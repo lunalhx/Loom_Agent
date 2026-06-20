@@ -1,0 +1,33 @@
+# /usr/local/bin/docker-compose -f /docs/dev-ops/environment/environment-docker-compose-2.4.yml up -d
+# docker-compose --env-file ../env/.env -f docker-compose-app.yml up -d
+# 你需要修改system为你自身系统的仓库名
+name: ${COMPOSE_PROJECT_NAME:-loom-agent}
+services:
+  Loom_Agent:
+    image: system/Loom_Agent:1.0-SNAPSHOT
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-app
+    restart: on-failure
+    ports:
+      - "${APP_HOST_PORT:-8091}:${SERVER_PORT:-8091}"
+    env_file:
+      - ../env/.env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - SERVER_PORT=${SERVER_PORT:-8091}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./log:/data/log
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - my-network
+
+networks:
+  my-network:
+    driver: bridge

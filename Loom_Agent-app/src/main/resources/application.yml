@@ -1,0 +1,6 @@
+spring:
+  config:
+    name: Loom_Agent-app
+    import: optional:file:./docs/env/.env[.properties]
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}

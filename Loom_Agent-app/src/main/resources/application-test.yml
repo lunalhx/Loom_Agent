@@ -1,0 +1,61 @@
+server:
+  port: ${SERVER_PORT:8091}
+
+# 线程池配置
+thread:
+  pool:
+    executor:
+      config:
+        core-pool-size: 20
+        max-pool-size: 50
+        keep-alive-time: 5000
+        block-queue-size: 5000
+        policy: CallerRunsPolicy
+
+# 数据库配置
+spring:
+  ai:
+    model:
+      chat: none
+    deepseek:
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${DEEPSEEK_API_KEY:test-key}
+      chat:
+        model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+        temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+        max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
+  datasource:
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_ROOT_PASSWORD:123456}
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:13306}/${MYSQL_DATABASE:loom_agent}?useUnicode=true&characterEncoding=utf8&autoReconnect=true&zeroDateTimeBehavior=convertToNull&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: ${REDIS_TIMEOUT_MS:3000}ms
+
+loom:
+  ai:
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:10000}
+    first-token-timeout-ms: ${AI_FIRST_TOKEN_TIMEOUT_MS:30000}
+    stream-timeout-ms: ${AI_STREAM_TIMEOUT_MS:120000}
+    retry-max-attempts: ${AI_RETRY_MAX_ATTEMPTS:3}
+    retry-backoff-initial-ms: ${AI_RETRY_BACKOFF_INITIAL_MS:10}
+    retry-backoff-max-ms: ${AI_RETRY_BACKOFF_MAX_MS:50}
+    max-message-length: ${AI_MAX_MESSAGE_LENGTH:20000}
+    allowed-models:
+      - deepseek-v4-flash
+      - deepseek-v4-pro
+
+mybatis:
+  mapper-locations: classpath:/mybatis/mapper/*.xml
+  config-location: classpath:/mybatis/config/mybatis-config.xml
+
+# 日志
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml
