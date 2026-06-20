@@ -158,6 +158,7 @@ public class AgentCodeController {
                 .conversationId(event.getConversationId())
                 .step(event.getStep())
                 .node(event.getNode())
+                .nodeInputs(event.getNodeInputs())
                 .thought(event.getThought())
                 .tool(event.getTool())
                 .input(event.getInput())

@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.Map;
+import java.util.List;
 
 @Data
 @Builder
@@ -20,6 +21,7 @@ public class AgentEvent {
     private String conversationId;
     private Integer step;
     private String node;
+    private List<String> nodeInputs;
     private String thought;
     private String tool;
     private Map<String, Object> input;

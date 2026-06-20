@@ -20,7 +20,18 @@ flowchart TD
     H --> I
 ```
 
-实现上每个节点都遵守统一接口：读取 `AgentContext`，写入当前决策、工具结果或最终答案，并返回下一节点。这样流程控制从大段硬编码循环里拆出来，后续可以插入审批、记忆、工具权限、RAG 等节点。
+实现上每个节点都是独立类，并遵守统一接口：声明 `name/inputKeys`，读取 `AgentContext`，写入当前决策、工具结果或最终答案，并返回下一节点。`DefaultAgentLoopService` 只负责初始化上下文、查找节点、驱动流转和发送事件，不承载具体业务节点逻辑。这样流程控制从大段硬编码循环里拆出来，后续可以插入审批、记忆、工具权限、RAG 等节点。
+
+当前节点类包括：
+
+- `StartNode`：输出运行元信息。
+- `RenderPromptNode`：根据问题、工具说明和历史 Observation 生成模型提示词。
+- `ModelDecisionNode`：调用模型生成 action/final JSON。
+- `ParseDecisionNode`：解析并校验模型决策。
+- `ToolDispatchNode`：根据工具名调用 `ToolRegistry`。
+- `ObservationNode`：记录工具 Observation 并回到提示词渲染节点。
+- `FinalAnswerNode`：输出最终答案。
+- `FailNode`：统一输出错误和结束事件。
 
 ## 工具协议
 
@@ -90,4 +101,3 @@ curl -N \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
   -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
 ```
-

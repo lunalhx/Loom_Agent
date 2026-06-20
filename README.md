@@ -103,7 +103,7 @@ SSE 事件：
 Agent SSE 事件：
 
 - `meta`：返回请求元信息。
-- `node_start`：节点开始执行，`includeTrace=true` 时返回。
+- `node_start`：节点开始执行，包含 `node` 和 `nodeInputs`，`includeTrace=true` 时返回。
 - `thought`：下一步行动意图摘要。
 - `tool_call`：工具名和参数。
 - `observation`：工具观察结果。
