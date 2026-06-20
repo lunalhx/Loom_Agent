@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.gateway;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
@@ -16,6 +17,8 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -64,6 +67,12 @@ public class DeepSeekModelGateway implements ModelGateway {
         return Flux.create(sink -> executor.execute(() -> executeStream(prompt, sink)), FluxSink.OverflowStrategy.BUFFER);
     }
 
+    @Override
+    public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+        return Mono.fromCallable(() -> executeComplete(prompt))
+                .subscribeOn(Schedulers.fromExecutor(executor));
+    }
+
     private void executeStream(ChatPrompt prompt, FluxSink<ModelStreamChunk> sink) {
         try {
             String apiKey = apiKey();
@@ -77,7 +86,7 @@ public class DeepSeekModelGateway implements ModelGateway {
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
                     .header("Authorization", "Bearer " + apiKey)
-                    .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt), StandardCharsets.UTF_8))
+                    .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt, true), StandardCharsets.UTF_8))
                     .build();
 
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -95,6 +104,25 @@ public class DeepSeekModelGateway implements ModelGateway {
         } catch (Exception e) {
             sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR, ModelErrorCode.MODEL_ERROR.message(), false, null, e));
         }
+    }
+
+    private ModelChatResult executeComplete(ChatPrompt prompt) throws IOException, InterruptedException {
+        String apiKey = apiKey();
+        if (StringUtils.isBlank(apiKey)) {
+            throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR, "DEEPSEEK_API_KEY 不能为空", false, null, null);
+        }
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint()))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt, false), StandardCharsets.UTF_8))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw toHttpException(response.statusCode(), response.body());
+        }
+        return parseChatResult(response.body());
     }
 
     private void consumeSse(InputStream inputStream, FluxSink<ModelStreamChunk> sink) throws IOException {
@@ -158,14 +186,30 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .build();
     }
 
-    private String toRequestBody(ChatPrompt prompt) throws IOException {
+    private ModelChatResult parseChatResult(String responseBody) throws IOException {
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.size() == 0) {
+            throw new ModelGatewayException(ModelErrorCode.MODEL_ERROR, "模型响应缺少 choices", false, null, null);
+        }
+        JsonNode choice = choices.get(0);
+        return ModelChatResult.builder()
+                .content(textOrNull(choice.path("message").path("content")))
+                .finishReason(textOrNull(choice.path("finish_reason")))
+                .usage(parseUsage(root.path("usage")))
+                .build();
+    }
+
+    private String toRequestBody(ChatPrompt prompt, boolean stream) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", prompt.getModel());
+        body.put("model", StringUtils.defaultIfBlank(prompt.getModel(), defaultModel()));
         body.put("messages", messages(prompt));
-        body.put("stream", true);
-        body.put("stream_options", Map.of("include_usage", true));
-        body.put("temperature", prompt.getTemperature());
-        body.put("max_tokens", prompt.getMaxTokens());
+        body.put("stream", stream);
+        if (stream) {
+            body.put("stream_options", Map.of("include_usage", true));
+        }
+        body.put("temperature", prompt.getTemperature() == null ? defaultTemperature() : prompt.getTemperature());
+        body.put("max_tokens", prompt.getMaxTokens() == null ? defaultMaxTokens() : prompt.getMaxTokens());
         body.put("user_id", prompt.getConversationId());
         if (OutputFormat.JSON_OBJECT == prompt.getOutputFormat()) {
             body.put("response_format", Map.of("type", "json_object"));
@@ -232,6 +276,18 @@ public class DeepSeekModelGateway implements ModelGateway {
     private String apiKey() {
         return environment.getProperty("spring.ai.deepseek.chat.api-key",
                 environment.getProperty("spring.ai.deepseek.api-key", ""));
+    }
+
+    private String defaultModel() {
+        return environment.getProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash");
+    }
+
+    private Double defaultTemperature() {
+        return environment.getProperty("spring.ai.deepseek.chat.temperature", Double.class, 0.2D);
+    }
+
+    private Integer defaultMaxTokens() {
+        return environment.getProperty("spring.ai.deepseek.chat.max-tokens", Integer.class, 2048);
     }
 
     private String textOrNull(JsonNode node) {

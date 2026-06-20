@@ -2,14 +2,14 @@
 
 Loom Agent 是一个基于 Java 17、Spring Boot 3 和 DeepSeek 的后端 Agent 骨架。当前版本先把单 Agent 的最薄链路做稳：通过一个 SSE 接口把用户消息发给 DeepSeek，并逐字返回模型输出。
 
-开发原则：每一步都保持项目可运行、可演示。先做单 Agent，再逐步接入代码检索、工具调用和多 Agent 编排。
+开发原则：每一步都保持项目可运行、可演示。先做单 Agent，再逐步接入代码检索、工具调用和多 Agent 编排。当前已提供一个节点化 ReAct Agent Loop，可用只读工具分析项目代码。
 
 ## 模块结构
 
 - `Loom_Agent-api`：对外 DTO、统一响应对象。
 - `Loom_Agent-trigger`：HTTP Controller、SSE 协议适配、请求参数兜底。
 - `Loom_Agent-domain`：会话流式服务、模型调用端口、重试/超时/输出格式校验。
-- `Loom_Agent-infrastructure`：DeepSeek 网关实现、MyBatis DAO、Redis 缓存占位。
+- `Loom_Agent-infrastructure`：DeepSeek 网关实现、只读文件工具、MyBatis DAO、Redis 缓存占位。
 - `Loom_Agent-app`：Spring Boot 启动、配置绑定、线程池、MyBatis 扫描。
 - `Loom_Agent-types`：通用异常、响应码、常量。
 
@@ -56,6 +56,16 @@ curl -N \
   -d '{"message":"用一句话介绍你自己"}'
 ```
 
+5. 调用代码分析 Agent：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
+  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+```
+
 ## 接口
 
 `POST /api/v1/chat/stream`
@@ -81,6 +91,26 @@ SSE 事件：
 
 返回当前生效的模型配置，API Key 会脱敏。
 
+`POST /api/v1/agent/code/ask/stream`
+
+节点化 ReAct 代码分析 Agent。请求字段：
+
+- `question`：必填，代码分析问题。
+- `workspace`：预留字段，当前默认使用 `AGENT_WORKSPACE_ROOT`。
+- `maxSteps`：可选，最大工具调用步数。
+- `includeTrace`：可选，是否返回 `thought/tool_call/observation` 等中间事件。
+
+Agent SSE 事件：
+
+- `meta`：返回请求元信息。
+- `node_start`：节点开始执行，`includeTrace=true` 时返回。
+- `thought`：下一步行动意图摘要。
+- `tool_call`：工具名和参数。
+- `observation`：工具观察结果。
+- `answer`：最终回答。
+- `done`：结束原因和步数。
+- `error`：兜底错误。
+
 ## 健壮性
 
 - 超时：`AI_CONNECT_TIMEOUT_MS`、`AI_FIRST_TOKEN_TIMEOUT_MS`、`AI_STREAM_TIMEOUT_MS`。
@@ -89,3 +119,4 @@ SSE 事件：
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
 
 更多设计细节见 [backend-architecture.md](docs/design/backend-architecture.md)。
+Agent Loop 设计见 [agent-loop.md](docs/design/agent-loop.md)。

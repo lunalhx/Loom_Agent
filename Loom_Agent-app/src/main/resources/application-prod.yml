@@ -59,6 +59,17 @@ loom:
     allowed-models:
       - deepseek-v4-flash
       - deepseek-v4-pro
+  agent:
+    enabled: ${AGENT_ENABLED:true}
+    workspace-root: ${AGENT_WORKSPACE_ROOT:.}
+    max-steps: ${AGENT_MAX_STEPS:6}
+    total-timeout-ms: ${AGENT_TOTAL_TIMEOUT_MS:120000}
+    step-timeout-ms: ${AGENT_STEP_TIMEOUT_MS:30000}
+    tool-timeout-ms: ${AGENT_TOOL_TIMEOUT_MS:3000}
+    observation-max-chars: ${AGENT_OBSERVATION_MAX_CHARS:8000}
+    parse-error-max-attempts: ${AGENT_PARSE_ERROR_MAX_ATTEMPTS:2}
+    file-max-bytes: ${AGENT_FILE_MAX_BYTES:200000}
+    search-max-results: ${AGENT_SEARCH_MAX_RESULTS:50}
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

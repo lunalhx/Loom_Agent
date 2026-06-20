@@ -1,10 +1,15 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
 import cn.lunalhx.ai.domain.conversation.service.DefaultChatStreamService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
@@ -12,6 +17,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+
+import java.util.List;
+import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
 public class AiRuntimeConfig {
@@ -23,8 +31,19 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    @ConfigurationProperties(prefix = "loom.agent")
+    public AgentRuntimeProperties agentRuntimeProperties() {
+        return new AgentRuntimeProperties();
+    }
+
+    @Bean
     public OutputFormatValidator outputFormatValidator(ObjectMapper objectMapper) {
         return new OutputFormatValidator(objectMapper);
+    }
+
+    @Bean
+    public ToolRegistry toolRegistry(List<AgentTool> tools) {
+        return new ToolRegistry(tools);
     }
 
     @Bean
@@ -39,7 +58,18 @@ public class AiRuntimeConfig {
     }
 
     @Bean
-    public InitializingBean aiConfigValidator(ModelRuntimeProperties modelRuntimeProperties, Environment environment) {
+    public AgentLoopService agentLoopService(ModelGateway modelGateway,
+                                             ToolRegistry toolRegistry,
+                                             AgentRuntimeProperties agentRuntimeProperties,
+                                             ObjectMapper objectMapper,
+                                             ThreadPoolExecutor threadPoolExecutor) {
+        return new DefaultAgentLoopService(modelGateway, toolRegistry, agentRuntimeProperties, objectMapper, threadPoolExecutor);
+    }
+
+    @Bean
+    public InitializingBean aiConfigValidator(ModelRuntimeProperties modelRuntimeProperties,
+                                             AgentRuntimeProperties agentRuntimeProperties,
+                                             Environment environment) {
         return () -> {
             String chatProvider = environment.getProperty("spring.ai.model.chat", "deepseek");
             if ("none".equalsIgnoreCase(chatProvider)) {
@@ -61,6 +91,9 @@ public class AiRuntimeConfig {
             if (modelRuntimeProperties.getRetryMaxAttempts() == null || modelRuntimeProperties.getRetryMaxAttempts() < 1) {
                 throw new IllegalStateException("AI_RETRY_MAX_ATTEMPTS 必须大于等于 1");
             }
+            requirePositive(agentRuntimeProperties.getTotalTimeoutMs(), "AGENT_TOTAL_TIMEOUT_MS");
+            requirePositive(agentRuntimeProperties.getStepTimeoutMs(), "AGENT_STEP_TIMEOUT_MS");
+            requirePositive(agentRuntimeProperties.getToolTimeoutMs(), "AGENT_TOOL_TIMEOUT_MS");
         };
     }
 

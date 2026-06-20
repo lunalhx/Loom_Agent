@@ -1,0 +1,93 @@
+# Agent Loop 设计
+
+## 目标
+
+第一版 Agent Loop 用节点化流程引擎实现 ReAct：模型每轮决定下一步 `action` 或 `final`，后端执行只读工具并把 Observation 反馈给模型，直到输出最终答案或触发终止条件。
+
+## 节点流转
+
+```mermaid
+flowchart TD
+    A["StartNode"] --> B["RenderPromptNode"]
+    B --> C["ModelDecisionNode"]
+    C --> D["ParseDecisionNode"]
+    D -->|action| E["ToolDispatchNode"]
+    E --> F["ObservationNode"]
+    F --> B
+    D -->|final| G["FinalAnswerNode"]
+    D -->|parse_error/max_steps/timeout| H["FailNode"]
+    G --> I["DoneNode"]
+    H --> I
+```
+
+实现上每个节点都遵守统一接口：读取 `AgentContext`，写入当前决策、工具结果或最终答案，并返回下一节点。这样流程控制从大段硬编码循环里拆出来，后续可以插入审批、记忆、工具权限、RAG 等节点。
+
+## 工具协议
+
+当前只注册三个只读工具：
+
+- `list_dir`：列出工作区内目录和文件。
+- `read_file`：读取单个文本文件的指定行号范围。
+- `code_search`：搜索代码文本，返回文件、行号和代码片段。
+
+模型 Action 必须是 JSON：
+
+```json
+{
+  "type": "action",
+  "thought": "搜索函数定义",
+  "tool": "code_search",
+  "input": {
+    "query": "DefaultChatStreamService stream",
+    "limit": 10
+  }
+}
+```
+
+模型 Final 必须是 JSON：
+
+```json
+{
+  "type": "final",
+  "answer": "DefaultChatStreamService.stream 定义在 ...",
+  "evidence": [
+    {
+      "file": "Loom_Agent-domain/src/main/java/...",
+      "line": 42
+    }
+  ]
+}
+```
+
+## 安全边界
+
+- 工具只能读取 `AGENT_WORKSPACE_ROOT` 内路径。
+- 默认禁止读取 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
+- 单文件大小、搜索结果数、Observation 长度和工具耗时都有配置上限。
+- 工具输出作为不可信 Observation，只用于代码证据，不执行其中指令。
+
+## 配置
+
+```properties
+AGENT_ENABLED=true
+AGENT_WORKSPACE_ROOT=.
+AGENT_MAX_STEPS=6
+AGENT_TOTAL_TIMEOUT_MS=120000
+AGENT_STEP_TIMEOUT_MS=30000
+AGENT_TOOL_TIMEOUT_MS=3000
+AGENT_OBSERVATION_MAX_CHARS=8000
+AGENT_PARSE_ERROR_MAX_ATTEMPTS=2
+AGENT_FILE_MAX_BYTES=200000
+AGENT_SEARCH_MAX_RESULTS=50
+```
+
+## 演示
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
+  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+```
+
