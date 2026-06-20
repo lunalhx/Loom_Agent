@@ -33,6 +33,21 @@ flowchart TD
 - `FinalAnswerNode`：输出最终答案。
 - `FailNode`：统一输出错误和结束事件。
 
+## 节点上下文
+
+节点之间通过同一个 `AgentContext` 传递信息。上下文分两类数据：
+
+- 结构化状态：`decision`、`toolResult`、`finalAnswer`、`stopReason` 等，供程序判断和路由使用。
+- 动态文本：`dynamicText`，供下一轮模型读取，保存 Observation、解析错误、当前线索等模型可读文本。
+
+`dynamicText` 由节点追加、由 `RenderPromptNode` 渲染：
+
+- `ObservationNode` 将工具调用结果整理成动态上下文。
+- `ParseDecisionNode` 将模型 JSON 解析错误整理成动态上下文。
+- `RenderPromptNode` 将 `question + toolSpecs + dynamicText` 渲染为下一轮 `currentPrompt`。
+
+这样工具执行结果仍保留在结构化字段里，同时模型看到的是经过节点整理后的文本上下文。
+
 ## 工具协议
 
 当前只注册三个只读工具：

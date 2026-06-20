@@ -31,7 +31,9 @@ public class DefaultAgentLoopServiceTest {
 
     @Test
     public void shouldCallToolsAndReturnFinalAnswer() {
+        List<String> prompts = new java.util.ArrayList<>();
         ModelGateway modelGateway = completeGateway(
+                prompts,
                 "{\"type\":\"action\",\"thought\":\"搜索函数\",\"tool\":\"code_search\",\"input\":{\"query\":\"DefaultChatStreamService.stream\",\"limit\":10}}",
                 "{\"type\":\"action\",\"thought\":\"读取文件\",\"tool\":\"read_file\",\"input\":{\"path\":\"Loom_Agent-domain/src/main/java/cn/lunalhx/ai/domain/conversation/service/DefaultChatStreamService.java\",\"startLine\":42,\"endLine\":80}}",
                 "{\"type\":\"final\",\"answer\":\"DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。\",\"evidence\":[{\"file\":\"DefaultChatStreamService.java\",\"line\":42}]}"
@@ -53,6 +55,8 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(types.contains(AgentEventType.TOOL_CALL));
         assertTrue(types.contains(AgentEventType.OBSERVATION));
         assertTrue(types.contains(AgentEventType.ANSWER));
+        assertTrue(prompts.get(1).contains("动态上下文"));
+        assertTrue(prompts.get(1).contains("DefaultChatStreamService.java:42"));
         assertEquals("DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
@@ -62,7 +66,7 @@ public class DefaultAgentLoopServiceTest {
         AgentRuntimeProperties properties = properties();
         properties.setParseErrorMaxAttempts(1);
         DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway("not json", "still not json"),
+                completeGateway(new java.util.ArrayList<>(), "not json", "still not json"),
                 new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
                 properties,
                 new ObjectMapper(),
@@ -101,7 +105,7 @@ public class DefaultAgentLoopServiceTest {
         return properties;
     }
 
-    private ModelGateway completeGateway(String... outputs) {
+    private ModelGateway completeGateway(List<String> prompts, String... outputs) {
         AtomicInteger index = new AtomicInteger();
         return new ModelGateway() {
             @Override
@@ -111,6 +115,7 @@ public class DefaultAgentLoopServiceTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                prompts.add(prompt.getMessage());
                 int current = Math.min(index.getAndIncrement(), outputs.length - 1);
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
             }

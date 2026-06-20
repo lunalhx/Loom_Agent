@@ -21,6 +21,7 @@ public class AgentContext {
     private Instant startedAt;
     private List<ToolSpec> toolSpecs = new ArrayList<>();
     private List<AgentStep> history = new ArrayList<>();
+    private DynamicText dynamicText = new DynamicText();
     private String currentPrompt;
     private String modelOutput;
     private AgentDecision decision;

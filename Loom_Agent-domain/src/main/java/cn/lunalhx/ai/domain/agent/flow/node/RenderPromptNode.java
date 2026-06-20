@@ -4,17 +4,15 @@ import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentStep;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
 public class RenderPromptNode extends AbstractAgentNode {
 
     public RenderPromptNode() {
-        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "history", "step", "maxSteps"));
+        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps"));
     }
 
     @Override
@@ -38,15 +36,9 @@ public class RenderPromptNode extends AbstractAgentNode {
             prompt.append("- ").append(spec.getName()).append(": ").append(spec.getDescription())
                     .append(" input=").append(spec.getInputSchema()).append("\n");
         }
-        if (!context.getHistory().isEmpty()) {
-            prompt.append("\n历史步骤：\n");
-            for (AgentStep step : context.getHistory()) {
-                prompt.append("Step ").append(step.getStep()).append("\n")
-                        .append("Thought: ").append(StringUtils.defaultString(step.getThought())).append("\n")
-                        .append("Tool: ").append(StringUtils.defaultString(step.getTool())).append("\n")
-                        .append("Input: ").append(StringUtils.defaultString(step.getInput())).append("\n")
-                        .append("Observation: ").append(StringUtils.defaultString(step.getObservation())).append("\n");
-            }
+        if (!context.getDynamicText().isEmpty()) {
+            prompt.append("\n动态上下文：\n");
+            prompt.append(context.getDynamicText().render()).append('\n');
         }
         prompt.append("\nAction JSON 示例：{\"type\":\"action\",\"thought\":\"搜索函数定义\",\"tool\":\"code_search\",\"input\":{\"query\":\"函数名\",\"limit\":10}}\n");
         prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"结论，包含文件路径和行号证据\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");

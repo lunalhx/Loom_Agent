@@ -61,6 +61,11 @@ public class ParseDecisionNode extends AbstractAgentNode {
             }
             context.setToolResult(ToolResult.failure("parse_error", "模型输出不是合法 Action JSON，请只输出 action 或 final JSON", 0L));
             appendStep(context, false);
+            context.getDynamicText().append(
+                    Math.max(1, context.getStep()),
+                    name(),
+                    "Model Output Parse Error",
+                    "模型输出无法解析为 action/final JSON。\nRawOutput:\n" + context.getModelOutput());
             return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
         }
     }
