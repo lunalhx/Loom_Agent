@@ -9,7 +9,7 @@
 ```mermaid
 flowchart TD
     A["StartNode"] --> B["RenderPromptNode"]
-    B --> C["ModelDecisionNode"]
+    B --> C["ModelCallNode"]
     C --> D["DecisionNode"]
     D -->|action| E["ToolDispatchNode"]
     E --> F["ObservationNode"]
@@ -26,12 +26,14 @@ flowchart TD
 
 - `StartNode`：输出运行元信息。
 - `RenderPromptNode`：根据问题、工具说明和历史 Observation 生成模型提示词。
-- `ModelDecisionNode`：调用模型生成 action/final JSON。
+- `ModelCallNode`：调用 LLM，生成 action/final JSON 文本。
 - `DecisionNode`：解析 LLM 输出，并根据 `action/final/parse_error/unknown_tool` 决定下一节点。
 - `ToolDispatchNode`：根据工具名调用 `ToolRegistry`。
 - `ObservationNode`：记录工具 Observation 并回到提示词渲染节点。
 - `FinalAnswerNode`：输出最终答案。
 - `FailNode`：统一输出错误和结束事件。
+
+`model_call` 和 `decision` 是刻意拆开的两个职责：前者只负责调用 LLM 并拿到模型输出文本，后者负责解析这段文本，并把流程路由到 `tool_dispatch`、`final_answer` 或 `fail`。
 
 ## 节点上下文
 

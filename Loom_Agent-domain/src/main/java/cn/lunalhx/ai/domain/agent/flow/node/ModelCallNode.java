@@ -15,13 +15,13 @@ import org.apache.commons.lang3.StringUtils;
 import java.time.Duration;
 import java.util.List;
 
-public class ModelDecisionNode extends AbstractAgentNode {
+public class ModelCallNode extends AbstractAgentNode {
 
     private final ModelGateway modelGateway;
     private final AgentRuntimeProperties properties;
 
-    public ModelDecisionNode(ModelGateway modelGateway, AgentRuntimeProperties properties) {
-        super(AgentNodeNames.MODEL_DECISION, List.of("currentPrompt", "requestId", "conversationId"));
+    public ModelCallNode(ModelGateway modelGateway, AgentRuntimeProperties properties) {
+        super(AgentNodeNames.MODEL_CALL, List.of("currentPrompt", "requestId", "conversationId"));
         this.modelGateway = modelGateway;
         this.properties = properties;
     }

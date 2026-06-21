@@ -43,3 +43,5 @@ docs/env/*.local
 
 ### Runtime logs ###
 Loom_Agent-app/data/
+data/
+*.log

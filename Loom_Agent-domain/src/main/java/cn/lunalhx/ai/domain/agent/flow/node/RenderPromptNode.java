@@ -22,7 +22,7 @@ public class RenderPromptNode extends AbstractAgentNode {
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
         context.setCurrentPrompt(renderPromptText(context));
-        return NodeResult.next(AgentNodeNames.MODEL_DECISION, List.of());
+        return NodeResult.next(AgentNodeNames.MODEL_CALL, List.of());
     }
 
     private String renderPromptText(AgentContext context) {

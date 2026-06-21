@@ -5,7 +5,7 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
-import cn.lunalhx.ai.domain.agent.flow.node.ModelDecisionNode;
+import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
@@ -51,7 +51,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.nodes = registerNodes(List.of(
                 new StartNode(),
                 new RenderPromptNode(),
-                new ModelDecisionNode(modelGateway, properties),
+                new ModelCallNode(modelGateway, properties),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ToolDispatchNode(toolRegistry, properties),
                 new ObservationNode(),

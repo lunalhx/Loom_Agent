@@ -56,6 +56,8 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(types.contains(AgentEventType.OBSERVATION));
         assertTrue(types.contains(AgentEventType.ANSWER));
         assertTrue(events.stream()
+                .anyMatch(event -> event.getType() == AgentEventType.NODE_START && "model_call".equals(event.getNode())));
+        assertTrue(events.stream()
                 .anyMatch(event -> event.getType() == AgentEventType.NODE_START && "decision".equals(event.getNode())));
         assertTrue(prompts.get(1).contains("动态上下文"));
         assertTrue(prompts.get(1).contains("assistant_action"));
