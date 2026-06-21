@@ -19,19 +19,27 @@ import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class DefaultAgentLoopServiceTest {
+
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
     public void shouldCallToolsAndReturnFinalAnswer() {
@@ -207,6 +215,49 @@ public class DefaultAgentLoopServiceTest {
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
 
+    @Test
+    public void shouldResumeApprovalWithOriginalResolvedWorkspace() throws Exception {
+        Path allowedRoot = temporaryFolder.newFolder("allowed-root").toPath();
+        Path projectA = Files.createDirectories(allowedRoot.resolve("project-a"));
+        Path projectB = Files.createDirectories(allowedRoot.resolve("project-b"));
+        AgentRuntimeProperties properties = properties(projectA, allowedRoot);
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Path> calledWorkspace = new AtomicReference<>();
+        AgentTool writeTool = fakeWriteTool("replace_in_file", "updated in selected workspace", calls, calledWorkspace);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"修改文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
+                new ToolRegistry(List.of(writeTool)),
+                approvalStore,
+                properties,
+                new ObjectMapper(),
+                Runnable::run);
+
+        List<AgentEvent> paused = service.ask(AgentQuestion.builder()
+                        .question("修改 project-b")
+                        .workspace("project-b")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+        AgentEvent approval = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("project-b", approval.getWorkspace());
+        assertEquals(projectB.toRealPath(), approvalStore.find(approval.getApprovalId()).orElseThrow().getResolvedWorkspace());
+
+        service.resume(approval.getApprovalId(), ApprovalDecision.APPROVE, "ok")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(1, calls.get());
+        assertEquals(projectB.toRealPath(), calledWorkspace.get());
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
@@ -217,7 +268,13 @@ public class DefaultAgentLoopServiceTest {
     }
 
     private AgentRuntimeProperties properties() {
+        return properties(Path.of(".").toAbsolutePath().normalize(), Path.of(".").toAbsolutePath().normalize());
+    }
+
+    private AgentRuntimeProperties properties(Path workspaceRoot, Path allowedRoot) {
         AgentRuntimeProperties properties = new AgentRuntimeProperties();
+        properties.setWorkspaceRoot(workspaceRoot.toString());
+        properties.setAllowedWorkspaceRoots(List.of(allowedRoot.toString()));
         properties.setStepTimeoutMs(1000L);
         properties.setTotalTimeoutMs(3000L);
         properties.setToolTimeoutMs(1000L);
@@ -262,6 +319,10 @@ public class DefaultAgentLoopServiceTest {
     }
 
     private AgentTool fakeWriteTool(String name, String observation, AtomicInteger calls) {
+        return fakeWriteTool(name, observation, calls, new AtomicReference<>());
+    }
+
+    private AgentTool fakeWriteTool(String name, String observation, AtomicInteger calls, AtomicReference<Path> calledWorkspace) {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
@@ -280,6 +341,7 @@ public class DefaultAgentLoopServiceTest {
             @Override
             public ToolResult call(ToolCall call) {
                 calls.incrementAndGet();
+                calledWorkspace.set(call.getWorkspaceRoot());
                 return ToolResult.success(observation, false, 1L);
             }
         };

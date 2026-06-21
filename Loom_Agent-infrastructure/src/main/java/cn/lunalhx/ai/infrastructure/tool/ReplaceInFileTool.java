@@ -44,9 +44,9 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         try {
-            Path path = resolvePath(call.getInput(), "path", null);
-            if (!isAllowedRegularFile(path)) {
-                return failure("file_not_allowed", "文件不存在、过大或被禁止：" + relative(path), startedAt);
+            Path path = resolvePath(call, "path", null);
+            if (!isAllowedRegularFile(call, path)) {
+                return failure("file_not_allowed", "文件不存在、过大或被禁止：" + relative(call, path), startedAt);
             }
             String oldText = text(call.getInput(), "oldText", "");
             String newText = text(call.getInput(), "newText", "");
@@ -62,7 +62,7 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
             }
 
             writeAtomically(path, content.replace(oldText, newText));
-            return ToolResult.success("updated: " + relative(path) + "\nreplacements: " + occurrences, false, elapsed(startedAt));
+            return ToolResult.success("updated: " + relative(call, path) + "\nreplacements: " + occurrences, false, elapsed(startedAt));
         } catch (Exception e) {
             return failure("replace_in_file_failed", e.getMessage(), startedAt);
         }

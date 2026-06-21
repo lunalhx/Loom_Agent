@@ -95,10 +95,28 @@ SSE 事件：
 
 节点化 ReAct 代码 Agent。只读工具自动执行；文件写入、测试命令、Git 暂存/提交会返回审批事件；高危动作默认拦截。请求字段：
 
-- `question`：必填，代码分析问题。
-- `workspace`：预留字段，当前默认使用 `AGENT_WORKSPACE_ROOT`。
+- `question`：代码任务；也兼容 `message` 字段，二者至少填一个。
+- `workspace`：可选工作区选择。为空时使用默认 `loom.agent.workspace-root`；相对路径会基于 `loom.agent.allowed-workspace-roots` 解析；绝对路径也必须落在白名单根目录下。
 - `maxSteps`：可选，最大工具调用步数。
 - `includeTrace`：可选，是否返回 `thought/tool_call/observation` 等中间事件。
+
+示例：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
+  -d '{"message":"帮我分析这个项目","workspace":"Agentic_RAG","maxSteps":6,"includeTrace":true}'
+```
+
+也可以传白名单下的绝对路径：
+
+```json
+{"message":"帮我分析这个项目","workspace":"/Users/lunalhx/Desktop/java/Agentic_RAG"}
+```
+
+非法 workspace 会直接返回 `error`，不会回退默认工作区。常见错误包括 `WORKSPACE_NOT_FOUND`、`WORKSPACE_NOT_DIRECTORY`、`WORKSPACE_NOT_ALLOWED`、`WORKSPACE_PATH_ESCAPE`。
 
 Agent SSE 事件：
 
@@ -145,7 +163,8 @@ curl -N \
 - 输出校验：空输出会返回 `output_empty`；`responseFormat=JSON_OBJECT` 时会校验完整输出是否为合法 JSON。
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
 - Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要 HITL 审批，`HIGH_RISK_DENY` 直接拦截。
-- Agent 沙箱：所有文件、命令和 Git 操作都限制在 `AGENT_WORKSPACE_ROOT` 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
+- Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
+- 多工作区：`loom.agent.workspace-root` 是默认工作区；`loom.agent.allowed-workspace-roots` 是可选择工作区的白名单。为空时默认只允许 `workspace-root`。
 
 更多设计细节见 [backend-architecture.md](docs/design/backend-architecture.md)。
 Agent Loop 设计见 [agent-loop.md](docs/design/agent-loop.md)。

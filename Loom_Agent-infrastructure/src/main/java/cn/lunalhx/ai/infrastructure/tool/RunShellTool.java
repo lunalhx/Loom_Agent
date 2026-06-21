@@ -77,9 +77,9 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                 return failure("shell_command_rejected", policy.getRiskReason(), startedAt);
             }
             List<String> tokens = splitCommand(text(call.getInput(), "command", ""));
-            Path cwd = resolvePath(call.getInput(), "cwd", ".");
+            Path cwd = resolvePath(call, "cwd", ".");
             if (!Files.isDirectory(cwd)) {
-                return failure("not_directory", "cwd 不是目录：" + relative(cwd), startedAt);
+                return failure("not_directory", "cwd 不是目录：" + relative(call, cwd), startedAt);
             }
             long requestedTimeoutMs = call.getInput() == null
                     ? properties.getShellTimeoutMs()

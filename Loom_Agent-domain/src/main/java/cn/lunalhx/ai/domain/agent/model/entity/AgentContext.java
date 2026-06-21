@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import lombok.Data;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +16,8 @@ public class AgentContext {
     private String requestId;
     private String conversationId;
     private String question;
+    private Path resolvedWorkspace;
+    private String workspaceDisplayName;
     private int maxSteps;
     private int step;
     private int parseErrors;

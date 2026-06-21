@@ -142,6 +142,9 @@ public class AgentCodeController {
                     .collect(Collectors.joining("; "));
             return error("invalid_request", message);
         }
+        if (StringUtils.isBlank(request.getQuestion()) && StringUtils.isBlank(request.getMessage())) {
+            return error("invalid_request", "question 不能为空");
+        }
         return null;
     }
 
@@ -165,7 +168,7 @@ public class AgentCodeController {
 
     private AgentQuestion toQuestion(AgentAskRequest request) {
         return AgentQuestion.builder()
-                .question(StringUtils.trim(request.getQuestion()))
+                .question(StringUtils.defaultIfBlank(StringUtils.trim(request.getQuestion()), StringUtils.trim(request.getMessage())))
                 .workspace(request.getWorkspace())
                 .maxSteps(request.getMaxSteps())
                 .includeTrace(request.getIncludeTrace())
@@ -235,6 +238,7 @@ public class AgentCodeController {
                 .type(event.getType().eventName())
                 .requestId(event.getRequestId())
                 .conversationId(event.getConversationId())
+                .workspace(event.getWorkspace())
                 .step(event.getStep())
                 .node(event.getNode())
                 .nodeInputs(event.getNodeInputs())
@@ -270,6 +274,7 @@ public class AgentCodeController {
                 .status("PENDING")
                 .requestId(approval.getRequestId())
                 .conversationId(approval.getConversationId())
+                .workspace(approval.getWorkspaceDisplayName())
                 .tool(approval.getTool())
                 .input(approval.getInput())
                 .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())

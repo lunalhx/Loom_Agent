@@ -10,6 +10,7 @@ public class AgentRuntimeProperties {
 
     private Boolean enabled = true;
     private String workspaceRoot = ".";
+    private List<String> allowedWorkspaceRoots = new ArrayList<>();
     private Integer maxSteps = 6;
     private Long totalTimeoutMs = 120000L;
     private Long stepTimeoutMs = 30000L;

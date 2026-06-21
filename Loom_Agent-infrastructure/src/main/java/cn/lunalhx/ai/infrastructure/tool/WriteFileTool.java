@@ -43,17 +43,19 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         try {
-            Path path = resolvePath(call.getInput(), "path", null);
             String mode = text(call.getInput(), "mode", "create");
             String content = text(call.getInput(), "content", "");
             if (!"create".equals(mode) && !"overwrite".equals(mode)) {
                 return failure("invalid_mode", "mode 只能是 create 或 overwrite", startedAt);
             }
+            Path path = "create".equals(mode)
+                    ? resolveWritablePath(call, "path", null)
+                    : resolvePath(call, "path", null);
             if ("create".equals(mode) && Files.exists(path)) {
-                return failure("file_exists", "文件已存在：" + relative(path), startedAt);
+                return failure("file_exists", "文件已存在：" + relative(call, path), startedAt);
             }
             if ("overwrite".equals(mode) && !Files.isRegularFile(path)) {
-                return failure("file_not_found", "覆盖模式要求文件已存在：" + relative(path), startedAt);
+                return failure("file_not_found", "覆盖模式要求文件已存在：" + relative(call, path), startedAt);
             }
             if (StringUtils.length(content) > properties.getFileMaxBytes()) {
                 return failure("file_too_large", "写入内容超过文件大小上限", startedAt);
@@ -61,7 +63,7 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
 
             Files.createDirectories(path.getParent());
             writeAtomically(path, content);
-            return ToolResult.success("written: " + relative(path) + "\nmode: " + mode, false, elapsed(startedAt));
+            return ToolResult.success("written: " + relative(call, path) + "\nmode: " + mode, false, elapsed(startedAt));
         } catch (Exception e) {
             return failure("write_file_failed", e.getMessage(), startedAt);
         }

@@ -17,6 +17,7 @@ public class AgentApprovalResponse {
     private String status;
     private String requestId;
     private String conversationId;
+    private String workspace;
     private String tool;
     private Map<String, Object> input;
     private String permissionLevel;

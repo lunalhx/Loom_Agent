@@ -21,6 +21,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -42,6 +44,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private final AgentRuntimeProperties properties;
     private final ApprovalStore approvalStore;
+    private final AgentWorkspaceResolver workspaceResolver;
     private final Executor executor;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
@@ -51,7 +54,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    AgentRuntimeProperties properties,
                                    ObjectMapper objectMapper,
                                    Executor executor) {
-        this(modelGateway, toolRegistry, new InMemoryApprovalStore(), properties, objectMapper, executor);
+        this(modelGateway, toolRegistry, new InMemoryApprovalStore(), new AgentWorkspaceResolver(properties), properties, objectMapper, executor);
     }
 
     public DefaultAgentLoopService(ModelGateway modelGateway,
@@ -60,8 +63,19 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    AgentRuntimeProperties properties,
                                    ObjectMapper objectMapper,
                                    Executor executor) {
+        this(modelGateway, toolRegistry, approvalStore, new AgentWorkspaceResolver(properties), properties, objectMapper, executor);
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentWorkspaceResolver workspaceResolver,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor) {
         this.properties = properties;
         this.approvalStore = approvalStore;
+        this.workspaceResolver = workspaceResolver;
         this.executor = executor;
         this.toolSpecs = toolRegistry.specs();
         this.nodes = registerNodes(List.of(
@@ -78,7 +92,21 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
-        return Flux.create(sink -> executor.execute(() -> runLoop(toContext(question), AgentNodeNames.START, sink)), FluxSink.OverflowStrategy.BUFFER);
+        return Flux.create(sink -> executor.execute(() -> {
+            try {
+                runLoop(toContext(question), AgentNodeNames.START, sink);
+            } catch (WorkspaceResolutionException e) {
+                emit(sink, List.of(workspaceError(e)));
+                sink.complete();
+            } catch (Exception e) {
+                emit(sink, List.of(AgentEvent.builder()
+                        .type(AgentEventType.ERROR)
+                        .code("agent_error")
+                        .message("Agent 执行失败")
+                        .build()));
+                sink.complete();
+            }
+        }), FluxSink.OverflowStrategy.BUFFER);
     }
 
     @Override
@@ -103,6 +131,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
         }
 
         AgentContext context = approval.getContext();
+        context.setResolvedWorkspace(approval.getResolvedWorkspace());
+        context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
         context.setStartedAt(Instant.now());
         if (decision == ApprovalDecision.APPROVE) {
             runLoop(context, AgentNodeNames.TOOL_DISPATCH, sink);
@@ -143,10 +173,13 @@ public class DefaultAgentLoopService implements AgentLoopService {
     }
 
     private AgentContext toContext(AgentQuestion question) {
+        AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
         AgentContext context = new AgentContext();
         context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
         context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
         context.setQuestion(StringUtils.trim(question.getQuestion()));
+        context.setResolvedWorkspace(workspace.getRoot());
+        context.setWorkspaceDisplayName(workspace.getDisplayName());
         context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
         context.setToolSpecs(toolSpecs);
@@ -170,8 +203,19 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .type(AgentEventType.NODE_START)
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
                 .node(node.name())
                 .nodeInputs(node.inputKeys())
+                .build();
+    }
+
+    private AgentEvent workspaceError(WorkspaceResolutionException e) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .requestId(UUID.randomUUID().toString())
+                .stopReason(AgentStopReason.MODEL_ERROR)
+                .code(e.getCode())
+                .message(e.getMessage())
                 .build();
     }
 

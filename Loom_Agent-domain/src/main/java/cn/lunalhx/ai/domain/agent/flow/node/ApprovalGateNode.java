@@ -41,6 +41,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
         ToolPolicyDecision policy = toolRegistry.policy(ToolCall.builder()
                 .name(context.getDecision().getTool())
                 .input(context.getDecision().getInput())
+                .workspaceRoot(context.getResolvedWorkspace())
                 .build());
         if (policy == null || policy.getPermissionLevel() == null || policy.getPermissionLevel() == ToolPermissionLevel.READ_ONLY) {
             return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
@@ -59,6 +60,8 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .approvalId(approvalId)
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
+                .resolvedWorkspace(context.getResolvedWorkspace())
+                .workspaceDisplayName(context.getWorkspaceDisplayName())
                 .tool(context.getDecision().getTool())
                 .input(inputSummary)
                 .permissionLevel(policy.getPermissionLevel())
@@ -74,6 +77,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .tool(context.getDecision().getTool())
                 .input(inputSummary)
                 .approvalId(approvalId)
+                .workspace(context.getWorkspaceDisplayName())
                 .permissionLevel(policy.getPermissionLevel().name())
                 .riskReason(policy.getRiskReason())
                 .operationPreview(policy.getOperationPreview())
@@ -118,6 +122,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .step(context.getStep())
                 .tool(context.getDecision().getTool())
                 .input(context.getDecision().getInputView())
+                .workspace(context.getWorkspaceDisplayName())
                 .permissionLevel(policy.getPermissionLevel().name())
                 .riskReason(reason)
                 .operationPreview(policy.getOperationPreview())

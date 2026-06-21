@@ -32,9 +32,9 @@ public class ReadFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         try {
-            Path path = resolvePath(call.getInput(), "path", null);
-            if (!isAllowedRegularFile(path)) {
-                return failure("file_not_allowed", "文件不存在、过大或被禁止：" + relative(path), startedAt);
+            Path path = resolvePath(call, "path", null);
+            if (!isAllowedRegularFile(call, path)) {
+                return failure("file_not_allowed", "文件不存在、过大或被禁止：" + relative(call, path), startedAt);
             }
             int startLine = Math.max(1, integer(call.getInput(), "startLine", 1));
             int endLine = integer(call.getInput(), "endLine", startLine + 119);

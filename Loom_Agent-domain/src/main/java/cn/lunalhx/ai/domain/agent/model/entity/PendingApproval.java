@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 
@@ -18,6 +19,8 @@ public class PendingApproval {
     private String approvalId;
     private String requestId;
     private String conversationId;
+    private Path resolvedWorkspace;
+    private String workspaceDisplayName;
     private String tool;
     private Map<String, Object> input;
     private ToolPermissionLevel permissionLevel;

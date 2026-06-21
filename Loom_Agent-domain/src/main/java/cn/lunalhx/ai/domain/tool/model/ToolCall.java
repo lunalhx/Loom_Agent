@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.nio.file.Path;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -14,5 +16,6 @@ public class ToolCall {
 
     private String name;
     private JsonNode input;
+    private Path workspaceRoot;
 
 }

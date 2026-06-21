@@ -61,6 +61,8 @@ loom:
   agent:
     enabled: ${AGENT_ENABLED:true}
     workspace-root: ${AGENT_WORKSPACE_ROOT:.}
+    allowed-workspace-roots:
+      - ${AGENT_ALLOWED_WORKSPACE_ROOT:${AGENT_WORKSPACE_ROOT:.}}
     max-steps: ${AGENT_MAX_STEPS:6}
     total-timeout-ms: ${AGENT_TOTAL_TIMEOUT_MS:120000}
     step-timeout-ms: ${AGENT_STEP_TIMEOUT_MS:30000}

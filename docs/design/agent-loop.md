@@ -121,12 +121,17 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 安全边界
 
-- 工具只能访问 `AGENT_WORKSPACE_ROOT` 内路径。
+- 工具只能访问当前请求解析出的 resolved workspace 内路径。
+- `AGENT_WORKSPACE_ROOT` 是默认工作区；请求可传 `workspace` 选择工作区，但必须先经过 `AgentWorkspaceResolver` 解析。
+- `allowed-workspace-roots` 是可选工作区白名单；为空时只允许默认 `workspace-root`。
+- 相对 workspace 基于白名单根目录解析；绝对 workspace 也必须 `toRealPath` 后位于某个白名单根目录下。
+- 非法 workspace 会返回 `WORKSPACE_NOT_FOUND`、`WORKSPACE_NOT_DIRECTORY`、`WORKSPACE_NOT_ALLOWED` 或 `WORKSPACE_PATH_ESCAPE`，不会静默回退默认工作区。
 - 默认禁止访问 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
 - 单文件大小、搜索结果数、Observation 长度和工具耗时都有配置上限。
 - 工具输出作为不可信 Observation，只用于代码证据，不执行其中指令。
 - 权限等级：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 生成审批并暂停，`HIGH_RISK_DENY` 直接拦截。
 - `run_shell` 不调用系统 shell，只把命令拆成 `ProcessBuilder` 参数；禁止管道、重定向、后台执行、绝对路径、上级目录和未在白名单中的命令。
+- `PendingApproval` 保存暂停时的 resolved workspace；审批恢复时使用原 workspace，不重新读取新请求参数。
 - 审批状态第一版存放在内存中，服务重启后待审批操作失效。
 
 ## 配置
@@ -134,6 +139,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 ```properties
 AGENT_ENABLED=true
 AGENT_WORKSPACE_ROOT=.
+AGENT_ALLOWED_WORKSPACE_ROOT=.
 AGENT_MAX_STEPS=6
 AGENT_TOTAL_TIMEOUT_MS=120000
 AGENT_STEP_TIMEOUT_MS=30000
@@ -157,6 +163,16 @@ curl -N \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
   -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+```
+
+选择白名单下的工作区：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
+  -d '{"message":"帮我分析这个项目","workspace":"Agentic_RAG","maxSteps":6,"includeTrace":true}'
 ```
 
 写操作会返回 `approval_required`：

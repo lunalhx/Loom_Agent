@@ -60,7 +60,7 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
                 return failure("git_op_rejected", policy.getRiskReason(), startedAt);
             }
             List<String> command = command(call);
-            return SandboxProcessRunner.run(command, workspaceRoot(), properties.getShellTimeoutMs(), properties.getShellMaxOutputChars(), startedAt);
+            return SandboxProcessRunner.run(command, workspaceRoot(call), properties.getShellTimeoutMs(), properties.getShellMaxOutputChars(), startedAt);
         } catch (Exception e) {
             return failure("git_op_failed", e.getMessage(), startedAt);
         }
@@ -109,9 +109,9 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
         if (StringUtils.isBlank(rawPath)) {
             return;
         }
-        Path path = resolvePath(call.getInput(), "path", null);
+        Path path = resolvePath(call, "path", null);
         command.add("--");
-        command.add(relative(path));
+        command.add(relative(call, path));
     }
 
     private String operation(ToolCall call) {

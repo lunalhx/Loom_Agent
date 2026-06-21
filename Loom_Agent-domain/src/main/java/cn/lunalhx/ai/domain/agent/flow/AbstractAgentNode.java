@@ -41,7 +41,8 @@ public abstract class AbstractAgentNode implements AgentNode {
         return AgentEvent.builder()
                 .type(type)
                 .requestId(context.getRequestId())
-                .conversationId(context.getConversationId());
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName());
     }
 
     protected void fail(AgentContext context, AgentStopReason reason, String code, String message) {

@@ -33,6 +33,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
         ToolResult result = toolRegistry.call(ToolCall.builder()
                 .name(decision.getTool())
                 .input(decision.getInput())
+                .workspaceRoot(context.getResolvedWorkspace())
                 .build());
         if (StringUtils.length(result.getObservation()) > properties.getObservationMaxChars()) {
             result.setObservation(StringUtils.abbreviate(result.getObservation(), properties.getObservationMaxChars()));
@@ -51,6 +52,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .thought(decision.getThought())
                 .tool(decision.getTool())
                 .input(decision.getInputView())
+                .workspace(context.getWorkspaceDisplayName())
                 .build());
         return NodeResult.next(AgentNodeNames.OBSERVATION, events);
     }

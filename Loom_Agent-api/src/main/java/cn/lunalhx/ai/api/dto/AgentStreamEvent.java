@@ -17,6 +17,7 @@ public class AgentStreamEvent {
     private String type;
     private String requestId;
     private String conversationId;
+    private String workspace;
     private Integer step;
     private String node;
     private List<String> nodeInputs;

@@ -1,38 +1,60 @@
 package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Locale;
 
 abstract class FileSystemToolSupport {
 
     protected final AgentRuntimeProperties properties;
-    private final Path workspaceRoot;
 
     protected FileSystemToolSupport(AgentRuntimeProperties properties) {
         this.properties = properties;
-        this.workspaceRoot = Paths.get(properties.getWorkspaceRoot()).toAbsolutePath().normalize();
     }
 
-    protected Path resolvePath(JsonNode input, String fieldName, String defaultPath) throws IOException {
-        String rawPath = text(input, fieldName, defaultPath);
+    protected Path resolvePath(ToolCall call, String fieldName, String defaultPath) throws IOException {
+        return resolveExistingPath(call, fieldName, defaultPath);
+    }
+
+    protected Path resolveExistingPath(ToolCall call, String fieldName, String defaultPath) throws IOException {
+        String rawPath = text(call.getInput(), fieldName, defaultPath);
         if (rawPath == null || rawPath.isBlank()) {
             throw new IOException(fieldName + " 不能为空");
         }
-        Path resolved = workspaceRoot.resolve(rawPath).normalize().toAbsolutePath();
-        if (!resolved.startsWith(workspaceRoot)) {
-            throw new IOException("路径越权：" + rawPath);
+        Path root = workspaceRoot(call);
+        Path candidate = toCandidate(root, rawPath);
+        if (!Files.exists(candidate)) {
+            throw new IOException("路径不存在：" + rawPath);
         }
-        if (isBlocked(resolved)) {
-            throw new IOException("路径被禁止读取：" + relative(resolved));
+        Path realPath = candidate.toRealPath();
+        validateInsideWorkspace(root, realPath, rawPath);
+        validateNotBlocked(root, realPath);
+        return realPath;
+    }
+
+    protected Path resolveWritablePath(ToolCall call, String fieldName, String defaultPath) throws IOException {
+        String rawPath = text(call.getInput(), fieldName, defaultPath);
+        if (rawPath == null || rawPath.isBlank()) {
+            throw new IOException(fieldName + " 不能为空");
         }
-        return resolved;
+        Path root = workspaceRoot(call);
+        Path candidate = toCandidate(root, rawPath);
+        Path parent = candidate.getParent();
+        if (parent == null || !Files.exists(parent)) {
+            throw new IOException("父目录不存在：" + rawPath);
+        }
+        Path realParent = parent.toRealPath();
+        validateInsideWorkspace(root, realParent, rawPath);
+        Path normalized = realParent.resolve(candidate.getFileName()).normalize().toAbsolutePath();
+        validateInsideWorkspace(root, normalized, rawPath);
+        validateNotBlocked(root, normalized);
+        return normalized;
     }
 
     protected String text(JsonNode input, String fieldName, String defaultValue) {
@@ -49,24 +71,42 @@ abstract class FileSystemToolSupport {
         return input.path(fieldName).asInt(defaultValue);
     }
 
-    protected String relative(Path path) {
-        return workspaceRoot.relativize(path.toAbsolutePath().normalize()).toString();
-    }
-
-    protected Path workspaceRoot() {
-        return workspaceRoot;
-    }
-
-    protected boolean isAllowedRegularFile(Path path) {
+    protected String relative(ToolCall call, Path path) {
         try {
-            return Files.isRegularFile(path) && Files.size(path) <= properties.getFileMaxBytes() && !isBlocked(path);
+            return workspaceRoot(call).relativize(path.toAbsolutePath().normalize()).toString();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    protected Path workspaceRoot(ToolCall call) throws IOException {
+        if (call == null || call.getWorkspaceRoot() == null) {
+            throw new IOException("workspace 未解析");
+        }
+        return call.getWorkspaceRoot().toRealPath();
+    }
+
+    protected boolean isAllowedRegularFile(ToolCall call, Path path) {
+        try {
+            Path root = workspaceRoot(call);
+            Path realPath = path.toRealPath();
+            return Files.isRegularFile(realPath)
+                    && realPath.startsWith(root)
+                    && Files.size(realPath) <= properties.getFileMaxBytes()
+                    && !isBlocked(root, realPath);
         } catch (IOException e) {
             return false;
         }
     }
 
-    protected boolean isAllowedPath(Path path) {
-        return !isBlocked(path);
+    protected boolean isAllowedPath(ToolCall call, Path path) {
+        try {
+            Path root = workspaceRoot(call);
+            Path realPath = path.toRealPath();
+            return realPath.startsWith(root) && !isBlocked(root, realPath);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     protected ToolResult failure(String code, String message, long startedAt) {
@@ -81,8 +121,27 @@ abstract class FileSystemToolSupport {
         return elapsed(startedAt) > properties.getToolTimeoutMs();
     }
 
-    private boolean isBlocked(Path path) {
-        Path relative = workspaceRoot.relativize(path.toAbsolutePath().normalize());
+    private Path toCandidate(Path root, String rawPath) {
+        Path raw = Path.of(rawPath);
+        return raw.isAbsolute()
+                ? raw.normalize().toAbsolutePath()
+                : root.resolve(raw).normalize().toAbsolutePath();
+    }
+
+    private void validateInsideWorkspace(Path root, Path path, String rawPath) throws IOException {
+        if (!path.toAbsolutePath().normalize().startsWith(root)) {
+            throw new IOException("路径越权：" + rawPath);
+        }
+    }
+
+    private void validateNotBlocked(Path root, Path path) throws IOException {
+        if (isBlocked(root, path)) {
+            throw new IOException("路径被禁止访问：" + root.relativize(path.toAbsolutePath().normalize()));
+        }
+    }
+
+    private boolean isBlocked(Path root, Path path) {
+        Path relative = root.relativize(path.toAbsolutePath().normalize());
         String normalized = relative.toString().replace('\\', '/');
         if (normalized.equals("docs/env/.env") || normalized.startsWith("docs/env/.env/")) {
             return true;

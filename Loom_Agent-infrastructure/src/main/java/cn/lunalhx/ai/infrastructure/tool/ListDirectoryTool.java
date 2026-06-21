@@ -33,9 +33,9 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         try {
-            Path path = resolvePath(call.getInput(), "path", ".");
+            Path path = resolvePath(call, "path", ".");
             if (!Files.isDirectory(path)) {
-                return failure("not_directory", "不是目录：" + relative(path), startedAt);
+                return failure("not_directory", "不是目录：" + relative(call, path), startedAt);
             }
             int maxDepth = Math.max(1, Math.min(3, integer(call.getInput(), "maxDepth", 1)));
             int limit = Math.max(1, properties.getSearchMaxResults());
@@ -43,13 +43,13 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
             StringBuilder output = new StringBuilder();
             try (Stream<Path> stream = Files.walk(path, maxDepth)) {
                 stream.filter(item -> !item.equals(path))
-                        .filter(this::isAllowedPath)
+                        .filter(item -> isAllowedPath(call, item))
                         .sorted(Comparator.comparing(Path::toString))
                         .limit(limit + 1L)
                         .forEach(item -> {
                             if (count.incrementAndGet() <= limit) {
                                 output.append(Files.isDirectory(item) ? "D " : "F ")
-                                        .append(relative(item))
+                                        .append(relative(call, item))
                                         .append('\n');
                             }
                         });

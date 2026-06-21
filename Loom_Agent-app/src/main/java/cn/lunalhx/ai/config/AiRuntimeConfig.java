@@ -3,6 +3,7 @@ package cn.lunalhx.ai.config;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
@@ -54,6 +55,11 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public AgentWorkspaceResolver agentWorkspaceResolver(AgentRuntimeProperties agentRuntimeProperties) {
+        return new AgentWorkspaceResolver(agentRuntimeProperties);
+    }
+
+    @Bean
     public ChatStreamService chatStreamService(ModelGateway modelGateway,
                                                ModelRuntimeProperties modelRuntimeProperties,
                                                OutputFormatValidator outputFormatValidator,
@@ -68,10 +74,11 @@ public class AiRuntimeConfig {
     public AgentLoopService agentLoopService(ModelGateway modelGateway,
                                              ToolRegistry toolRegistry,
                                              ApprovalStore approvalStore,
+                                             AgentWorkspaceResolver agentWorkspaceResolver,
                                              AgentRuntimeProperties agentRuntimeProperties,
                                              ObjectMapper objectMapper,
                                              ThreadPoolExecutor threadPoolExecutor) {
-        return new DefaultAgentLoopService(modelGateway, toolRegistry, approvalStore, agentRuntimeProperties, objectMapper, threadPoolExecutor);
+        return new DefaultAgentLoopService(modelGateway, toolRegistry, approvalStore, agentWorkspaceResolver, agentRuntimeProperties, objectMapper, threadPoolExecutor);
     }
 
     @Bean

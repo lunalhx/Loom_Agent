@@ -39,17 +39,17 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
             if (query.isBlank()) {
                 return failure("query_required", "query 不能为空", startedAt);
             }
-            Path path = resolvePath(call.getInput(), "path", ".");
+            Path path = resolvePath(call, "path", ".");
             int limit = Math.max(1, Math.min(properties.getSearchMaxResults(), integer(call.getInput(), "limit", 20)));
             AtomicInteger count = new AtomicInteger();
             StringBuilder output = new StringBuilder();
             String lowerQuery = query.toLowerCase(Locale.ROOT);
             try (Stream<Path> stream = Files.walk(path)) {
-                for (Path file : stream.filter(this::isAllowedRegularFile).toList()) {
+                for (Path file : stream.filter(file -> isAllowedRegularFile(call, file)).toList()) {
                     if (timedOut(startedAt) || count.get() >= limit) {
                         break;
                     }
-                    searchFile(file, lowerQuery, count, limit, output);
+                    searchFile(call, file, lowerQuery, count, limit, output);
                 }
             }
             boolean truncated = count.get() >= limit || timedOut(startedAt);
@@ -59,14 +59,14 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
         }
     }
 
-    private void searchFile(Path file, String lowerQuery, AtomicInteger count, int limit, StringBuilder output) {
+    private void searchFile(ToolCall call, Path file, String lowerQuery, AtomicInteger count, int limit, StringBuilder output) {
         try {
             List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
             for (int i = 0; i < lines.size() && count.get() < limit; i++) {
                 String line = lines.get(i);
                 if (line.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
                     count.incrementAndGet();
-                    output.append(relative(file))
+                    output.append(relative(call, file))
                             .append(':')
                             .append(i + 1)
                             .append(": ")
