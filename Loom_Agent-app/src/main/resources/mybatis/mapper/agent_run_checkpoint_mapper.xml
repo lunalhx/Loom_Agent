@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao">
+
+    <resultMap id="AgentRunCheckpointMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO">
+        <id column="id" property="id"/>
+        <result column="run_id" property="runId"/>
+        <result column="version" property="version"/>
+        <result column="current_node" property="currentNode"/>
+        <result column="context_json" property="contextJson"/>
+        <result column="plan_json" property="planJson"/>
+        <result column="last_tool_execution_json" property="lastToolExecutionJson"/>
+        <result column="reason" property="reason"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <select id="selectMaxVersion" resultType="java.lang.Long">
+        SELECT MAX(version) FROM agent_run_checkpoint WHERE run_id = #{runId}
+    </select>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO agent_run_checkpoint
+        (run_id, version, current_node, context_json, plan_json, last_tool_execution_json, reason)
+        VALUES
+        (#{runId}, #{version}, #{currentNode}, #{contextJson}, #{planJson}, #{lastToolExecutionJson}, #{reason})
+    </insert>
+
+    <select id="selectLatest" resultMap="AgentRunCheckpointMap">
+        SELECT * FROM agent_run_checkpoint
+        WHERE run_id = #{runId}
+        ORDER BY version DESC
+        LIMIT 1
+    </select>
+
+</mapper>

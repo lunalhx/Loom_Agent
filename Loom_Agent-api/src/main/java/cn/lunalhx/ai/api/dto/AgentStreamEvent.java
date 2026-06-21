@@ -15,6 +15,7 @@ import java.util.List;
 public class AgentStreamEvent {
 
     private String type;
+    private String runId;
     private String requestId;
     private String conversationId;
     private String workspace;
@@ -36,5 +37,7 @@ public class AgentStreamEvent {
     private Integer stepCount;
     private String code;
     private String message;
+    private Map<String, Object> plan;
+    private Long checkpointVersion;
 
 }

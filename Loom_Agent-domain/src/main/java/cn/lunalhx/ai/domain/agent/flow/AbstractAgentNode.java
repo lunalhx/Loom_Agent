@@ -40,6 +40,7 @@ public abstract class AbstractAgentNode implements AgentNode {
     protected AgentEvent.AgentEventBuilder event(AgentContext context, AgentEventType type) {
         return AgentEvent.builder()
                 .type(type)
+                .runId(context.getRunId())
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .workspace(context.getWorkspaceDisplayName());

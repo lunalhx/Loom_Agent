@@ -11,4 +11,6 @@ public interface AgentLoopService {
 
     Flux<AgentEvent> resume(String approvalId, ApprovalDecision decision, String reason);
 
+    Flux<AgentEvent> resumeRun(String runId);
+
 }

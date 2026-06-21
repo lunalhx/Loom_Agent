@@ -14,6 +14,7 @@ import java.util.Map;
 public class AgentApprovalResponse {
 
     private String approvalId;
+    private String runId;
     private String status;
     private String requestId;
     private String conversationId;

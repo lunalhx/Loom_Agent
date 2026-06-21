@@ -71,6 +71,13 @@ public class DynamicText {
         return List.copyOf(entries);
     }
 
+    public void replaceEntries(List<DynamicTextEntry> newEntries) {
+        entries.clear();
+        if (newEntries != null) {
+            entries.addAll(newEntries);
+        }
+    }
+
     public String render() {
         return entries.stream()
                 .map(this::renderEntry)

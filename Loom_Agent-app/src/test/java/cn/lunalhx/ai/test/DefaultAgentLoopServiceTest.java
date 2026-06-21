@@ -1,12 +1,20 @@
 package cn.lunalhx.ai.test;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
@@ -18,6 +26,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.infrastructure.tool.TodoWriteTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Rule;
 import org.junit.Test;
@@ -258,10 +267,197 @@ public class DefaultAgentLoopServiceTest {
         assertEquals(projectB.toRealPath(), calledWorkspace.get());
     }
 
+    @Test
+    public void shouldCreatePlanForCacheAndUnitTestTask() {
+        List<String> prompts = new java.util.ArrayList<>();
+        DefaultAgentLoopService service = newService(
+                completeGateway(prompts, "{\"type\":\"final\",\"answer\":\"计划已创建。\",\"evidence\":[]}"),
+                List.of(fakeTool("code_search", "unused")));
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .question("给订单模块加缓存并补单测")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        AgentEvent plan = events.stream()
+                .filter(event -> event.getType() == AgentEventType.PLAN_UPDATED)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(String.valueOf(plan.getPlan()).contains("缓存"));
+        assertTrue(String.valueOf(plan.getPlan()).contains("单元测试"));
+        assertTrue(prompts.get(0).contains("当前计划"));
+    }
+
+    @Test
+    public void shouldUpdatePlanWithTodoWriteTool() {
+        DefaultAgentLoopService service = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"理解代码\",\"status\":\"completed\",\"evidence\":\"已读实现\"},{\"id\":\"task-2\",\"content\":\"补测试\",\"status\":\"in_progress\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"计划已更新。\",\"evidence\":[]}"),
+                List.of(new TodoWriteTool()));
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .question("给某模块加缓存并补单测")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.PLAN_UPDATED
+                && String.valueOf(event.getPlan()).contains("已读实现")));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("Updated 2 planned tasks")));
+    }
+
+    @Test
+    public void shouldRemindModelWhenPlanIsNotUpdatedForThreeRounds() {
+        List<String> prompts = new java.util.ArrayList<>();
+        DefaultAgentLoopService service = newService(
+                completeGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
+                List.of(fakeTool("code_search", "ok")));
+
+        service.ask(AgentQuestion.builder()
+                        .question("给某模块加缓存并补单测")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertTrue(prompts.get(3).contains("<reminder>Update your todos with todo_write before continuing.</reminder>"));
+    }
+
+    @Test
+    public void shouldReplanAfterToolFailure() {
+        DefaultAgentLoopService service = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"执行失败工具\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}",
+                        "{\"type\":\"final\",\"answer\":\"已根据失败调整计划。\",\"evidence\":[]}"),
+                List.of(failingTool("code_search", "boom")));
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .question("给某模块加缓存并补单测")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED
+                && String.valueOf(event.getPlan()).contains("检查失败原因")));
+    }
+
+    @Test
+    public void shouldResumeApprovalFromCheckpointRepository() {
+        AgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        AgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("replace_in_file", "updated after resume", calls);
+
+        DefaultAgentLoopService firstService = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"修改文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}"),
+                List.of(writeTool),
+                approvalStore,
+                runRepository,
+                checkpointRepository);
+
+        List<AgentEvent> paused = firstService.ask(AgentQuestion.builder()
+                        .question("修改 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+        String approvalId = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow()
+                .getApprovalId();
+
+        DefaultAgentLoopService secondService = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"恢复后完成。\",\"evidence\":[]}"),
+                List.of(writeTool),
+                approvalStore,
+                runRepository,
+                checkpointRepository);
+
+        List<AgentEvent> resumed = secondService.resume(approvalId, ApprovalDecision.APPROVE, "ok")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(1, calls.get());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.RESUME_STARTED));
+        assertEquals("恢复后完成。",
+                resumed.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+    }
+
+    @Test
+    public void shouldReplanUnsafeResumeWithoutRepeatingTool() {
+        AgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        AgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        AtomicInteger calls = new AtomicInteger();
+        AgentContext context = new AgentContext();
+        context.setRunId("run-unsafe");
+        context.setRequestId("request-unsafe");
+        context.setConversationId("conversation-unsafe");
+        context.setQuestion("给某模块加缓存并补单测");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(java.time.Instant.now());
+        context.setCurrentNode(AgentNodeNames.TOOL_DISPATCH);
+        context.setUnsafeResumeRequired(true);
+        context.setToolSpecs(List.of(ToolSpec.builder().name("replace_in_file").description("write").inputSchema("{}").build()));
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId(context.getRunId())
+                .currentNode(AgentNodeNames.TOOL_DISPATCH)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("before_tool:replace_in_file")
+                .build());
+
+        DefaultAgentLoopService service = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"未重复写入，已改为检查状态。\",\"evidence\":[]}"),
+                List.of(fakeWriteTool("replace_in_file", "should not execute", calls)),
+                new InMemoryApprovalStore(),
+                runRepository,
+                checkpointRepository);
+
+        List<AgentEvent> events = service.resumeRun("run-unsafe")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(0, calls.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED));
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
                 new ToolRegistry(tools),
+                properties(),
+                new ObjectMapper(),
+                Runnable::run);
+    }
+
+    private DefaultAgentLoopService newService(ModelGateway modelGateway,
+                                               List<AgentTool> tools,
+                                               ApprovalStore approvalStore,
+                                               AgentRunRepository runRepository,
+                                               AgentCheckpointRepository checkpointRepository) {
+        return new DefaultAgentLoopService(
+                modelGateway,
+                new ToolRegistry(tools),
+                approvalStore,
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties()),
+                runRepository,
+                checkpointRepository,
                 properties(),
                 new ObjectMapper(),
                 Runnable::run);
@@ -314,6 +510,24 @@ public class DefaultAgentLoopServiceTest {
             @Override
             public ToolResult call(ToolCall call) {
                 return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool failingTool(String name, String message) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder()
+                        .name(name)
+                        .description(name)
+                        .inputSchema("{}")
+                        .build();
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                return ToolResult.failure("fake_failure", message, 1L);
             }
         };
     }

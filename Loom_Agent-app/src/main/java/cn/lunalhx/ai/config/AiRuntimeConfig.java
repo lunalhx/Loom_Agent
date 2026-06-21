@@ -1,10 +1,14 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
 import cn.lunalhx.ai.domain.conversation.service.DefaultChatStreamService;
@@ -13,6 +17,12 @@ import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
+import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
@@ -20,6 +30,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -50,8 +61,25 @@ public class AiRuntimeConfig {
     }
 
     @Bean
-    public ApprovalStore approvalStore() {
-        return new InMemoryApprovalStore();
+    public AgentRunRepository agentRunRepository(ObjectProvider<AgentRunDao> agentRunDaoProvider) {
+        AgentRunDao agentRunDao = agentRunDaoProvider.getIfAvailable();
+        return agentRunDao == null ? new InMemoryAgentRunRepository() : new MybatisAgentRunRepository(agentRunDao);
+    }
+
+    @Bean
+    public AgentCheckpointRepository agentCheckpointRepository(ObjectProvider<AgentRunCheckpointDao> checkpointDaoProvider,
+                                                               ObjectMapper objectMapper) {
+        AgentRunCheckpointDao checkpointDao = checkpointDaoProvider.getIfAvailable();
+        return checkpointDao == null
+                ? new InMemoryAgentCheckpointRepository()
+                : new MybatisAgentCheckpointRepository(checkpointDao, objectMapper);
+    }
+
+    @Bean
+    public ApprovalStore approvalStore(ObjectProvider<AgentPendingApprovalDao> approvalDaoProvider,
+                                       ObjectMapper objectMapper) {
+        AgentPendingApprovalDao approvalDao = approvalDaoProvider.getIfAvailable();
+        return approvalDao == null ? new InMemoryApprovalStore() : new MybatisApprovalStore(approvalDao, objectMapper);
     }
 
     @Bean
@@ -75,10 +103,21 @@ public class AiRuntimeConfig {
                                              ToolRegistry toolRegistry,
                                              ApprovalStore approvalStore,
                                              AgentWorkspaceResolver agentWorkspaceResolver,
+                                             AgentRunRepository agentRunRepository,
+                                             AgentCheckpointRepository agentCheckpointRepository,
                                              AgentRuntimeProperties agentRuntimeProperties,
                                              ObjectMapper objectMapper,
                                              ThreadPoolExecutor threadPoolExecutor) {
-        return new DefaultAgentLoopService(modelGateway, toolRegistry, approvalStore, agentWorkspaceResolver, agentRuntimeProperties, objectMapper, threadPoolExecutor);
+        return new DefaultAgentLoopService(
+                modelGateway,
+                toolRegistry,
+                approvalStore,
+                agentWorkspaceResolver,
+                agentRunRepository,
+                agentCheckpointRepository,
+                agentRuntimeProperties,
+                objectMapper,
+                threadPoolExecutor);
     }
 
     @Bean

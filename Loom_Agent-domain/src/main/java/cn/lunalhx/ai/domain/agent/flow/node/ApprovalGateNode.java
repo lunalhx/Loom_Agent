@@ -55,9 +55,11 @@ public class ApprovalGateNode extends AbstractAgentNode {
     private NodeResult requireApproval(AgentContext context, ToolPolicyDecision policy) {
         Instant now = Instant.now();
         String approvalId = UUID.randomUUID().toString();
+        context.setPendingApprovalId(approvalId);
         Map<String, Object> inputSummary = summarizeInput(context.getDecision().getInputView());
         PendingApproval approval = PendingApproval.builder()
                 .approvalId(approvalId)
+                .runId(context.getRunId())
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .resolvedWorkspace(context.getResolvedWorkspace())
@@ -129,7 +131,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .observation(result.getObservation())
                 .build());
         events.addAll(observationEvents(context));
-        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, events);
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
     }
 
 }

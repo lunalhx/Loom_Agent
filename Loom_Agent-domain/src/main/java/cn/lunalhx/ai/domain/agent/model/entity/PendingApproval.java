@@ -17,6 +17,7 @@ import java.util.Map;
 public class PendingApproval {
 
     private String approvalId;
+    private String runId;
     private String requestId;
     private String conversationId;
     private Path resolvedWorkspace;

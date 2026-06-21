@@ -124,7 +124,35 @@ public class AgentCodeController {
                 .orElseGet(() -> Response.<AgentApprovalResponse>builder()
                         .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
                         .info("审批不存在或已过期")
-                        .build());
+                .build());
+    }
+
+    @PostMapping(value = "/runs/{runId}/resume/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter resumeRun(@PathVariable String runId) {
+        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
+        AtomicBoolean completed = new AtomicBoolean(false);
+
+        if (StringUtils.isBlank(runId)) {
+            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, error("invalid_request", "runId 不能为空")));
+            return emitter;
+        }
+
+        Disposable disposable = agentLoopService.resumeRun(runId)
+                .filter(event -> event.getType() != AgentEventType.CHECKPOINT_SAVED)
+                .subscribe(event -> send(emitter, event),
+                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
+                        () -> complete(emitter, completed));
+
+        emitter.onCompletion(disposable::dispose);
+        emitter.onTimeout(() -> {
+            disposable.dispose();
+            sendAndComplete(emitter, completed, timeoutError());
+        });
+        emitter.onError(throwable -> {
+            disposable.dispose();
+            log.warn("Agent run resume SSE connection closed with error: {}", throwable.getMessage());
+        });
+        return emitter;
     }
 
     private AgentEvent validateRequest(AgentAskRequest request) {
@@ -180,6 +208,9 @@ public class AgentCodeController {
             return true;
         }
         return event.getType() == AgentEventType.META
+                || event.getType() == AgentEventType.PLAN_UPDATED
+                || event.getType() == AgentEventType.REPLAN_STARTED
+                || event.getType() == AgentEventType.RESUME_STARTED
                 || event.getType() == AgentEventType.APPROVAL_REQUIRED
                 || event.getType() == AgentEventType.POLICY_DENIED
                 || event.getType() == AgentEventType.ANSWER
@@ -236,6 +267,7 @@ public class AgentCodeController {
     private AgentStreamEvent toDto(AgentEvent event) {
         return AgentStreamEvent.builder()
                 .type(event.getType().eventName())
+                .runId(event.getRunId())
                 .requestId(event.getRequestId())
                 .conversationId(event.getConversationId())
                 .workspace(event.getWorkspace())
@@ -257,6 +289,8 @@ public class AgentCodeController {
                 .stepCount(event.getStepCount())
                 .code(event.getCode())
                 .message(event.getMessage())
+                .plan(event.getPlan())
+                .checkpointVersion(event.getCheckpointVersion())
                 .build();
     }
 
@@ -271,6 +305,7 @@ public class AgentCodeController {
     private AgentApprovalResponse toApprovalResponse(PendingApproval approval) {
         return AgentApprovalResponse.builder()
                 .approvalId(approval.getApprovalId())
+                .runId(approval.getRunId())
                 .status("PENDING")
                 .requestId(approval.getRequestId())
                 .conversationId(approval.getConversationId())

@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import lombok.Data;
@@ -13,6 +14,7 @@ import java.util.List;
 @Data
 public class AgentContext {
 
+    private String runId;
     private String requestId;
     private String conversationId;
     private String question;
@@ -33,5 +35,12 @@ public class AgentContext {
     private AgentStopReason stopReason;
     private String errorCode;
     private String errorMessage;
+    private AgentPlan plan;
+    private ReplanReason replanReason;
+    private String replanMessage;
+    private String currentNode;
+    private Long checkpointVersion;
+    private boolean unsafeResumeRequired;
+    private String pendingApprovalId;
 
 }

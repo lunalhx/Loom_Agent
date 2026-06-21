@@ -4,6 +4,10 @@ public enum AgentEventType {
 
     META("meta"),
     NODE_START("node_start"),
+    PLAN_UPDATED("plan_updated"),
+    REPLAN_STARTED("replan_started"),
+    CHECKPOINT_SAVED("checkpoint_saved"),
+    RESUME_STARTED("resume_started"),
     THOUGHT("thought"),
     TOOL_CALL("tool_call"),
     APPROVAL_REQUIRED("approval_required"),

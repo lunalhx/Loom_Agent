@@ -18,6 +18,7 @@ import java.time.Instant;
 public class AgentEvent {
 
     private AgentEventType type;
+    private String runId;
     private String requestId;
     private String conversationId;
     private String workspace;
@@ -39,5 +40,7 @@ public class AgentEvent {
     private Integer stepCount;
     private String code;
     private String message;
+    private Map<String, Object> plan;
+    private Long checkpointVersion;
 
 }

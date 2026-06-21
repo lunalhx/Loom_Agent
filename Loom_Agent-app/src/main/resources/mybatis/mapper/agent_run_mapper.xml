@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentRunDao">
+
+    <resultMap id="AgentRunMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
+        <id column="id" property="id"/>
+        <result column="run_id" property="runId"/>
+        <result column="request_id" property="requestId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="question" property="question"/>
+        <result column="workspace" property="workspace"/>
+        <result column="status" property="status"/>
+        <result column="current_node" property="currentNode"/>
+        <result column="step" property="step"/>
+        <result column="checkpoint_version" property="checkpointVersion"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
+        INSERT INTO agent_run
+        (run_id, request_id, conversation_id, question, workspace, status, current_node, step, checkpoint_version)
+        VALUES
+        (#{runId}, #{requestId}, #{conversationId}, #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion})
+        ON DUPLICATE KEY UPDATE
+        request_id = VALUES(request_id),
+        conversation_id = VALUES(conversation_id),
+        question = VALUES(question),
+        workspace = VALUES(workspace),
+        status = VALUES(status),
+        current_node = VALUES(current_node),
+        step = VALUES(step),
+        checkpoint_version = VALUES(checkpoint_version),
+        update_time = CURRENT_TIMESTAMP
+    </insert>
+
+    <select id="selectByRunId" resultMap="AgentRunMap">
+        SELECT * FROM agent_run WHERE run_id = #{runId} LIMIT 1
+    </select>
+
+</mapper>

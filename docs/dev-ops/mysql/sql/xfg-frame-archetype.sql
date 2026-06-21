@@ -44,3 +44,63 @@ CREATE TABLE IF NOT EXISTS model_call_log (
     KEY idx_conversation_id (conversation_id),
     KEY idx_create_time (create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模型调用日志表';
+
+CREATE TABLE IF NOT EXISTS agent_run (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    run_id VARCHAR(64) NOT NULL COMMENT 'Agent run ID',
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '请求 ID',
+    conversation_id VARCHAR(64) DEFAULT NULL COMMENT '会话 ID',
+    question VARCHAR(4000) NOT NULL COMMENT '用户任务',
+    workspace VARCHAR(512) DEFAULT NULL COMMENT '工作区展示名',
+    status VARCHAR(32) NOT NULL COMMENT 'RUNNING/WAITING_APPROVAL/COMPLETED/FAILED',
+    current_node VARCHAR(64) DEFAULT NULL COMMENT '当前节点',
+    step INT NOT NULL DEFAULT 0 COMMENT '当前步骤',
+    checkpoint_version BIGINT DEFAULT NULL COMMENT '最新 checkpoint 版本',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_run_id (run_id),
+    KEY idx_conversation_id (conversation_id),
+    KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 运行表';
+
+CREATE TABLE IF NOT EXISTS agent_run_checkpoint (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    run_id VARCHAR(64) NOT NULL COMMENT 'Agent run ID',
+    version BIGINT NOT NULL COMMENT 'checkpoint 版本',
+    current_node VARCHAR(64) NOT NULL COMMENT '恢复节点',
+    context_json LONGTEXT NOT NULL COMMENT 'AgentContextSnapshot JSON',
+    plan_json MEDIUMTEXT DEFAULT NULL COMMENT 'AgentPlan JSON',
+    last_tool_execution_json MEDIUMTEXT DEFAULT NULL COMMENT '最近工具调用快照',
+    reason VARCHAR(255) DEFAULT NULL COMMENT '保存原因',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_run_version (run_id, version),
+    KEY idx_run_id (run_id),
+    KEY idx_create_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent Checkpoint 表';
+
+CREATE TABLE IF NOT EXISTS agent_pending_approval (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    approval_id VARCHAR(64) NOT NULL COMMENT '审批 ID',
+    run_id VARCHAR(64) DEFAULT NULL COMMENT 'Agent run ID',
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '请求 ID',
+    conversation_id VARCHAR(64) DEFAULT NULL COMMENT '会话 ID',
+    resolved_workspace VARCHAR(1024) DEFAULT NULL COMMENT '解析后的工作区',
+    workspace_display_name VARCHAR(512) DEFAULT NULL COMMENT '工作区展示名',
+    tool VARCHAR(128) NOT NULL COMMENT '工具名',
+    input_json MEDIUMTEXT DEFAULT NULL COMMENT '工具输入摘要 JSON',
+    permission_level VARCHAR(32) NOT NULL COMMENT '权限等级',
+    risk_reason VARCHAR(512) DEFAULT NULL COMMENT '风险原因',
+    operation_preview MEDIUMTEXT DEFAULT NULL COMMENT '操作预览',
+    context_json LONGTEXT DEFAULT NULL COMMENT '审批暂停时的上下文快照',
+    created_at DATETIME DEFAULT NULL COMMENT '审批创建时间',
+    expires_at DATETIME DEFAULT NULL COMMENT '审批过期时间',
+    consumed TINYINT NOT NULL DEFAULT 0 COMMENT '是否已消费',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_approval_id (approval_id),
+    KEY idx_run_id (run_id),
+    KEY idx_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 待审批表';

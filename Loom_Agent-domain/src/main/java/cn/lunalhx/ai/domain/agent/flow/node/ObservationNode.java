@@ -23,7 +23,7 @@ public class ObservationNode extends AbstractAgentNode {
                 name(),
                 context.getDecision(),
                 toDynamicObservation(context, result));
-        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 
     private String toDynamicObservation(AgentContext context, ToolResult result) {

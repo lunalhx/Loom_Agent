@@ -16,7 +16,7 @@ public class StartNode extends AbstractAgentNode {
 
     @Override
     protected NodeResult doApply(AgentContext context) {
-        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(event(context, AgentEventType.META)
+        return NodeResult.next(AgentNodeNames.PLANNER, List.of(event(context, AgentEventType.META)
                 .stepCount(context.getMaxSteps())
                 .build()));
     }
