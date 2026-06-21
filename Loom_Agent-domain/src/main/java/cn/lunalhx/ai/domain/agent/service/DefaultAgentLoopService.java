@@ -7,7 +7,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelDecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
-import cn.lunalhx.ai.domain.agent.flow.node.ParseDecisionNode;
+import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
@@ -52,7 +52,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new StartNode(),
                 new RenderPromptNode(),
                 new ModelDecisionNode(modelGateway, properties),
-                new ParseDecisionNode(objectMapper, toolRegistry, properties),
+                new DecisionNode(objectMapper, toolRegistry, properties),
                 new ToolDispatchNode(toolRegistry, properties),
                 new ObservationNode(),
                 new FinalAnswerNode(),
@@ -80,7 +80,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
 
             emit(sink, List.of(nodeStartEvent(context, node)));
-            NodeResult result = node.execute(context);
+            NodeResult result = node.apply(context);
             emit(sink, result.getEvents());
             if (result.isTerminal()) {
                 sink.complete();
@@ -98,6 +98,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
         context.setToolSpecs(toolSpecs);
+        context.getDynamicText().appendUserTask(context.getQuestion());
         return context;
     }
 

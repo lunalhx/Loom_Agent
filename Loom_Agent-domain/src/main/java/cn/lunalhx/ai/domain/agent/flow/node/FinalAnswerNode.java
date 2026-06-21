@@ -17,7 +17,7 @@ public class FinalAnswerNode extends AbstractAgentNode {
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         String answer = StringUtils.defaultIfBlank(context.getDecision().getAnswer(), "未能生成最终回答");
         context.setFinalAnswer(answer);
         context.setStopReason(AgentStopReason.FINAL_ANSWER);

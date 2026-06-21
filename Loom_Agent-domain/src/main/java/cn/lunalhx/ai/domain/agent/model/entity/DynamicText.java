@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.DynamicTextRole;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -10,14 +11,54 @@ public class DynamicText {
 
     private final List<DynamicTextEntry> entries = new ArrayList<>();
 
-    public void append(int step, String sourceNode, String title, String content) {
+    public void appendSystemNote(int step, String sourceNode, String title, String content) {
+        append(step, DynamicTextRole.SYSTEM_NOTE, sourceNode, title, null, null, content);
+    }
+
+    public void appendUserTask(String question) {
+        append(0, DynamicTextRole.USER_TASK, "start", "User Task", null, null, question);
+    }
+
+    public void appendAssistantAction(int step, String sourceNode, AgentDecision decision) {
+        if (decision == null) {
+            return;
+        }
+        append(step,
+                DynamicTextRole.ASSISTANT_ACTION,
+                sourceNode,
+                "Assistant Action",
+                decision.getTool(),
+                String.valueOf(decision.getInputView()),
+                "Thought: " + StringUtils.defaultString(decision.getThought()));
+    }
+
+    public void appendToolResult(int step, String sourceNode, AgentDecision decision, String content) {
+        append(step,
+                DynamicTextRole.TOOL_RESULT,
+                sourceNode,
+                "Tool Result",
+                decision == null ? null : decision.getTool(),
+                decision == null ? null : String.valueOf(decision.getInputView()),
+                content);
+    }
+
+    private void append(int step,
+                        DynamicTextRole role,
+                        String sourceNode,
+                        String title,
+                        String tool,
+                        String input,
+                        String content) {
         if (StringUtils.isBlank(content)) {
             return;
         }
         entries.add(DynamicTextEntry.builder()
                 .step(step)
+                .role(role)
                 .sourceNode(sourceNode)
                 .title(title)
+                .tool(tool)
+                .input(input)
                 .content(content)
                 .build());
     }
@@ -38,8 +79,18 @@ public class DynamicText {
 
     private String renderEntry(DynamicTextEntry entry) {
         StringBuilder text = new StringBuilder();
-        text.append("## Step ").append(entry.getStep()).append(" - ").append(entry.getTitle()).append('\n');
+        text.append("## ");
+        if (entry.getStep() > 0) {
+            text.append("Step ").append(entry.getStep()).append(" - ");
+        }
+        text.append(entry.getRole().code()).append(" - ").append(entry.getTitle()).append('\n');
         text.append("SourceNode: ").append(entry.getSourceNode()).append('\n');
+        if (StringUtils.isNotBlank(entry.getTool())) {
+            text.append("Tool: ").append(entry.getTool()).append('\n');
+        }
+        if (StringUtils.isNotBlank(entry.getInput())) {
+            text.append("Input: ").append(entry.getInput()).append('\n');
+        }
         text.append(entry.getContent());
         return text.toString();
     }

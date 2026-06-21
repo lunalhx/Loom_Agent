@@ -27,7 +27,7 @@ public class ModelDecisionNode extends AbstractAgentNode {
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         try {
             ChatPrompt prompt = ChatPrompt.builder()
                     .requestId(context.getRequestId())
@@ -42,7 +42,7 @@ public class ModelDecisionNode extends AbstractAgentNode {
                 throw new IllegalStateException("模型响应为空");
             }
             context.setModelOutput(result.getContent());
-            return NodeResult.next(AgentNodeNames.PARSE_DECISION, List.of());
+            return NodeResult.next(AgentNodeNames.DECISION, List.of());
         } catch (Exception e) {
             fail(context, AgentStopReason.MODEL_ERROR, "model_error", "模型决策失败");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());

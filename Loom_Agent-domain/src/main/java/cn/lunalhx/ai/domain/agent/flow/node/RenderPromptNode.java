@@ -16,7 +16,7 @@ public class RenderPromptNode extends AbstractAgentNode {
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         if (context.getStep() >= context.getMaxSteps()) {
             fail(context, AgentStopReason.MAX_STEPS, "max_steps", "达到最大步骤数，已停止");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
@@ -38,6 +38,8 @@ public class RenderPromptNode extends AbstractAgentNode {
         }
         if (!context.getDynamicText().isEmpty()) {
             prompt.append("\n动态上下文：\n");
+            prompt.append("上下文按 user_task / assistant_action / tool_result / system_note 组织。");
+            prompt.append("assistant_action 是你上一轮请求的工具调用，tool_result 是后端实际执行工具后的观察结果。\n");
             prompt.append(context.getDynamicText().render()).append('\n');
         }
         prompt.append("\nAction JSON 示例：{\"type\":\"action\",\"thought\":\"搜索函数定义\",\"tool\":\"code_search\",\"input\":{\"query\":\"函数名\",\"limit\":10}}\n");

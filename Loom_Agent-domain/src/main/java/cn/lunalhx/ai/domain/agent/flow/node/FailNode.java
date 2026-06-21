@@ -15,7 +15,7 @@ public class FailNode extends AbstractAgentNode {
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         return NodeResult.terminal(List.of(
                 event(context, AgentEventType.ERROR)
                         .code(context.getErrorCode())

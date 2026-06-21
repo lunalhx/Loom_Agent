@@ -27,7 +27,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         AgentDecision decision = context.getDecision();
         context.setStep(context.getStep() + 1);
         ToolResult result = toolRegistry.call(ToolCall.builder()
@@ -39,6 +39,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
             result.setTruncated(true);
         }
         context.setToolResult(result);
+        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
 
         List<cn.lunalhx.ai.domain.agent.model.entity.AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)

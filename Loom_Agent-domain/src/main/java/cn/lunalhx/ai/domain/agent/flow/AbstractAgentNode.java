@@ -30,6 +30,13 @@ public abstract class AbstractAgentNode implements AgentNode {
         return inputKeys;
     }
 
+    @Override
+    public final NodeResult apply(AgentContext context) {
+        return doApply(context);
+    }
+
+    protected abstract NodeResult doApply(AgentContext context);
+
     protected AgentEvent.AgentEventBuilder event(AgentContext context, AgentEventType type) {
         return AgentEvent.builder()
                 .type(type)

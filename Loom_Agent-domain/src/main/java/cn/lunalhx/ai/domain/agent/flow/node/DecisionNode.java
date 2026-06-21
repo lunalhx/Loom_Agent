@@ -17,21 +17,21 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.List;
 import java.util.Map;
 
-public class ParseDecisionNode extends AbstractAgentNode {
+public class DecisionNode extends AbstractAgentNode {
 
     private final ObjectMapper objectMapper;
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
 
-    public ParseDecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
-        super(AgentNodeNames.PARSE_DECISION, List.of("modelOutput", "parseErrors", "registeredTools"));
+    public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
+        super(AgentNodeNames.DECISION, List.of("modelOutput", "parseErrors", "registeredTools", "decision"));
         this.objectMapper = objectMapper;
         this.toolRegistry = toolRegistry;
         this.properties = properties;
     }
 
     @Override
-    public NodeResult execute(AgentContext context) {
+    protected NodeResult doApply(AgentContext context) {
         try {
             context.setDecision(null);
             AgentDecision decision = parseDecisionJson(context.getModelOutput());
@@ -50,6 +50,12 @@ public class ParseDecisionNode extends AbstractAgentNode {
                 context.setStep(context.getStep() + 1);
                 context.setToolResult(ToolResult.failure("unknown_tool", "未知工具：" + decision.getTool(), 0L));
                 appendStep(context, false);
+                context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
+                context.getDynamicText().appendToolResult(
+                        context.getStep(),
+                        name(),
+                        decision,
+                        "Success: false\nObservation:\n未知工具：" + decision.getTool());
                 return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
             }
             return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
@@ -61,7 +67,7 @@ public class ParseDecisionNode extends AbstractAgentNode {
             }
             context.setToolResult(ToolResult.failure("parse_error", "模型输出不是合法 Action JSON，请只输出 action 或 final JSON", 0L));
             appendStep(context, false);
-            context.getDynamicText().append(
+            context.getDynamicText().appendSystemNote(
                     Math.max(1, context.getStep()),
                     name(),
                     "Model Output Parse Error",

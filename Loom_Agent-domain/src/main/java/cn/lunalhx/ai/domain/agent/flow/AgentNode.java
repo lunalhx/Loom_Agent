@@ -10,6 +10,6 @@ public interface AgentNode {
 
     List<String> inputKeys();
 
-    NodeResult execute(AgentContext context);
+    NodeResult apply(AgentContext context);
 
 }

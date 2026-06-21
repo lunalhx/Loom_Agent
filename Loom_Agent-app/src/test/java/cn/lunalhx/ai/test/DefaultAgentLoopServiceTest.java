@@ -55,8 +55,14 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(types.contains(AgentEventType.TOOL_CALL));
         assertTrue(types.contains(AgentEventType.OBSERVATION));
         assertTrue(types.contains(AgentEventType.ANSWER));
+        assertTrue(events.stream()
+                .anyMatch(event -> event.getType() == AgentEventType.NODE_START && "decision".equals(event.getNode())));
         assertTrue(prompts.get(1).contains("动态上下文"));
+        assertTrue(prompts.get(1).contains("assistant_action"));
+        assertTrue(prompts.get(1).contains("tool_result"));
         assertTrue(prompts.get(1).contains("DefaultChatStreamService.java:42"));
+        assertTrue(prompts.get(2).contains("Step 2 - assistant_action"));
+        assertTrue(prompts.get(2).contains("Step 2 - tool_result"));
         assertEquals("DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
