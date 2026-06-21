@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.Map;
 import java.util.List;
+import java.time.Instant;
 
 @Data
 @Builder
@@ -25,6 +26,11 @@ public class AgentEvent {
     private String thought;
     private String tool;
     private Map<String, Object> input;
+    private String approvalId;
+    private String permissionLevel;
+    private String riskReason;
+    private String operationPreview;
+    private Instant expiresAt;
     private String observation;
     private Boolean truncated;
     private String answer;

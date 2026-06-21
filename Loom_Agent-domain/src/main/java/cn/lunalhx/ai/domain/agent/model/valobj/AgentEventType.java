@@ -6,6 +6,8 @@ public enum AgentEventType {
     NODE_START("node_start"),
     THOUGHT("thought"),
     TOOL_CALL("tool_call"),
+    APPROVAL_REQUIRED("approval_required"),
+    POLICY_DENIED("policy_denied"),
     OBSERVATION("observation"),
     ANSWER("answer"),
     DONE("done"),

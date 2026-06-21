@@ -6,34 +6,22 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.Map;
-import java.util.List;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AgentStreamEvent {
+public class AgentApprovalResponse {
 
-    private String type;
+    private String approvalId;
+    private String status;
     private String requestId;
     private String conversationId;
-    private Integer step;
-    private String node;
-    private List<String> nodeInputs;
-    private String thought;
     private String tool;
     private Map<String, Object> input;
-    private String approvalId;
     private String permissionLevel;
     private String riskReason;
     private String operationPreview;
     private String expiresAt;
-    private String observation;
-    private Boolean truncated;
-    private String answer;
-    private String stopReason;
-    private Integer stepCount;
-    private String code;
-    private String message;
 
 }

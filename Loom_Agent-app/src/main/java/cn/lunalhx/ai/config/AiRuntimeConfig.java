@@ -1,8 +1,10 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
 import cn.lunalhx.ai.domain.conversation.service.DefaultChatStreamService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -47,6 +49,11 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public ApprovalStore approvalStore() {
+        return new InMemoryApprovalStore();
+    }
+
+    @Bean
     public ChatStreamService chatStreamService(ModelGateway modelGateway,
                                                ModelRuntimeProperties modelRuntimeProperties,
                                                OutputFormatValidator outputFormatValidator,
@@ -60,10 +67,11 @@ public class AiRuntimeConfig {
     @Bean
     public AgentLoopService agentLoopService(ModelGateway modelGateway,
                                              ToolRegistry toolRegistry,
+                                             ApprovalStore approvalStore,
                                              AgentRuntimeProperties agentRuntimeProperties,
                                              ObjectMapper objectMapper,
                                              ThreadPoolExecutor threadPoolExecutor) {
-        return new DefaultAgentLoopService(modelGateway, toolRegistry, agentRuntimeProperties, objectMapper, threadPoolExecutor);
+        return new DefaultAgentLoopService(modelGateway, toolRegistry, approvalStore, agentRuntimeProperties, objectMapper, threadPoolExecutor);
     }
 
     @Bean
@@ -94,6 +102,14 @@ public class AiRuntimeConfig {
             requirePositive(agentRuntimeProperties.getTotalTimeoutMs(), "AGENT_TOTAL_TIMEOUT_MS");
             requirePositive(agentRuntimeProperties.getStepTimeoutMs(), "AGENT_STEP_TIMEOUT_MS");
             requirePositive(agentRuntimeProperties.getToolTimeoutMs(), "AGENT_TOOL_TIMEOUT_MS");
+            requirePositive(agentRuntimeProperties.getApprovalTtlSeconds(), "AGENT_APPROVAL_TTL_SECONDS");
+            requirePositive(agentRuntimeProperties.getShellTimeoutMs(), "AGENT_SHELL_TIMEOUT_MS");
+            if (agentRuntimeProperties.getShellMaxOutputChars() == null || agentRuntimeProperties.getShellMaxOutputChars() <= 0) {
+                throw new IllegalStateException("AGENT_SHELL_MAX_OUTPUT_CHARS 必须大于 0");
+            }
+            if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
+                throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 第一版仅支持 DENY");
+            }
         };
     }
 

@@ -53,6 +53,10 @@ abstract class FileSystemToolSupport {
         return workspaceRoot.relativize(path.toAbsolutePath().normalize()).toString();
     }
 
+    protected Path workspaceRoot() {
+        return workspaceRoot;
+    }
+
     protected boolean isAllowedRegularFile(Path path) {
         try {
             return Files.isRegularFile(path) && Files.size(path) <= properties.getFileMaxBytes() && !isBlocked(path);

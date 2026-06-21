@@ -1,8 +1,10 @@
 package cn.lunalhx.ai.domain.agent.service;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
+import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
@@ -14,11 +16,14 @@ import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -36,6 +41,7 @@ import java.util.concurrent.Executor;
 public class DefaultAgentLoopService implements AgentLoopService {
 
     private final AgentRuntimeProperties properties;
+    private final ApprovalStore approvalStore;
     private final Executor executor;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
@@ -45,7 +51,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    AgentRuntimeProperties properties,
                                    ObjectMapper objectMapper,
                                    Executor executor) {
+        this(modelGateway, toolRegistry, new InMemoryApprovalStore(), properties, objectMapper, executor);
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor) {
         this.properties = properties;
+        this.approvalStore = approvalStore;
         this.executor = executor;
         this.toolSpecs = toolRegistry.specs();
         this.nodes = registerNodes(List.of(
@@ -53,6 +69,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new RenderPromptNode(),
                 new ModelCallNode(modelGateway, properties),
                 new DecisionNode(objectMapper, toolRegistry, properties),
+                new ApprovalGateNode(toolRegistry, approvalStore, properties),
                 new ToolDispatchNode(toolRegistry, properties),
                 new ObservationNode(),
                 new FinalAnswerNode(),
@@ -61,12 +78,47 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
-        return Flux.create(sink -> executor.execute(() -> run(question, sink)), FluxSink.OverflowStrategy.BUFFER);
+        return Flux.create(sink -> executor.execute(() -> runLoop(toContext(question), AgentNodeNames.START, sink)), FluxSink.OverflowStrategy.BUFFER);
     }
 
-    private void run(AgentQuestion question, FluxSink<AgentEvent> sink) {
-        AgentContext context = toContext(question);
-        String currentNode = AgentNodeNames.START;
+    @Override
+    public Flux<AgentEvent> resume(String approvalId, ApprovalDecision decision, String reason) {
+        return Flux.create(sink -> executor.execute(() -> resumeLoop(approvalId, decision, reason, sink)), FluxSink.OverflowStrategy.BUFFER);
+    }
+
+    private void resumeLoop(String approvalId,
+                            ApprovalDecision decision,
+                            String reason,
+                            FluxSink<AgentEvent> sink) {
+        PendingApproval approval = approvalStore.consume(approvalId).orElse(null);
+        if (approval == null) {
+            emit(sink, List.of(AgentEvent.builder()
+                    .type(AgentEventType.ERROR)
+                    .approvalId(approvalId)
+                    .code("approval_not_found")
+                    .message("审批不存在或已过期")
+                    .build()));
+            sink.complete();
+            return;
+        }
+
+        AgentContext context = approval.getContext();
+        context.setStartedAt(Instant.now());
+        if (decision == ApprovalDecision.APPROVE) {
+            runLoop(context, AgentNodeNames.TOOL_DISPATCH, sink);
+            return;
+        }
+
+        context.setStep(context.getStep() + 1);
+        context.setToolResult(ToolResult.failure(
+                "approval_rejected",
+                StringUtils.defaultIfBlank(reason, "用户拒绝执行该写操作"),
+                0L));
+        context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
+        runLoop(context, AgentNodeNames.OBSERVATION, sink);
+    }
+
+    private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {
         while (!sink.isCancelled()) {
             if (isTotalTimeout(context)) {
                 fail(context, AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");

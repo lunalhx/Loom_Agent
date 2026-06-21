@@ -2,6 +2,9 @@ package cn.lunalhx.ai.domain.agent.model.valobj;
 
 import lombok.Data;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Data
 public class AgentRuntimeProperties {
 
@@ -15,5 +18,10 @@ public class AgentRuntimeProperties {
     private Integer parseErrorMaxAttempts = 2;
     private Long fileMaxBytes = 200000L;
     private Integer searchMaxResults = 50;
+    private Long approvalTtlSeconds = 900L;
+    private Long shellTimeoutMs = 120000L;
+    private Integer shellMaxOutputChars = 12000;
+    private String highRiskPolicy = "DENY";
+    private List<String> allowedShellCommands = new ArrayList<>(List.of("mvn", "./mvnw", "git", "pwd", "ls", "rg"));
 
 }

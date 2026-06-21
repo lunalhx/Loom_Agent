@@ -6,6 +6,7 @@ public final class AgentNodeNames {
     public static final String RENDER_PROMPT = "render_prompt";
     public static final String MODEL_CALL = "model_call";
     public static final String DECISION = "decision";
+    public static final String APPROVAL_GATE = "approval_gate";
     public static final String TOOL_DISPATCH = "tool_dispatch";
     public static final String OBSERVATION = "observation";
     public static final String FINAL_ANSWER = "final_answer";

@@ -2,7 +2,7 @@
 
 Loom Agent 是一个基于 Java 17、Spring Boot 3 和 DeepSeek 的后端 Agent 骨架。当前版本先把单 Agent 的最薄链路做稳：通过一个 SSE 接口把用户消息发给 DeepSeek，并逐字返回模型输出。
 
-开发原则：每一步都保持项目可运行、可演示。先做单 Agent，再逐步接入代码检索、工具调用和多 Agent 编排。当前已提供一个节点化 ReAct Agent Loop，可用只读工具分析项目代码。
+开发原则：每一步都保持项目可运行、可演示。先做单 Agent，再逐步接入代码检索、工具调用和多 Agent 编排。当前已提供一个节点化 ReAct Agent Loop，可用只读工具分析项目代码，也可在人工确认后执行文件修改、测试命令和受限 Git 操作。
 
 ## 模块结构
 
@@ -93,7 +93,7 @@ SSE 事件：
 
 `POST /api/v1/agent/code/ask/stream`
 
-节点化 ReAct 代码分析 Agent。请求字段：
+节点化 ReAct 代码 Agent。只读工具自动执行；文件写入、测试命令、Git 暂存/提交会返回审批事件；高危动作默认拦截。请求字段：
 
 - `question`：必填，代码分析问题。
 - `workspace`：预留字段，当前默认使用 `AGENT_WORKSPACE_ROOT`。
@@ -106,10 +106,37 @@ Agent SSE 事件：
 - `node_start`：节点开始执行，包含 `node` 和 `nodeInputs`，`includeTrace=true` 时返回。
 - `thought`：下一步行动意图摘要。
 - `tool_call`：工具名和参数。
+- `approval_required`：写操作等待人工确认，包含 `approvalId`、`permissionLevel`、`riskReason`、`operationPreview`、`expiresAt`。
+- `policy_denied`：高危动作被拦截，不会执行真实操作。
 - `observation`：工具观察结果。
 - `answer`：最终回答。
 - `done`：结束原因和步数。
 - `error`：兜底错误。
+
+`GET /api/v1/agent/code/approvals/{approvalId}`
+
+查询待审批操作，返回审批状态、工具名、参数摘要、风险原因和过期时间。
+
+`POST /api/v1/agent/code/approvals/{approvalId}/decide/stream`
+
+审批并继续 Agent Loop：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/approvals/{approvalId}/decide/stream \
+  -d '{"decision":"APPROVE","reason":"允许本次文件修改"}'
+```
+
+`decision` 只能是 `APPROVE` 或 `REJECT`。批准后从暂停的工具调用继续执行；拒绝后会把 `approval_rejected` 作为工具观察结果反馈给模型。
+
+写类工具：
+
+- `replace_in_file`：按精确文本替换文件内容，要求匹配次数符合 `expectedOccurrences`。
+- `write_file`：创建或覆盖工作区内文本文件。
+- `run_shell`：进程级沙箱执行允许的只读命令或 Maven 测试命令。
+- `git_op`：支持 `status/diff/log/add/commit`，其中 `add/commit` 需要审批。
 
 ## 健壮性
 
@@ -117,6 +144,8 @@ Agent SSE 事件：
 - 重试：默认最多 3 次，只在首 token 输出前重试；429、500、503 会重试，400、401、402、422 不重试。
 - 输出校验：空输出会返回 `output_empty`；`responseFormat=JSON_OBJECT` 时会校验完整输出是否为合法 JSON。
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
+- Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要 HITL 审批，`HIGH_RISK_DENY` 直接拦截。
+- Agent 沙箱：所有文件、命令和 Git 操作都限制在 `AGENT_WORKSPACE_ROOT` 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
 
 更多设计细节见 [backend-architecture.md](docs/design/backend-architecture.md)。
 Agent Loop 设计见 [agent-loop.md](docs/design/agent-loop.md)。

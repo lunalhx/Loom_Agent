@@ -58,7 +58,7 @@ public class DecisionNode extends AbstractAgentNode {
                         "Success: false\nObservation:\n未知工具：" + decision.getTool());
                 return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
             }
-            return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
         } catch (Exception e) {
             context.setParseErrors(context.getParseErrors() + 1);
             if (context.getParseErrors() > properties.getParseErrorMaxAttempts()) {

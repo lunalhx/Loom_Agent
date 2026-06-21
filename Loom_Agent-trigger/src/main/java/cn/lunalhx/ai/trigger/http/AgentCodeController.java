@@ -1,19 +1,28 @@
 package cn.lunalhx.ai.trigger.http;
 
+import cn.lunalhx.ai.api.dto.AgentApprovalDecisionRequest;
+import cn.lunalhx.ai.api.dto.AgentApprovalResponse;
 import cn.lunalhx.ai.api.dto.AgentAskRequest;
 import cn.lunalhx.ai.api.dto.AgentStreamEvent;
+import cn.lunalhx.ai.api.response.Response;
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.types.enums.ResponseCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,6 +44,7 @@ import java.util.stream.Collectors;
 public class AgentCodeController {
 
     private final AgentLoopService agentLoopService;
+    private final ApprovalStore approvalStore;
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final Validator validator;
     private final ThreadPoolExecutor threadPoolExecutor;
@@ -68,6 +78,55 @@ public class AgentCodeController {
         return emitter;
     }
 
+    @PostMapping(value = "/approvals/{approvalId}/decide/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter decide(@PathVariable String approvalId,
+                             @RequestBody(required = false) AgentApprovalDecisionRequest request) {
+        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
+        AtomicBoolean completed = new AtomicBoolean(false);
+
+        AgentEvent validationError = validateApprovalRequest(request);
+        if (validationError != null) {
+            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, validationError));
+            return emitter;
+        }
+
+        ApprovalDecision decision = parseApprovalDecision(request.getDecision());
+        if (decision == null) {
+            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, error("invalid_request", "decision 只能是 APPROVE 或 REJECT")));
+            return emitter;
+        }
+
+        Disposable disposable = agentLoopService.resume(approvalId, decision, request.getReason())
+                .subscribe(event -> send(emitter, event),
+                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
+                        () -> complete(emitter, completed));
+
+        emitter.onCompletion(disposable::dispose);
+        emitter.onTimeout(() -> {
+            disposable.dispose();
+            sendAndComplete(emitter, completed, timeoutError());
+        });
+        emitter.onError(throwable -> {
+            disposable.dispose();
+            log.warn("Agent approval SSE connection closed with error: {}", throwable.getMessage());
+        });
+        return emitter;
+    }
+
+    @GetMapping("/approvals/{approvalId}")
+    public Response<AgentApprovalResponse> approval(@PathVariable String approvalId) {
+        return approvalStore.find(approvalId)
+                .map(approval -> Response.<AgentApprovalResponse>builder()
+                        .code(ResponseCode.SUCCESS.getCode())
+                        .info(ResponseCode.SUCCESS.getInfo())
+                        .data(toApprovalResponse(approval))
+                        .build())
+                .orElseGet(() -> Response.<AgentApprovalResponse>builder()
+                        .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
+                        .info("审批不存在或已过期")
+                        .build());
+    }
+
     private AgentEvent validateRequest(AgentAskRequest request) {
         if (request == null) {
             return error("invalid_request", "请求体不能为空");
@@ -76,6 +135,24 @@ public class AgentCodeController {
             return error("agent_disabled", "Agent 功能未启用");
         }
         Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            String message = violations.stream()
+                    .map(ConstraintViolation::getMessage)
+                    .distinct()
+                    .collect(Collectors.joining("; "));
+            return error("invalid_request", message);
+        }
+        return null;
+    }
+
+    private AgentEvent validateApprovalRequest(AgentApprovalDecisionRequest request) {
+        if (request == null) {
+            return error("invalid_request", "请求体不能为空");
+        }
+        if (!Boolean.TRUE.equals(agentRuntimeProperties.getEnabled())) {
+            return error("agent_disabled", "Agent 功能未启用");
+        }
+        Set<ConstraintViolation<AgentApprovalDecisionRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
             String message = violations.stream()
                     .map(ConstraintViolation::getMessage)
@@ -100,6 +177,8 @@ public class AgentCodeController {
             return true;
         }
         return event.getType() == AgentEventType.META
+                || event.getType() == AgentEventType.APPROVAL_REQUIRED
+                || event.getType() == AgentEventType.POLICY_DENIED
                 || event.getType() == AgentEventType.ANSWER
                 || event.getType() == AgentEventType.DONE
                 || event.getType() == AgentEventType.ERROR;
@@ -162,6 +241,11 @@ public class AgentCodeController {
                 .thought(event.getThought())
                 .tool(event.getTool())
                 .input(event.getInput())
+                .approvalId(event.getApprovalId())
+                .permissionLevel(event.getPermissionLevel())
+                .riskReason(event.getRiskReason())
+                .operationPreview(event.getOperationPreview())
+                .expiresAt(event.getExpiresAt() == null ? null : event.getExpiresAt().toString())
                 .observation(event.getObservation())
                 .truncated(event.getTruncated())
                 .answer(event.getAnswer())
@@ -169,6 +253,29 @@ public class AgentCodeController {
                 .stepCount(event.getStepCount())
                 .code(event.getCode())
                 .message(event.getMessage())
+                .build();
+    }
+
+    private ApprovalDecision parseApprovalDecision(String value) {
+        try {
+            return ApprovalDecision.valueOf(StringUtils.upperCase(StringUtils.trim(value)));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private AgentApprovalResponse toApprovalResponse(PendingApproval approval) {
+        return AgentApprovalResponse.builder()
+                .approvalId(approval.getApprovalId())
+                .status("PENDING")
+                .requestId(approval.getRequestId())
+                .conversationId(approval.getConversationId())
+                .tool(approval.getTool())
+                .input(approval.getInput())
+                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
+                .riskReason(approval.getRiskReason())
+                .operationPreview(approval.getOperationPreview())
+                .expiresAt(approval.getExpiresAt() == null ? null : approval.getExpiresAt().toString())
                 .build();
     }
 

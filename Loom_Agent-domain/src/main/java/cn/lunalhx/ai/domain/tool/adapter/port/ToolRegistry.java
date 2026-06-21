@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.tool.adapter.port;
 
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 
@@ -38,6 +39,14 @@ public class ToolRegistry {
             return ToolResult.failure("unknown_tool", "未知工具：" + call.getName(), 0L);
         }
         return tool.call(call);
+    }
+
+    public ToolPolicyDecision policy(ToolCall call) {
+        AgentTool tool = tools.get(call.getName());
+        if (tool == null) {
+            return ToolPolicyDecision.highRiskDeny("未知工具：" + call.getName(), call.getName());
+        }
+        return tool.policy(call);
     }
 
 }

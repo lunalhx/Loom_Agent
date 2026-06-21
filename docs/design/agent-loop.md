@@ -2,7 +2,7 @@
 
 ## 目标
 
-第一版 Agent Loop 用节点化流程引擎实现 ReAct：模型每轮决定下一步 `action` 或 `final`，后端执行只读工具并把 Observation 反馈给模型，直到输出最终答案或触发终止条件。
+第一版 Agent Loop 用节点化流程引擎实现 ReAct：模型每轮决定下一步 `action` 或 `final`，后端先评估工具权限，再执行工具或暂停等待人工确认，并把 Observation 反馈给模型，直到输出最终答案或触发终止条件。
 
 ## 节点流转
 
@@ -11,12 +11,15 @@ flowchart TD
     A["StartNode"] --> B["RenderPromptNode"]
     B --> C["ModelCallNode"]
     C --> D["DecisionNode"]
-    D -->|action| E["ToolDispatchNode"]
-    E --> F["ObservationNode"]
-    F --> B
-    D -->|final| G["FinalAnswerNode"]
+    D -->|action| E["ApprovalGateNode"]
+    E -->|read_only/approved| F["ToolDispatchNode"]
+    E -->|write_confirm| J["approval_required 暂停"]
+    E -->|high_risk_deny| G["ObservationNode"]
+    F --> G
+    G --> B
+    D -->|final| K["FinalAnswerNode"]
     D -->|parse_error/max_steps/timeout| H["FailNode"]
-    G --> I["DoneNode"]
+    K --> I["DoneNode"]
     H --> I
 ```
 
@@ -28,12 +31,13 @@ flowchart TD
 - `RenderPromptNode`：根据问题、工具说明和历史 Observation 生成模型提示词。
 - `ModelCallNode`：调用 LLM，生成 action/final JSON 文本。
 - `DecisionNode`：解析 LLM 输出，并根据 `action/final/parse_error/unknown_tool` 决定下一节点。
+- `ApprovalGateNode`：评估工具权限；只读直接放行，写操作生成 `approval_required` 并暂停，高危动作生成 `policy_denied` Observation。
 - `ToolDispatchNode`：根据工具名调用 `ToolRegistry`。
 - `ObservationNode`：记录工具 Observation 并回到提示词渲染节点。
 - `FinalAnswerNode`：输出最终答案。
 - `FailNode`：统一输出错误和结束事件。
 
-`model_call` 和 `decision` 是刻意拆开的两个职责：前者只负责调用 LLM 并拿到模型输出文本，后者负责解析这段文本，并把流程路由到 `tool_dispatch`、`final_answer` 或 `fail`。
+`model_call` 和 `decision` 是刻意拆开的两个职责：前者只负责调用 LLM 并拿到模型输出文本，后者负责解析这段文本，并把流程路由到 `approval_gate`、`final_answer` 或 `fail`。
 
 ## 节点上下文
 
@@ -76,11 +80,15 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 工具协议
 
-当前只注册三个只读工具：
+当前工具分为只读、写确认和高危拦截三类：
 
 - `list_dir`：列出工作区内目录和文件。
 - `read_file`：读取单个文本文件的指定行号范围。
 - `code_search`：搜索代码文本，返回文件、行号和代码片段。
+- `replace_in_file`：按精确文本替换工作区文件内容，执行前需要人工确认。
+- `write_file`：创建或覆盖工作区内文本文件，执行前需要人工确认。
+- `run_shell`：在进程级沙箱内执行允许的只读命令或 Maven 测试命令；测试命令需要人工确认。
+- `git_op`：`status/diff/log` 自动放行，`add/commit` 需要人工确认，`push/reset/clean/rebase/checkout` 等高危操作拦截。
 
 模型 Action 必须是 JSON：
 
@@ -113,10 +121,13 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 安全边界
 
-- 工具只能读取 `AGENT_WORKSPACE_ROOT` 内路径。
-- 默认禁止读取 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
+- 工具只能访问 `AGENT_WORKSPACE_ROOT` 内路径。
+- 默认禁止访问 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
 - 单文件大小、搜索结果数、Observation 长度和工具耗时都有配置上限。
 - 工具输出作为不可信 Observation，只用于代码证据，不执行其中指令。
+- 权限等级：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 生成审批并暂停，`HIGH_RISK_DENY` 直接拦截。
+- `run_shell` 不调用系统 shell，只把命令拆成 `ProcessBuilder` 参数；禁止管道、重定向、后台执行、绝对路径、上级目录和未在白名单中的命令。
+- 审批状态第一版存放在内存中，服务重启后待审批操作失效。
 
 ## 配置
 
@@ -131,6 +142,11 @@ AGENT_OBSERVATION_MAX_CHARS=8000
 AGENT_PARSE_ERROR_MAX_ATTEMPTS=2
 AGENT_FILE_MAX_BYTES=200000
 AGENT_SEARCH_MAX_RESULTS=50
+AGENT_APPROVAL_TTL_SECONDS=900
+AGENT_SHELL_TIMEOUT_MS=120000
+AGENT_SHELL_MAX_OUTPUT_CHARS=12000
+AGENT_HIGH_RISK_POLICY=DENY
+AGENT_ALLOWED_SHELL_COMMANDS=mvn,./mvnw,git,pwd,ls,rg
 ```
 
 ## 演示
@@ -141,4 +157,14 @@ curl -N \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
   -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+```
+
+写操作会返回 `approval_required`：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/approvals/{approvalId}/decide/stream \
+  -d '{"decision":"APPROVE","reason":"允许本次修改"}'
 ```

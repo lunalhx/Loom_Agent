@@ -1,10 +1,13 @@
 package cn.lunalhx.ai.test;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -12,6 +15,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -94,6 +98,115 @@ public class DefaultAgentLoopServiceTest {
         assertEquals("parse_error", error.getCode());
     }
 
+    @Test
+    public void shouldPauseWriteToolUntilApprovalAndResumeAfterApprove() {
+        List<String> prompts = new java.util.ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("replace_in_file", "updated: Demo.java", calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                completeGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"修改文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}",
+                        "{\"type\":\"final\",\"answer\":\"文件已修改并验证。\",\"evidence\":[{\"file\":\"Demo.java\",\"line\":1}]}"),
+                new ToolRegistry(List.of(writeTool)),
+                approvalStore,
+                properties(),
+                new ObjectMapper(),
+                Runnable::run);
+
+        List<AgentEvent> paused = service.ask(AgentQuestion.builder()
+                        .question("把 Demo.java 里的 a 改成 b")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        AgentEvent approval = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("replace_in_file", approval.getTool());
+        assertEquals("WRITE_CONFIRM", approval.getPermissionLevel());
+        assertEquals(0, calls.get());
+        assertTrue(approvalStore.find(approval.getApprovalId()).isPresent());
+
+        List<AgentEvent> resumed = service.resume(approval.getApprovalId(), ApprovalDecision.APPROVE, "ok")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(1, calls.get());
+        assertTrue(approvalStore.find(approval.getApprovalId()).isEmpty());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.TOOL_CALL));
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("updated: Demo.java")));
+        assertEquals("文件已修改并验证。",
+                resumed.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+    }
+
+    @Test
+    public void shouldContinueWithRejectedObservationAfterApprovalReject() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("write_file", "written", calls);
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"写文件\",\"tool\":\"write_file\",\"input\":{\"path\":\"Demo.java\",\"content\":\"x\",\"mode\":\"create\"}}",
+                        "{\"type\":\"final\",\"answer\":\"用户拒绝写入，未修改文件。\",\"evidence\":[]}"),
+                new ToolRegistry(List.of(writeTool)),
+                new InMemoryApprovalStore(),
+                properties(),
+                new ObjectMapper(),
+                Runnable::run);
+
+        List<AgentEvent> paused = service.ask(AgentQuestion.builder()
+                        .question("创建 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+        String approvalId = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow()
+                .getApprovalId();
+
+        List<AgentEvent> resumed = service.resume(approvalId, ApprovalDecision.REJECT, "不允许写")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(0, calls.get());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("approval_rejected")));
+        assertEquals("用户拒绝写入，未修改文件。",
+                resumed.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+    }
+
+    @Test
+    public void shouldDenyHighRiskToolWithoutCallingIt() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool dangerousTool = fakeDenyTool("run_shell", calls);
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"删除文件\",\"tool\":\"run_shell\",\"input\":{\"command\":\"rm -rf .\"}}",
+                        "{\"type\":\"final\",\"answer\":\"高危命令已拦截。\",\"evidence\":[]}"),
+                new ToolRegistry(List.of(dangerousTool)),
+                properties(),
+                new ObjectMapper(),
+                Runnable::run);
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .question("删除所有文件")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(0, calls.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.POLICY_DENIED
+                && event.getObservation().contains("policy_denied")));
+        assertEquals("高危命令已拦截。",
+                events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
@@ -144,6 +257,54 @@ public class DefaultAgentLoopServiceTest {
             @Override
             public ToolResult call(ToolCall call) {
                 return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool fakeWriteTool(String name, String observation, AtomicInteger calls) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder()
+                        .name(name)
+                        .description(name)
+                        .inputSchema("{}")
+                        .build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.writeConfirm("write", name);
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool fakeDenyTool(String name, AtomicInteger calls) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder()
+                        .name(name)
+                        .description(name)
+                        .inputSchema("{}")
+                        .build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.highRiskDeny("高危命令已拦截", name);
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.success("should not happen", false, 1L);
             }
         };
     }
