@@ -2,9 +2,11 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -20,6 +22,11 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
 
     public CodeSearchTool(AgentRuntimeProperties properties) {
         super(properties);
+    }
+
+    @Autowired
+    public CodeSearchTool(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
+        super(properties, workspacePort);
     }
 
     @Override

@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,9 +14,15 @@ import java.util.Locale;
 abstract class FileSystemToolSupport {
 
     protected final AgentRuntimeProperties properties;
+    private final WorkspacePort workspacePort;
 
     protected FileSystemToolSupport(AgentRuntimeProperties properties) {
+        this(properties, new LocalWorkspacePort());
+    }
+
+    protected FileSystemToolSupport(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
         this.properties = properties;
+        this.workspacePort = workspacePort;
     }
 
     protected Path resolvePath(ToolCall call, String fieldName, String defaultPath) throws IOException {
@@ -81,9 +88,9 @@ abstract class FileSystemToolSupport {
 
     protected Path workspaceRoot(ToolCall call) throws IOException {
         if (call == null || call.getWorkspaceRoot() == null) {
-            throw new IOException("workspace 未解析");
+            return workspacePort.requireLocalRoot(call);
         }
-        return call.getWorkspaceRoot().toRealPath();
+        return workspacePort.requireLocalRoot(call);
     }
 
     protected boolean isAllowedRegularFile(ToolCall call, Path path) {

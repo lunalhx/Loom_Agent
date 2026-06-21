@@ -2,11 +2,13 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -19,6 +21,11 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
 
     public ReplaceInFileTool(AgentRuntimeProperties properties) {
         super(properties);
+    }
+
+    @Autowired
+    public ReplaceInFileTool(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
+        super(properties, workspacePort);
     }
 
     @Override

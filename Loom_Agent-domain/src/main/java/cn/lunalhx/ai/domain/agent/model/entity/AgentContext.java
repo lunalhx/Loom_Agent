@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.Data;
 
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ public class AgentContext {
     private String conversationId;
     private String question;
     private Path resolvedWorkspace;
+    private WorkspaceRef workspace;
     private String workspaceDisplayName;
     private int maxSteps;
     private int step;

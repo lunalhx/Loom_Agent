@@ -16,6 +16,17 @@ public class ToolCall {
 
     private String name;
     private JsonNode input;
+    private WorkspaceRef workspace;
     private Path workspaceRoot;
+
+    public WorkspaceRef workspaceRef() {
+        if (workspace != null) {
+            return workspace;
+        }
+        if (workspaceRoot != null) {
+            return WorkspaceRef.local(workspaceRoot, workspaceRoot.getFileName() == null ? workspaceRoot.toString() : workspaceRoot.getFileName().toString());
+        }
+        return null;
+    }
 
 }

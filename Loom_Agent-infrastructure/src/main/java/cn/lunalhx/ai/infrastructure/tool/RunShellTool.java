@@ -2,12 +2,15 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
+import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
@@ -22,9 +25,17 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
     private static final Set<String> READ_ONLY_COMMANDS = Set.of("pwd", "ls", "rg");
     private static final Set<String> HIGH_RISK_GIT_OPS = Set.of("push", "reset", "clean", "rebase", "checkout");
+    private final CommandExecutor commandExecutor;
 
     public RunShellTool(AgentRuntimeProperties properties) {
         super(properties);
+        this.commandExecutor = new LocalCommandExecutor();
+    }
+
+    @Autowired
+    public RunShellTool(AgentRuntimeProperties properties, WorkspacePort workspacePort, CommandExecutor commandExecutor) {
+        super(properties, workspacePort);
+        this.commandExecutor = commandExecutor;
     }
 
     @Override
@@ -85,7 +96,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                     ? properties.getShellTimeoutMs()
                     : call.getInput().path("timeoutMs").asLong(properties.getShellTimeoutMs());
             long timeoutMs = Math.min(Math.max(1L, requestedTimeoutMs), properties.getShellTimeoutMs());
-            return SandboxProcessRunner.run(tokens, cwd, timeoutMs, properties.getShellMaxOutputChars(), startedAt);
+            return commandExecutor.run(tokens, cwd, timeoutMs, properties.getShellMaxOutputChars(), startedAt);
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }

@@ -41,6 +41,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
         ToolPolicyDecision policy = toolRegistry.policy(ToolCall.builder()
                 .name(context.getDecision().getTool())
                 .input(context.getDecision().getInput())
+                .workspace(context.getWorkspace())
                 .workspaceRoot(context.getResolvedWorkspace())
                 .build());
         if (policy == null || policy.getPermissionLevel() == null || policy.getPermissionLevel() == ToolPermissionLevel.READ_ONLY) {
@@ -63,6 +64,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .resolvedWorkspace(context.getResolvedWorkspace())
+                .workspace(context.getWorkspace())
                 .workspaceDisplayName(context.getWorkspaceDisplayName())
                 .tool(context.getDecision().getTool())
                 .input(inputSummary)

@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+target
+**/target
+data
+**/data
+*.log
+docs/env/.env
+docs/env/*.local
+.DS_Store
+README.tmp

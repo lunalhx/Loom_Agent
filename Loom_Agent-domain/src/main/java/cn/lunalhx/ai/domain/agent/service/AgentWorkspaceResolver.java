@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import org.apache.commons.lang3.StringUtils;
 
 import java.nio.file.Files;
@@ -27,6 +28,7 @@ public class AgentWorkspaceResolver {
             return AgentWorkspace.builder()
                     .root(defaultWorkspace)
                     .displayName(displayName(defaultWorkspace))
+                    .workspace(WorkspaceRef.local(defaultWorkspace, displayName(defaultWorkspace)))
                     .build();
         }
         String trimmed = StringUtils.trim(requestWorkspace);
@@ -37,6 +39,7 @@ public class AgentWorkspaceResolver {
             return AgentWorkspace.builder()
                     .root(workspace)
                     .displayName(displayName(workspace))
+                    .workspace(WorkspaceRef.local(workspace, displayName(workspace)))
                     .build();
         }
 
@@ -50,6 +53,7 @@ public class AgentWorkspaceResolver {
                 return AgentWorkspace.builder()
                         .root(workspace)
                         .displayName(displayName(workspace))
+                        .workspace(WorkspaceRef.local(workspace, displayName(workspace)))
                         .build();
             } catch (WorkspaceResolutionException e) {
                 if ("WORKSPACE_NOT_ALLOWED".equals(e.getCode()) || "WORKSPACE_PATH_ESCAPE".equals(e.getCode())) {
@@ -72,7 +76,12 @@ public class AgentWorkspaceResolver {
         return AgentWorkspace.builder()
                 .root(defaultWorkspace)
                 .displayName(displayName(defaultWorkspace))
+                .workspace(WorkspaceRef.local(defaultWorkspace, displayName(defaultWorkspace)))
                 .build();
+    }
+
+    public List<Path> getAllowedRoots() {
+        return allowedRoots;
     }
 
     public void validateWorkspace(Path workspace) {

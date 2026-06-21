@@ -181,6 +181,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
         }
         restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
+        context.setWorkspace(approval.getWorkspace());
         context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
         context.setStartedAt(Instant.now());
         context.setPendingApprovalId(null);
@@ -286,6 +287,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
         context.setQuestion(StringUtils.trim(question.getQuestion()));
         context.setResolvedWorkspace(workspace.getRoot());
+        context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
         context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
@@ -297,6 +299,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private void restoreWorkspace(AgentContext context, String workspace) {
         AgentWorkspace resolved = workspaceResolver.resolve(workspace);
         context.setResolvedWorkspace(resolved.getRoot());
+        context.setWorkspace(resolved.getWorkspace());
         context.setWorkspaceDisplayName(resolved.getDisplayName());
     }
 

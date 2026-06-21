@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.valobj;
 
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,5 +16,6 @@ public class AgentWorkspace {
 
     private Path root;
     private String displayName;
+    private WorkspaceRef workspace;
 
 }

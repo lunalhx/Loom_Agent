@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,6 +26,7 @@ public class AgentContextSnapshot {
     private String conversationId;
     private String question;
     private String resolvedWorkspace;
+    private WorkspaceRef workspace;
     private String workspaceDisplayName;
     private Integer maxSteps;
     private Integer step;
@@ -56,6 +58,7 @@ public class AgentContextSnapshot {
                 .conversationId(context.getConversationId())
                 .question(context.getQuestion())
                 .resolvedWorkspace(context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString())
+                .workspace(context.getWorkspace())
                 .workspaceDisplayName(context.getWorkspaceDisplayName())
                 .maxSteps(context.getMaxSteps())
                 .step(context.getStep())
@@ -89,6 +92,9 @@ public class AgentContextSnapshot {
         context.setConversationId(conversationId);
         context.setQuestion(question);
         context.setResolvedWorkspace(resolvedWorkspace == null ? null : Path.of(resolvedWorkspace));
+        context.setWorkspace(workspace == null && resolvedWorkspace != null
+                ? WorkspaceRef.local(Path.of(resolvedWorkspace), workspaceDisplayName)
+                : workspace);
         context.setWorkspaceDisplayName(workspaceDisplayName);
         context.setMaxSteps(maxSteps == null ? 0 : maxSteps);
         context.setStep(step == null ? 0 : step);

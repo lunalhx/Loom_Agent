@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,6 +22,7 @@ public class PendingApproval {
     private String requestId;
     private String conversationId;
     private Path resolvedWorkspace;
+    private WorkspaceRef workspace;
     private String workspaceDisplayName;
     private String tool;
     private Map<String, Object> input;

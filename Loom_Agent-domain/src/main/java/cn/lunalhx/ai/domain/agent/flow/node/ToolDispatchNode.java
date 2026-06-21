@@ -45,6 +45,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
         ToolCall toolCall = ToolCall.builder()
                 .name(decision.getTool())
                 .input(decision.getInput())
+                .workspace(context.getWorkspace())
                 .workspaceRoot(context.getResolvedWorkspace())
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);

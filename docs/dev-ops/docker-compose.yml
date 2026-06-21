@@ -1,0 +1,122 @@
+name: ${COMPOSE_PROJECT_NAME:-loom-agent}
+
+services:
+  mysql:
+    image: mysql:8.0.32
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-loom_agent}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+    ports:
+      - "${MYSQL_HOST_PORT:-13306}:3306"
+    volumes:
+      - ./mysql/my.cnf:/etc/mysql/conf.d/mysql.cnf:ro
+      - ./mysql/sql:/docker-entrypoint-initdb.d:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 15s
+    networks:
+      - my-network
+
+  redis:
+    image: redis:6.2
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-16379}:6379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - my-network
+
+  app:
+    image: ${APP_IMAGE:-loom-agent-app}:${APP_VERSION:-1.0-SNAPSHOT}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-app
+    restart: unless-stopped
+    env_file:
+      - ../env/.env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVER_PORT: ${SERVER_PORT:-8091}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AGENT_WORKSPACE_ROOT: ${CONTAINER_WORKSPACE_ROOT:-/workspace}
+      AGENT_ALLOWED_WORKSPACE_ROOT: ${CONTAINER_WORKSPACE_ROOT:-/workspace}
+      AGENT_ALLOWED_WORKSPACE_ROOTS: ${CONTAINER_WORKSPACE_ROOTS:-${CONTAINER_WORKSPACE_ROOT:-/workspace}}
+    ports:
+      - "${APP_HOST_PORT:-8091}:${SERVER_PORT:-8091}"
+    volumes:
+      - ${HOST_WORKSPACE_ROOT:-../..}:${CONTAINER_WORKSPACE_ROOT:-/workspace}
+      - app-log:/app/data/log
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - my-network
+
+  phpmyadmin:
+    image: phpmyadmin:5.2.1
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-phpmyadmin
+    profiles:
+      - admin
+    ports:
+      - "${PHPMYADMIN_HOST_PORT:-8899}:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - my-network
+
+  redis-admin:
+    image: spryker/redis-commander:0.8.0
+    container_name: ${COMPOSE_PROJECT_NAME:-loom-agent}-redis-admin
+    profiles:
+      - admin
+    restart: unless-stopped
+    ports:
+      - "${REDIS_ADMIN_HOST_PORT:-8081}:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+      HTTP_USER: admin
+      HTTP_PASSWORD: admin
+      LANG: C.UTF-8
+      LANGUAGE: C.UTF-8
+      LC_ALL: C.UTF-8
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - my-network
+
+networks:
+  my-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  app-log:
