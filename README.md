@@ -15,7 +15,9 @@ Loom Agent 是一个基于 Java 17、Spring Boot 3 和 DeepSeek 的后端 Agent 
 
 ## 本地运行
 
-1. 准备环境变量：
+提供两种启动方式，**选其中一种即可**，不需要同时启动。
+
+### 前置：准备环境变量
 
 ```bash
 cp docs/env/.env.example docs/env/.env
@@ -23,42 +25,69 @@ cp docs/env/.env.example docs/env/.env
 
 然后把 `docs/env/.env` 中的 `DEEPSEEK_API_KEY` 改成自己的 DeepSeek API Key。真实 `.env` 已加入 `.gitignore`，提交时只提交 `.env.example`。
 
-Docker 资源默认使用 `COMPOSE_PROJECT_NAME=loom-agent` 隔离，容器名会是 `loom-agent-mysql`、`loom-agent-redis`、`loom-agent-app`。如果本机已有其他项目占用端口，只改 `.env` 里的宿主机端口即可：
+`.env` 关键配置项：
+
+| 变量 | 说明 |
+|------|------|
+| `SERVER_PORT` / `APP_HOST_PORT` | 应用端口，默认 8091 |
+| `MYSQL_HOST_PORT` | 宿主机 MySQL 端口，默认 13306 |
+| `REDIS_HOST_PORT` | 宿主机 Redis 端口，默认 16379 |
+| `HOST_WORKSPACE_ROOT` | 宿主机工作区根目录（Docker 模式需要改成你的实际路径） |
+| `CONTAINER_WORKSPACE_ROOT` | 容器内工作区根目录，默认 `/workspace` |
+| `CONTAINER_WORKSPACE_ROOTS` | 容器内允许的工作区白名单 |
+
+如果本机已有其他项目占用端口，只改宿主机端口映射即可：
 
 ```bash
-APP_HOST_PORT=8091
-MYSQL_HOST_PORT=13306
-REDIS_HOST_PORT=16379
-PHPMYADMIN_HOST_PORT=8899
-REDIS_ADMIN_HOST_PORT=8081
+APP_HOST_PORT=9091
+MYSQL_HOST_PORT=23306
+REDIS_HOST_PORT=26379
 ```
 
-2. 启动 MySQL 和 Redis：
+### 方式一：纯 Docker（推荐，全容器化）
+
+所有服务（MySQL + Redis + App）都在容器内运行。一条命令启动：
 
 ```bash
 cd docs/dev-ops
-docker-compose --env-file ../env/.env -f docker-compose-environment.yml up -d
+docker-compose --env-file ../env/.env -f docker-compose.yml up -d
 ```
 
-3. 启动应用：
+启动后 App 监听 `http://localhost:8091`，工作区通过 Docker volume 映射：宿主机 `HOST_WORKSPACE_ROOT` → 容器 `/workspace`。
+
+**重要**：`.env` 中 `HOST_WORKSPACE_ROOT` 需要设为你的实际工作目录（例如 `/Users/yourname/Desktop`），这样 Docker 容器才能读写你的项目文件。`CONTAINER_WORKSPACE_ROOT` 和 `CONTAINER_WORKSPACE_ROOTS` 保持 `/workspace`（容器内路径）。
+
+Agent 接口中 `workspace` 字段传相对路径即可，例如 `"workspace":"java/Loom_Agent"`（相对于 `/workspace`）。
+
+### 方式二：开发模式（Docker 基础设施 + IDE 启动应用）
+
+Docker 只启动 MySQL 和 Redis，应用由 IDEA 或命令行启动：
 
 ```bash
+# 1. 启动基础设施
+cd docs/dev-ops
+docker-compose --env-file ../env/.env -f docker-compose-environment.yml up -d
+
+# 2. 启动 Spring Boot 应用（dev profile 自动连 127.0.0.1:13306/16379）
 mvn -pl Loom_Agent-app -am spring-boot:run
 ```
 
-4. 调用流式接口：
+App 以 dev profile 运行，直接访问本地文件系统，`workspace` 可以传绝对路径（如 `/Users/yourname/Desktop/java/Loom_Agent`）或相对路径。
+
+### 验证
 
 ```bash
+# 检查模型配置
+curl http://localhost:8091/api/v1/model/config
+
+# 调用流式接口
 curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/chat/stream \
   -d '{"message":"用一句话介绍你自己"}'
-```
 
-5. 调用代码分析 Agent：
-
-```bash
+# 调用代码分析 Agent
 curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
