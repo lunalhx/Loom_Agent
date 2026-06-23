@@ -155,6 +155,10 @@ Agent SSE 事件：
 - `tool_call`：工具名和参数。
 - `approval_required`：写操作等待人工确认，包含 `approvalId`、`permissionLevel`、`riskReason`、`operationPreview`、`expiresAt`。
 - `policy_denied`：高危动作被拦截，不会执行真实操作。
+- `sub_agent_started`：子 Agent 子任务开始，包含 `subAgentTaskId`、`subAgentRunId`、`subAgentRole`。
+- `sub_agent_completed`：子 Agent 成功完成，只返回轻量元信息。
+- `sub_agent_failed`：子 Agent 失败或超时，其他子 Agent 会继续汇总。
+- `sub_agent_summary`：所有子 Agent 的聚合摘要，不包含子 Agent 中间工具日志。
 - `observation`：工具观察结果。
 - `answer`：最终回答。
 - `done`：结束原因和步数。
@@ -192,6 +196,7 @@ curl -N \
 - 输出校验：空输出会返回 `output_empty`；`responseFormat=JSON_OBJECT` 时会校验完整输出是否为合法 JSON。
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
 - Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要 HITL 审批，`HIGH_RISK_DENY` 直接拦截。
+- 子 Agent：主 Agent 可通过内建虚拟工具 `spawn_agents` 派生 explorer/reviewer/editor 子 Agent；explorer/reviewer 强制只读并可并发，editor 默认只允许单个串行执行。
 - Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
 - 多工作区：`loom.agent.workspace-root` 是默认工作区；`loom.agent.allowed-workspace-roots` 是可选择工作区的白名单。为空时默认只允许 `workspace-root`。
 

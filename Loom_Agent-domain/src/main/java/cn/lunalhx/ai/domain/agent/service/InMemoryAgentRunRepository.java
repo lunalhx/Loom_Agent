@@ -5,6 +5,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,6 +32,17 @@ public class InMemoryAgentRunRepository implements AgentRunRepository {
             return Optional.empty();
         }
         return Optional.ofNullable(runs.get(runId));
+    }
+
+    @Override
+    public List<AgentRun> findChildren(String parentRunId) {
+        if (StringUtils.isBlank(parentRunId)) {
+            return List.of();
+        }
+        return runs.values().stream()
+                .filter(run -> parentRunId.equals(run.getParentRunId()))
+                .sorted(Comparator.comparing(run -> run.getChildOrdinal() == null ? 0 : run.getChildOrdinal()))
+                .toList();
     }
 
 }

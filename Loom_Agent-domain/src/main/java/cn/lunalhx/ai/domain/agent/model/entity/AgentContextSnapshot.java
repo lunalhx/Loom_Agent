@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -22,9 +23,15 @@ import java.util.List;
 public class AgentContextSnapshot {
 
     private String runId;
+    private String parentRunId;
+    private String rootRunId;
     private String requestId;
     private String conversationId;
+    private AgentRole agentRole;
+    private Integer agentDepth;
+    private Integer childOrdinal;
     private String question;
+    private String pathScope;
     private String resolvedWorkspace;
     private WorkspaceRef workspace;
     private String workspaceDisplayName;
@@ -50,13 +57,20 @@ public class AgentContextSnapshot {
     private Long checkpointVersion;
     private Boolean unsafeResumeRequired;
     private String pendingApprovalId;
+    private Boolean subAgentSpawnAllowed;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
                 .runId(context.getRunId())
+                .parentRunId(context.getParentRunId())
+                .rootRunId(context.getRootRunId())
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
+                .agentRole(context.getAgentRole())
+                .agentDepth(context.getAgentDepth())
+                .childOrdinal(context.getChildOrdinal())
                 .question(context.getQuestion())
+                .pathScope(context.getPathScope())
                 .resolvedWorkspace(context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString())
                 .workspace(context.getWorkspace())
                 .workspaceDisplayName(context.getWorkspaceDisplayName())
@@ -82,15 +96,22 @@ public class AgentContextSnapshot {
                 .checkpointVersion(context.getCheckpointVersion())
                 .unsafeResumeRequired(context.isUnsafeResumeRequired())
                 .pendingApprovalId(context.getPendingApprovalId())
+                .subAgentSpawnAllowed(context.isSubAgentSpawnAllowed())
                 .build();
     }
 
     public AgentContext restore() {
         AgentContext context = new AgentContext();
         context.setRunId(runId);
+        context.setParentRunId(parentRunId);
+        context.setRootRunId(rootRunId);
         context.setRequestId(requestId);
         context.setConversationId(conversationId);
+        context.setAgentRole(agentRole);
+        context.setAgentDepth(agentDepth == null ? 0 : agentDepth);
+        context.setChildOrdinal(childOrdinal == null ? 0 : childOrdinal);
         context.setQuestion(question);
+        context.setPathScope(pathScope);
         context.setResolvedWorkspace(resolvedWorkspace == null ? null : Path.of(resolvedWorkspace));
         context.setWorkspace(workspace == null && resolvedWorkspace != null
                 ? WorkspaceRef.local(Path.of(resolvedWorkspace), workspaceDisplayName)
@@ -120,6 +141,7 @@ public class AgentContextSnapshot {
         context.setCheckpointVersion(checkpointVersion);
         context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
         context.setPendingApprovalId(pendingApprovalId);
+        context.setSubAgentSpawnAllowed(Boolean.TRUE.equals(subAgentSpawnAllowed));
         return context;
     }
 

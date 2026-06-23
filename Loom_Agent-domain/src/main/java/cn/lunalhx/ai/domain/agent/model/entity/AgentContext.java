@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -16,9 +17,15 @@ import java.util.List;
 public class AgentContext {
 
     private String runId;
+    private String parentRunId;
+    private String rootRunId;
     private String requestId;
     private String conversationId;
+    private AgentRole agentRole;
+    private int agentDepth;
+    private int childOrdinal;
     private String question;
+    private String pathScope;
     private Path resolvedWorkspace;
     private WorkspaceRef workspace;
     private String workspaceDisplayName;
@@ -44,5 +51,6 @@ public class AgentContext {
     private Long checkpointVersion;
     private boolean unsafeResumeRequired;
     private String pendingApprovalId;
+    private boolean subAgentSpawnAllowed;
 
 }

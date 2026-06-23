@@ -9,6 +9,7 @@ public final class AgentNodeNames {
     public static final String DECISION = "decision";
     public static final String APPROVAL_GATE = "approval_gate";
     public static final String TOOL_DISPATCH = "tool_dispatch";
+    public static final String SUB_AGENT_DISPATCH = "sub_agent_dispatch";
     public static final String OBSERVATION = "observation";
     public static final String REPLAN_GUARD = "replan_guard";
     public static final String REPLAN = "replan";

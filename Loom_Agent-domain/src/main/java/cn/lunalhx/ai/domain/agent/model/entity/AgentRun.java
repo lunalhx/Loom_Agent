@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -15,14 +17,21 @@ import java.time.Instant;
 public class AgentRun {
 
     private String runId;
+    private String parentRunId;
+    private String rootRunId;
     private String requestId;
     private String conversationId;
+    private AgentRole agentRole;
+    private AgentRunKind runKind;
+    private Integer depth;
+    private Integer childOrdinal;
     private String question;
     private String workspace;
     private AgentRunStatus status;
     private String currentNode;
     private Integer step;
     private Long checkpointVersion;
+    private String summaryJson;
     private Instant createdAt;
     private Instant updatedAt;
 

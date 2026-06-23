@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -83,14 +84,21 @@ public class CheckpointAgentHook implements AgentHook {
         }
         runRepository.save(AgentRun.builder()
                 .runId(context.getRunId())
+                .parentRunId(context.getParentRunId())
+                .rootRunId(StringUtils.defaultIfBlank(context.getRootRunId(), context.getRunId()))
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
+                .agentRole(context.getAgentRole())
+                .runKind(StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT : AgentRunKind.CHILD)
+                .depth(context.getAgentDepth())
+                .childOrdinal(context.getChildOrdinal())
                 .question(context.getQuestion())
                 .workspace(context.getWorkspaceDisplayName())
                 .status(status)
                 .currentNode(currentNode)
                 .step(context.getStep())
                 .checkpointVersion(context.getCheckpointVersion())
+                .summaryJson(context.getAgentRole() == null ? null : context.getFinalAnswer())
                 .updatedAt(Instant.now())
                 .build());
     }

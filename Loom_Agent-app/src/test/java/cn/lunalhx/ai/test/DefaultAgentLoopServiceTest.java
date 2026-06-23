@@ -7,8 +7,11 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.SubAgentDispatchResult;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -16,6 +19,8 @@ import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
+import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -23,6 +28,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -38,6 +44,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -437,6 +445,138 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED));
     }
 
+    @Test
+    public void shouldSpawnReadOnlySubAgentsAndReturnOnlyAggregatedSummary() {
+        List<String> prompts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        ModelGateway modelGateway = promptRoutingGateway(prompts);
+        AgentRuntimeProperties properties = properties();
+        InMemoryApprovalStore approvalStore = new InMemoryApprovalStore();
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        List<AgentTool> tools = List.of(fakeTool("code_search", "raw child search output"), new TodoWriteTool());
+        SubAgentCoordinator coordinator = new SubAgentCoordinator(
+                modelGateway,
+                new RoleToolRegistryFactory(tools),
+                approvalStore,
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                runRepository,
+                checkpointRepository,
+                properties,
+                new ObjectMapper(),
+                Runnable::run);
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                modelGateway,
+                new ToolRegistry(tools),
+                approvalStore,
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                runRepository,
+                checkpointRepository,
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                coordinator);
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .question("搜集 DeprecatedApi 的使用点")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(5));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.SUB_AGENT_STARTED));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.SUB_AGENT_COMPLETED
+                && "domain".equals(event.getSubAgentTaskId())));
+        AgentEvent summary = events.stream()
+                .filter(event -> event.getType() == AgentEventType.SUB_AGENT_SUMMARY)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(summary.getObservation().contains("\"type\":\"sub_agent_summary\""));
+        assertTrue(summary.getObservation().contains("DeprecatedApi"));
+        assertEquals("汇总完成。",
+                events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+        assertTrue(prompts.stream().anyMatch(prompt -> prompt.contains("spawn_agents")));
+        assertTrue(prompts.stream().anyMatch(prompt -> prompt.contains("\"type\":\"sub_agent_summary\"")));
+    }
+
+    @Test
+    public void shouldPreventReadOnlySubAgentFromCallingWriteTool() {
+        AtomicInteger calls = new AtomicInteger();
+        RoleToolRegistryFactory factory = new RoleToolRegistryFactory(List.of(
+                fakeWriteTool("run_shell", "should not write", calls),
+                fakeTool("code_search", "ok")));
+
+        ToolRegistry registry = factory.create(AgentRole.EXPLORER);
+        ToolCall call = ToolCall.builder()
+                .name("run_shell")
+                .input(new ObjectMapper().createObjectNode().put("path", "Demo.java"))
+                .workspaceRoot(Path.of(".").toAbsolutePath().normalize())
+                .build();
+
+        ToolPolicyDecision policy = registry.policy(call);
+        ToolResult result = registry.call(call);
+
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertEquals(0, calls.get());
+        assertTrue(result.getObservation().contains("sub_agent_read_only_violation"));
+    }
+
+    @Test
+    public void shouldRunReadOnlySubAgentsConcurrently() {
+        ExecutorService executor = Executors.newFixedThreadPool(4);
+        try {
+            List<AgentTool> tools = List.of(fakeTool("code_search", "unused"), new TodoWriteTool());
+            AgentRuntimeProperties properties = properties();
+            properties.setSubAgentMaxConcurrency(4);
+            properties.setSubAgentTimeoutMs(3000L);
+            ModelGateway modelGateway = delayedFinalGateway(180L);
+            SubAgentCoordinator coordinator = new SubAgentCoordinator(
+                    modelGateway,
+                    new RoleToolRegistryFactory(tools),
+                    new InMemoryApprovalStore(),
+                    new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                    new InMemoryAgentRunRepository(),
+                    new InMemoryAgentCheckpointRepository(),
+                    properties,
+                    new ObjectMapper(),
+                    executor);
+
+            AgentContext parent = parentContextWithSpawnDecision(4);
+            long startedAt = System.currentTimeMillis();
+            SubAgentDispatchResult result = coordinator.dispatch(parent);
+            long elapsed = System.currentTimeMillis() - startedAt;
+
+            assertTrue(result.isSuccess());
+            assertEquals(4, result.getResults().size());
+            assertTrue("expected concurrent execution but elapsed=" + elapsed, elapsed < 650L);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void shouldNotLeakParentDynamicTextIntoChildPrompt() {
+        List<String> prompts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        AgentRuntimeProperties properties = properties();
+        SubAgentCoordinator coordinator = new SubAgentCoordinator(
+                promptRoutingGateway(prompts),
+                new RoleToolRegistryFactory(List.of(fakeTool("code_search", "unused"), new TodoWriteTool())),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                new InMemoryAgentRunRepository(),
+                new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run);
+
+        AgentContext parent = parentContextWithSpawnDecision(1);
+        parent.getDynamicText().appendSystemNote(1, "test", "Parent Secret", "SHOULD_NOT_LEAK_TO_CHILD");
+        coordinator.dispatch(parent);
+
+        assertTrue(prompts.stream()
+                .filter(prompt -> prompt.contains("隔离子 Agent"))
+                .noneMatch(prompt -> prompt.contains("SHOULD_NOT_LEAK_TO_CHILD")));
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
@@ -494,6 +634,92 @@ public class DefaultAgentLoopServiceTest {
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
             }
         };
+    }
+
+    private ModelGateway promptRoutingGateway(List<String> prompts) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                prompts.add(prompt.getMessage());
+                String message = prompt.getMessage();
+                if (message.contains("你是主 Agent 派生出的隔离子 Agent")) {
+                    String taskId = message.contains("Loom_Agent-domain") ? "domain" : "app";
+                    return Mono.just(ModelChatResult.builder()
+                            .content("{\"type\":\"final\",\"answer\":\"{\\\"summary\\\":\\\""
+                                    + taskId + " found DeprecatedApi\\\",\\\"findings\\\":[{\\\"file\\\":\\\""
+                                    + taskId + "/Demo.java\\\",\\\"line\\\":7,\\\"symbol\\\":\\\"DeprecatedApi\\\",\\\"reason\\\":\\\"direct use\\\"}],\\\"confidence\\\":\\\"high\\\",\\\"truncated\\\":false,\\\"followUp\\\":\\\"\\\"}\",\"evidence\":[{\"file\":\""
+                                    + taskId + "/Demo.java\",\"line\":7}]}")
+                            .finishReason("stop")
+                            .build());
+                }
+                if (message.contains("sub_agent_summary")) {
+                    return Mono.just(ModelChatResult.builder()
+                            .content("{\"type\":\"final\",\"answer\":\"汇总完成。\",\"evidence\":[]}")
+                            .finishReason("stop")
+                            .build());
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"action\",\"thought\":\"按模块并行搜索\",\"tool\":\"spawn_agents\",\"input\":{\"reason\":\"搜索 DeprecatedApi\",\"maxConcurrency\":2,\"returnMode\":\"summary_only\",\"tasks\":[{\"taskId\":\"domain\",\"role\":\"explorer\",\"question\":\"在 Loom_Agent-domain 下搜索 DeprecatedApi 的使用点\",\"pathScope\":\"Loom_Agent-domain\"},{\"taskId\":\"app\",\"role\":\"explorer\",\"question\":\"在 Loom_Agent-app 下搜索 DeprecatedApi 的使用点\",\"pathScope\":\"Loom_Agent-app\"}]}}")
+                        .finishReason("stop")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway delayedFinalGateway(long delayMs) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                return Mono.fromCallable(() -> {
+                    Thread.sleep(delayMs);
+                    return ModelChatResult.builder()
+                            .content("{\"type\":\"final\",\"answer\":\"{\\\"summary\\\":\\\"ok\\\",\\\"findings\\\":[],\\\"confidence\\\":\\\"high\\\",\\\"truncated\\\":false,\\\"followUp\\\":\\\"\\\"}\",\"evidence\":[]}")
+                            .finishReason("stop")
+                            .build();
+                });
+            }
+        };
+    }
+
+    private AgentContext parentContextWithSpawnDecision(int taskCount) {
+        AgentContext parent = new AgentContext();
+        parent.setRunId("parent-run");
+        parent.setRootRunId("parent-run");
+        parent.setRequestId("parent-request");
+        parent.setConversationId("parent-conversation");
+        parent.setQuestion("搜集 DeprecatedApi 的使用点");
+        parent.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        parent.setWorkspaceDisplayName(".");
+        parent.setMaxSteps(3);
+        parent.setStartedAt(java.time.Instant.now());
+        com.fasterxml.jackson.databind.node.ObjectNode input = new ObjectMapper().createObjectNode();
+        input.put("reason", "搜索 DeprecatedApi");
+        input.put("maxConcurrency", taskCount);
+        com.fasterxml.jackson.databind.node.ArrayNode tasks = input.putArray("tasks");
+        for (int i = 1; i <= taskCount; i++) {
+            tasks.addObject()
+                    .put("taskId", "task-" + i)
+                    .put("role", "explorer")
+                    .put("question", "搜索 DeprecatedApi 使用点 " + i)
+                    .put("pathScope", ".");
+        }
+        parent.setDecision(AgentDecision.builder()
+                .type("action")
+                .tool("spawn_agents")
+                .input(input)
+                .inputView(new java.util.LinkedHashMap<>())
+                .build());
+        return parent;
     }
 
     private AgentTool fakeTool(String name, String observation) {

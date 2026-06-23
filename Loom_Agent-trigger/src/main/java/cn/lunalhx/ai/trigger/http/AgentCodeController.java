@@ -211,6 +211,10 @@ public class AgentCodeController {
                 || event.getType() == AgentEventType.PLAN_UPDATED
                 || event.getType() == AgentEventType.REPLAN_STARTED
                 || event.getType() == AgentEventType.RESUME_STARTED
+                || event.getType() == AgentEventType.SUB_AGENT_STARTED
+                || event.getType() == AgentEventType.SUB_AGENT_COMPLETED
+                || event.getType() == AgentEventType.SUB_AGENT_FAILED
+                || event.getType() == AgentEventType.SUB_AGENT_SUMMARY
                 || event.getType() == AgentEventType.APPROVAL_REQUIRED
                 || event.getType() == AgentEventType.POLICY_DENIED
                 || event.getType() == AgentEventType.ANSWER
@@ -271,6 +275,12 @@ public class AgentCodeController {
                 .requestId(event.getRequestId())
                 .conversationId(event.getConversationId())
                 .workspace(event.getWorkspace())
+                .parentRunId(event.getParentRunId())
+                .subAgentRunId(event.getSubAgentRunId())
+                .subAgentTaskId(event.getSubAgentTaskId())
+                .subAgentRole(event.getSubAgentRole())
+                .subAgentStatus(event.getSubAgentStatus())
+                .elapsedMs(event.getElapsedMs())
                 .step(event.getStep())
                 .node(event.getNode())
                 .nodeInputs(event.getNodeInputs())

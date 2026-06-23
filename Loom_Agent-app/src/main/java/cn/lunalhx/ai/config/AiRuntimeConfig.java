@@ -10,6 +10,8 @@ import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
+import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
 import cn.lunalhx.ai.domain.conversation.service.DefaultChatStreamService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -61,6 +63,11 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public RoleToolRegistryFactory roleToolRegistryFactory(List<AgentTool> tools) {
+        return new RoleToolRegistryFactory(tools);
+    }
+
+    @Bean
     public AgentRunRepository agentRunRepository(ObjectProvider<AgentRunDao> agentRunDaoProvider) {
         AgentRunDao agentRunDao = agentRunDaoProvider.getIfAvailable();
         return agentRunDao == null ? new InMemoryAgentRunRepository() : new MybatisAgentRunRepository(agentRunDao);
@@ -107,10 +114,34 @@ public class AiRuntimeConfig {
                                              AgentCheckpointRepository agentCheckpointRepository,
                                              AgentRuntimeProperties agentRuntimeProperties,
                                              ObjectMapper objectMapper,
-                                             ThreadPoolExecutor threadPoolExecutor) {
+                                             ThreadPoolExecutor threadPoolExecutor,
+                                             SubAgentCoordinator subAgentCoordinator) {
         return new DefaultAgentLoopService(
                 modelGateway,
                 toolRegistry,
+                approvalStore,
+                agentWorkspaceResolver,
+                agentRunRepository,
+                agentCheckpointRepository,
+                agentRuntimeProperties,
+                objectMapper,
+                threadPoolExecutor,
+                subAgentCoordinator);
+    }
+
+    @Bean
+    public SubAgentCoordinator subAgentCoordinator(ModelGateway modelGateway,
+                                                   RoleToolRegistryFactory roleToolRegistryFactory,
+                                                   ApprovalStore approvalStore,
+                                                   AgentWorkspaceResolver agentWorkspaceResolver,
+                                                   AgentRunRepository agentRunRepository,
+                                                   AgentCheckpointRepository agentCheckpointRepository,
+                                                   AgentRuntimeProperties agentRuntimeProperties,
+                                                   ObjectMapper objectMapper,
+                                                   ThreadPoolExecutor threadPoolExecutor) {
+        return new SubAgentCoordinator(
+                modelGateway,
+                roleToolRegistryFactory,
                 approvalStore,
                 agentWorkspaceResolver,
                 agentRunRepository,
@@ -123,7 +154,8 @@ public class AiRuntimeConfig {
     @Bean
     public InitializingBean aiConfigValidator(ModelRuntimeProperties modelRuntimeProperties,
                                              AgentRuntimeProperties agentRuntimeProperties,
-                                             Environment environment) {
+                                             Environment environment,
+                                             ThreadPoolExecutor threadPoolExecutor) {
         return () -> {
             String chatProvider = environment.getProperty("spring.ai.model.chat", "deepseek");
             if ("none".equalsIgnoreCase(chatProvider)) {
@@ -155,6 +187,22 @@ public class AiRuntimeConfig {
             }
             if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
                 throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 第一版仅支持 DENY");
+            }
+            requirePositive(agentRuntimeProperties.getSubAgentTimeoutMs(), "AGENT_SUB_AGENT_TIMEOUT_MS");
+            if (agentRuntimeProperties.getSubAgentMaxChildren() == null || agentRuntimeProperties.getSubAgentMaxChildren() < 1) {
+                throw new IllegalStateException("AGENT_SUB_AGENT_MAX_CHILDREN 必须大于等于 1");
+            }
+            if (agentRuntimeProperties.getSubAgentMaxConcurrency() == null || agentRuntimeProperties.getSubAgentMaxConcurrency() < 1) {
+                throw new IllegalStateException("AGENT_SUB_AGENT_MAX_CONCURRENCY 必须大于等于 1");
+            }
+            if (agentRuntimeProperties.getSubAgentMaxDepth() == null || agentRuntimeProperties.getSubAgentMaxDepth() < 1) {
+                throw new IllegalStateException("AGENT_SUB_AGENT_MAX_DEPTH 必须大于等于 1");
+            }
+            if (agentRuntimeProperties.getSubAgentSummaryMaxChars() == null || agentRuntimeProperties.getSubAgentSummaryMaxChars() < 1000) {
+                throw new IllegalStateException("AGENT_SUB_AGENT_SUMMARY_MAX_CHARS 必须大于等于 1000");
+            }
+            if (threadPoolExecutor.getMaximumPoolSize() < agentRuntimeProperties.getSubAgentMaxConcurrency() + 1) {
+                throw new IllegalStateException("线程池最大线程数必须大于 AGENT_SUB_AGENT_MAX_CONCURRENCY");
             }
         };
     }

@@ -19,6 +19,12 @@ public class AgentStreamEvent {
     private String requestId;
     private String conversationId;
     private String workspace;
+    private String parentRunId;
+    private String subAgentRunId;
+    private String subAgentTaskId;
+    private String subAgentRole;
+    private String subAgentStatus;
+    private Long elapsedMs;
     private Integer step;
     private String node;
     private List<String> nodeInputs;

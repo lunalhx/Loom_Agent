@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.service.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -46,6 +47,12 @@ public class DecisionNode extends AbstractAgentNode {
             if (StringUtils.isBlank(decision.getTool())) {
                 throw new IllegalArgumentException("action.tool 不能为空");
             }
+            if (SubAgentToolSpecs.SPAWN_AGENTS.equals(decision.getTool())) {
+                if (context.isSubAgentSpawnAllowed()) {
+                    return NodeResult.next(AgentNodeNames.SUB_AGENT_DISPATCH, List.of());
+                }
+                return unavailableSubAgentTool(context, decision);
+            }
             if (!toolRegistry.contains(decision.getTool())) {
                 context.setStep(context.getStep() + 1);
                 context.setToolResult(ToolResult.failure("unknown_tool", "未知工具：" + decision.getTool(), 0L));
@@ -74,6 +81,19 @@ public class DecisionNode extends AbstractAgentNode {
                     "模型输出无法解析为 action/final JSON。\nRawOutput:\n" + context.getModelOutput());
             return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
         }
+    }
+
+    private NodeResult unavailableSubAgentTool(AgentContext context, AgentDecision decision) {
+        context.setStep(context.getStep() + 1);
+        context.setToolResult(ToolResult.failure("sub_agent_unavailable", "当前上下文不允许派生子 Agent", 0L));
+        appendStep(context, false);
+        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
+        context.getDynamicText().appendToolResult(
+                context.getStep(),
+                name(),
+                decision,
+                "Success: false\nObservation:\n当前上下文不允许派生子 Agent");
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 
     private AgentDecision parseDecisionJson(String output) throws Exception {

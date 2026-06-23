@@ -66,6 +66,12 @@ loom:
     shell-max-output-chars: ${AGENT_SHELL_MAX_OUTPUT_CHARS:12000}
     high-risk-policy: ${AGENT_HIGH_RISK_POLICY:DENY}
     allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
+    sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
+    sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}
+    sub-agent-max-concurrency: ${AGENT_SUB_AGENT_MAX_CONCURRENCY:4}
+    sub-agent-max-depth: ${AGENT_SUB_AGENT_MAX_DEPTH:1}
+    sub-agent-timeout-ms: ${AGENT_SUB_AGENT_TIMEOUT_MS:60000}
+    sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

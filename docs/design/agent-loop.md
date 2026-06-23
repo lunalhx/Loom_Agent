@@ -89,6 +89,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 - `write_file`：创建或覆盖工作区内文本文件，执行前需要人工确认。
 - `run_shell`：在进程级沙箱内执行允许的只读命令或 Maven 测试命令；测试命令需要人工确认。
 - `git_op`：`status/diff/log` 自动放行，`add/commit` 需要人工确认，`push/reset/clean/rebase/checkout` 等高危操作拦截。
+- `spawn_agents`：内建虚拟工具，不进入普通 `ToolRegistry`；由 `DecisionNode` 路由到 `SubAgentDispatchNode`，用于派生隔离上下文的子 Agent 并只回传聚合摘要。
 
 模型 Action 必须是 JSON：
 
@@ -116,6 +117,39 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
       "line": 42
     }
   ]
+}
+```
+
+## 子 Agent 派生
+
+主 Agent 在遇到可独立拆分的读多任务时，可以调用 `spawn_agents`。典型场景是按模块搜集某个废弃 API 的使用点、分目录审查风险、并行分析日志或测试输出。子 Agent 使用独立 `AgentContext`、独立 `runId`、独立 `dynamicText/history`，只继承 workspace、安全配置、父任务摘要和子任务说明。
+
+内置角色：
+
+- `EXPLORER`：只读探索，返回文件、行号、符号和用途摘要。
+- `REVIEWER`：只读审查，返回风险、测试缺口和证据。
+- `EDITOR`：编辑角色，第一版只允许单个串行派生，避免并发写冲突。
+
+`EXPLORER/REVIEWER` 的工具注册表由 `RoleToolRegistryFactory` 构造，并通过包装器强制只放行 `READ_ONLY` 策略。子 Agent 的中间工具日志不会进入父 Agent 上下文；父 Agent 只看到 `sub_agent_summary` JSON，随后基于摘要继续推理或输出最终答案。
+
+```json
+{
+  "type": "action",
+  "thought": "按模块并行搜索废弃 API",
+  "tool": "spawn_agents",
+  "input": {
+    "reason": "搜索 DeprecatedApi 使用点",
+    "maxConcurrency": 4,
+    "returnMode": "summary_only",
+    "tasks": [
+      {
+        "taskId": "domain",
+        "role": "explorer",
+        "question": "在 Loom_Agent-domain 下搜索 DeprecatedApi 的使用点",
+        "pathScope": "Loom_Agent-domain"
+      }
+    ]
+  }
 }
 ```
 
@@ -153,6 +187,12 @@ AGENT_SHELL_TIMEOUT_MS=120000
 AGENT_SHELL_MAX_OUTPUT_CHARS=12000
 AGENT_HIGH_RISK_POLICY=DENY
 AGENT_ALLOWED_SHELL_COMMANDS=mvn,./mvnw,git,pwd,ls,rg
+AGENT_SUB_AGENT_ENABLED=true
+AGENT_SUB_AGENT_MAX_CHILDREN=6
+AGENT_SUB_AGENT_MAX_CONCURRENCY=4
+AGENT_SUB_AGENT_MAX_DEPTH=1
+AGENT_SUB_AGENT_TIMEOUT_MS=60000
+AGENT_SUB_AGENT_SUMMARY_MAX_CHARS=12000
 ```
 
 ## 演示

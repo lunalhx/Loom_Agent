@@ -21,6 +21,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanGuardNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
 import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
+import cn.lunalhx.ai.domain.agent.flow.node.SubAgentDispatchNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
@@ -38,6 +39,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
@@ -50,6 +52,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
+@Slf4j
 public class DefaultAgentLoopService implements AgentLoopService {
 
     private final AgentRuntimeProperties properties;
@@ -58,6 +61,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final AgentCheckpointRepository checkpointRepository;
     private final AgentHookRegistry hookRegistry;
     private final Executor executor;
+    private final SubAgentCoordinator subAgentCoordinator;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
 
@@ -100,14 +104,29 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    AgentRuntimeProperties properties,
                                    ObjectMapper objectMapper,
                                    Executor executor) {
+        this(modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, null);
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentWorkspaceResolver workspaceResolver,
+                                   AgentRunRepository runRepository,
+                                   AgentCheckpointRepository checkpointRepository,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor,
+                                   SubAgentCoordinator subAgentCoordinator) {
         this.properties = properties;
         this.approvalStore = approvalStore;
         this.workspaceResolver = workspaceResolver;
         this.checkpointRepository = checkpointRepository;
         this.executor = executor;
+        this.subAgentCoordinator = subAgentCoordinator;
         this.toolSpecs = toolRegistry.specs();
         this.hookRegistry = new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
-        this.nodes = registerNodes(List.of(
+        List<AgentNode> nodeList = new java.util.ArrayList<>(List.of(
                 new StartNode(),
                 new PlannerNode(),
                 new RenderPromptNode(),
@@ -120,6 +139,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new ReplanNode(modelGateway, properties, objectMapper),
                 new FinalAnswerNode(),
                 new FailNode()));
+        if (subAgentCoordinator != null) {
+            nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties));
+        }
+        this.nodes = registerNodes(nodeList);
     }
 
     @Override
@@ -137,6 +160,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 emit(sink, List.of(workspaceError(e)));
                 sink.complete();
             } catch (Exception e) {
+                log.error("Agent loop failed before terminal event, workspace={}, question={}",
+                        question == null ? null : question.getWorkspace(),
+                        question == null ? null : StringUtils.abbreviate(question.getQuestion(), 200),
+                        e);
                 emit(sink, List.of(AgentEvent.builder()
                         .type(AgentEventType.ERROR)
                         .code("agent_error")
@@ -180,6 +207,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 context = checkpoint.getContextSnapshot().restore();
             }
         }
+        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
         restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
         context.setWorkspace(approval.getWorkspace());
         context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
@@ -214,6 +242,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         }
         try {
             AgentContext context = checkpoint.getContextSnapshot().restore();
+            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
             restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
             context.setStartedAt(Instant.now());
             context.setCheckpointVersion(checkpoint.getVersion());
@@ -281,19 +310,39 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private AgentContext toContext(AgentQuestion question) {
         AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
+        String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
         AgentContext context = new AgentContext();
-        context.setRunId(UUID.randomUUID().toString());
+        context.setRunId(runId);
+        context.setParentRunId(question.getParentRunId());
+        context.setRootRunId(StringUtils.defaultIfBlank(question.getRootRunId(), runId));
         context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
         context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
+        context.setAgentRole(question.getAgentRole());
+        context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
+        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
         context.setQuestion(StringUtils.trim(question.getQuestion()));
+        context.setPathScope(question.getPathScope());
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
         context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
-        context.setToolSpecs(toolSpecs);
+        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
+        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
+        if (context.isSubAgentSpawnAllowed()) {
+            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        context.setToolSpecs(specs);
         context.getDynamicText().appendUserTask(context.getQuestion());
         return context;
+    }
+
+    private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
+        boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
+        return requested
+                && subAgentCoordinator != null
+                && Boolean.TRUE.equals(properties.getSubAgentEnabled())
+                && context.getAgentDepth() < Math.max(1, properties.getSubAgentMaxDepth() == null ? 1 : properties.getSubAgentMaxDepth());
     }
 
     private void restoreWorkspace(AgentContext context, String workspace) {
@@ -321,6 +370,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
                 .node(node.name())
                 .nodeInputs(node.inputKeys())
                 .build();
@@ -333,6 +383,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
                 .checkpointVersion(context.getCheckpointVersion())
                 .plan(context.getPlan() == null ? null : context.getPlan().toView())
                 .build();
@@ -345,6 +396,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
                 .workspace(approval.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
                 .step(context.getStep() + 1)
                 .tool(approval.getTool())
                 .input(approval.getInput())

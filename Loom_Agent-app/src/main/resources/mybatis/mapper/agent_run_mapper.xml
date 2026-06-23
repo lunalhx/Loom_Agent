@@ -5,37 +5,57 @@
     <resultMap id="AgentRunMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
         <id column="id" property="id"/>
         <result column="run_id" property="runId"/>
+        <result column="parent_run_id" property="parentRunId"/>
+        <result column="root_run_id" property="rootRunId"/>
         <result column="request_id" property="requestId"/>
         <result column="conversation_id" property="conversationId"/>
+        <result column="agent_role" property="agentRole"/>
+        <result column="run_kind" property="runKind"/>
+        <result column="depth" property="depth"/>
+        <result column="child_ordinal" property="childOrdinal"/>
         <result column="question" property="question"/>
         <result column="workspace" property="workspace"/>
         <result column="status" property="status"/>
         <result column="current_node" property="currentNode"/>
         <result column="step" property="step"/>
         <result column="checkpoint_version" property="checkpointVersion"/>
+        <result column="summary_json" property="summaryJson"/>
         <result column="create_time" property="createTime"/>
         <result column="update_time" property="updateTime"/>
     </resultMap>
 
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
         INSERT INTO agent_run
-        (run_id, request_id, conversation_id, question, workspace, status, current_node, step, checkpoint_version)
+        (run_id, parent_run_id, root_run_id, request_id, conversation_id, agent_role, run_kind, depth, child_ordinal,
+         question, workspace, status, current_node, step, checkpoint_version, summary_json)
         VALUES
-        (#{runId}, #{requestId}, #{conversationId}, #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion})
+        (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{agentRole}, #{runKind}, #{depth}, #{childOrdinal},
+         #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson})
         ON DUPLICATE KEY UPDATE
+        parent_run_id = VALUES(parent_run_id),
+        root_run_id = VALUES(root_run_id),
         request_id = VALUES(request_id),
         conversation_id = VALUES(conversation_id),
+        agent_role = VALUES(agent_role),
+        run_kind = VALUES(run_kind),
+        depth = VALUES(depth),
+        child_ordinal = VALUES(child_ordinal),
         question = VALUES(question),
         workspace = VALUES(workspace),
         status = VALUES(status),
         current_node = VALUES(current_node),
         step = VALUES(step),
         checkpoint_version = VALUES(checkpoint_version),
+        summary_json = VALUES(summary_json),
         update_time = CURRENT_TIMESTAMP
     </insert>
 
     <select id="selectByRunId" resultMap="AgentRunMap">
         SELECT * FROM agent_run WHERE run_id = #{runId} LIMIT 1
+    </select>
+
+    <select id="selectByParentRunId" resultMap="AgentRunMap">
+        SELECT * FROM agent_run WHERE parent_run_id = #{parentRunId} ORDER BY child_ordinal ASC, create_time ASC
     </select>
 
 </mapper>

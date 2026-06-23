@@ -35,6 +35,11 @@ REDIS_PORT=16379
 The app does not have to run in Docker during development. Running only MySQL
 and Redis in Docker is usually the fastest local loop.
 
+The Spring config automatically imports `docs/env/.env` when IDEA starts from
+either the repository root or the `Loom_Agent-app` module directory. If you use a
+custom working directory, add the `.env` values to the IDEA run configuration
+environment variables.
+
 ## Start app with an existing environment compose
 
 ```bash

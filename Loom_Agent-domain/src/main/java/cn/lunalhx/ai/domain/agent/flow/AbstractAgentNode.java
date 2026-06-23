@@ -43,7 +43,8 @@ public abstract class AbstractAgentNode implements AgentNode {
                 .runId(context.getRunId())
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName());
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId());
     }
 
     protected void fail(AgentContext context, AgentStopReason reason, String code, String message) {
