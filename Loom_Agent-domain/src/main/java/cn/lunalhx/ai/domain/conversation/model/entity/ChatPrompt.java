@@ -20,5 +20,6 @@ public class ChatPrompt {
     private Double temperature;
     private Integer maxTokens;
     private OutputFormat outputFormat;
+    private String capability;
 
 }

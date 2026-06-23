@@ -74,7 +74,9 @@ public class CheckpointAgentHook implements AgentHook {
 
     private void saveRun(AgentContext context, String currentNode) {
         AgentRunStatus status = AgentRunStatus.RUNNING;
-        if (context.getStopReason() != null && context.getErrorCode() == null) {
+        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+            status = AgentRunStatus.BUDGET_EXCEEDED;
+        } else if (context.getStopReason() != null && context.getErrorCode() == null) {
             status = AgentRunStatus.COMPLETED;
         } else if (context.getErrorCode() != null) {
             status = AgentRunStatus.FAILED;
@@ -99,6 +101,9 @@ public class CheckpointAgentHook implements AgentHook {
                 .step(context.getStep())
                 .checkpointVersion(context.getCheckpointVersion())
                 .summaryJson(context.getAgentRole() == null ? null : context.getFinalAnswer())
+                .blockedReason(context.getBudgetBlockedReason())
+                .usedTokens(context.getUsedTokens())
+                .estimatedCost(context.getEstimatedCost())
                 .updatedAt(Instant.now())
                 .build());
     }

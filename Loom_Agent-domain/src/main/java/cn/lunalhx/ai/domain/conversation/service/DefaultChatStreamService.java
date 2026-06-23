@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.StreamEventType;
@@ -14,7 +15,6 @@ import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -74,25 +74,15 @@ public class DefaultChatStreamService implements ChatStreamService {
                 .model(model)
                 .temperature(rawPrompt.getTemperature() == null ? defaultTemperature : rawPrompt.getTemperature())
                 .maxTokens(rawPrompt.getMaxTokens() == null ? defaultMaxTokens : rawPrompt.getMaxTokens())
+                .capability(StringUtils.defaultIfBlank(rawPrompt.getCapability(), ModelCapabilities.STREAM_CHAT))
                 .outputFormat(outputFormat)
                 .build();
     }
 
     private Flux<ModelStreamChunk> guardedModelStream(ChatPrompt prompt, AtomicBoolean tokenEmitted) {
-        int maxAttempts = Math.max(1, properties.getRetryMaxAttempts());
-        Retry retry = Retry.backoff(maxAttempts - 1, Duration.ofMillis(properties.getRetryBackoffInitialMs()))
-                .maxBackoff(Duration.ofMillis(properties.getRetryBackoffMaxMs()))
-                .jitter(0.2)
-                .filter(throwable -> !tokenEmitted.get() && isRetryable(throwable));
-
         return Flux.defer(() -> modelGateway.stream(prompt))
                 .timeout(Duration.ofMillis(properties.getFirstTokenTimeoutMs()),
-                        ignored -> Mono.delay(Duration.ofMillis(properties.getStreamTimeoutMs())))
-                .retryWhen(retry);
-    }
-
-    private boolean isRetryable(Throwable throwable) {
-        return throwable instanceof ModelGatewayException && ((ModelGatewayException) throwable).isRetryable();
+                        ignored -> Mono.delay(Duration.ofMillis(properties.getStreamTimeoutMs())));
     }
 
     private Flux<StreamEvent> toEvents(ChatPrompt prompt,

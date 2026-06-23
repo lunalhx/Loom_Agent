@@ -20,6 +20,9 @@
         <result column="step" property="step"/>
         <result column="checkpoint_version" property="checkpointVersion"/>
         <result column="summary_json" property="summaryJson"/>
+        <result column="blocked_reason" property="blockedReason"/>
+        <result column="used_tokens" property="usedTokens"/>
+        <result column="estimated_cost" property="estimatedCost"/>
         <result column="create_time" property="createTime"/>
         <result column="update_time" property="updateTime"/>
     </resultMap>
@@ -27,10 +30,10 @@
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
         INSERT INTO agent_run
         (run_id, parent_run_id, root_run_id, request_id, conversation_id, agent_role, run_kind, depth, child_ordinal,
-         question, workspace, status, current_node, step, checkpoint_version, summary_json)
+         question, workspace, status, current_node, step, checkpoint_version, summary_json, blocked_reason, used_tokens, estimated_cost)
         VALUES
         (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{agentRole}, #{runKind}, #{depth}, #{childOrdinal},
-         #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson})
+         #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson}, #{blockedReason}, #{usedTokens}, #{estimatedCost})
         ON DUPLICATE KEY UPDATE
         parent_run_id = VALUES(parent_run_id),
         root_run_id = VALUES(root_run_id),
@@ -47,6 +50,9 @@
         step = VALUES(step),
         checkpoint_version = VALUES(checkpoint_version),
         summary_json = VALUES(summary_json),
+        blocked_reason = VALUES(blocked_reason),
+        used_tokens = VALUES(used_tokens),
+        estimated_cost = VALUES(estimated_cost),
         update_time = CURRENT_TIMESTAMP
     </insert>
 

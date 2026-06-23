@@ -15,16 +15,20 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -51,6 +55,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class DefaultAgentLoopServiceTest {
@@ -446,6 +451,53 @@ public class DefaultAgentLoopServiceTest {
     }
 
     @Test
+    public void shouldReplanWhenResumeFindsExpiredApprovalCheckpoint() {
+        AgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        AgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        AtomicInteger calls = new AtomicInteger();
+        AgentContext context = new AgentContext();
+        context.setRunId("run-expired-approval");
+        context.setRequestId("request-expired-approval");
+        context.setConversationId("conversation-expired-approval");
+        context.setQuestion("写入配置文件");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(java.time.Instant.now());
+        context.setCurrentNode(AgentNodeNames.APPROVAL_GATE);
+        context.setPendingApprovalId("expired-approval");
+        context.setDecision(AgentDecision.builder()
+                .tool("replace_in_file")
+                .input(new ObjectMapper().createObjectNode())
+                .build());
+        context.setToolSpecs(List.of(ToolSpec.builder().name("replace_in_file").description("write").inputSchema("{}").build()));
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId(context.getRunId())
+                .currentNode(AgentNodeNames.APPROVAL_GATE)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:approval_gate")
+                .build());
+
+        DefaultAgentLoopService service = newService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{}",
+                        "{\"type\":\"final\",\"answer\":\"先检查状态，不复用过期审批。\",\"evidence\":[]}"),
+                List.of(fakeWriteTool("replace_in_file", "should not execute", calls)),
+                new InMemoryApprovalStore(),
+                runRepository,
+                checkpointRepository);
+
+        List<AgentEvent> events = service.resumeRun("run-expired-approval")
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(0, calls.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.RESUME_STARTED));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED));
+    }
+
+    @Test
     public void shouldSpawnReadOnlySubAgentsAndReturnOnlyAggregatedSummary() {
         List<String> prompts = new java.util.concurrent.CopyOnWriteArrayList<>();
         ModelGateway modelGateway = promptRoutingGateway(prompts);
@@ -577,6 +629,117 @@ public class DefaultAgentLoopServiceTest {
                 .noneMatch(prompt -> prompt.contains("SHOULD_NOT_LEAK_TO_CHILD")));
     }
 
+    @Test
+    public void shouldRecordTraceTimelineForNormalRun() {
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        AgentRuntimeProperties properties = properties();
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
+                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                new InMemoryAgentRunRepository(),
+                new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                null,
+                traceRecorder,
+                new DefaultBudgetGuard(properties));
+
+        service.ask(AgentQuestion.builder()
+                        .runId("trace-run")
+                        .question("记录 trace")
+                        .maxSteps(3)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        var timeline = traceRecorder.timeline("trace-run");
+        assertFalse(timeline.isEmpty());
+        assertTrue(timeline.stream().anyMatch(event -> "node_start".equals(event.getEventType())));
+        assertTrue(timeline.stream().anyMatch(event -> "node_end".equals(event.getEventType())));
+        assertTrue(timeline.stream().anyMatch(event -> "stop".equals(event.getEventType())));
+        for (int i = 1; i < timeline.size(); i++) {
+            assertTrue(timeline.get(i).getSequenceNo() > timeline.get(i - 1).getSequenceNo());
+        }
+    }
+
+    @Test
+    public void shouldBlockModelCallWhenBudgetExceeded() {
+        AgentRuntimeProperties properties = properties();
+        properties.getBudget().setEnabled(true);
+        properties.getBudget().setMaxTotalTokens(4);
+        properties.getBudget().setReservedOutputTokens(4);
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway modelGateway = countingGateway(calls);
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                modelGateway,
+                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                runRepository,
+                new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                null,
+                new InMemoryTraceRecorder(),
+                new DefaultBudgetGuard(properties));
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("budget-run")
+                        .question("预算不足时不要调用模型")
+                        .maxSteps(3)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(0, calls.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && "budget_exceeded".equals(event.getCode())));
+        assertEquals(AgentRunStatus.BUDGET_EXCEEDED,
+                runRepository.find("budget-run").orElseThrow().getStatus());
+    }
+
+    @Test
+    public void shouldAccumulateUsageCostAndRecordModelUsageTrace() {
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        AgentRuntimeProperties properties = properties();
+        properties.getBudget().setInputPricePer1k(new java.math.BigDecimal("0.001"));
+        properties.getBudget().setOutputPricePer1k(new java.math.BigDecimal("0.002"));
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        DefaultAgentLoopService service = new DefaultAgentLoopService(
+                usageGateway("{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}", 10, 5, 15),
+                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                runRepository,
+                new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                null,
+                traceRecorder,
+                new DefaultBudgetGuard(properties));
+
+        service.ask(AgentQuestion.builder()
+                        .runId("usage-run")
+                        .question("累计 usage")
+                        .maxSteps(3)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(Long.valueOf(15L), runRepository.find("usage-run").orElseThrow().getUsedTokens());
+        assertTrue(traceRecorder.timeline("usage-run").stream()
+                .anyMatch(event -> "model_usage".equals(event.getEventType())
+                        && event.getTokenUsage() != null
+                        && Integer.valueOf(15).equals(event.getTokenUsage().getTotalTokens())));
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
@@ -632,6 +795,46 @@ public class DefaultAgentLoopServiceTest {
                 prompts.add(prompt.getMessage());
                 int current = Math.min(index.getAndIncrement(), outputs.length - 1);
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
+            }
+        };
+    }
+
+    private ModelGateway usageGateway(String output, int promptTokens, int completionTokens, int totalTokens) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                return Mono.just(ModelChatResult.builder()
+                        .content(output)
+                        .finishReason("stop")
+                        .usage(TokenUsage.builder()
+                                .promptTokens(promptTokens)
+                                .completionTokens(completionTokens)
+                                .totalTokens(totalTokens)
+                                .build())
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway countingGateway(AtomicInteger calls) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"不应调用。\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
             }
         };
     }

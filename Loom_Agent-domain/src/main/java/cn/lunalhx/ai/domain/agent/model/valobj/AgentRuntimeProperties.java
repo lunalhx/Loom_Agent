@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.valobj;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,5 +31,18 @@ public class AgentRuntimeProperties {
     private Integer subAgentMaxDepth = 1;
     private Long subAgentTimeoutMs = 60000L;
     private Integer subAgentSummaryMaxChars = 12000;
+    private BudgetProperties budget = new BudgetProperties();
+
+    @Data
+    public static class BudgetProperties {
+
+        private Boolean enabled = false;
+        private Integer maxTotalTokens = 200000;
+        private Integer reservedOutputTokens = 2048;
+        private Integer estimatedCharsPerToken = 4;
+        private BigDecimal inputPricePer1k = BigDecimal.ZERO;
+        private BigDecimal outputPricePer1k = BigDecimal.ZERO;
+
+    }
 
 }

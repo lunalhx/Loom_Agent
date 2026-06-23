@@ -5,6 +5,7 @@ public enum AgentRunStatus {
     RUNNING,
     WAITING_APPROVAL,
     COMPLETED,
-    FAILED
+    FAILED,
+    BUDGET_EXCEEDED
 
 }

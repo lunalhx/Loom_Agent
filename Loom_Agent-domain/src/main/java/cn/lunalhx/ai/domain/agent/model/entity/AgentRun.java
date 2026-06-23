@@ -8,6 +8,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Data
@@ -32,6 +33,9 @@ public class AgentRun {
     private Integer step;
     private Long checkpointVersion;
     private String summaryJson;
+    private String blockedReason;
+    private Long usedTokens;
+    private BigDecimal estimatedCost;
     private Instant createdAt;
     private Instant updatedAt;
 

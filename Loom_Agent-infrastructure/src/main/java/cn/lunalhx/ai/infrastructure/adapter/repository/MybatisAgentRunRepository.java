@@ -58,6 +58,9 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
         po.setStep(run.getStep());
         po.setCheckpointVersion(run.getCheckpointVersion());
         po.setSummaryJson(run.getSummaryJson());
+        po.setBlockedReason(run.getBlockedReason());
+        po.setUsedTokens(run.getUsedTokens());
+        po.setEstimatedCost(run.getEstimatedCost());
         return po;
     }
 
@@ -79,6 +82,9 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .step(po.getStep())
                 .checkpointVersion(po.getCheckpointVersion())
                 .summaryJson(po.getSummaryJson())
+                .blockedReason(po.getBlockedReason())
+                .usedTokens(po.getUsedTokens())
+                .estimatedCost(po.getEstimatedCost())
                 .createdAt(toInstant(po.getCreateTime()))
                 .updatedAt(toInstant(po.getUpdateTime()))
                 .build();

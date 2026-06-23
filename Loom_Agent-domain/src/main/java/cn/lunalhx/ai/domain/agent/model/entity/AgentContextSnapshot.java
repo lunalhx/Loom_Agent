@@ -10,7 +10,10 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.lang3.StringUtils;
 
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +24,8 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AgentContextSnapshot {
+
+    private static final int LARGE_TEXT_LIMIT = 4000;
 
     private String runId;
     private String parentRunId;
@@ -58,6 +63,15 @@ public class AgentContextSnapshot {
     private Boolean unsafeResumeRequired;
     private String pendingApprovalId;
     private Boolean subAgentSpawnAllowed;
+    private String traceId;
+    private String currentSpanId;
+    private String parentSpanId;
+    private Long traceSequenceNo;
+    private Long usedPromptTokens;
+    private Long usedCompletionTokens;
+    private Long usedTokens;
+    private BigDecimal estimatedCost;
+    private String budgetBlockedReason;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -81,8 +95,8 @@ public class AgentContextSnapshot {
                 .toolSpecs(new ArrayList<>(context.getToolSpecs()))
                 .history(new ArrayList<>(context.getHistory()))
                 .dynamicTextEntries(context.getDynamicText().entries())
-                .currentPrompt(context.getCurrentPrompt())
-                .modelOutput(context.getModelOutput())
+                .currentPrompt(summarizeLargeText(context.getCurrentPrompt()))
+                .modelOutput(summarizeLargeText(context.getModelOutput()))
                 .decision(context.getDecision())
                 .toolResult(context.getToolResult())
                 .finalAnswer(context.getFinalAnswer())
@@ -97,7 +111,25 @@ public class AgentContextSnapshot {
                 .unsafeResumeRequired(context.isUnsafeResumeRequired())
                 .pendingApprovalId(context.getPendingApprovalId())
                 .subAgentSpawnAllowed(context.isSubAgentSpawnAllowed())
+                .traceId(context.getTraceId())
+                .currentSpanId(context.getCurrentSpanId())
+                .parentSpanId(context.getParentSpanId())
+                .traceSequenceNo(context.getTraceSequenceNo())
+                .usedPromptTokens(context.getUsedPromptTokens())
+                .usedCompletionTokens(context.getUsedCompletionTokens())
+                .usedTokens(context.getUsedTokens())
+                .estimatedCost(context.getEstimatedCost())
+                .budgetBlockedReason(context.getBudgetBlockedReason())
                 .build();
+    }
+
+    private static String summarizeLargeText(String text) {
+        if (StringUtils.length(text) <= LARGE_TEXT_LIMIT) {
+            return text;
+        }
+        return StringUtils.abbreviate(text, LARGE_TEXT_LIMIT)
+                + "\n[checkpoint_truncated length=" + text.length()
+                + " sha256=" + DigestUtils.sha256Hex(text) + "]";
     }
 
     public AgentContext restore() {
@@ -142,6 +174,15 @@ public class AgentContextSnapshot {
         context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
         context.setPendingApprovalId(pendingApprovalId);
         context.setSubAgentSpawnAllowed(Boolean.TRUE.equals(subAgentSpawnAllowed));
+        context.setTraceId(traceId);
+        context.setCurrentSpanId(currentSpanId);
+        context.setParentSpanId(parentSpanId);
+        context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
+        context.setUsedPromptTokens(usedPromptTokens == null ? 0L : usedPromptTokens);
+        context.setUsedCompletionTokens(usedCompletionTokens == null ? 0L : usedCompletionTokens);
+        context.setUsedTokens(usedTokens == null ? 0L : usedTokens);
+        context.setEstimatedCost(estimatedCost == null ? BigDecimal.ZERO : estimatedCost);
+        context.setBudgetBlockedReason(budgetBlockedReason);
         return context;
     }
 

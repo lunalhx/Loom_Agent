@@ -1,36 +1,56 @@
 package cn.lunalhx.ai.domain.agent.flow.node;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
+import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
+import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 public class ReplanNode extends AbstractAgentNode {
 
     private final ModelGateway modelGateway;
     private final AgentRuntimeProperties properties;
     private final ObjectMapper objectMapper;
+    private final TraceRecorder traceRecorder;
+    private final BudgetGuard budgetGuard;
 
     public ReplanNode(ModelGateway modelGateway, AgentRuntimeProperties properties, ObjectMapper objectMapper) {
+        this(modelGateway, properties, objectMapper, null, null);
+    }
+
+    public ReplanNode(ModelGateway modelGateway,
+                      AgentRuntimeProperties properties,
+                      ObjectMapper objectMapper,
+                      TraceRecorder traceRecorder,
+                      BudgetGuard budgetGuard) {
         super(AgentNodeNames.REPLAN, List.of("plan", "replanReason", "history"));
         this.modelGateway = modelGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.traceRecorder = traceRecorder;
+        this.budgetGuard = budgetGuard;
     }
 
     @Override
@@ -39,7 +59,15 @@ public class ReplanNode extends AbstractAgentNode {
             context.setPlan(AgentPlan.forQuestion(context.getQuestion()));
         }
         ReplanReason reason = context.getReplanReason() == null ? ReplanReason.TOOL_FAILURE : context.getReplanReason();
-        boolean modelUpdated = applyModelPlanDelta(context, reason);
+        String prompt = renderReplanPrompt(context, reason);
+        if (budgetGuard != null) {
+            BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), prompt);
+            if (!check.isAllowed()) {
+                blockForBudget(context, check);
+                return NodeResult.next(AgentNodeNames.FAIL, List.of());
+            }
+        }
+        boolean modelUpdated = applyModelPlanDelta(context, prompt);
         if (!modelUpdated) {
             context.getPlan().addReplanItem(fallbackItem(reason), "replan:" + reason.name());
         }
@@ -62,20 +90,25 @@ public class ReplanNode extends AbstractAgentNode {
         return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(replanStarted, planUpdated));
     }
 
-    private boolean applyModelPlanDelta(AgentContext context, ReplanReason reason) {
+    private boolean applyModelPlanDelta(AgentContext context, String promptText) {
         try {
             ChatPrompt prompt = ChatPrompt.builder()
                     .requestId(context.getRequestId())
                     .conversationId(context.getConversationId())
-                    .message(renderReplanPrompt(context, reason))
+                    .message(promptText)
+                    .capability(ModelCapabilities.COMPLETE_REPLAN)
                     .outputFormat(OutputFormat.JSON_OBJECT)
                     .build();
-            ModelChatResult result = modelGateway.complete(prompt)
-                    .timeout(Duration.ofMillis(properties.getStepTimeoutMs()))
-                    .block(Duration.ofMillis(properties.getStepTimeoutMs() + 1000L));
+            ModelChatResult result;
+            try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+                result = modelGateway.complete(prompt)
+                        .timeout(Duration.ofMillis(properties.getStepTimeoutMs()))
+                        .block(Duration.ofMillis(properties.getStepTimeoutMs() + 1000L));
+            }
             if (result == null || StringUtils.isBlank(result.getContent())) {
                 return false;
             }
+            recordUsage(context, result);
             JsonNode root = objectMapper.readTree(stripMarkdownFence(result.getContent()));
             JsonNode todos = root.path("todos");
             if (!todos.isArray()) {
@@ -118,6 +151,25 @@ public class ReplanNode extends AbstractAgentNode {
             text = text.replaceFirst("\\s*```$", "");
         }
         return text;
+    }
+
+    private void recordUsage(AgentContext context, ModelChatResult result) {
+        TraceCost cost = budgetGuard == null ? null : budgetGuard.recordModelUsage(context, result.getUsage());
+        if (traceRecorder != null) {
+            Map<String, Object> metadata = result.getUsage() == null
+                    ? Map.of("usageMissing", true)
+                    : Map.of("finishReason", StringUtils.defaultString(result.getFinishReason()));
+            traceRecorder.recordModelUsage(context, name(), result.getUsage(), cost, metadata);
+        }
+    }
+
+    private void blockForBudget(AgentContext context, BudgetCheckResult check) {
+        String reason = "budget_exceeded: usedTokens=" + check.getUsedTokens()
+                + ", estimatedInputTokens=" + check.getEstimatedInputTokens()
+                + ", reservedOutputTokens=" + check.getReservedOutputTokens()
+                + ", maxTotalTokens=" + check.getMaxTotalTokens();
+        context.setBudgetBlockedReason(reason);
+        fail(context, AgentStopReason.BUDGET_EXCEEDED, "budget_exceeded", reason);
     }
 
 }

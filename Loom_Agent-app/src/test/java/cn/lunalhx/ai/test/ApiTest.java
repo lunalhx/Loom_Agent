@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScrapeEndpoint;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
@@ -31,6 +32,7 @@ public class ApiTest {
     @Test
     public void test() {
         assertNotNull(applicationContext);
+        assertNotNull(applicationContext.getBean(PrometheusScrapeEndpoint.class));
         log.info("测试完成");
     }
 

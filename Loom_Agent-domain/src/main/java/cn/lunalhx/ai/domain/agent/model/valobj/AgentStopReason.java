@@ -7,6 +7,7 @@ public enum AgentStopReason {
     PARSE_ERROR,
     TOOL_ERROR,
     TIMEOUT,
-    MODEL_ERROR
+    MODEL_ERROR,
+    BUDGET_EXCEEDED
 
 }

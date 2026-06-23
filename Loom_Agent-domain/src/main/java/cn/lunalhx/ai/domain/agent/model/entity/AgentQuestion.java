@@ -26,5 +26,6 @@ public class AgentQuestion {
     private Integer maxSteps;
     private Boolean includeTrace;
     private Boolean subAgentSpawnAllowed;
+    private String traceId;
 
 }

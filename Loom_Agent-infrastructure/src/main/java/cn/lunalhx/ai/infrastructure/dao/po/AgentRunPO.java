@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -24,6 +25,9 @@ public class AgentRunPO {
     private Integer step;
     private Long checkpointVersion;
     private String summaryJson;
+    private String blockedReason;
+    private Long usedTokens;
+    private BigDecimal estimatedCost;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

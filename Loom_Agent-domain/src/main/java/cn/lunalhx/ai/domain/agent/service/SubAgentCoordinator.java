@@ -3,6 +3,9 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -43,6 +46,9 @@ public class SubAgentCoordinator {
     private final AgentRuntimeProperties properties;
     private final ObjectMapper objectMapper;
     private final Executor executor;
+    private final TraceRecorder traceRecorder;
+    private final BudgetGuard budgetGuard;
+    private final AgentMetrics agentMetrics;
 
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
@@ -53,6 +59,37 @@ public class SubAgentCoordinator {
                                AgentRuntimeProperties properties,
                                ObjectMapper objectMapper,
                                Executor executor) {
+        this(modelGateway, toolRegistryFactory, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, new InMemoryTraceRecorder(), new DefaultBudgetGuard(properties), new NoopAgentMetrics());
+    }
+
+    public SubAgentCoordinator(ModelGateway modelGateway,
+                               RoleToolRegistryFactory toolRegistryFactory,
+                               ApprovalStore approvalStore,
+                               AgentWorkspaceResolver workspaceResolver,
+                               AgentRunRepository runRepository,
+                               AgentCheckpointRepository checkpointRepository,
+                               AgentRuntimeProperties properties,
+                               ObjectMapper objectMapper,
+                               Executor executor,
+                               TraceRecorder traceRecorder,
+                               BudgetGuard budgetGuard) {
+        this(modelGateway, toolRegistryFactory, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, traceRecorder, budgetGuard, new NoopAgentMetrics());
+    }
+
+    public SubAgentCoordinator(ModelGateway modelGateway,
+                               RoleToolRegistryFactory toolRegistryFactory,
+                               ApprovalStore approvalStore,
+                               AgentWorkspaceResolver workspaceResolver,
+                               AgentRunRepository runRepository,
+                               AgentCheckpointRepository checkpointRepository,
+                               AgentRuntimeProperties properties,
+                               ObjectMapper objectMapper,
+                               Executor executor,
+                               TraceRecorder traceRecorder,
+                               BudgetGuard budgetGuard,
+                               AgentMetrics agentMetrics) {
         this.modelGateway = modelGateway;
         this.toolRegistryFactory = toolRegistryFactory;
         this.approvalStore = approvalStore;
@@ -62,6 +99,9 @@ public class SubAgentCoordinator {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executor = executor;
+        this.traceRecorder = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
+        this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
+        this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
     }
 
     public SubAgentDispatchResult dispatch(AgentContext parent) {
@@ -171,7 +211,10 @@ public class SubAgentCoordinator {
                     properties,
                     objectMapper,
                     Runnable::run,
-                    null);
+                    null,
+                    traceRecorder,
+                    budgetGuard,
+                    agentMetrics);
             List<AgentEvent> events = childService.ask(childQuestion(parent, task, ordinal, childRunId, role))
                     .onErrorResume(error -> Flux.just(AgentEvent.builder()
                             .type(AgentEventType.ERROR)
@@ -225,6 +268,7 @@ public class SubAgentCoordinator {
                 .rootRunId(rootRunId)
                 .requestId(UUID.randomUUID().toString())
                 .conversationId(parent.getConversationId())
+                .traceId(parent.getTraceId())
                 .agentRole(role)
                 .agentDepth(parent.getAgentDepth() + 1)
                 .childOrdinal(ordinal)

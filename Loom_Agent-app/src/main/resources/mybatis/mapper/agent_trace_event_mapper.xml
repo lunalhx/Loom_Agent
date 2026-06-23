@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao">
+
+    <resultMap id="AgentTraceEventMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO">
+        <id column="id" property="id"/>
+        <result column="trace_id" property="traceId"/>
+        <result column="root_run_id" property="rootRunId"/>
+        <result column="run_id" property="runId"/>
+        <result column="parent_run_id" property="parentRunId"/>
+        <result column="span_id" property="spanId"/>
+        <result column="parent_span_id" property="parentSpanId"/>
+        <result column="sequence_no" property="sequenceNo"/>
+        <result column="event_type" property="eventType"/>
+        <result column="node" property="node"/>
+        <result column="status" property="status"/>
+        <result column="duration_ms" property="durationMs"/>
+        <result column="summary" property="summary"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="token_usage_json" property="tokenUsageJson"/>
+        <result column="cost_json" property="costJson"/>
+        <result column="metadata_json" property="metadataJson"/>
+        <result column="replayable" property="replayable"/>
+        <result column="sensitive_redacted" property="sensitiveRedacted"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO agent_trace_event
+        (trace_id, root_run_id, run_id, parent_run_id, span_id, parent_span_id, sequence_no,
+         event_type, node, status, duration_ms, summary, error_code, error_message,
+         token_usage_json, cost_json, metadata_json, replayable, sensitive_redacted)
+        VALUES
+        (#{traceId}, #{rootRunId}, #{runId}, #{parentRunId}, #{spanId}, #{parentSpanId}, #{sequenceNo},
+         #{eventType}, #{node}, #{status}, #{durationMs}, #{summary}, #{errorCode}, #{errorMessage},
+         #{tokenUsageJson}, #{costJson}, #{metadataJson}, #{replayable}, #{sensitiveRedacted})
+    </insert>
+
+    <select id="selectMaxSequenceNo" resultType="java.lang.Long">
+        SELECT MAX(sequence_no) FROM agent_trace_event WHERE run_id = #{runId}
+    </select>
+
+    <select id="selectByRunId" resultMap="AgentTraceEventMap">
+        SELECT * FROM agent_trace_event
+        WHERE run_id = #{runId}
+        ORDER BY sequence_no ASC, id ASC
+    </select>
+
+    <select id="selectByTraceId" resultMap="AgentTraceEventMap">
+        SELECT * FROM agent_trace_event
+        WHERE trace_id = #{traceId}
+        ORDER BY create_time ASC, run_id ASC, sequence_no ASC, id ASC
+    </select>
+
+</mapper>

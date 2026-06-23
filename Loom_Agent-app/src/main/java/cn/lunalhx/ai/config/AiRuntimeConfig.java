@@ -1,15 +1,22 @@
 package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.DefaultReplayService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
+import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
@@ -22,10 +29,14 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisTraceRecorder;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
+import cn.lunalhx.ai.infrastructure.metrics.MicrometerAgentMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -90,6 +101,28 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public TraceRecorder traceRecorder(ObjectProvider<AgentTraceEventDao> traceEventDaoProvider,
+                                       ObjectMapper objectMapper) {
+        AgentTraceEventDao traceEventDao = traceEventDaoProvider.getIfAvailable();
+        return traceEventDao == null ? new InMemoryTraceRecorder() : new MybatisTraceRecorder(traceEventDao, objectMapper);
+    }
+
+    @Bean
+    public BudgetGuard budgetGuard(AgentRuntimeProperties agentRuntimeProperties) {
+        return new DefaultBudgetGuard(agentRuntimeProperties);
+    }
+
+    @Bean
+    public ReplayService replayService(TraceRecorder traceRecorder) {
+        return new DefaultReplayService(traceRecorder);
+    }
+
+    @Bean
+    public AgentMetrics agentMetrics(MeterRegistry meterRegistry) {
+        return new MicrometerAgentMetrics(meterRegistry);
+    }
+
+    @Bean
     public AgentWorkspaceResolver agentWorkspaceResolver(AgentRuntimeProperties agentRuntimeProperties) {
         return new AgentWorkspaceResolver(agentRuntimeProperties);
     }
@@ -115,7 +148,10 @@ public class AiRuntimeConfig {
                                              AgentRuntimeProperties agentRuntimeProperties,
                                              ObjectMapper objectMapper,
                                              ThreadPoolExecutor threadPoolExecutor,
-                                             SubAgentCoordinator subAgentCoordinator) {
+                                             SubAgentCoordinator subAgentCoordinator,
+                                             TraceRecorder traceRecorder,
+                                             BudgetGuard budgetGuard,
+                                             AgentMetrics agentMetrics) {
         return new DefaultAgentLoopService(
                 modelGateway,
                 toolRegistry,
@@ -126,7 +162,10 @@ public class AiRuntimeConfig {
                 agentRuntimeProperties,
                 objectMapper,
                 threadPoolExecutor,
-                subAgentCoordinator);
+                subAgentCoordinator,
+                traceRecorder,
+                budgetGuard,
+                agentMetrics);
     }
 
     @Bean
@@ -138,7 +177,10 @@ public class AiRuntimeConfig {
                                                    AgentCheckpointRepository agentCheckpointRepository,
                                                    AgentRuntimeProperties agentRuntimeProperties,
                                                    ObjectMapper objectMapper,
-                                                   ThreadPoolExecutor threadPoolExecutor) {
+                                                   ThreadPoolExecutor threadPoolExecutor,
+                                                   TraceRecorder traceRecorder,
+                                                   BudgetGuard budgetGuard,
+                                                   AgentMetrics agentMetrics) {
         return new SubAgentCoordinator(
                 modelGateway,
                 roleToolRegistryFactory,
@@ -148,7 +190,10 @@ public class AiRuntimeConfig {
                 agentCheckpointRepository,
                 agentRuntimeProperties,
                 objectMapper,
-                threadPoolExecutor);
+                threadPoolExecutor,
+                traceRecorder,
+                budgetGuard,
+                agentMetrics);
     }
 
     @Bean
@@ -204,10 +249,28 @@ public class AiRuntimeConfig {
             if (threadPoolExecutor.getMaximumPoolSize() < agentRuntimeProperties.getSubAgentMaxConcurrency() + 1) {
                 throw new IllegalStateException("线程池最大线程数必须大于 AGENT_SUB_AGENT_MAX_CONCURRENCY");
             }
+            if (Boolean.TRUE.equals(agentRuntimeProperties.getBudget().getEnabled())) {
+                requirePositive(agentRuntimeProperties.getBudget().getMaxTotalTokens(), "AGENT_BUDGET_MAX_TOTAL_TOKENS");
+                requirePositive(agentRuntimeProperties.getBudget().getEstimatedCharsPerToken(), "AGENT_BUDGET_ESTIMATED_CHARS_PER_TOKEN");
+            }
+            if (Boolean.TRUE.equals(modelRuntimeProperties.getResilience().getEnabled())) {
+                requirePositive(modelRuntimeProperties.getResilience().getRetryMaxAttempts(), "AI_RESILIENCE_RETRY_MAX_ATTEMPTS");
+                requirePositive(modelRuntimeProperties.getResilience().getRetryBackoffInitialMs(), "AI_RESILIENCE_RETRY_BACKOFF_INITIAL_MS");
+                requirePositive(modelRuntimeProperties.getResilience().getRetryBackoffMaxMs(), "AI_RESILIENCE_RETRY_BACKOFF_MAX_MS");
+                requirePositive(modelRuntimeProperties.getResilience().getCircuitSlidingWindowSize(), "AI_RESILIENCE_CIRCUIT_SLIDING_WINDOW_SIZE");
+                requirePositive(modelRuntimeProperties.getResilience().getCircuitOpenStateWaitMs(), "AI_RESILIENCE_CIRCUIT_OPEN_STATE_WAIT_MS");
+                requirePositive(modelRuntimeProperties.getResilience().getCircuitHalfOpenPermittedCalls(), "AI_RESILIENCE_CIRCUIT_HALF_OPEN_PERMITTED_CALLS");
+            }
         };
     }
 
     private void requirePositive(Long value, String name) {
+        if (value == null || value <= 0) {
+            throw new IllegalStateException(name + " 必须大于 0");
+        }
+    }
+
+    private void requirePositive(Integer value, String name) {
         if (value == null || value <= 0) {
             throw new IllegalStateException(name + " 必须大于 0");
         }

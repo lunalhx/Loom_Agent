@@ -56,6 +56,17 @@ loom:
     retry-backoff-initial-ms: ${AI_RETRY_BACKOFF_INITIAL_MS:300}
     retry-backoff-max-ms: ${AI_RETRY_BACKOFF_MAX_MS:3000}
     max-message-length: ${AI_MAX_MESSAGE_LENGTH:20000}
+    resilience:
+      enabled: ${AI_RESILIENCE_ENABLED:true}
+      retry-max-attempts: ${AI_RESILIENCE_RETRY_MAX_ATTEMPTS:3}
+      retry-backoff-initial-ms: ${AI_RESILIENCE_RETRY_BACKOFF_INITIAL_MS:300}
+      retry-backoff-max-ms: ${AI_RESILIENCE_RETRY_BACKOFF_MAX_MS:3000}
+      circuit-failure-rate-threshold: ${AI_RESILIENCE_CIRCUIT_FAILURE_RATE_THRESHOLD:50}
+      circuit-slow-call-rate-threshold: ${AI_RESILIENCE_CIRCUIT_SLOW_CALL_RATE_THRESHOLD:50}
+      circuit-slow-call-duration-ms: ${AI_RESILIENCE_CIRCUIT_SLOW_CALL_DURATION_MS:30000}
+      circuit-sliding-window-size: ${AI_RESILIENCE_CIRCUIT_SLIDING_WINDOW_SIZE:10}
+      circuit-open-state-wait-ms: ${AI_RESILIENCE_CIRCUIT_OPEN_STATE_WAIT_MS:30000}
+      circuit-half-open-permitted-calls: ${AI_RESILIENCE_CIRCUIT_HALF_OPEN_PERMITTED_CALLS:2}
     allowed-models:
       - deepseek-v4-flash
       - deepseek-v4-pro
@@ -92,3 +103,18 @@ logging:
   level:
     root: info
   config: classpath:logback-spring.xml
+
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      access: read-only
+    prometheus:
+      access: read-only

@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -52,5 +53,19 @@ public class AgentContext {
     private boolean unsafeResumeRequired;
     private String pendingApprovalId;
     private boolean subAgentSpawnAllowed;
+    private String traceId;
+    private String currentSpanId;
+    private String parentSpanId;
+    private long traceSequenceNo;
+    private long usedPromptTokens;
+    private long usedCompletionTokens;
+    private long usedTokens;
+    private BigDecimal estimatedCost = BigDecimal.ZERO;
+    private String budgetBlockedReason;
+
+    public long nextTraceSequenceNo() {
+        traceSequenceNo++;
+        return traceSequenceNo;
+    }
 
 }

@@ -16,6 +16,7 @@ import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -53,10 +54,14 @@ public class ChatStreamController {
             return emitter;
         }
 
-        Disposable disposable = chatStreamService.stream(toPrompt(request))
-                .subscribe(event -> send(emitter, event),
+        String requestId = UUID.randomUUID().toString();
+        MDC.put("request_id", requestId);
+        MDC.put("conversation_id", StringUtils.defaultString(request.getConversationId()));
+        Disposable disposable = chatStreamService.stream(toPrompt(request, requestId))
+                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
                         throwable -> sendAndComplete(emitter, completed, fallbackError(request, throwable)),
                         () -> complete(emitter, completed));
+        MDC.clear();
 
         emitter.onCompletion(disposable::dispose);
         emitter.onTimeout(() -> {
@@ -98,9 +103,10 @@ public class ChatStreamController {
                 .build();
     }
 
-    private ChatPrompt toPrompt(ChatStreamRequest request) {
+    private ChatPrompt toPrompt(ChatStreamRequest request, String requestId) {
         ResponseFormat responseFormat = request.getResponseFormat() == null ? ResponseFormat.TEXT : request.getResponseFormat();
         return ChatPrompt.builder()
+                .requestId(requestId)
                 .conversationId(request.getConversationId())
                 .message(StringUtils.trim(request.getMessage()))
                 .systemPrompt(request.getSystemPrompt())
@@ -109,6 +115,18 @@ public class ChatStreamController {
                 .maxTokens(request.getMaxTokens())
                 .outputFormat(OutputFormat.valueOf(responseFormat.name()))
                 .build();
+    }
+
+    private void withMdc(StreamEvent event, Runnable runnable) {
+        if (event != null) {
+            MDC.put("request_id", StringUtils.defaultString(event.getRequestId()));
+            MDC.put("conversation_id", StringUtils.defaultString(event.getConversationId()));
+        }
+        try {
+            runnable.run();
+        } finally {
+            MDC.clear();
+        }
     }
 
     private void send(SseEmitter emitter, StreamEvent event) {

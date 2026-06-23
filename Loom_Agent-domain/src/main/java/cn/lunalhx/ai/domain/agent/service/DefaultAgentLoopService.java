@@ -3,6 +3,9 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
@@ -31,6 +34,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
@@ -41,6 +45,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.MDC;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
@@ -62,6 +67,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final AgentHookRegistry hookRegistry;
     private final Executor executor;
     private final SubAgentCoordinator subAgentCoordinator;
+    private final TraceRecorder traceRecorder;
+    private final BudgetGuard budgetGuard;
+    private final AgentMetrics agentMetrics;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
 
@@ -118,25 +126,62 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    ObjectMapper objectMapper,
                                    Executor executor,
                                    SubAgentCoordinator subAgentCoordinator) {
+        this(modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, subAgentCoordinator,
+                new InMemoryTraceRecorder(), new DefaultBudgetGuard(properties), new NoopAgentMetrics());
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentWorkspaceResolver workspaceResolver,
+                                   AgentRunRepository runRepository,
+                                   AgentCheckpointRepository checkpointRepository,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor,
+                                   SubAgentCoordinator subAgentCoordinator,
+                                   TraceRecorder traceRecorder,
+                                   BudgetGuard budgetGuard) {
+        this(modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, subAgentCoordinator, traceRecorder, budgetGuard, new NoopAgentMetrics());
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentWorkspaceResolver workspaceResolver,
+                                   AgentRunRepository runRepository,
+                                   AgentCheckpointRepository checkpointRepository,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor,
+                                   SubAgentCoordinator subAgentCoordinator,
+                                   TraceRecorder traceRecorder,
+                                   BudgetGuard budgetGuard,
+                                   AgentMetrics agentMetrics) {
         this.properties = properties;
         this.approvalStore = approvalStore;
         this.workspaceResolver = workspaceResolver;
         this.checkpointRepository = checkpointRepository;
         this.executor = executor;
         this.subAgentCoordinator = subAgentCoordinator;
+        this.traceRecorder = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
+        this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
+        this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
         this.toolSpecs = toolRegistry.specs();
         this.hookRegistry = new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
         List<AgentNode> nodeList = new java.util.ArrayList<>(List.of(
                 new StartNode(),
                 new PlannerNode(),
                 new RenderPromptNode(),
-                new ModelCallNode(modelGateway, properties),
+                new ModelCallNode(modelGateway, properties, this.traceRecorder, this.budgetGuard),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ApprovalGateNode(toolRegistry, approvalStore, properties),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry),
                 new ObservationNode(),
                 new ReplanGuardNode(),
-                new ReplanNode(modelGateway, properties, objectMapper),
+                new ReplanNode(modelGateway, properties, objectMapper, this.traceRecorder, this.budgetGuard),
                 new FinalAnswerNode(),
                 new FailNode()));
         if (subAgentCoordinator != null) {
@@ -256,7 +301,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
             }
             String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.RENDER_PROMPT);
-            if (context.isUnsafeResumeRequired()) {
+            if (context.isUnsafeResumeRequired() || requiresResumeReplan(currentNode)) {
+                context.setUnsafeResumeRequired(true);
                 currentNode = AgentNodeNames.REPLAN_GUARD;
             }
             runLoop(context, currentNode, sink);
@@ -280,6 +326,12 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 node = nodes.get(AgentNodeNames.FAIL);
             }
 
+            String parentSpanId = context.getCurrentSpanId();
+            String spanId = traceRecorder.recordNodeStart(context, node, parentSpanId);
+            context.setParentSpanId(parentSpanId);
+            context.setCurrentSpanId(spanId);
+            long startedAt = System.currentTimeMillis();
+            putNodeMdc(context, node.name());
             emit(sink, hookRegistry.trigger(AgentHookEvent.BEFORE_NODE, AgentHookContext.builder()
                     .agentContext(context)
                     .node(node.name())
@@ -289,6 +341,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
             NodeResult result = node.apply(context);
             emit(sink, result.getEvents());
             String nextNode = result.isTerminal() ? node.name() : result.getNextNode();
+            long durationMs = System.currentTimeMillis() - startedAt;
+            String status = nodeStatus(context, result);
+            traceRecorder.recordNodeEnd(context, node, spanId, status,
+                    durationMs, "nextNode=" + nextNode, null);
+            agentMetrics.recordNodeDuration(node.name(), status, durationMs);
             emit(sink, hookRegistry.trigger(AgentHookEvent.AFTER_NODE, AgentHookContext.builder()
                     .agentContext(context)
                     .node(node.name())
@@ -296,16 +353,25 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     .reason("after_node:" + node.name())
                     .build()));
             if (result.isTerminal()) {
+                traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
+                agentMetrics.recordRun(runKind(context), stopStatus(context), context.getErrorCode());
                 emit(sink, hookRegistry.trigger(AgentHookEvent.STOP, AgentHookContext.builder()
                         .agentContext(context)
                         .node(node.name())
                         .reason("stop:" + node.name())
                         .build()));
                 sink.complete();
+                MDC.clear();
                 return;
             }
+            MDC.clear();
             currentNode = nextNode;
         }
+    }
+
+    private boolean requiresResumeReplan(String currentNode) {
+        return AgentNodeNames.APPROVAL_GATE.equals(currentNode)
+                || AgentNodeNames.TOOL_DISPATCH.equals(currentNode);
     }
 
     private AgentContext toContext(AgentQuestion question) {
@@ -315,6 +381,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         context.setRunId(runId);
         context.setParentRunId(question.getParentRunId());
         context.setRootRunId(StringUtils.defaultIfBlank(question.getRootRunId(), runId));
+        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
         context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
         context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
         context.setAgentRole(question.getAgentRole());
@@ -422,6 +489,45 @@ public class DefaultAgentLoopService implements AgentLoopService {
         context.setStopReason(reason);
         context.setErrorCode(code);
         context.setErrorMessage(message);
+    }
+
+    private String nodeStatus(AgentContext context, NodeResult result) {
+        if (StringUtils.isNotBlank(context.getErrorCode())) {
+            return "failed";
+        }
+        if (result != null && result.isTerminal()) {
+            return "terminal";
+        }
+        return "success";
+    }
+
+    private String stopStatus(AgentContext context) {
+        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+            return "budget_exceeded";
+        }
+        return StringUtils.isBlank(context.getErrorCode()) ? "completed" : "failed";
+    }
+
+    private String stopSummary(AgentContext context) {
+        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+            return context.getBudgetBlockedReason();
+        }
+        if (StringUtils.isNotBlank(context.getFinalAnswer())) {
+            return StringUtils.abbreviate(context.getFinalAnswer(), 500);
+        }
+        return StringUtils.defaultString(context.getErrorMessage());
+    }
+
+    private String runKind(AgentContext context) {
+        return StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
+    }
+
+    private void putNodeMdc(AgentContext context, String node) {
+        MDC.put("trace_id", StringUtils.defaultString(context.getTraceId()));
+        MDC.put("run_id", StringUtils.defaultString(context.getRunId()));
+        MDC.put("request_id", StringUtils.defaultString(context.getRequestId()));
+        MDC.put("conversation_id", StringUtils.defaultString(context.getConversationId()));
+        MDC.put("node", StringUtils.defaultString(node));
     }
 
     private boolean isTotalTimeout(AgentContext context) {

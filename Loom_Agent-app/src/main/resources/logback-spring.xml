@@ -19,7 +19,7 @@
             <level>info</level>
         </filter>
         <encoder>
-            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
+            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0} trace_id=%X{trace_id} run_id=%X{run_id} request_id=%X{request_id} conversation_id=%X{conversation_id} node=%X{node} %m%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
@@ -31,7 +31,7 @@
         <file>./data/log/log_info.log</file>
         <!--日志文件输出格式-->
         <encoder>
-            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
+            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0} trace_id=%X{trace_id} run_id=%X{run_id} request_id=%X{request_id} conversation_id=%X{conversation_id} node=%X{node} %m%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
         <!-- 日志记录器的滚动策略，按日期，按大小记录 -->
@@ -53,7 +53,7 @@
         <file>./data/log/log_error.log</file>
         <!--日志文件输出格式-->
         <encoder>
-            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
+            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0} trace_id=%X{trace_id} run_id=%X{run_id} request_id=%X{request_id} conversation_id=%X{conversation_id} node=%X{node} %m%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
         <!-- 日志记录器的滚动策略，按日期，按大小记录 -->
