@@ -6,15 +6,21 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
+import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.DefaultReplayService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.InMemoryContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryContextBlobStore;
 import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
@@ -29,7 +35,10 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisTraceRecorder;
+import cn.lunalhx.ai.infrastructure.context.LocalFileContextBlobStore;
+import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
@@ -108,6 +117,35 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public ContextArtifactRepository contextArtifactRepository(ObjectProvider<AgentContextArtifactDao> artifactDaoProvider) {
+        AgentContextArtifactDao artifactDao = artifactDaoProvider.getIfAvailable();
+        return artifactDao == null ? new InMemoryContextArtifactRepository() : new MybatisContextArtifactRepository(artifactDao);
+    }
+
+    @Bean
+    public ContextBlobStore contextBlobStore(AgentRuntimeProperties agentRuntimeProperties,
+                                             ObjectProvider<AgentContextArtifactDao> artifactDaoProvider) {
+        AgentContextArtifactDao artifactDao = artifactDaoProvider.getIfAvailable();
+        if (artifactDao == null) {
+            return new InMemoryContextBlobStore();
+        }
+        return new LocalFileContextBlobStore(agentRuntimeProperties.getContext().getStorageRoot());
+    }
+
+    @Bean
+    public ContextWindowManager contextWindowManager(AgentRuntimeProperties agentRuntimeProperties,
+                                                     ContextArtifactRepository contextArtifactRepository,
+                                                     ContextBlobStore contextBlobStore) {
+        return new ContextWindowManager(agentRuntimeProperties, contextArtifactRepository, contextBlobStore);
+    }
+
+    @Bean
+    public ContextRecallTool contextRecallTool(ContextArtifactRepository contextArtifactRepository,
+                                               ContextBlobStore contextBlobStore) {
+        return new ContextRecallTool(contextArtifactRepository, contextBlobStore);
+    }
+
+    @Bean
     public BudgetGuard budgetGuard(AgentRuntimeProperties agentRuntimeProperties) {
         return new DefaultBudgetGuard(agentRuntimeProperties);
     }
@@ -151,7 +189,8 @@ public class AiRuntimeConfig {
                                              SubAgentCoordinator subAgentCoordinator,
                                              TraceRecorder traceRecorder,
                                              BudgetGuard budgetGuard,
-                                             AgentMetrics agentMetrics) {
+                                             AgentMetrics agentMetrics,
+                                             ContextWindowManager contextWindowManager) {
         return new DefaultAgentLoopService(
                 modelGateway,
                 toolRegistry,
@@ -165,7 +204,8 @@ public class AiRuntimeConfig {
                 subAgentCoordinator,
                 traceRecorder,
                 budgetGuard,
-                agentMetrics);
+                agentMetrics,
+                contextWindowManager);
     }
 
     @Bean
@@ -180,7 +220,8 @@ public class AiRuntimeConfig {
                                                    ThreadPoolExecutor threadPoolExecutor,
                                                    TraceRecorder traceRecorder,
                                                    BudgetGuard budgetGuard,
-                                                   AgentMetrics agentMetrics) {
+                                                   AgentMetrics agentMetrics,
+                                                   ContextWindowManager contextWindowManager) {
         return new SubAgentCoordinator(
                 modelGateway,
                 roleToolRegistryFactory,
@@ -193,7 +234,8 @@ public class AiRuntimeConfig {
                 threadPoolExecutor,
                 traceRecorder,
                 budgetGuard,
-                agentMetrics);
+                agentMetrics,
+                contextWindowManager);
     }
 
     @Bean
@@ -246,6 +288,12 @@ public class AiRuntimeConfig {
             if (agentRuntimeProperties.getSubAgentSummaryMaxChars() == null || agentRuntimeProperties.getSubAgentSummaryMaxChars() < 1000) {
                 throw new IllegalStateException("AGENT_SUB_AGENT_SUMMARY_MAX_CHARS 必须大于等于 1000");
             }
+            requirePositive(agentRuntimeProperties.getContext().getPersistToolResultChars(), "AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS");
+            requirePositive(agentRuntimeProperties.getContext().getToolPreviewChars(), "AGENT_CONTEXT_TOOL_PREVIEW_CHARS");
+            requirePositive(agentRuntimeProperties.getContext().getKeepRecentToolResults(), "AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS");
+            requirePositive(agentRuntimeProperties.getContext().getMaxDynamicEntries(), "AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES");
+            requirePositive(agentRuntimeProperties.getContext().getAutoCompactTokenLimit(), "AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT");
+            requirePositive(agentRuntimeProperties.getContext().getSummaryMaxChars(), "AGENT_CONTEXT_SUMMARY_MAX_CHARS");
             if (threadPoolExecutor.getMaximumPoolSize() < agentRuntimeProperties.getSubAgentMaxConcurrency() + 1) {
                 throw new IllegalStateException("线程池最大线程数必须大于 AGENT_SUB_AGENT_MAX_CONCURRENCY");
             }

@@ -48,5 +48,6 @@ public class AgentEvent {
     private String message;
     private Map<String, Object> plan;
     private Long checkpointVersion;
+    private Map<String, Object> metadata;
 
 }

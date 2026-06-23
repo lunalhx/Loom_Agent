@@ -49,6 +49,7 @@ public class SubAgentCoordinator {
     private final TraceRecorder traceRecorder;
     private final BudgetGuard budgetGuard;
     private final AgentMetrics agentMetrics;
+    private final ContextWindowManager contextWindowManager;
 
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
@@ -90,6 +91,24 @@ public class SubAgentCoordinator {
                                TraceRecorder traceRecorder,
                                BudgetGuard budgetGuard,
                                AgentMetrics agentMetrics) {
+        this(modelGateway, toolRegistryFactory, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, traceRecorder, budgetGuard, agentMetrics,
+                ContextWindowManager.noop(properties));
+    }
+
+    public SubAgentCoordinator(ModelGateway modelGateway,
+                               RoleToolRegistryFactory toolRegistryFactory,
+                               ApprovalStore approvalStore,
+                               AgentWorkspaceResolver workspaceResolver,
+                               AgentRunRepository runRepository,
+                               AgentCheckpointRepository checkpointRepository,
+                               AgentRuntimeProperties properties,
+                               ObjectMapper objectMapper,
+                               Executor executor,
+                               TraceRecorder traceRecorder,
+                               BudgetGuard budgetGuard,
+                               AgentMetrics agentMetrics,
+                               ContextWindowManager contextWindowManager) {
         this.modelGateway = modelGateway;
         this.toolRegistryFactory = toolRegistryFactory;
         this.approvalStore = approvalStore;
@@ -102,6 +121,7 @@ public class SubAgentCoordinator {
         this.traceRecorder = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
         this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
         this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
+        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
     }
 
     public SubAgentDispatchResult dispatch(AgentContext parent) {
@@ -214,7 +234,8 @@ public class SubAgentCoordinator {
                     null,
                     traceRecorder,
                     budgetGuard,
-                    agentMetrics);
+                    agentMetrics,
+                    contextWindowManager);
             List<AgentEvent> events = childService.ask(childQuestion(parent, task, ordinal, childRunId, role))
                     .onErrorResume(error -> Flux.just(AgentEvent.builder()
                             .type(AgentEventType.ERROR)

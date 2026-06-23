@@ -17,6 +17,10 @@ public class ToolResult {
     private String errorCode;
     private String message;
     private long elapsedMs;
+    private String artifactId;
+    private Integer originalChars;
+    private Integer retainedChars;
+    private String sha256;
 
     public static ToolResult success(String observation, boolean truncated, long elapsedMs) {
         return ToolResult.builder()

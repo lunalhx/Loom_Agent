@@ -3,6 +3,8 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
@@ -18,9 +20,13 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
+import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
+import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.InMemoryContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryContextBlobStore;
 import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
@@ -56,6 +62,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class DefaultAgentLoopServiceTest {
@@ -740,6 +747,125 @@ public class DefaultAgentLoopServiceTest {
                         && Integer.valueOf(15).equals(event.getTokenUsage().getTotalTokens())));
     }
 
+    @Test
+    public void shouldPersistLargeToolObservationAsContextArtifact() {
+        List<String> prompts = new java.util.ArrayList<>();
+        AgentRuntimeProperties properties = properties();
+        properties.getContext().setPersistToolResultChars(80);
+        properties.getContext().setToolPreviewChars(30);
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        String largeObservation = "alpha-" + "x".repeat(160) + "-omega-tail";
+
+        DefaultAgentLoopService service = newServiceWithContext(
+                completeGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"查大输出\",\"tool\":\"code_search\",\"input\":{\"query\":\"large\"}}",
+                        "{\"type\":\"final\",\"answer\":\"已读取大输出。\",\"evidence\":[]}"),
+                List.of(fakeTool("code_search", largeObservation), new ContextRecallTool(artifactRepository, blobStore)),
+                properties,
+                artifactRepository,
+                blobStore);
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("artifact-run")
+                        .question("制造一个大 observation")
+                        .maxSteps(4)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertNotNull(events);
+        assertEquals(1, artifactRepository.listByRootRunId("artifact-run").size());
+        String artifactId = artifactRepository.listByRootRunId("artifact-run").getFirst().getArtifactId();
+        assertTrue(events.stream()
+                .filter(event -> event.getType() == AgentEventType.OBSERVATION)
+                .anyMatch(event -> event.getObservation().contains(artifactId)
+                        && event.getObservation().contains("context_recall")
+                        && !event.getObservation().contains("omega-tail")));
+        assertTrue(blobStore.read(artifactRepository.listByRootRunId("artifact-run").getFirst().getStorageUri())
+                .contains("omega-tail"));
+        assertTrue(prompts.get(1).contains("context_artifact"));
+        assertTrue(prompts.get(1).contains("需要完整细节时先调用 context_recall"));
+    }
+
+    @Test
+    public void contextRecallShouldRejectArtifactsOutsideRootRun() {
+        AgentRuntimeProperties properties = properties();
+        properties.getContext().setPersistToolResultChars(10);
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+        AgentContext runA = contextForRoot("root-a");
+        AgentContext runB = contextForRoot("root-b");
+        manager.prepareToolResult(runA, ToolResult.success("A-" + "a".repeat(40), false, 1L));
+        ToolResult bResult = manager.prepareToolResult(runB, ToolResult.success("B-" + "b".repeat(40), false, 1L));
+        ContextRecallTool recallTool = new ContextRecallTool(artifactRepository, blobStore);
+        com.fasterxml.jackson.databind.node.ObjectNode input = new ObjectMapper().createObjectNode()
+                .put("action", "get")
+                .put("artifactId", bResult.getArtifactId());
+
+        ToolResult denied = recallTool.call(ToolCall.builder()
+                .name(ContextRecallTool.NAME)
+                .input(input)
+                .runId("root-a")
+                .rootRunId("root-a")
+                .conversationId("conversation-a")
+                .build());
+
+        assertFalse(denied.isSuccess());
+        assertEquals("context_recall_not_found", denied.getErrorCode());
+    }
+
+    @Test
+    public void shouldReactiveCompactAndRetryOnProviderContextOverflow() {
+        AgentRuntimeProperties properties = properties();
+        properties.getContext().setReactiveCompactMaxAttempts(1);
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.getAndIncrement() == 0) {
+                    return Mono.error(new RuntimeException("context_length_exceeded"));
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"压缩后成功。\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        };
+
+        DefaultAgentLoopService service = newServiceWithContext(
+                gateway,
+                List.of(new ContextRecallTool(artifactRepository, blobStore)),
+                properties,
+                artifactRepository,
+                blobStore);
+
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("reactive-run")
+                        .question("触发上下文超限后重试")
+                        .maxSteps(3)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertNotNull(events);
+        assertEquals(2, calls.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.CONTEXT_COMPACTED
+                && event.getMetadata() != null
+                && event.getMetadata().get("strategies").toString().contains("reactive_summary")));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ANSWER
+                && "压缩后成功。".equals(event.getAnswer())));
+        assertEquals(1, artifactRepository.listByRootRunId("reactive-run").size());
+    }
+
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
         return new DefaultAgentLoopService(
                 modelGateway,
@@ -747,6 +873,40 @@ public class DefaultAgentLoopServiceTest {
                 properties(),
                 new ObjectMapper(),
                 Runnable::run);
+    }
+
+    private DefaultAgentLoopService newServiceWithContext(ModelGateway modelGateway,
+                                                          List<AgentTool> tools,
+                                                          AgentRuntimeProperties properties,
+                                                          ContextArtifactRepository artifactRepository,
+                                                          ContextBlobStore blobStore) {
+        ContextWindowManager contextWindowManager = new ContextWindowManager(properties, artifactRepository, blobStore);
+        return new DefaultAgentLoopService(
+                modelGateway,
+                new ToolRegistry(tools),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                new InMemoryAgentRunRepository(),
+                new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                null,
+                new InMemoryTraceRecorder(),
+                new DefaultBudgetGuard(properties),
+                null,
+                contextWindowManager);
+    }
+
+    private AgentContext contextForRoot(String rootRunId) {
+        AgentContext context = new AgentContext();
+        context.setRunId(rootRunId);
+        context.setRootRunId(rootRunId);
+        context.setConversationId("conversation-" + rootRunId);
+        context.setQuestion("question-" + rootRunId);
+        context.setMaxSteps(3);
+        context.setStartedAt(java.time.Instant.now());
+        return context;
     }
 
     private DefaultAgentLoopService newService(ModelGateway modelGateway,

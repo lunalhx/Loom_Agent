@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao">
+
+    <resultMap id="AgentContextArtifactMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO">
+        <id column="id" property="id"/>
+        <result column="artifact_id" property="artifactId"/>
+        <result column="run_id" property="runId"/>
+        <result column="root_run_id" property="rootRunId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="kind" property="kind"/>
+        <result column="storage_uri" property="storageUri"/>
+        <result column="preview" property="preview"/>
+        <result column="sha256" property="sha256"/>
+        <result column="original_chars" property="originalChars"/>
+        <result column="retained_chars" property="retainedChars"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO">
+        INSERT INTO agent_context_artifact
+        (artifact_id, run_id, root_run_id, conversation_id, kind, storage_uri, preview, sha256,
+         original_chars, retained_chars, create_time)
+        VALUES
+        (#{artifactId}, #{runId}, #{rootRunId}, #{conversationId}, #{kind}, #{storageUri}, #{preview}, #{sha256},
+         #{originalChars}, #{retainedChars}, COALESCE(#{createTime}, CURRENT_TIMESTAMP))
+    </insert>
+
+    <select id="selectByArtifactIdAndRootRunId" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE artifact_id = #{artifactId} AND root_run_id = #{rootRunId}
+        LIMIT 1
+    </select>
+
+    <select id="selectByRootRunId" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE root_run_id = #{rootRunId}
+        ORDER BY create_time ASC, id ASC
+    </select>
+
+    <select id="searchByRootRunId" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE root_run_id = #{rootRunId}
+          AND (artifact_id LIKE CONCAT('%', #{query}, '%') OR preview LIKE CONCAT('%', #{query}, '%'))
+        ORDER BY create_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

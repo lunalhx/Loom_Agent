@@ -344,6 +344,7 @@ public class AgentCodeController {
         return event.getType() == AgentEventType.META
                 || event.getType() == AgentEventType.PLAN_UPDATED
                 || event.getType() == AgentEventType.REPLAN_STARTED
+                || event.getType() == AgentEventType.CONTEXT_COMPACTED
                 || event.getType() == AgentEventType.RESUME_STARTED
                 || event.getType() == AgentEventType.SUB_AGENT_STARTED
                 || event.getType() == AgentEventType.SUB_AGENT_COMPLETED
@@ -435,6 +436,7 @@ public class AgentCodeController {
                 .message(event.getMessage())
                 .plan(event.getPlan())
                 .checkpointVersion(event.getCheckpointVersion())
+                .metadata(event.getMetadata())
                 .build();
     }
 

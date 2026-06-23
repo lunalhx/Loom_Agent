@@ -43,6 +43,9 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .input(context.getDecision().getInput())
                 .workspace(context.getWorkspace())
                 .workspaceRoot(context.getResolvedWorkspace())
+                .runId(context.getRunId())
+                .rootRunId(context.getRootRunId())
+                .conversationId(context.getConversationId())
                 .build());
         if (policy == null || policy.getPermissionLevel() == null || policy.getPermissionLevel() == ToolPermissionLevel.READ_ONLY) {
             return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());

@@ -83,6 +83,16 @@ loom:
     sub-agent-max-depth: ${AGENT_SUB_AGENT_MAX_DEPTH:1}
     sub-agent-timeout-ms: ${AGENT_SUB_AGENT_TIMEOUT_MS:60000}
     sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
+    context:
+      enabled: ${AGENT_CONTEXT_ENABLED:true}
+      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${java.io.tmpdir}/loom-agent/context-artifacts}
+      persist-tool-result-chars: ${AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS:12000}
+      tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
+      keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
+      max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
+      auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
+      reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
+      summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

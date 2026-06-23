@@ -22,6 +22,7 @@ public class ObservationNode extends AbstractAgentNode {
                 Math.max(1, context.getStep()),
                 name(),
                 context.getDecision(),
+                result,
                 toDynamicObservation(context, result));
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }

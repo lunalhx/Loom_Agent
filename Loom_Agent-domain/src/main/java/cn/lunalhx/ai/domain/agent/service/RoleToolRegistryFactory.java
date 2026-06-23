@@ -15,7 +15,8 @@ import java.util.Set;
 public class RoleToolRegistryFactory {
 
     private static final Set<String> READ_ONLY_TOOL_NAMES = Set.of(
-            "list_dir", "read_file", "code_search", "run_shell", "git_op", "todo_write");
+            "list_dir", "read_file", "code_search", "run_shell", "git_op", "todo_write", ContextRecallTool.NAME);
+
 
     private final List<AgentTool> tools;
 

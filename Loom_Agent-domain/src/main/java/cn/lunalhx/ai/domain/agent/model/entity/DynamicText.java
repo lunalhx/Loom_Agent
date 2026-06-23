@@ -1,10 +1,12 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.DynamicTextRole;
+import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class DynamicText {
@@ -42,6 +44,22 @@ public class DynamicText {
                 content);
     }
 
+    public void appendToolResult(int step, String sourceNode, AgentDecision decision, ToolResult result, String content) {
+        DynamicTextEntry entry = newEntry(step,
+                DynamicTextRole.TOOL_RESULT,
+                sourceNode,
+                "Tool Result",
+                decision == null ? null : decision.getTool(),
+                decision == null ? null : String.valueOf(decision.getInputView()),
+                content);
+        if (result != null) {
+            entry.setArtifactId(result.getArtifactId());
+            entry.setOriginalChars(result.getOriginalChars());
+            entry.setRenderChars(StringUtils.length(content));
+        }
+        entries.add(entry);
+    }
+
     private void append(int step,
                         DynamicTextRole role,
                         String sourceNode,
@@ -52,7 +70,18 @@ public class DynamicText {
         if (StringUtils.isBlank(content)) {
             return;
         }
-        entries.add(DynamicTextEntry.builder()
+        entries.add(newEntry(step, role, sourceNode, title, tool, input, content));
+    }
+
+    private DynamicTextEntry newEntry(int step,
+                                      DynamicTextRole role,
+                                      String sourceNode,
+                                      String title,
+                                      String tool,
+                                      String input,
+                                      String content) {
+        return DynamicTextEntry.builder()
+                .entryId(UUID.randomUUID().toString())
                 .step(step)
                 .role(role)
                 .sourceNode(sourceNode)
@@ -60,7 +89,10 @@ public class DynamicText {
                 .tool(tool)
                 .input(input)
                 .content(content)
-                .build());
+                .originalChars(StringUtils.length(content))
+                .renderChars(StringUtils.length(content))
+                .compacted(false)
+                .build();
     }
 
     public boolean isEmpty() {

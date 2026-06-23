@@ -62,6 +62,7 @@ public class AgentContext {
     private long usedTokens;
     private BigDecimal estimatedCost = BigDecimal.ZERO;
     private String budgetBlockedReason;
+    private int reactiveCompactAttempts;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;

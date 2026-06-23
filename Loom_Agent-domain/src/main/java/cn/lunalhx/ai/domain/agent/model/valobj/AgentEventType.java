@@ -6,6 +6,7 @@ public enum AgentEventType {
     NODE_START("node_start"),
     PLAN_UPDATED("plan_updated"),
     REPLAN_STARTED("replan_started"),
+    CONTEXT_COMPACTED("context_compacted"),
     CHECKPOINT_SAVED("checkpoint_saved"),
     RESUME_STARTED("resume_started"),
     SUB_AGENT_STARTED("sub_agent_started"),

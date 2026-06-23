@@ -70,6 +70,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final TraceRecorder traceRecorder;
     private final BudgetGuard budgetGuard;
     private final AgentMetrics agentMetrics;
+    private final ContextWindowManager contextWindowManager;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
 
@@ -160,6 +161,25 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    TraceRecorder traceRecorder,
                                    BudgetGuard budgetGuard,
                                    AgentMetrics agentMetrics) {
+        this(modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository, checkpointRepository,
+                properties, objectMapper, executor, subAgentCoordinator, traceRecorder, budgetGuard, agentMetrics,
+                ContextWindowManager.noop(properties));
+    }
+
+    public DefaultAgentLoopService(ModelGateway modelGateway,
+                                   ToolRegistry toolRegistry,
+                                   ApprovalStore approvalStore,
+                                   AgentWorkspaceResolver workspaceResolver,
+                                   AgentRunRepository runRepository,
+                                   AgentCheckpointRepository checkpointRepository,
+                                   AgentRuntimeProperties properties,
+                                   ObjectMapper objectMapper,
+                                   Executor executor,
+                                   SubAgentCoordinator subAgentCoordinator,
+                                   TraceRecorder traceRecorder,
+                                   BudgetGuard budgetGuard,
+                                   AgentMetrics agentMetrics,
+                                   ContextWindowManager contextWindowManager) {
         this.properties = properties;
         this.approvalStore = approvalStore;
         this.workspaceResolver = workspaceResolver;
@@ -169,16 +189,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.traceRecorder = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
         this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
         this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
+        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
         this.toolSpecs = toolRegistry.specs();
         this.hookRegistry = new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
         List<AgentNode> nodeList = new java.util.ArrayList<>(List.of(
                 new StartNode(),
                 new PlannerNode(),
-                new RenderPromptNode(),
-                new ModelCallNode(modelGateway, properties, this.traceRecorder, this.budgetGuard),
+                new RenderPromptNode(this.contextWindowManager),
+                new ModelCallNode(modelGateway, properties, this.traceRecorder, this.budgetGuard, this.contextWindowManager),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ApprovalGateNode(toolRegistry, approvalStore, properties),
-                new ToolDispatchNode(toolRegistry, properties, hookRegistry),
+                new ToolDispatchNode(toolRegistry, properties, hookRegistry, this.contextWindowManager),
                 new ObservationNode(),
                 new ReplanGuardNode(),
                 new ReplanNode(modelGateway, properties, objectMapper, this.traceRecorder, this.budgetGuard),
@@ -340,6 +361,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             emit(sink, List.of(nodeStartEvent(context, node)));
             NodeResult result = node.apply(context);
             emit(sink, result.getEvents());
+            recordContextCompactedEvents(context, node, startedAt, result.getEvents());
             String nextNode = result.isTerminal() ? node.name() : result.getNextNode();
             long durationMs = System.currentTimeMillis() - startedAt;
             String status = nodeStatus(context, result);
@@ -372,6 +394,24 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private boolean requiresResumeReplan(String currentNode) {
         return AgentNodeNames.APPROVAL_GATE.equals(currentNode)
                 || AgentNodeNames.TOOL_DISPATCH.equals(currentNode);
+    }
+
+    private void recordContextCompactedEvents(AgentContext context, AgentNode node, long startedAt, List<AgentEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        for (AgentEvent event : events) {
+            if (event.getType() == AgentEventType.CONTEXT_COMPACTED) {
+                traceRecorder.recordModelGatewayEvent(context,
+                        AgentEventType.CONTEXT_COMPACTED.eventName(),
+                        node.name(),
+                        "success",
+                        System.currentTimeMillis() - startedAt,
+                        event.getMessage(),
+                        null,
+                        event.getMetadata());
+            }
+        }
     }
 
     private AgentContext toContext(AgentQuestion question) {

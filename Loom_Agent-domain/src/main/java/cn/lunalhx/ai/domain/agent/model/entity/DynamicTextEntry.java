@@ -19,5 +19,11 @@ public class DynamicTextEntry {
     private String tool;
     private String input;
     private String content;
+    private String entryId;
+    private String artifactId;
+    private Integer originalChars;
+    private Integer renderChars;
+    private Boolean compacted;
+    private String summary;
 
 }

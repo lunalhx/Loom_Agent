@@ -32,6 +32,7 @@ public class AgentRuntimeProperties {
     private Long subAgentTimeoutMs = 60000L;
     private Integer subAgentSummaryMaxChars = 12000;
     private BudgetProperties budget = new BudgetProperties();
+    private ContextProperties context = new ContextProperties();
 
     @Data
     public static class BudgetProperties {
@@ -42,6 +43,21 @@ public class AgentRuntimeProperties {
         private Integer estimatedCharsPerToken = 4;
         private BigDecimal inputPricePer1k = BigDecimal.ZERO;
         private BigDecimal outputPricePer1k = BigDecimal.ZERO;
+
+    }
+
+    @Data
+    public static class ContextProperties {
+
+        private Boolean enabled = true;
+        private String storageRoot = System.getProperty("java.io.tmpdir") + "/loom-agent/context-artifacts";
+        private Integer persistToolResultChars = 12000;
+        private Integer toolPreviewChars = 2000;
+        private Integer keepRecentToolResults = 4;
+        private Integer maxDynamicEntries = 60;
+        private Integer autoCompactTokenLimit = 64000;
+        private Integer reactiveCompactMaxAttempts = 1;
+        private Integer summaryMaxChars = 6000;
 
     }
 

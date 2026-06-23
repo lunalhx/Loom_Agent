@@ -72,6 +72,7 @@ public class AgentContextSnapshot {
     private Long usedTokens;
     private BigDecimal estimatedCost;
     private String budgetBlockedReason;
+    private Integer reactiveCompactAttempts;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -120,6 +121,7 @@ public class AgentContextSnapshot {
                 .usedTokens(context.getUsedTokens())
                 .estimatedCost(context.getEstimatedCost())
                 .budgetBlockedReason(context.getBudgetBlockedReason())
+                .reactiveCompactAttempts(context.getReactiveCompactAttempts())
                 .build();
     }
 
@@ -183,6 +185,7 @@ public class AgentContextSnapshot {
         context.setUsedTokens(usedTokens == null ? 0L : usedTokens);
         context.setEstimatedCost(estimatedCost == null ? BigDecimal.ZERO : estimatedCost);
         context.setBudgetBlockedReason(budgetBlockedReason);
+        context.setReactiveCompactAttempts(reactiveCompactAttempts == null ? 0 : reactiveCompactAttempts);
         return context;
     }
 

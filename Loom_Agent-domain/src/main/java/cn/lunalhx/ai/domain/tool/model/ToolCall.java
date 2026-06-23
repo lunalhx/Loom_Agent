@@ -18,6 +18,9 @@ public class ToolCall {
     private JsonNode input;
     private WorkspaceRef workspace;
     private Path workspaceRoot;
+    private String runId;
+    private String rootRunId;
+    private String conversationId;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

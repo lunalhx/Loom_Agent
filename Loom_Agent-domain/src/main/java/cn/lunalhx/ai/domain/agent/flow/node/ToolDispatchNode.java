@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
@@ -26,16 +27,25 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
     private final AgentHookRegistry hookRegistry;
+    private final ContextWindowManager contextWindowManager;
 
     public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
         this(toolRegistry, properties, AgentHookRegistry.empty());
     }
 
     public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties, AgentHookRegistry hookRegistry) {
+        this(toolRegistry, properties, hookRegistry, ContextWindowManager.noop(properties));
+    }
+
+    public ToolDispatchNode(ToolRegistry toolRegistry,
+                            AgentRuntimeProperties properties,
+                            AgentHookRegistry hookRegistry,
+                            ContextWindowManager contextWindowManager) {
         super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input", "step"));
         this.toolRegistry = toolRegistry;
         this.properties = properties;
         this.hookRegistry = hookRegistry;
+        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
     }
 
     @Override
@@ -47,6 +57,9 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .input(decision.getInput())
                 .workspace(context.getWorkspace())
                 .workspaceRoot(context.getResolvedWorkspace())
+                .runId(context.getRunId())
+                .rootRunId(context.getRootRunId())
+                .conversationId(context.getConversationId())
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);
         context.setUnsafeResumeRequired(policy != null && policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM);
@@ -61,7 +74,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
         ToolResult result = toolRegistry.call(toolCall);
         context.setUnsafeResumeRequired(false);
-        if (StringUtils.length(result.getObservation()) > properties.getObservationMaxChars()) {
+        result = contextWindowManager.prepareToolResult(context, result);
+        if (!contextEnabled() && StringUtils.length(result.getObservation()) > properties.getObservationMaxChars()) {
             result.setObservation(StringUtils.abbreviate(result.getObservation(), properties.getObservationMaxChars()));
             result.setTruncated(true);
         }
@@ -109,6 +123,10 @@ public class ToolDispatchNode extends AbstractAgentNode {
         } catch (Exception e) {
             return ToolResult.failure("todo_write_failed", e.getMessage(), original.getElapsedMs());
         }
+    }
+
+    private boolean contextEnabled() {
+        return properties.getContext() != null && Boolean.TRUE.equals(properties.getContext().getEnabled());
     }
 
 }
