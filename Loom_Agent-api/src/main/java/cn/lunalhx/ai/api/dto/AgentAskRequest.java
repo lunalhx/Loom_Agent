@@ -23,7 +23,7 @@ public class AgentAskRequest {
     private String workspace;
 
     @Min(value = 1, message = "maxSteps 不能小于 1")
-    @Max(value = 12, message = "maxSteps 不能大于 12")
+    @Max(value = 30, message = "maxSteps 不能大于 30")
     private Integer maxSteps;
 
     private Boolean includeTrace;

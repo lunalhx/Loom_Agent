@@ -73,9 +73,9 @@ loom:
     enabled: ${AGENT_ENABLED:true}
     workspace-root: ${AGENT_WORKSPACE_ROOT:.}
     allowed-workspace-roots: ${AGENT_ALLOWED_WORKSPACE_ROOTS:${AGENT_ALLOWED_WORKSPACE_ROOT:${user.home}/Desktop}}
-    max-steps: ${AGENT_MAX_STEPS:6}
-    total-timeout-ms: ${AGENT_TOTAL_TIMEOUT_MS:120000}
-    step-timeout-ms: ${AGENT_STEP_TIMEOUT_MS:30000}
+    max-steps: ${AGENT_MAX_STEPS:30}
+    total-timeout-ms: ${AGENT_TOTAL_TIMEOUT_MS:1800000}
+    step-timeout-ms: ${AGENT_STEP_TIMEOUT_MS:120000}
     tool-timeout-ms: ${AGENT_TOOL_TIMEOUT_MS:3000}
     observation-max-chars: ${AGENT_OBSERVATION_MAX_CHARS:8000}
     parse-error-max-attempts: ${AGENT_PARSE_ERROR_MAX_ATTEMPTS:2}

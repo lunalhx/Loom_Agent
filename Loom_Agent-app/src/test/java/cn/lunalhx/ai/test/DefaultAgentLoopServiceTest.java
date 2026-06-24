@@ -288,26 +288,21 @@ public class DefaultAgentLoopServiceTest {
     }
 
     @Test
-    public void shouldCreatePlanForCacheAndUnitTestTask() {
+    public void shouldNotCreatePlanUntilTodoWriteIsCalled() {
         List<String> prompts = new java.util.ArrayList<>();
         DefaultAgentLoopService service = newService(
-                completeGateway(prompts, "{\"type\":\"final\",\"answer\":\"计划已创建。\",\"evidence\":[]}"),
+                completeGateway(prompts, "{\"type\":\"final\",\"answer\":\"直接完成。\",\"evidence\":[]}"),
                 List.of(fakeTool("code_search", "unused")));
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
-                        .question("给订单模块加缓存并补单测")
+                        .question("根目录下有多少个文件夹")
                         .maxSteps(6)
                         .build())
                 .collectList()
                 .block(Duration.ofSeconds(3));
 
-        AgentEvent plan = events.stream()
-                .filter(event -> event.getType() == AgentEventType.PLAN_UPDATED)
-                .findFirst()
-                .orElseThrow();
-        assertTrue(String.valueOf(plan.getPlan()).contains("缓存"));
-        assertTrue(String.valueOf(plan.getPlan()).contains("单元测试"));
-        assertTrue(prompts.get(0).contains("当前计划"));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.PLAN_UPDATED));
+        assertFalse(prompts.get(0).contains("当前计划：\n"));
     }
 
     @Test
@@ -327,6 +322,12 @@ public class DefaultAgentLoopServiceTest {
 
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.PLAN_UPDATED
                 && String.valueOf(event.getPlan()).contains("已读实现")));
+        AgentEvent plan = events.stream()
+                .filter(event -> event.getType() == AgentEventType.PLAN_UPDATED)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, ((List<?>) plan.getPlan().get("items")).size());
+        assertTrue(String.valueOf(plan.getPlan()).contains("title=理解代码"));
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
                 && event.getObservation().contains("Updated 2 planned tasks")));
     }
@@ -336,11 +337,12 @@ public class DefaultAgentLoopServiceTest {
         List<String> prompts = new java.util.ArrayList<>();
         DefaultAgentLoopService service = newService(
                 completeGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"pending\"}]}}",
                         "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
                         "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
                         "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
                         "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
-                List.of(fakeTool("code_search", "ok")));
+                List.of(new TodoWriteTool(), fakeTool("code_search", "ok")));
 
         service.ask(AgentQuestion.builder()
                         .question("给某模块加缓存并补单测")

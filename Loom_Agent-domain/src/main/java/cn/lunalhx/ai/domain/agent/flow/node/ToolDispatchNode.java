@@ -115,7 +115,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private ToolResult applyTodoWrite(AgentContext context, ToolResult original) {
         try {
             if (context.getPlan() == null) {
-                context.setPlan(cn.lunalhx.ai.domain.agent.model.entity.AgentPlan.forQuestion(context.getQuestion()));
+                context.setPlan(new cn.lunalhx.ai.domain.agent.model.entity.AgentPlan());
             }
             int submittedTodos = context.getDecision().getInput().path("todos").size();
             context.getPlan().applyTodoWrite(context.getDecision().getInput());

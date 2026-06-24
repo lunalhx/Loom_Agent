@@ -33,6 +33,7 @@ public class AgentPlanItem {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", id);
         view.put("order", order);
+        view.put("title", content);
         view.put("content", content);
         view.put("status", status == null ? AgentPlanItemStatus.PENDING.code() : status.code());
         if (StringUtils.isNotBlank(evidence)) {
