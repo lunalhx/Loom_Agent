@@ -1133,6 +1133,9 @@ public class DefaultAgentLoopServiceTest {
 
         assertEquals(1, calls.get());
         assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.CONTEXT_COMPACTED));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.BAD_REQUEST.code().equals(event.getCode())
+                && "temperature is invalid".equals(event.getMessage())));
     }
 
     @Test

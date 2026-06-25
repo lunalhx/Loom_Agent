@@ -104,7 +104,7 @@ public class DeepSeekModelGateway implements ModelGateway {
             consumeSse(response.body(), sink);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR, "模型调用线程被中断", true, null, e));
+            sink.error(interruptedException(e));
         } catch (IOException e) {
             sink.error(new ModelGatewayException(ModelErrorCode.PROVIDER_UNAVAILABLE, "模型服务网络异常", true, null, e));
         } catch (Exception e) {
@@ -112,7 +112,7 @@ public class DeepSeekModelGateway implements ModelGateway {
         }
     }
 
-    private ModelChatResult executeComplete(ChatPrompt prompt) throws IOException, InterruptedException {
+    private ModelChatResult executeComplete(ChatPrompt prompt) throws IOException {
         String apiKey = apiKey();
         if (StringUtils.isBlank(apiKey)) {
             throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR, "DEEPSEEK_API_KEY 不能为空", false, null, null);
@@ -125,11 +125,22 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .header("Authorization", "Bearer " + apiKey)
                 .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt, false), StandardCharsets.UTF_8))
                 .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw interruptedException(e);
+        }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw toHttpException(response.statusCode(), response.body(), response.headers(), resolvedModel(prompt));
         }
         return parseChatResult(response.body());
+    }
+
+    private ModelGatewayException interruptedException(InterruptedException cause) {
+        return new ModelGatewayException(
+                ModelErrorCode.MODEL_ERROR, "模型调用线程被中断", false, null, cause);
     }
 
     private void consumeSse(InputStream inputStream, FluxSink<ModelStreamChunk> sink) throws IOException {
@@ -218,7 +229,6 @@ public class DeepSeekModelGateway implements ModelGateway {
         }
         body.put("temperature", prompt.getTemperature() == null ? defaultTemperature() : prompt.getTemperature());
         body.put("max_tokens", prompt.getMaxTokens() == null ? defaultMaxTokens() : prompt.getMaxTokens());
-        body.put("user_id", prompt.getConversationId());
         if (OutputFormat.JSON_OBJECT == prompt.getOutputFormat()) {
             body.put("response_format", Map.of("type", "json_object"));
         }
@@ -280,7 +290,8 @@ public class DeepSeekModelGateway implements ModelGateway {
             errorCode = ModelErrorCode.MODEL_ERROR;
         }
         String message = StringUtils.defaultIfBlank(providerMessage, errorCode.message());
-        log.warn("DeepSeek API returned status {}", statusCode);
+        log.warn("DeepSeek API returned status {}, model={}, errorCode={}, message={}",
+                statusCode, model, errorCode.code(), message);
         return new ModelGatewayException(errorCode, message, retryable, statusCode,
                 retryAfterMs(headers), model, null);
     }

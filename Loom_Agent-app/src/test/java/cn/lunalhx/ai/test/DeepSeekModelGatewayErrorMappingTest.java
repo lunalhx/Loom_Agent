@@ -1,9 +1,12 @@
 package cn.lunalhx.ai.test;
 
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.infrastructure.gateway.DeepSeekModelGateway;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -16,8 +19,37 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class DeepSeekModelGatewayErrorMappingTest {
+
+    @Test
+    public void shouldOmitUserIdAndKeepJsonResponseFormat() throws Exception {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1, 2, 1L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            DeepSeekModelGateway gateway = new DeepSeekModelGateway(
+                    new MockEnvironment(), objectMapper, new ModelRuntimeProperties(), executor);
+            Method method = DeepSeekModelGateway.class.getDeclaredMethod(
+                    "toRequestBody", ChatPrompt.class, boolean.class);
+            method.setAccessible(true);
+
+            String requestBody = (String) method.invoke(gateway, ChatPrompt.builder()
+                    .conversationId("conversation/with unsupported characters")
+                    .message("return json")
+                    .outputFormat(OutputFormat.JSON_OBJECT)
+                    .build(), false);
+            JsonNode body = objectMapper.readTree(requestBody);
+
+            assertFalse(body.has("user_id"));
+            assertTrue(body.has("response_format"));
+            assertEquals("json_object", body.path("response_format").path("type").asText());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     public void shouldMapOnlyExplicitContextErrorsToContextOverflow() throws Exception {

@@ -145,6 +145,14 @@ public class ModelCallNode extends AbstractAgentNode {
             if (isContextOverflow(e)) {
                 return recoverContextOverflow(context, e, deadlineEpochMs, requestedMaxTokens);
             }
+            ModelGatewayException gatewayException = modelGatewayException(e);
+            if (gatewayException != null) {
+                ModelErrorCode errorCode = gatewayException.getErrorCode() == null
+                        ? ModelErrorCode.MODEL_ERROR : gatewayException.getErrorCode();
+                fail(context, AgentStopReason.MODEL_ERROR, errorCode.code(),
+                        StringUtils.defaultIfBlank(gatewayException.getMessage(), errorCode.message()));
+                return NodeResult.next(AgentNodeNames.FAIL, List.of());
+            }
             fail(context, AgentStopReason.MODEL_ERROR, "model_error", "模型决策失败");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
@@ -325,6 +333,17 @@ public class ModelCallNode extends AbstractAgentNode {
             current = current.getCause();
         }
         return false;
+    }
+
+    private ModelGatewayException modelGatewayException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof ModelGatewayException exception) {
+                return exception;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private boolean hasErrorCode(Throwable throwable, ModelErrorCode errorCode) {
