@@ -98,9 +98,8 @@ public class AgentCodeControllerContractTest {
         AgentHttpQueryService queryService = new AgentHttpQueryService(approvalStore,
                 agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
-        AgentCodeController controller = new AgentCodeController(agentLoopService, approvalStore,
-                agentRunRepository, traceRecorder, replayService, properties, validator, executor, queryService,
-                sseResponder, requestMapper);
+        AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
+                queryService, sseResponder);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 
