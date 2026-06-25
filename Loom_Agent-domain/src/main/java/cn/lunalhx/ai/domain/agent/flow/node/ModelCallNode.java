@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
@@ -34,6 +35,9 @@ import java.util.Map;
 import java.util.Objects;
 
 public class ModelCallNode extends AbstractAgentNode {
+
+    private static final String TODO_UPDATE_REMINDER =
+            "<reminder>Update your todos with todo_write before continuing.</reminder>";
 
     private final ModelGateway modelGateway;
     private final AgentRuntimeProperties properties;
@@ -60,11 +64,14 @@ public class ModelCallNode extends AbstractAgentNode {
         int requestedMaxTokens = 0;
         boolean escalated = false;
         String requestedModel = context.getRecoveryModelOverride();
+        String currentPrompt = context.getCurrentPrompt();
+        boolean reminderTriggered = isTodoUpdateReminderTriggered(context);
         try {
             while (true) {
                 if (budgetGuard != null) {
                     BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), requestedModel,
-                            ModelCallPurpose.CONTROL_JSON, context.getCurrentPrompt(), requestedMaxTokens);
+                            ModelCallPurpose.CONTROL_JSON, budgetInput(currentPrompt, reminderTriggered),
+                            requestedMaxTokens);
                     if (!check.isAllowed()) {
                         blockForBudget(context, check);
                         return NodeResult.next(AgentNodeNames.FAIL, List.of());
@@ -73,7 +80,12 @@ public class ModelCallNode extends AbstractAgentNode {
                 ChatPrompt prompt = ChatPrompt.builder()
                         .requestId(context.getRequestId())
                         .conversationId(context.getConversationId())
-                        .message(context.getCurrentPrompt())
+                        .message(reminderTriggered ? null : currentPrompt)
+                        .messages(reminderTriggered
+                                ? List.of(
+                                        ChatMessage.builder().role("user").content(currentPrompt).build(),
+                                        ChatMessage.builder().role("user").content(TODO_UPDATE_REMINDER).build())
+                                : null)
                         .model(requestedModel)
                         .maxTokens(requestedMaxTokens <= 0 ? null : requestedMaxTokens)
                         .capability(ModelCapabilities.COMPLETE_AGENT_DECISION)
@@ -221,6 +233,17 @@ public class ModelCallNode extends AbstractAgentNode {
         BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), fallbackModel,
                 ModelCallPurpose.CONTROL_JSON, compactedBudgetInput(context), Math.max(0, requestedMaxTokens));
         return check.isAllowed() ? fallbackModel : null;
+    }
+
+    private boolean isTodoUpdateReminderTriggered(AgentContext context) {
+        return context.getPlan() != null
+                && context.getPlan().getRoundsSinceUpdate() >= 3;
+    }
+
+    private String budgetInput(String currentPrompt, boolean reminderTriggered) {
+        return reminderTriggered
+                ? StringUtils.defaultString(currentPrompt) + TODO_UPDATE_REMINDER
+                : currentPrompt;
     }
 
     private String compactedBudgetInput(AgentContext context) {

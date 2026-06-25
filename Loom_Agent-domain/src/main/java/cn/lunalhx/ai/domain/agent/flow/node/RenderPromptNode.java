@@ -56,11 +56,7 @@ public class RenderPromptNode extends AbstractAgentNode {
         prompt.append("用户问题：").append(context.getQuestion()).append("\n\n");
         if (context.getPlan() != null) {
             prompt.append("当前计划：\n");
-            prompt.append(context.getPlan().render()).append("\n");
-            if (context.getPlan().getRoundsSinceUpdate() >= 3) {
-                prompt.append("<reminder>Update your todos with todo_write before continuing.</reminder>\n");
-            }
-            prompt.append("\n");
+            prompt.append(context.getPlan().render()).append("\n\n");
         }
         prompt.append("可用工具：\n");
         for (ToolSpec spec : context.getToolSpecs()) {

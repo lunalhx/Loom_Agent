@@ -35,6 +35,7 @@ import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -52,6 +53,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.infrastructure.tool.TodoWriteTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -71,9 +73,13 @@ import java.util.stream.Collectors;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class DefaultAgentLoopServiceTest {
+
+    private static final String TODO_UPDATE_REMINDER_CONSTANT =
+            "<reminder>Update your todos with todo_write before continuing.</reminder>";
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -333,9 +339,9 @@ public class DefaultAgentLoopServiceTest {
 
     @Test
     public void shouldRemindModelWhenPlanIsNotUpdatedForThreeRounds() {
-        List<String> prompts = new java.util.ArrayList<>();
+        List<ChatPrompt> prompts = new java.util.ArrayList<>();
         DefaultAgentLoopService service = newService(
-                completeGateway(prompts,
+                capturePromptGateway(prompts,
                         "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"pending\"}]}}",
                         "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
                         "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
@@ -350,7 +356,91 @@ public class DefaultAgentLoopServiceTest {
                 .collectList()
                 .block(Duration.ofSeconds(3));
 
-        assertTrue(prompts.get(3).contains("<reminder>Update your todos with todo_write before continuing.</reminder>"));
+        // 前两轮未达到阈值：单消息请求，没有独立 reminder message。
+        ChatPrompt roundZero = prompts.get(0);
+        assertNotNull(roundZero.getMessage());
+        assertTrue(StringUtils.isNotBlank(roundZero.getMessage()));
+        assertNull(roundZero.getMessages());
+        assertFalse(containsReminder(roundZero.getMessage()));
+        ChatPrompt roundOne = prompts.get(1);
+        assertNotNull(roundOne.getMessage());
+        assertNull(roundOne.getMessages());
+        assertFalse(containsReminder(roundOne.getMessage()));
+
+        // 达到阈值的轮次：主提示词与 reminder 拆成两条独立 user message。
+        ChatPrompt reminded = prompts.get(3);
+        assertNull("主提示词不应再通过 message 承载", reminded.getMessage());
+        assertNotNull(reminded.getMessages());
+        assertEquals(2, reminded.getMessages().size());
+        ChatMessage first = reminded.getMessages().get(0);
+        ChatMessage second = reminded.getMessages().get(1);
+        assertEquals("user", first.getRole());
+        assertEquals("user", second.getRole());
+        assertTrue(first.getContent().contains("用户问题：给某模块加缓存并补单测"));
+        assertTrue(first.getContent().contains("当前计划："));
+        assertFalse("主提示词不得包含 reminder 文本", containsReminder(first.getContent()));
+        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, second.getContent());
+    }
+
+    @Test
+    public void shouldStopRemindingAfterTodoWriteResetsRounds() {
+        List<ChatPrompt> prompts = new java.util.ArrayList<>();
+        DefaultAgentLoopService service = newService(
+                capturePromptGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
+                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"in_progress\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
+                List.of(new TodoWriteTool(), fakeTool("code_search", "ok")));
+
+        service.ask(AgentQuestion.builder()
+                        .question("给某模块加缓存并补单测")
+                        .maxSteps(10)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        // 第 4 轮被提醒，该轮执行 todo_write 后 roundsSinceUpdate 归零，下一轮恢复单消息。
+        ChatPrompt reminded = prompts.get(3);
+        assertNotNull(reminded.getMessages());
+        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, reminded.getMessages().get(1).getContent());
+        ChatPrompt todoWriteRound = prompts.get(4);
+        assertNotNull("todo_write 轮仍处于阈值之上，应继续提醒", todoWriteRound.getMessages());
+        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, todoWriteRound.getMessages().get(1).getContent());
+        ChatPrompt afterTodoWrite = prompts.get(5);
+        assertNotNull(afterTodoWrite.getMessage());
+        assertNull(afterTodoWrite.getMessages());
+        assertFalse(containsReminder(afterTodoWrite.getMessage()));
+    }
+
+    @Test
+    public void shouldNeverRemindWithoutPlan() {
+        List<ChatPrompt> prompts = new java.util.ArrayList<>();
+        DefaultAgentLoopService service = newService(
+                capturePromptGateway(prompts,
+                        "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
+                        "{\"type\":\"action\",\"thought\":\"查4\",\"tool\":\"code_search\",\"input\":{\"query\":\"d\"}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
+                List.of(fakeTool("code_search", "ok")));
+
+        service.ask(AgentQuestion.builder()
+                        .question("随便查点东西")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        // 没有计划时，无论运行多少轮都不注入 reminder。
+        for (ChatPrompt prompt : prompts) {
+            assertNull(prompt.getMessages());
+            if (prompt.getMessage() != null) {
+                assertFalse(containsReminder(prompt.getMessage()));
+            }
+        }
     }
 
     @Test
@@ -1249,6 +1339,27 @@ public class DefaultAgentLoopServiceTest {
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
             }
         };
+    }
+
+    private ModelGateway capturePromptGateway(List<ChatPrompt> prompts, String... outputs) {
+        AtomicInteger index = new AtomicInteger();
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                prompts.add(prompt);
+                int current = Math.min(index.getAndIncrement(), outputs.length - 1);
+                return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
+            }
+        };
+    }
+
+    private boolean containsReminder(String text) {
+        return text != null && text.contains("<reminder>Update your todos with todo_write");
     }
 
     private ModelGateway usageGateway(String output, int promptTokens, int completionTokens, int totalTokens) {
