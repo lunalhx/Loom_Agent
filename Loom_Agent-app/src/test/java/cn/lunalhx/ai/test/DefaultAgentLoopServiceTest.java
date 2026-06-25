@@ -122,12 +122,11 @@ public class DefaultAgentLoopServiceTest {
     public void shouldStopAfterRepeatedParseErrors() {
         AgentRuntimeProperties properties = properties();
         properties.setParseErrorMaxAttempts(1);
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(new java.util.ArrayList<>(), "not json", "still not json"),
-                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
-                properties,
-                new ObjectMapper(),
-                Runnable::run);
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new java.util.ArrayList<>(), "not json", "still not json"))
+                .tools(List.of(fakeTool("code_search", "unused")))
+                .properties(properties)
+                .buildAgentLoop();
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
                         .question("这个函数在哪")
@@ -149,15 +148,13 @@ public class DefaultAgentLoopServiceTest {
         AtomicInteger calls = new AtomicInteger();
         AgentTool writeTool = fakeWriteTool("replace_in_file", "updated: Demo.java", calls);
         ApprovalStore approvalStore = new InMemoryApprovalStore();
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(prompts,
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(prompts,
                         "{\"type\":\"action\",\"thought\":\"修改文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}",
-                        "{\"type\":\"final\",\"answer\":\"文件已修改并验证。\",\"evidence\":[{\"file\":\"Demo.java\",\"line\":1}]}"),
-                new ToolRegistry(List.of(writeTool)),
-                approvalStore,
-                properties(),
-                new ObjectMapper(),
-                Runnable::run);
+                        "{\"type\":\"final\",\"answer\":\"文件已修改并验证。\",\"evidence\":[{\"file\":\"Demo.java\",\"line\":1}]}"))
+                .tools(List.of(writeTool))
+                .approvalStore(approvalStore)
+                .buildAgentLoop();
 
         List<AgentEvent> paused = service.ask(AgentQuestion.builder()
                         .question("把 Demo.java 里的 a 改成 b")
@@ -192,15 +189,12 @@ public class DefaultAgentLoopServiceTest {
     public void shouldContinueWithRejectedObservationAfterApprovalReject() {
         AtomicInteger calls = new AtomicInteger();
         AgentTool writeTool = fakeWriteTool("write_file", "written", calls);
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(new java.util.ArrayList<>(),
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new java.util.ArrayList<>(),
                         "{\"type\":\"action\",\"thought\":\"写文件\",\"tool\":\"write_file\",\"input\":{\"path\":\"Demo.java\",\"content\":\"x\",\"mode\":\"create\"}}",
-                        "{\"type\":\"final\",\"answer\":\"用户拒绝写入，未修改文件。\",\"evidence\":[]}"),
-                new ToolRegistry(List.of(writeTool)),
-                new InMemoryApprovalStore(),
-                properties(),
-                new ObjectMapper(),
-                Runnable::run);
+                        "{\"type\":\"final\",\"answer\":\"用户拒绝写入，未修改文件。\",\"evidence\":[]}"))
+                .tools(List.of(writeTool))
+                .buildAgentLoop();
 
         List<AgentEvent> paused = service.ask(AgentQuestion.builder()
                         .question("创建 Demo.java")
@@ -229,14 +223,12 @@ public class DefaultAgentLoopServiceTest {
     public void shouldDenyHighRiskToolWithoutCallingIt() {
         AtomicInteger calls = new AtomicInteger();
         AgentTool dangerousTool = fakeDenyTool("run_shell", calls);
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(new java.util.ArrayList<>(),
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new java.util.ArrayList<>(),
                         "{\"type\":\"action\",\"thought\":\"删除文件\",\"tool\":\"run_shell\",\"input\":{\"command\":\"rm -rf .\"}}",
-                        "{\"type\":\"final\",\"answer\":\"高危命令已拦截。\",\"evidence\":[]}"),
-                new ToolRegistry(List.of(dangerousTool)),
-                properties(),
-                new ObjectMapper(),
-                Runnable::run);
+                        "{\"type\":\"final\",\"answer\":\"高危命令已拦截。\",\"evidence\":[]}"))
+                .tools(List.of(dangerousTool))
+                .buildAgentLoop();
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
                         .question("删除所有文件")
@@ -262,15 +254,14 @@ public class DefaultAgentLoopServiceTest {
         AtomicReference<Path> calledWorkspace = new AtomicReference<>();
         AgentTool writeTool = fakeWriteTool("replace_in_file", "updated in selected workspace", calls, calledWorkspace);
         ApprovalStore approvalStore = new InMemoryApprovalStore();
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(new java.util.ArrayList<>(),
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new java.util.ArrayList<>(),
                         "{\"type\":\"action\",\"thought\":\"修改文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}",
-                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
-                new ToolRegistry(List.of(writeTool)),
-                approvalStore,
-                properties,
-                new ObjectMapper(),
-                Runnable::run);
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"))
+                .tools(List.of(writeTool))
+                .approvalStore(approvalStore)
+                .properties(properties)
+                .buildAgentLoop();
 
         List<AgentEvent> paused = service.ask(AgentQuestion.builder()
                         .question("修改 project-b")
@@ -523,27 +514,24 @@ public class DefaultAgentLoopServiceTest {
         InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
         InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
         List<AgentTool> tools = List.of(fakeTool("code_search", "raw child search output"), new TodoWriteTool());
-        SubAgentCoordinator coordinator = new SubAgentCoordinator(
-                modelGateway,
-                new RoleToolRegistryFactory(tools),
-                approvalStore,
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                runRepository,
-                checkpointRepository,
-                properties,
-                new ObjectMapper(),
-                Runnable::run);
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(tools),
-                approvalStore,
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                runRepository,
-                checkpointRepository,
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                coordinator);
+        SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(tools)
+                .approvalStore(approvalStore)
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .properties(properties)
+                .subAgentEnabled()
+                .buildSubAgentCoordinator();
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(tools)
+                .approvalStore(approvalStore)
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .properties(properties)
+                .subAgentCoordinator(coordinator)
+                .buildAgentLoop();
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
                         .question("搜集 DeprecatedApi 的使用点")
@@ -598,16 +586,13 @@ public class DefaultAgentLoopServiceTest {
             properties.setSubAgentMaxConcurrency(4);
             properties.setSubAgentTimeoutMs(3000L);
             ModelGateway modelGateway = delayedFinalGateway(180L);
-            SubAgentCoordinator coordinator = new SubAgentCoordinator(
-                    modelGateway,
-                    new RoleToolRegistryFactory(tools),
-                    new InMemoryApprovalStore(),
-                    new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                    new InMemoryAgentRunRepository(),
-                    new InMemoryAgentCheckpointRepository(),
-                    properties,
-                    new ObjectMapper(),
-                    executor);
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(modelGateway)
+                    .tools(tools)
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
 
             AgentContext parent = parentContextWithSpawnDecision(4);
             long startedAt = System.currentTimeMillis();
@@ -626,16 +611,12 @@ public class DefaultAgentLoopServiceTest {
     public void shouldNotLeakParentDynamicTextIntoChildPrompt() {
         List<String> prompts = new java.util.concurrent.CopyOnWriteArrayList<>();
         AgentRuntimeProperties properties = properties();
-        SubAgentCoordinator coordinator = new SubAgentCoordinator(
-                promptRoutingGateway(prompts),
-                new RoleToolRegistryFactory(List.of(fakeTool("code_search", "unused"), new TodoWriteTool())),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                new InMemoryAgentRunRepository(),
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run);
+        SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                .modelGateway(promptRoutingGateway(prompts))
+                .tools(List.of(fakeTool("code_search", "unused"), new TodoWriteTool()))
+                .properties(properties)
+                .subAgentEnabled()
+                .buildSubAgentCoordinator();
 
         AgentContext parent = parentContextWithSpawnDecision(1);
         parent.getDynamicText().appendSystemNote(1, "test", "Parent Secret", "SHOULD_NOT_LEAK_TO_CHILD");
@@ -650,20 +631,14 @@ public class DefaultAgentLoopServiceTest {
     public void shouldRecordTraceTimelineForNormalRun() {
         InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
         AgentRuntimeProperties properties = properties();
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                completeGateway(new java.util.ArrayList<>(),
-                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
-                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                new InMemoryAgentRunRepository(),
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                null,
-                traceRecorder,
-                new DefaultBudgetGuard(properties));
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new java.util.ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"))
+                .tools(List.of(fakeTool("code_search", "unused")))
+                .properties(properties)
+                .traceRecorder(traceRecorder)
+                .budgetGuard(new DefaultBudgetGuard(properties))
+                .buildAgentLoop();
 
         service.ask(AgentQuestion.builder()
                         .runId("trace-run")
@@ -692,19 +667,13 @@ public class DefaultAgentLoopServiceTest {
         AtomicInteger calls = new AtomicInteger();
         ModelGateway modelGateway = countingGateway(calls);
         InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                runRepository,
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                null,
-                new InMemoryTraceRecorder(),
-                new DefaultBudgetGuard(properties));
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(List.of(fakeTool("code_search", "unused")))
+                .properties(properties)
+                .runRepository(runRepository)
+                .budgetGuard(new DefaultBudgetGuard(properties))
+                .buildAgentLoop();
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
                         .runId("budget-run")
@@ -728,19 +697,14 @@ public class DefaultAgentLoopServiceTest {
         properties.getBudget().setInputPricePer1k(new java.math.BigDecimal("0.001"));
         properties.getBudget().setOutputPricePer1k(new java.math.BigDecimal("0.002"));
         InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
-        DefaultAgentLoopService service = new DefaultAgentLoopService(
-                usageGateway("{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}", 10, 5, 15),
-                new ToolRegistry(List.of(fakeTool("code_search", "unused"))),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                runRepository,
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                null,
-                traceRecorder,
-                new DefaultBudgetGuard(properties));
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(usageGateway("{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}", 10, 5, 15))
+                .tools(List.of(fakeTool("code_search", "unused")))
+                .properties(properties)
+                .runRepository(runRepository)
+                .traceRecorder(traceRecorder)
+                .budgetGuard(new DefaultBudgetGuard(properties))
+                .buildAgentLoop();
 
         service.ask(AgentQuestion.builder()
                         .runId("usage-run")
@@ -1192,12 +1156,10 @@ public class DefaultAgentLoopServiceTest {
     }
 
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
-        return new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(tools),
-                properties(),
-                new ObjectMapper(),
-                Runnable::run);
+        return AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(tools)
+                .buildAgentLoop();
     }
 
     private DefaultAgentLoopService newServiceWithContext(ModelGateway modelGateway,
@@ -1206,21 +1168,12 @@ public class DefaultAgentLoopServiceTest {
                                                           ContextArtifactRepository artifactRepository,
                                                           ContextBlobStore blobStore) {
         ContextWindowManager contextWindowManager = new ContextWindowManager(properties, artifactRepository, blobStore);
-        return new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(tools),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                new InMemoryAgentRunRepository(),
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                null,
-                new InMemoryTraceRecorder(),
-                new DefaultBudgetGuard(properties),
-                null,
-                contextWindowManager);
+        return AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(tools)
+                .properties(properties)
+                .contextWindowManager(contextWindowManager)
+                .buildAgentLoop();
     }
 
     private DefaultAgentLoopService statefulService(ModelGateway modelGateway,
@@ -1228,21 +1181,13 @@ public class DefaultAgentLoopServiceTest {
                                                     AgentRunRepository runRepository,
                                                     AgentCheckpointRepository checkpointRepository,
                                                     ContextWindowManager contextWindowManager) {
-        return new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(List.of()),
-                new InMemoryApprovalStore(),
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
-                runRepository,
-                checkpointRepository,
-                properties,
-                new ObjectMapper(),
-                Runnable::run,
-                null,
-                new InMemoryTraceRecorder(),
-                new DefaultBudgetGuard(properties),
-                null,
-                contextWindowManager);
+        return AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .properties(properties)
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .contextWindowManager(contextWindowManager)
+                .buildAgentLoop();
     }
 
     private AgentContext contextForRoot(String rootRunId) {
@@ -1261,16 +1206,13 @@ public class DefaultAgentLoopServiceTest {
                                                ApprovalStore approvalStore,
                                                AgentRunRepository runRepository,
                                                AgentCheckpointRepository checkpointRepository) {
-        return new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(tools),
-                approvalStore,
-                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties()),
-                runRepository,
-                checkpointRepository,
-                properties(),
-                new ObjectMapper(),
-                Runnable::run);
+        return AgentRuntimeTestFixture.fixture()
+                .modelGateway(modelGateway)
+                .tools(tools)
+                .approvalStore(approvalStore)
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .buildAgentLoop();
     }
 
     private AgentRuntimeProperties properties() {

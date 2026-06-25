@@ -1,0 +1,510 @@
+package cn.lunalhx.ai.test;
+
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
+import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
+import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
+import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
+import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
+import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
+import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.Test;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+/**
+ * Agent Loop 行为契约（Phase 1 §3）。
+ *
+ * <p>保护外部可观察行为，不绑定私有方法实现，不锁死完整内部节点顺序。
+ * 覆盖：正常执行事件顺序与标识一致性、审批暂停/恢复、Checkpoint 恢复、
+ * 用户输入恢复、错误/超时终态与 Flux 正常完成。
+ *
+ * <p>本类只断言事件类型/顺序/标识/终态等外部可观察不变量；内部节点图细节
+ * 由 {@code DefaultAgentLoopServiceTest} 覆盖，这里不重复锁死，以便未来新增节点不致无意义失败。
+ */
+public class AgentLoopContractTest {
+
+    private static final Duration TIMEOUT = Duration.ofSeconds(3);
+
+    // ===== 1. 正常执行 =====
+
+    @Test
+    public void normalRunShouldEmitAnswerBeforeDoneAndPreserveIdentifiers() {
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}",
+                        "{\"type\":\"final\",\"answer\":\"最终答案。\",\"evidence\":[]}"))
+                .tools(List.of(fakeTool("code_search", "找到结果")));
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("contract-run")
+                        .requestId("contract-request")
+                        .conversationId("contract-conversation")
+                        .question("正常执行")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        // ANSWER 出现在 DONE 之前
+        assertTrue("ANSWER 必须出现", types.contains(AgentEventType.ANSWER));
+        assertTrue("DONE 必须出现", types.contains(AgentEventType.DONE));
+        assertTrue("ANSWER 必须在 DONE 之前",
+                types.indexOf(AgentEventType.ANSWER) < types.indexOf(AgentEventType.DONE));
+
+        // DONE 后不再产生业务事件（持久化副作用 CHECKPOINT_SAVED 除外）
+        int doneIndex = types.indexOf(AgentEventType.DONE);
+        List<AgentEventType> afterDone = types.subList(doneIndex + 1, types.size());
+        assertTrue("DONE 后只允许 CHECKPOINT_SAVED 持久化副作用，实际：" + afterDone,
+                afterDone.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+
+        // run/request/conversation 标识在整个流中持续一致
+        assertTrue(events.stream().allMatch(event -> "contract-run".equals(event.getRunId())));
+        assertTrue(events.stream()
+                .filter(event -> event.getRequestId() != null)
+                .allMatch(event -> "contract-request".equals(event.getRequestId())));
+        assertTrue(events.stream()
+                .filter(event -> event.getConversationId() != null)
+                .allMatch(event -> "contract-conversation".equals(event.getConversationId())));
+
+        // 工具调用与 observation 出现
+        assertTrue(types.contains(AgentEventType.TOOL_CALL));
+        assertTrue(types.contains(AgentEventType.OBSERVATION));
+    }
+
+    @Test
+    public void normalRunFluxMustCompleteNotHang() {
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"直接完成。\",\"evidence\":[]}"));
+
+        // block() 正常返回即说明 Flux 已 complete()，否则会超时抛异常
+        List<AgentEvent> events = fixture.buildAgentLoop().ask(AgentQuestion.builder()
+                        .question("直接完成")
+                        .maxSteps(3)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
+    }
+
+    // ===== 2. 审批暂停与恢复 =====
+
+    @Test
+    public void writeToolMustNotExecuteBeforeApprovalAndPauseStreamEndsWithApprovalRequired() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("replace_in_file", "updated", calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"写\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}"))
+                .tools(List.of(writeTool))
+                .approvalStore(approvalStore);
+
+        List<AgentEvent> paused = fixture.buildAgentLoop().ask(AgentQuestion.builder()
+                        .question("改 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        // 写操作在审批前不得执行
+        assertEquals(0, calls.get());
+        // 暂停流以 APPROVAL_REQUIRED 结束（其后只允许 CHECKPOINT_SAVED 持久化副作用）
+        AgentEvent approval = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("replace_in_file", approval.getTool());
+        int approvalIndex = paused.indexOf(approval);
+        List<AgentEventType> afterApproval = paused.stream()
+                .skip(approvalIndex + 1L)
+                .map(AgentEvent::getType)
+                .collect(Collectors.toList());
+        assertTrue("APPROVAL_REQUIRED 后只允许 CHECKPOINT_SAVED，实际：" + afterApproval,
+                afterApproval.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+        // DONE 不应出现在暂停流中
+        assertFalse(paused.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
+    }
+
+    @Test
+    public void approveResumeShouldStartWithResumeStartedAndExecuteOriginalTool() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("write_file", "written", calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"写\",\"tool\":\"write_file\",\"input\":{\"path\":\"Demo.java\",\"content\":\"x\",\"mode\":\"create\"}}",
+                        "{\"type\":\"final\",\"answer\":\"已写入。\",\"evidence\":[]}"))
+                .tools(List.of(writeTool))
+                .approvalStore(approvalStore)
+                .properties(properties)
+                .runRepository(new InMemoryAgentRunRepository())
+                .checkpointRepository(new InMemoryAgentCheckpointRepository());
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        String approvalId = service.ask(AgentQuestion.builder()
+                        .question("创建 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT)
+                .stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow()
+                .getApprovalId();
+
+        List<AgentEvent> resumed = service.resume(approvalId, ApprovalDecision.APPROVE, "ok")
+                .collectList()
+                .block(TIMEOUT);
+
+        // 恢复流首先包含 RESUME_STARTED
+        assertEquals(AgentEventType.RESUME_STARTED, resumed.get(0).getType());
+        // APPROVE 执行原工具
+        assertEquals(1, calls.get());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.TOOL_CALL));
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("written")));
+        assertEquals("已写入。",
+                resumed.stream().filter(event -> event.getType() == AgentEventType.ANSWER)
+                        .findFirst().orElseThrow().getAnswer());
+    }
+
+    @Test
+    public void rejectResumeShouldProduceRejectionObservationWithoutExecutingTool() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool writeTool = fakeWriteTool("write_file", "should not run", calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"写\",\"tool\":\"write_file\",\"input\":{\"path\":\"Demo.java\",\"content\":\"x\",\"mode\":\"create\"}}",
+                        "{\"type\":\"final\",\"answer\":\"已拒绝。\",\"evidence\":[]}"))
+                .tools(List.of(writeTool))
+                .approvalStore(approvalStore);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        String approvalId = service.ask(AgentQuestion.builder()
+                        .question("创建 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT)
+                .stream()
+                .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow()
+                .getApprovalId();
+
+        List<AgentEvent> resumed = service.resume(approvalId, ApprovalDecision.REJECT, "不允许")
+                .collectList()
+                .block(TIMEOUT);
+
+        // REJECT 不执行原工具
+        assertEquals(0, calls.get());
+        // 生成拒绝 observation
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("approval_rejected")));
+    }
+
+    // ===== 3. Checkpoint 恢复 =====
+
+    @Test
+    public void resumeRunShouldNotRepeatUnsafeToolAndReplanInstead() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        AtomicInteger calls = new AtomicInteger();
+
+        // 构造一个停在 TOOL_DISPATCH 且 unsafeResumeRequired 的 checkpoint
+        AgentContext context = new AgentContext();
+        context.setRunId("unsafe-run");
+        context.setRequestId("unsafe-request");
+        context.setConversationId("unsafe-conversation");
+        context.setQuestion("恢复不安全工具");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(Instant.now());
+        context.setCurrentNode(AgentNodeNames.TOOL_DISPATCH);
+        context.setUnsafeResumeRequired(true);
+        context.setToolSpecs(List.of(ToolSpec.builder().name("replace_in_file").description("write").inputSchema("{}").build()));
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("unsafe-run")
+                .currentNode(AgentNodeNames.TOOL_DISPATCH)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("before_tool:replace_in_file")
+                .build());
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"未重复写入，已检查状态。\",\"evidence\":[]}"))
+                .tools(List.of(fakeWriteTool("replace_in_file", "should not execute", calls)))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository);
+
+        List<AgentEvent> events = fixture.buildAgentLoop().resumeRun("unsafe-run")
+                .collectList()
+                .block(TIMEOUT);
+
+        // 不重复执行不安全工具
+        assertEquals(0, calls.get());
+        // 转为 REPLAN
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED));
+    }
+
+    @Test
+    public void resumeRunWithMissingCheckpointShouldReturnStableErrorCodeAndComplete() {
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(), "{\"type\":\"final\",\"answer\":\"x\",\"evidence\":[]}"));
+
+        List<AgentEvent> events = fixture.buildAgentLoop().resumeRun("no-such-checkpoint-run")
+                .collectList()
+                .block(TIMEOUT);
+
+        // 缺少 checkpoint 返回稳定错误码 checkpoint_not_found，且 Flux 正常完成
+        AgentEvent error = events.stream()
+                .filter(event -> event.getType() == AgentEventType.ERROR)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("checkpoint_not_found", error.getCode());
+        assertEquals(events.size() - 1, events.indexOf(error));
+    }
+
+    // ===== 4. 用户输入恢复 =====
+
+    @Test
+    public void continueWithoutMessageShouldReturnInvalidUserInput() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        AgentContext context = waitingUserInputContext("input-run");
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("input-run")
+                .currentNode(AgentNodeNames.USER_INPUT_GATE)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:user_input_gate")
+                .build());
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(), "{\"type\":\"final\",\"answer\":\"x\",\"evidence\":[]}"))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository);
+
+        List<AgentEvent> events = fixture.buildAgentLoop()
+                .resumeWithUserInput("input-run", UserInputAction.CONTINUE, null)
+                .collectList()
+                .block(TIMEOUT);
+
+        // CONTINUE 必须携带非空 message，否则 invalid_user_input
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && "invalid_user_input".equals(event.getCode())));
+    }
+
+    @Test
+    public void abortWhileWaitingShouldKeepContextOverflowTerminalSemantics() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        AgentContext context = waitingUserInputContext("abort-run");
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("abort-run")
+                .currentNode(AgentNodeNames.USER_INPUT_GATE)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:user_input_gate")
+                .build());
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(), "{\"type\":\"final\",\"answer\":\"never\",\"evidence\":[]}"))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository);
+
+        List<AgentEvent> events = fixture.buildAgentLoop()
+                .resumeWithUserInput("abort-run", UserInputAction.ABORT, null)
+                .collectList()
+                .block(TIMEOUT);
+
+        // ABORT 保持 CONTEXT_OVERFLOW 终止语义：ERROR code=context_length_exceeded + DONE stopReason=CONTEXT_OVERFLOW
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && cn.lunalhx.ai.domain.model.valobj.ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+    }
+
+    // ===== 5. 错误和超时 =====
+
+    @Test
+    public void unknownNodeShouldTerminateWithErrorAndComplete() {
+        // 通过一个总是返回未知工具决策的 gateway，触发 decision 节点处理未知工具路径；
+        // 这里直接断言：连续解析错误最终进入 ERROR/DONE 终态且 Flux 完成。
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setParseErrorMaxAttempts(1);
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(), "not json", "still not json"))
+                .properties(properties);
+
+        List<AgentEvent> events = fixture.buildAgentLoop().ask(AgentQuestion.builder()
+                        .question("触发错误")
+                        .maxSteps(4)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        AgentEvent error = events.stream()
+                .filter(event -> event.getType() == AgentEventType.ERROR)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("parse_error", error.getCode());
+        // 进入终态且 Flux 完成
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
+    }
+
+    @Test
+    public void totalTimeoutShouldReachDoneTerminalAndComplete() {
+        // totalTimeoutMs 设到极小值；gateway 始终返回 action（永不 final），
+        // runLoop 在后续迭代命中 isTotalTimeout -> FAIL -> ERROR(agent_timeout) + DONE(TIMEOUT)
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setTotalTimeoutMs(1L);
+        properties.setMaxSteps(20);
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"循环\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}"))
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties);
+
+        List<AgentEvent> events = fixture.buildAgentLoop().ask(AgentQuestion.builder()
+                        .question("触发总超时")
+                        .maxSteps(20)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        // 总超时最终进入 ERROR + DONE 终态且 stopReason=TIMEOUT，Flux 正常完成
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && "agent_timeout".equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.TIMEOUT));
+    }
+
+    // ===== 辅助 =====
+
+    private AgentContext waitingUserInputContext(String runId) {
+        AgentContext context = new AgentContext();
+        context.setRunId(runId);
+        context.setRootRunId(runId);
+        context.setRequestId("request-" + runId);
+        context.setConversationId("conversation-" + runId);
+        context.setQuestion("等待用户输入");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(Instant.now());
+        context.setCurrentNode(AgentNodeNames.USER_INPUT_GATE);
+        context.setContextRecoveryStage(ContextRecoveryStage.WAITING_USER_INPUT);
+        context.setToolSpecs(List.of());
+        context.setDecision(AgentDecision.builder()
+                .type("final")
+                .input(new ObjectMapper().createObjectNode())
+                .build());
+        return context;
+    }
+
+    private ModelGateway completeGateway(List<String> prompts, String... outputs) {
+        AtomicInteger index = new AtomicInteger();
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (prompts != null) {
+                    prompts.add(prompt.getMessage());
+                }
+                int current = Math.min(index.getAndIncrement(), outputs.length - 1);
+                return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
+            }
+        };
+    }
+
+    private AgentTool fakeTool(String name, String observation) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name(name).description(name).inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool fakeWriteTool(String name, String observation, AtomicInteger calls) {
+        return fakeWriteTool(name, observation, calls, new AtomicReference<>());
+    }
+
+    private AgentTool fakeWriteTool(String name, String observation, AtomicInteger calls, AtomicReference<Path> calledWorkspace) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name(name).description(name).inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.writeConfirm("write", name);
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                calledWorkspace.set(call.getWorkspaceRoot());
+                return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+}
