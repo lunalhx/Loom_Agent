@@ -21,6 +21,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class ToolDispatchNode extends AbstractAgentNode {
 
@@ -29,27 +30,15 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private final AgentHookRegistry hookRegistry;
     private final ContextWindowManager contextWindowManager;
 
-    /** @deprecated Use the 4-parameter constructor. */
-    @Deprecated(forRemoval = true)
-    public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
-        this(toolRegistry, properties, AgentHookRegistry.empty());
-    }
-
-    /** @deprecated Use the 4-parameter constructor. */
-    @Deprecated(forRemoval = true)
-    public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties, AgentHookRegistry hookRegistry) {
-        this(toolRegistry, properties, hookRegistry, ContextWindowManager.noop(properties));
-    }
-
     public ToolDispatchNode(ToolRegistry toolRegistry,
                             AgentRuntimeProperties properties,
                             AgentHookRegistry hookRegistry,
                             ContextWindowManager contextWindowManager) {
         super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input", "step"));
-        this.toolRegistry = toolRegistry;
-        this.properties = properties;
-        this.hookRegistry = hookRegistry;
-        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
+        this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
+        this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
     }
 
     @Override

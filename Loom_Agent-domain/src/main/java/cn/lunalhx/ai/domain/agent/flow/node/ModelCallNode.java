@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class ModelCallNode extends AbstractAgentNode {
 
@@ -40,32 +41,17 @@ public class ModelCallNode extends AbstractAgentNode {
     private final BudgetGuard budgetGuard;
     private final ContextWindowManager contextWindowManager;
 
-    /** @deprecated Use the 5-parameter constructor. */
-    @Deprecated(forRemoval = true)
-    public ModelCallNode(ModelGateway modelGateway, AgentRuntimeProperties properties) {
-        this(modelGateway, properties, null, null);
-    }
-
-    /** @deprecated Use the 5-parameter constructor. */
-    @Deprecated(forRemoval = true)
-    public ModelCallNode(ModelGateway modelGateway,
-                         AgentRuntimeProperties properties,
-                         TraceRecorder traceRecorder,
-                         BudgetGuard budgetGuard) {
-        this(modelGateway, properties, traceRecorder, budgetGuard, ContextWindowManager.noop(properties));
-    }
-
     public ModelCallNode(ModelGateway modelGateway,
                          AgentRuntimeProperties properties,
                          TraceRecorder traceRecorder,
                          BudgetGuard budgetGuard,
                          ContextWindowManager contextWindowManager) {
         super(AgentNodeNames.MODEL_CALL, List.of("currentPrompt", "requestId", "conversationId"));
-        this.modelGateway = modelGateway;
-        this.properties = properties;
+        this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.traceRecorder = traceRecorder;
         this.budgetGuard = budgetGuard;
-        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
+        this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
     }
 
     @Override

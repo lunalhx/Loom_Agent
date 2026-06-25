@@ -3,16 +3,13 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.DynamicTextEntry;
-import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import org.apache.commons.lang3.StringUtils;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 public class ContextWindowManager {
@@ -30,12 +27,10 @@ public class ContextWindowManager {
                                 ContextArtifactRepository artifactRepository,
                                 ContextBlobStore blobStore,
                                 DeepContextSummaryService deepSummaryService) {
-        this.properties = properties;
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        Objects.requireNonNull(artifactRepository, "artifactRepository must not be null");
+        Objects.requireNonNull(blobStore, "blobStore must not be null");
         this.components = ContextWindowComponents.create(properties, artifactRepository, blobStore, deepSummaryService);
-    }
-
-    public static ContextWindowManager noop(AgentRuntimeProperties properties) {
-        return new ContextWindowManager(properties, new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
     }
 
     public ToolResult prepareToolResult(AgentContext context, ToolResult result) {
@@ -124,9 +119,7 @@ public class ContextWindowManager {
                 positive(contextProperties().getReactiveKeepRecentEntries(), 5),
                 deadlineEpochMs,
                 ContextCompactionCommand.ContextCompactionMode.DEEP);
-        ContextStrategyResult result = components.deepSummaryStrategy != null
-                ? components.deepSummaryStrategy.compact(context, cmd)
-                : fallbackDeepSummary(context, targetTokens);
+        ContextStrategyResult result = components.deepSummaryStrategy.compact(context, cmd);
         int afterTokens = estimateTokens(context);
         return compactResult(true, beforeTokens, afterTokens,
                 Math.max(0, components.artifactService.artifactCount(context) - beforeArtifacts),
@@ -138,18 +131,6 @@ public class ContextWindowManager {
     }
 
     // --- internal helpers retained in facade ---
-
-    private ContextStrategyResult fallbackDeepSummary(AgentContext context, int targetTokens) {
-        // deepSummaryService 为 null 时的确定性降级（与 DeepSummaryStrategy 的 catch 分支一致）
-        List<DynamicTextEntry> entries = new ArrayList<>(context.getDynamicText().entries());
-        ContextArtifact transcriptArtifact = components.artifactService.ensureTranscript(context,
-                components.renderer.renderEntries(entries));
-        String summary = components.composer.compose(context, entries, transcriptArtifact,
-                components.tokenEstimator.summaryCharsForTarget(targetTokens));
-        int retained = components.rewriter.replaceWithSummary(context, entries, summary, "Deep Context Summary",
-                positive(contextProperties().getReactiveKeepRecentEntries(), 5), targetTokens);
-        return new ContextStrategyResult(true, "deep_summary_deterministic", retained, transcriptArtifact.getArtifactId());
-    }
 
     private ContextCompactResult compactResult(boolean compacted,
                                                int beforeTokens,

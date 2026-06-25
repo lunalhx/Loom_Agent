@@ -50,9 +50,8 @@ class ContextWindowComponents {
         MicroCompactionStrategy microStrategy = new MicroCompactionStrategy(properties);
         DeterministicSummaryStrategy deterministicSummaryStrategy = new DeterministicSummaryStrategy(
                 properties, artifactService, renderer, composer, rewriter, tokenEstimator);
-        DeepSummaryStrategy deepSummaryStrategy = deepSummaryService == null
-                ? null
-                : new DeepSummaryStrategy(properties, artifactService, renderer, composer, rewriter, tokenEstimator, deepSummaryService);
+        DeepSummaryStrategy deepSummaryStrategy = new DeepSummaryStrategy(
+                properties, artifactService, renderer, composer, rewriter, tokenEstimator, deepSummaryService);
 
         return new ContextWindowComponents(tokenEstimator, artifactService, renderer, composer, rewriter,
                 snipStrategy, microStrategy, deterministicSummaryStrategy, deepSummaryStrategy);

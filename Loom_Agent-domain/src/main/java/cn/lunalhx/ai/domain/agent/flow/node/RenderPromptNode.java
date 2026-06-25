@@ -8,27 +8,21 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class RenderPromptNode extends AbstractAgentNode {
 
     private final ContextWindowManager contextWindowManager;
 
-    /** @deprecated Use the 1-parameter constructor with explicit ContextWindowManager. */
-    @Deprecated(forRemoval = true)
-    public RenderPromptNode() {
-        this(ContextWindowManager.noop(new AgentRuntimeProperties()));
-    }
-
     public RenderPromptNode(ContextWindowManager contextWindowManager) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps"));
-        this.contextWindowManager = contextWindowManager;
+        this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
     }
 
     @Override
