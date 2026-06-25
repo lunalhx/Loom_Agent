@@ -33,6 +33,7 @@ import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
+import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -76,73 +77,42 @@ public class AgentCodeController {
     private final Validator validator;
     private final ThreadPoolExecutor threadPoolExecutor;
     private final AgentHttpQueryService queryService;
+    private final AgentSseResponder sseResponder;
+    private final AgentRequestMapper requestMapper;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request) {
-        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
-        AtomicBoolean completed = new AtomicBoolean(false);
-
-        AgentEvent validationError = validateRequest(request);
-        if (validationError != null) {
-            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, validationError));
-            return emitter;
+        AgentRequestMapper.Result<AgentQuestion> result = requestMapper.mapAsk(request);
+        if (!result.valid()) {
+            return sseResponder.completedAgentError(result.problem());
         }
 
-        String requestId = UUID.randomUUID().toString();
-        MDC.put("request_id", requestId);
-        AgentQuestion question = toQuestion(request, requestId);
-        Disposable disposable = agentLoopService.ask(question)
-                .filter(event -> shouldSend(event, request))
-                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
-                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
-                        () -> complete(emitter, completed));
-        MDC.clear();
+        AgentSseResponder.StreamProfile profile = Boolean.TRUE.equals(request.getIncludeTrace())
+                ? AgentSseResponder.StreamProfile.ALL_EVENTS
+                : AgentSseResponder.StreamProfile.PUBLIC_ASK;
 
-        emitter.onCompletion(disposable::dispose);
-        emitter.onTimeout(() -> {
-            disposable.dispose();
-            sendAndComplete(emitter, completed, timeoutError());
-        });
-        emitter.onError(throwable -> {
-            disposable.dispose();
-            log.warn("Agent SSE connection closed with error: {}", throwable.getMessage());
-        });
-        return emitter;
+        return sseResponder.streamAgentEvents(
+                "ask",
+                result.value().getRequestId(),
+                () -> agentLoopService.ask(result.value()),
+                profile
+        );
     }
 
     @PostMapping(value = "/approvals/{approvalId}/decide/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter decide(@PathVariable String approvalId,
                              @RequestBody(required = false) AgentApprovalDecisionRequest request) {
-        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
-        AtomicBoolean completed = new AtomicBoolean(false);
-
-        AgentEvent validationError = validateApprovalRequest(request);
-        if (validationError != null) {
-            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, validationError));
-            return emitter;
+        AgentRequestMapper.Result<AgentRequestMapper.ApprovalCommand> result = requestMapper.mapApproval(request);
+        if (!result.valid()) {
+            return sseResponder.completedAgentError(result.problem());
         }
 
-        ApprovalDecision decision = parseApprovalDecision(request.getDecision());
-        if (decision == null) {
-            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, error("invalid_request", "decision 只能是 APPROVE 或 REJECT")));
-            return emitter;
-        }
-
-        Disposable disposable = agentLoopService.resume(approvalId, decision, request.getReason())
-                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
-                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
-                        () -> complete(emitter, completed));
-
-        emitter.onCompletion(disposable::dispose);
-        emitter.onTimeout(() -> {
-            disposable.dispose();
-            sendAndComplete(emitter, completed, timeoutError());
-        });
-        emitter.onError(throwable -> {
-            disposable.dispose();
-            log.warn("Agent approval SSE connection closed with error: {}", throwable.getMessage());
-        });
-        return emitter;
+        return sseResponder.streamAgentEvents(
+                "decide",
+                UUID.randomUUID().toString(),
+                () -> agentLoopService.resume(approvalId, result.value().decision(), result.value().reason()),
+                AgentSseResponder.StreamProfile.ALL_EVENTS
+        );
     }
 
     @GetMapping("/approvals/{approvalId}")
@@ -152,59 +122,33 @@ public class AgentCodeController {
 
     @PostMapping(value = "/runs/{runId}/resume/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter resumeRun(@PathVariable String runId) {
-        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
-        AtomicBoolean completed = new AtomicBoolean(false);
-
-        if (StringUtils.isBlank(runId)) {
-            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, error("invalid_request", "runId 不能为空")));
-            return emitter;
+        AgentRequestMapper.Result<String> result = requestMapper.mapRunId(runId);
+        if (!result.valid()) {
+            return sseResponder.completedAgentError(result.problem());
         }
 
-        Disposable disposable = agentLoopService.resumeRun(runId)
-                .filter(event -> event.getType() != AgentEventType.CHECKPOINT_SAVED)
-                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
-                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
-                        () -> complete(emitter, completed));
-
-        emitter.onCompletion(disposable::dispose);
-        emitter.onTimeout(() -> {
-            disposable.dispose();
-            sendAndComplete(emitter, completed, timeoutError());
-        });
-        emitter.onError(throwable -> {
-            disposable.dispose();
-            log.warn("Agent run resume SSE connection closed with error: {}", throwable.getMessage());
-        });
-        return emitter;
+        return sseResponder.streamAgentEvents(
+                "resumeRun",
+                UUID.randomUUID().toString(),
+                () -> agentLoopService.resumeRun(runId),
+                AgentSseResponder.StreamProfile.WITHOUT_CHECKPOINT
+        );
     }
 
     @PostMapping(value = "/runs/{runId}/input/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter resumeWithUserInput(@PathVariable String runId,
                                           @RequestBody(required = false) AgentUserInputRequest request) {
-        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
-        AtomicBoolean completed = new AtomicBoolean(false);
-
-        AgentEvent validationError = validateUserInputRequest(runId, request);
-        if (validationError != null) {
-            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, validationError));
-            return emitter;
+        AgentRequestMapper.Result<AgentRequestMapper.UserInputCommand> result = requestMapper.mapUserInput(runId, request);
+        if (!result.valid()) {
+            return sseResponder.completedAgentError(result.problem());
         }
-        UserInputAction action = parseUserInputAction(request.getAction());
-        Disposable disposable = agentLoopService.resumeWithUserInput(runId, action, request.getMessage())
-                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
-                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
-                        () -> complete(emitter, completed));
 
-        emitter.onCompletion(disposable::dispose);
-        emitter.onTimeout(() -> {
-            disposable.dispose();
-            sendAndComplete(emitter, completed, timeoutError());
-        });
-        emitter.onError(throwable -> {
-            disposable.dispose();
-            log.warn("Agent user-input SSE connection closed with error: {}", throwable.getMessage());
-        });
-        return emitter;
+        return sseResponder.streamAgentEvents(
+                "userInput",
+                UUID.randomUUID().toString(),
+                () -> agentLoopService.resumeWithUserInput(runId, result.value().action(), result.value().message()),
+                AgentSseResponder.StreamProfile.ALL_EVENTS
+        );
     }
 
     @GetMapping("/runs/{runId}/trace")
@@ -222,45 +166,18 @@ public class AgentCodeController {
     public SseEmitter replayStream(@PathVariable String runId,
                                    @RequestParam(required = false) Boolean includeChildren,
                                    @RequestBody(required = false) AgentReplayStreamRequest request) {
-        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
-        AtomicBoolean completed = new AtomicBoolean(false);
-        threadPoolExecutor.execute(() -> {
-            boolean resolvedIncludeChildren = includeChildren(includeChildren, request);
-            if (StringUtils.isBlank(runId)) {
-                sendReplayAndComplete(emitter, completed, "error", Map.of(
-                        "type", "error",
-                        "code", "invalid_request",
-                        "message", "runId 不能为空"));
-                return;
-            }
-            try {
-                AgentReplayTimeline timeline = replayService.replayRun(runId, resolvedIncludeChildren);
-                sendReplay(emitter, "replay_started", Map.of(
-                        "type", "replay_started",
-                        "mode", AgentReplayTimeline.MODE,
-                        "runId", runId,
-                        "traceId", StringUtils.defaultString(timeline.getTraceId()),
-                        "rootRunId", StringUtils.defaultString(timeline.getRootRunId()),
-                        "includeChildren", resolvedIncludeChildren,
-                        "costGenerated", false));
-                for (AgentTraceEvent event : timeline.getEvents()) {
-                    sendReplay(emitter, "replay_event", toReplayDto(event));
-                }
-                sendReplayAndComplete(emitter, completed, "replay_done", Map.of(
-                        "type", "replay_done",
-                        "mode", AgentReplayTimeline.MODE,
-                        "runId", runId,
-                        "eventCount", timeline.getEvents().size(),
-                        "costGenerated", false));
-            } catch (Exception e) {
-                log.warn("Replay stream failed, runId={}, message={}", runId, e.getMessage(), e);
-                sendReplayAndComplete(emitter, completed, "error", Map.of(
-                        "type", "error",
-                        "code", "replay_failed",
-                        "message", "Replay 失败"));
-            }
-        });
-        return emitter;
+        AgentRequestMapper.Result<String> result = requestMapper.mapRunId(runId);
+        if (!result.valid()) {
+            return sseResponder.completedReplayError(result.problem());
+        }
+
+        boolean resolvedIncludeChildren = requestMapper.resolveIncludeChildren(includeChildren, request);
+
+        return sseResponder.streamReplay(
+                runId,
+                resolvedIncludeChildren,
+                () -> queryService.replayTimeline(runId, resolvedIncludeChildren)
+        );
     }
 
     private AgentEvent validateRequest(AgentAskRequest request) {
