@@ -9,7 +9,10 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopFactory;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
@@ -189,65 +192,48 @@ public class AiRuntimeConfig {
     }
 
     @Bean
-    public AgentLoopService agentLoopService(ModelGateway modelGateway,
-                                             ToolRegistry toolRegistry,
-                                             ApprovalStore approvalStore,
-                                             AgentWorkspaceResolver agentWorkspaceResolver,
-                                             AgentRunRepository agentRunRepository,
-                                             AgentCheckpointRepository agentCheckpointRepository,
-                                             AgentRuntimeProperties agentRuntimeProperties,
-                                             ObjectMapper objectMapper,
-                                             ThreadPoolExecutor threadPoolExecutor,
-                                             SubAgentCoordinator subAgentCoordinator,
-                                             TraceRecorder traceRecorder,
-                                             BudgetGuard budgetGuard,
-                                             AgentMetrics agentMetrics,
-                                             ContextWindowManager contextWindowManager) {
-        return new DefaultAgentLoopService(
-                modelGateway,
-                toolRegistry,
-                approvalStore,
-                agentWorkspaceResolver,
-                agentRunRepository,
-                agentCheckpointRepository,
-                agentRuntimeProperties,
-                objectMapper,
-                threadPoolExecutor,
-                subAgentCoordinator,
-                traceRecorder,
-                budgetGuard,
-                agentMetrics,
-                contextWindowManager);
+    public AgentLoopStateDependencies agentLoopStateDependencies(ApprovalStore approvalStore,
+                                                                  AgentWorkspaceResolver agentWorkspaceResolver,
+                                                                  AgentRunRepository agentRunRepository,
+                                                                  AgentCheckpointRepository agentCheckpointRepository,
+                                                                  ObjectMapper objectMapper) {
+        return new AgentLoopStateDependencies(approvalStore, agentWorkspaceResolver, agentRunRepository,
+                agentCheckpointRepository, objectMapper);
     }
 
     @Bean
-    public SubAgentCoordinator subAgentCoordinator(ModelGateway modelGateway,
-                                                   RoleToolRegistryFactory roleToolRegistryFactory,
-                                                   ApprovalStore approvalStore,
-                                                   AgentWorkspaceResolver agentWorkspaceResolver,
-                                                   AgentRunRepository agentRunRepository,
-                                                   AgentCheckpointRepository agentCheckpointRepository,
+    public AgentLoopRuntimeDependencies agentLoopRuntimeDependencies(AgentRuntimeProperties agentRuntimeProperties,
+                                                                       TraceRecorder traceRecorder,
+                                                                       BudgetGuard budgetGuard,
+                                                                       AgentMetrics agentMetrics,
+                                                                       ContextWindowManager contextWindowManager) {
+        return new AgentLoopRuntimeDependencies(agentRuntimeProperties, traceRecorder, budgetGuard,
+                agentMetrics, contextWindowManager);
+    }
+
+    @Bean
+    public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
+                                             AgentLoopStateDependencies state,
+                                             AgentLoopRuntimeDependencies runtime) {
+        return new AgentLoopFactory(modelGateway, state, runtime);
+    }
+
+    @Bean
+    public AgentLoopService agentLoopService(AgentLoopFactory agentLoopFactory,
+                                             ToolRegistry toolRegistry,
+                                             ThreadPoolExecutor threadPoolExecutor,
+                                             SubAgentCoordinator subAgentCoordinator) {
+        return agentLoopFactory.createRoot(toolRegistry, threadPoolExecutor, subAgentCoordinator);
+    }
+
+    @Bean
+    public SubAgentCoordinator subAgentCoordinator(RoleToolRegistryFactory roleToolRegistryFactory,
+                                                   AgentLoopFactory agentLoopFactory,
                                                    AgentRuntimeProperties agentRuntimeProperties,
                                                    ObjectMapper objectMapper,
-                                                   ThreadPoolExecutor threadPoolExecutor,
-                                                   TraceRecorder traceRecorder,
-                                                   BudgetGuard budgetGuard,
-                                                   AgentMetrics agentMetrics,
-                                                   ContextWindowManager contextWindowManager) {
-        return new SubAgentCoordinator(
-                modelGateway,
-                roleToolRegistryFactory,
-                approvalStore,
-                agentWorkspaceResolver,
-                agentRunRepository,
-                agentCheckpointRepository,
-                agentRuntimeProperties,
-                objectMapper,
-                threadPoolExecutor,
-                traceRecorder,
-                budgetGuard,
-                agentMetrics,
-                contextWindowManager);
+                                                   ThreadPoolExecutor threadPoolExecutor) {
+        return new SubAgentCoordinator(roleToolRegistryFactory, agentLoopFactory,
+                agentRuntimeProperties, objectMapper, threadPoolExecutor);
     }
 
     @Bean

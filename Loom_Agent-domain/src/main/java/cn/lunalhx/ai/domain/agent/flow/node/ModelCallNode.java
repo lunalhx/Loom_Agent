@@ -40,10 +40,14 @@ public class ModelCallNode extends AbstractAgentNode {
     private final BudgetGuard budgetGuard;
     private final ContextWindowManager contextWindowManager;
 
+    /** @deprecated Use the 5-parameter constructor. */
+    @Deprecated(forRemoval = true)
     public ModelCallNode(ModelGateway modelGateway, AgentRuntimeProperties properties) {
         this(modelGateway, properties, null, null);
     }
 
+    /** @deprecated Use the 5-parameter constructor. */
+    @Deprecated(forRemoval = true)
     public ModelCallNode(ModelGateway modelGateway,
                          AgentRuntimeProperties properties,
                          TraceRecorder traceRecorder,

@@ -29,10 +29,14 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private final AgentHookRegistry hookRegistry;
     private final ContextWindowManager contextWindowManager;
 
+    /** @deprecated Use the 4-parameter constructor. */
+    @Deprecated(forRemoval = true)
     public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
         this(toolRegistry, properties, AgentHookRegistry.empty());
     }
 
+    /** @deprecated Use the 4-parameter constructor. */
+    @Deprecated(forRemoval = true)
     public ToolDispatchNode(ToolRegistry toolRegistry, AgentRuntimeProperties properties, AgentHookRegistry hookRegistry) {
         this(toolRegistry, properties, hookRegistry, ContextWindowManager.noop(properties));
     }

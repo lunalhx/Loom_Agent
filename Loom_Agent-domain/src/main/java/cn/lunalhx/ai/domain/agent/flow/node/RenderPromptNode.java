@@ -20,6 +20,8 @@ public class RenderPromptNode extends AbstractAgentNode {
 
     private final ContextWindowManager contextWindowManager;
 
+    /** @deprecated Use the 1-parameter constructor with explicit ContextWindowManager. */
+    @Deprecated(forRemoval = true)
     public RenderPromptNode() {
         this(ContextWindowManager.noop(new AgentRuntimeProperties()));
     }

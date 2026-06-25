@@ -14,11 +14,11 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
+import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
-import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PlannerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanGuardNode;
@@ -77,7 +77,46 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final ContextWindowManager contextWindowManager;
     private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
+    private final boolean subAgentAvailable;
 
+    // ==================== Phase 2 新生产构造器（包内可见，仅供 AgentLoopFactory 调用） ====================
+
+    /**
+     * 新生产构造器 — 只做字段赋值，不创建 Repository/Store/Metrics/Context 默认实现，不创建节点和 Hook。
+     *
+     * @param state               状态存储依赖
+     * @param runtime             运行时依赖
+     * @param flow                节点图装配
+     * @param subAgentCoordinator 子 Agent 协调器（可能为 null，表示无子 Agent 能力）
+     * @param executor            异步执行器
+     */
+    DefaultAgentLoopService(AgentLoopStateDependencies state,
+                            AgentLoopRuntimeDependencies runtime,
+                            AgentFlowDefinition flow,
+                            SubAgentCoordinator subAgentCoordinator,
+                            Executor executor) {
+        this.properties = runtime.properties();
+        this.approvalStore = state.approvalStore();
+        this.workspaceResolver = state.workspaceResolver();
+        this.checkpointRepository = state.checkpointRepository();
+        this.executor = executor;
+        this.subAgentCoordinator = subAgentCoordinator;
+        this.traceRecorder = runtime.traceRecorder();
+        this.budgetGuard = runtime.budgetGuard();
+        this.agentMetrics = runtime.agentMetrics();
+        this.contextWindowManager = runtime.contextWindowManager();
+        this.toolSpecs = flow.toolSpecs();
+        this.hookRegistry = flow.hookRegistry();
+        this.nodes = flow.nodes();
+        this.subAgentAvailable = flow.subAgentAvailable();
+    }
+
+    // ==================== 旧构造器（Phase 2 兼容层，标记废弃，最终阶段删除） ====================
+
+    /**
+     * @deprecated Use {@link AgentLoopFactory#createStandalone}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    AgentRuntimeProperties properties,
@@ -87,6 +126,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new InMemoryAgentRunRepository(), new InMemoryAgentCheckpointRepository(), properties, objectMapper, executor);
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -97,6 +140,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new InMemoryAgentRunRepository(), new InMemoryAgentCheckpointRepository(), properties, objectMapper, executor);
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -108,6 +155,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new InMemoryAgentRunRepository(), new InMemoryAgentCheckpointRepository(), properties, objectMapper, executor);
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -121,6 +172,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 properties, objectMapper, executor, null);
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -136,6 +191,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new InMemoryTraceRecorder(), new DefaultBudgetGuard(properties), new NoopAgentMetrics());
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -152,6 +211,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 properties, objectMapper, executor, subAgentCoordinator, traceRecorder, budgetGuard, new NoopAgentMetrics());
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -170,6 +233,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 ContextWindowManager.noop(properties));
     }
 
+    /**
+     * @deprecated Use {@link AgentLoopFactory}.
+     */
+    @Deprecated(forRemoval = true)
     public DefaultAgentLoopService(ModelGateway modelGateway,
                                    ToolRegistry toolRegistry,
                                    ApprovalStore approvalStore,
@@ -194,6 +261,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
         this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
         this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
+        this.subAgentAvailable = subAgentCoordinator != null;
         this.toolSpecs = toolRegistry.specs();
         this.hookRegistry = new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
         List<AgentNode> nodeList = new java.util.ArrayList<>(List.of(
@@ -210,7 +278,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new FinalAnswerNode(),
                 new UserInputGateNode(),
                 new FailNode()));
-        if (subAgentCoordinator != null) {
+        if (subAgentAvailable) {
             nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties));
         }
         this.nodes = registerNodes(nodeList);
@@ -284,7 +352,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 context = checkpoint.getContextSnapshot().restore();
             }
         }
-        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
+        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
         restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
         context.setWorkspace(approval.getWorkspace());
         context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
@@ -319,7 +387,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         }
         try {
             AgentContext context = checkpoint.getContextSnapshot().restore();
-            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
+            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
             restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
             context.setStartedAt(Instant.now());
             context.setCheckpointVersion(checkpoint.getVersion());
@@ -388,7 +456,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             return;
         }
         try {
-            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
+            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
             restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
             context.setStartedAt(Instant.now());
             context.setCheckpointVersion(checkpoint.getVersion());
@@ -532,7 +600,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
         boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
         return requested
-                && subAgentCoordinator != null
+                && subAgentAvailable
                 && Boolean.TRUE.equals(properties.getSubAgentEnabled())
                 && context.getAgentDepth() < Math.max(1, properties.getSubAgentMaxDepth() == null ? 1 : properties.getSubAgentMaxDepth());
     }

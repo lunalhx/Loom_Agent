@@ -50,7 +50,35 @@ public class SubAgentCoordinator {
     private final BudgetGuard budgetGuard;
     private final AgentMetrics agentMetrics;
     private final ContextWindowManager contextWindowManager;
+    // === Phase 2 新字段：供 runChild 创建子 Agent ===
+    private final AgentLoopFactory agentLoopFactory;
 
+    // ==================== Phase 2 新生产构造器（5 参数） ====================
+
+    public SubAgentCoordinator(RoleToolRegistryFactory toolRegistryFactory,
+                               AgentLoopFactory agentLoopFactory,
+                               AgentRuntimeProperties properties,
+                               ObjectMapper objectMapper,
+                               Executor executor) {
+        this.modelGateway = null;
+        this.toolRegistryFactory = toolRegistryFactory;
+        this.agentLoopFactory = agentLoopFactory;
+        this.approvalStore = null;
+        this.workspaceResolver = null;
+        this.runRepository = null;
+        this.checkpointRepository = null;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.executor = executor;
+        this.traceRecorder = null;
+        this.budgetGuard = null;
+        this.agentMetrics = null;
+        this.contextWindowManager = null;
+    }
+
+    // ==================== 旧构造器（标记废弃，最终阶段删除） ====================
+
+    @Deprecated(forRemoval = true)
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
                                ApprovalStore approvalStore,
@@ -64,6 +92,7 @@ public class SubAgentCoordinator {
                 properties, objectMapper, executor, new InMemoryTraceRecorder(), new DefaultBudgetGuard(properties), new NoopAgentMetrics());
     }
 
+    @Deprecated(forRemoval = true)
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
                                ApprovalStore approvalStore,
@@ -79,6 +108,7 @@ public class SubAgentCoordinator {
                 properties, objectMapper, executor, traceRecorder, budgetGuard, new NoopAgentMetrics());
     }
 
+    @Deprecated(forRemoval = true)
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
                                ApprovalStore approvalStore,
@@ -96,6 +126,7 @@ public class SubAgentCoordinator {
                 ContextWindowManager.noop(properties));
     }
 
+    @Deprecated(forRemoval = true)
     public SubAgentCoordinator(ModelGateway modelGateway,
                                RoleToolRegistryFactory toolRegistryFactory,
                                ApprovalStore approvalStore,
@@ -122,6 +153,7 @@ public class SubAgentCoordinator {
         this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
         this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
         this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
+        this.agentLoopFactory = null;
     }
 
     public SubAgentDispatchResult dispatch(AgentContext parent) {
@@ -221,21 +253,17 @@ public class SubAgentCoordinator {
         try {
             AgentRole role = task.getRole() == null ? AgentRole.EXPLORER : task.getRole();
             ToolRegistry childRegistry = toolRegistryFactory.create(role);
-            DefaultAgentLoopService childService = new DefaultAgentLoopService(
-                    modelGateway,
-                    childRegistry,
-                    approvalStore,
-                    workspaceResolver,
-                    runRepository,
-                    checkpointRepository,
-                    properties,
-                    objectMapper,
-                    Runnable::run,
-                    null,
-                    traceRecorder,
-                    budgetGuard,
-                    agentMetrics,
-                    contextWindowManager);
+            DefaultAgentLoopService childService;
+            if (agentLoopFactory != null) {
+                childService = agentLoopFactory.createChild(childRegistry);
+            } else {
+                // 旧构造器兼容路径：直接 new（最终阶段删除）
+                childService = new DefaultAgentLoopService(
+                        modelGateway, childRegistry, approvalStore, workspaceResolver,
+                        runRepository, checkpointRepository, properties, objectMapper,
+                        Runnable::run, null, traceRecorder, budgetGuard, agentMetrics,
+                        contextWindowManager);
+            }
             List<AgentEvent> events = childService.ask(childQuestion(parent, task, ordinal, childRunId, role))
                     .onErrorResume(error -> Flux.just(AgentEvent.builder()
                             .type(AgentEventType.ERROR)
