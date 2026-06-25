@@ -15,7 +15,7 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 
 /**
- * Agent Loop 统一装配入口（Phase 2 §三）。
+ * Agent Loop 统一装配入口（Phase 3 §七）。
  *
  * <p>生产代码只能通过本 Factory 创建 Agent Loop；所有依赖必须显式传入。
  * 内部持有 {@link AgentFlowFactory} 创建节点图。
@@ -43,8 +43,7 @@ public class AgentLoopFactory {
     public DefaultAgentLoopService createStandalone(ToolRegistry toolRegistry, Executor executor) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         Objects.requireNonNull(executor, "executor must not be null");
-        AgentFlowDefinition flow = flowFactory.createStandalone(toolRegistry);
-        return new DefaultAgentLoopService(state, runtime, flow, null, executor);
+        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), executor);
     }
 
     /**
@@ -56,19 +55,41 @@ public class AgentLoopFactory {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         Objects.requireNonNull(executor, "executor must not be null");
         Objects.requireNonNull(subAgentCoordinator, "subAgentCoordinator must not be null");
-        AgentFlowDefinition flow = flowFactory.createRoot(toolRegistry, subAgentCoordinator);
-        return new DefaultAgentLoopService(state, runtime, flow, subAgentCoordinator, executor);
+        return new DefaultAgentLoopService(assembleRoot(toolRegistry, subAgentCoordinator), executor);
     }
 
     /**
      * 创建子 Agent Loop（无子 Agent 节点），固定使用同步 Executor（{@code Runnable::run}）。
      *
      * <p>外层 CompletableFuture 负责并发，子 Agent 内部 Loop 不再额外切换线程。
-     * 保留当前行为。
      */
     public DefaultAgentLoopService createChild(ToolRegistry toolRegistry) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
+        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), Runnable::run);
+    }
+
+    // ==================== Phase 3 装配方法 ====================
+
+    AgentLoopAssembly assembleStandalone(ToolRegistry toolRegistry) {
         AgentFlowDefinition flow = flowFactory.createStandalone(toolRegistry);
-        return new DefaultAgentLoopService(state, runtime, flow, null, Runnable::run);
+        AgentLoopComponents components = buildComponents(flow);
+        return new AgentLoopAssembly(runtime.properties(), flow, components);
+    }
+
+    AgentLoopAssembly assembleRoot(ToolRegistry toolRegistry, SubAgentCoordinator coordinator) {
+        AgentFlowDefinition flow = flowFactory.createRoot(toolRegistry, coordinator);
+        AgentLoopComponents components = buildComponents(flow);
+        return new AgentLoopAssembly(runtime.properties(), flow, components);
+    }
+
+    private AgentLoopComponents buildComponents(AgentFlowDefinition flow) {
+        AgentEventFactory eventFactory = new AgentEventFactory();
+        AgentContextFactory contextFactory = new AgentContextFactory(
+                runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable());
+        AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
+                state.approvalStore(), state.checkpointRepository(), contextFactory, eventFactory);
+        AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
+                runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory);
+        return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory);
     }
 }

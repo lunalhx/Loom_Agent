@@ -1,0 +1,94 @@
+package cn.lunalhx.ai.domain.agent.service;
+
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import org.apache.commons.lang3.StringUtils;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+public final class AgentContextFactory {
+
+    private final AgentRuntimeProperties properties;
+    private final AgentWorkspaceResolver workspaceResolver;
+    private final List<ToolSpec> toolSpecs;
+    private final boolean subAgentAvailable;
+
+    public AgentContextFactory(AgentRuntimeProperties properties,
+                               AgentWorkspaceResolver workspaceResolver,
+                               List<ToolSpec> toolSpecs,
+                               boolean subAgentAvailable) {
+        this.properties = properties;
+        this.workspaceResolver = workspaceResolver;
+        this.toolSpecs = List.copyOf(toolSpecs);
+        this.subAgentAvailable = subAgentAvailable;
+    }
+
+    public AgentContext create(AgentQuestion question) {
+        AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
+        String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
+        AgentContext context = new AgentContext();
+        context.setRunId(runId);
+        context.setParentRunId(question.getParentRunId());
+        context.setRootRunId(StringUtils.defaultIfBlank(question.getRootRunId(), runId));
+        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
+        context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
+        context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
+        context.setAgentRole(question.getAgentRole());
+        context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
+        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
+        context.setQuestion(StringUtils.trim(question.getQuestion()));
+        context.setPathScope(question.getPathScope());
+        context.setResolvedWorkspace(workspace.getRoot());
+        context.setWorkspace(workspace.getWorkspace());
+        context.setWorkspaceDisplayName(workspace.getDisplayName());
+        context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
+        context.setStartedAt(Instant.now());
+        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
+        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
+        if (context.isSubAgentSpawnAllowed()) {
+            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        context.setToolSpecs(specs);
+        context.getDynamicText().appendUserTask(context.getQuestion());
+        return context;
+    }
+
+    public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {
+        restoreWorkspace(context, workspace);
+        context.setStartedAt(Instant.now());
+        context.setCheckpointVersion(checkpointVersion);
+        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
+        return context;
+    }
+
+    public AgentContext prepareApprovalResume(AgentContext context, PendingApproval approval) {
+        restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
+        context.setWorkspace(approval.getWorkspace());
+        context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
+        context.setStartedAt(Instant.now());
+        context.setPendingApprovalId(null);
+        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
+        return context;
+    }
+
+    private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
+        boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
+        return requested
+                && subAgentAvailable
+                && Boolean.TRUE.equals(properties.getSubAgentEnabled())
+                && context.getAgentDepth() < Math.max(1, properties.getSubAgentMaxDepth() == null ? 1 : properties.getSubAgentMaxDepth());
+    }
+
+    private void restoreWorkspace(AgentContext context, String workspace) {
+        AgentWorkspace resolved = workspaceResolver.resolve(workspace);
+        context.setResolvedWorkspace(resolved.getRoot());
+        context.setWorkspace(resolved.getWorkspace());
+        context.setWorkspaceDisplayName(resolved.getDisplayName());
+    }
+}

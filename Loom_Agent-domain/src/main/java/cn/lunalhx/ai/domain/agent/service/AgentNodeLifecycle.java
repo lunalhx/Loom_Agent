@@ -1,0 +1,161 @@
+package cn.lunalhx.ai.domain.agent.service;
+
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.flow.AgentNode;
+import cn.lunalhx.ai.domain.agent.flow.NodeResult;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.MDC;
+
+import java.util.List;
+import java.util.function.Consumer;
+
+public final class AgentNodeLifecycle {
+
+    private final TraceRecorder traceRecorder;
+    private final AgentMetrics agentMetrics;
+    private final AgentHookRegistry hookRegistry;
+    private final AgentEventFactory eventFactory;
+
+    public AgentNodeLifecycle(TraceRecorder traceRecorder,
+                              AgentMetrics agentMetrics,
+                              AgentHookRegistry hookRegistry,
+                              AgentEventFactory eventFactory) {
+        this.traceRecorder = traceRecorder;
+        this.agentMetrics = agentMetrics;
+        this.hookRegistry = hookRegistry;
+        this.eventFactory = eventFactory;
+    }
+
+    public void userPromptSubmitted(AgentContext context, Consumer<List<AgentEvent>> emitter) {
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.USER_PROMPT_SUBMIT, AgentHookContext.builder()
+                .agentContext(context)
+                .node(cn.lunalhx.ai.domain.agent.flow.AgentNodeNames.START)
+                .reason("user_prompt_submit")
+                .build()));
+    }
+
+    public AgentNodeExecution execute(AgentContext context, AgentNode node, Consumer<List<AgentEvent>> emitter) {
+        String parentSpanId = context.getCurrentSpanId();
+        String spanId = traceRecorder.recordNodeStart(context, node, parentSpanId);
+        context.setParentSpanId(parentSpanId);
+        context.setCurrentSpanId(spanId);
+        long startedAt = System.currentTimeMillis();
+        putNodeMdc(context, node.name());
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.BEFORE_NODE, AgentHookContext.builder()
+                .agentContext(context)
+                .node(node.name())
+                .reason("before_node:" + node.name())
+                .build()));
+        emitter.accept(List.of(eventFactory.nodeStarted(context, node)));
+
+        NodeResult result;
+        try {
+            result = node.apply(context);
+        } catch (Exception e) {
+            long durationMs = System.currentTimeMillis() - startedAt;
+            traceRecorder.recordNodeEnd(context, node, spanId, "failed", durationMs, "error=" + e.getMessage(), e);
+            agentMetrics.recordNodeDuration(node.name(), "failed", durationMs);
+            MDC.clear();
+            throw e;
+        }
+
+        emitter.accept(result.getEvents());
+        recordContextCompactedEvents(context, node, startedAt, result.getEvents());
+        String nextNode = result.isTerminal() ? node.name() : result.getNextNode();
+        long durationMs = System.currentTimeMillis() - startedAt;
+        String status = nodeStatus(context, result);
+        traceRecorder.recordNodeEnd(context, node, spanId, status, durationMs, "nextNode=" + nextNode, null);
+        agentMetrics.recordNodeDuration(node.name(), status, durationMs);
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_NODE, AgentHookContext.builder()
+                .agentContext(context)
+                .node(node.name())
+                .nextNode(nextNode)
+                .reason("after_node:" + node.name())
+                .build()));
+        MDC.clear();
+        return new AgentNodeExecution(result, nextNode);
+    }
+
+    public void stop(AgentContext context, AgentNode terminalNode, Consumer<List<AgentEvent>> emitter) {
+        traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
+        agentMetrics.recordRun(runKind(context), stopStatus(context), context.getErrorCode());
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.STOP, AgentHookContext.builder()
+                .agentContext(context)
+                .node(terminalNode.name())
+                .reason("stop:" + terminalNode.name())
+                .build()));
+        MDC.clear();
+    }
+
+    private void recordContextCompactedEvents(AgentContext context, AgentNode node, long startedAt, List<AgentEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        for (AgentEvent event : events) {
+            if (event.getType() == AgentEventType.CONTEXT_COMPACTED) {
+                traceRecorder.recordModelGatewayEvent(context,
+                        AgentEventType.CONTEXT_COMPACTED.eventName(),
+                        node.name(),
+                        "success",
+                        System.currentTimeMillis() - startedAt,
+                        event.getMessage(),
+                        null,
+                        event.getMetadata());
+            }
+        }
+    }
+
+    public static String nodeStatus(AgentContext context, NodeResult result) {
+        if (StringUtils.isNotBlank(context.getErrorCode())) {
+            return "failed";
+        }
+        if (result != null && result.isTerminal()) {
+            return "terminal";
+        }
+        return "success";
+    }
+
+    public static String stopStatus(AgentContext context) {
+        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+            return "budget_exceeded";
+        }
+        if (StringUtils.isNotBlank(context.getErrorCode())) {
+            return "failed";
+        }
+        if (context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+            return "waiting_user_input";
+        }
+        return "completed";
+    }
+
+    public static String stopSummary(AgentContext context) {
+        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+            return context.getBudgetBlockedReason();
+        }
+        if (StringUtils.isNotBlank(context.getFinalAnswer())) {
+            return StringUtils.abbreviate(context.getFinalAnswer(), 500);
+        }
+        return StringUtils.defaultString(context.getErrorMessage());
+    }
+
+    public static String runKind(AgentContext context) {
+        return StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
+    }
+
+    private void putNodeMdc(AgentContext context, String node) {
+        MDC.put("trace_id", StringUtils.defaultString(context.getTraceId()));
+        MDC.put("run_id", StringUtils.defaultString(context.getRunId()));
+        MDC.put("request_id", StringUtils.defaultString(context.getRequestId()));
+        MDC.put("conversation_id", StringUtils.defaultString(context.getConversationId()));
+        MDC.put("node", StringUtils.defaultString(node));
+    }
+}

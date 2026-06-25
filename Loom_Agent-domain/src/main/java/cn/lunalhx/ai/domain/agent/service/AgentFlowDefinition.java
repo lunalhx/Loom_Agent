@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,7 @@ public record AgentFlowDefinition(
         Objects.requireNonNull(nodes, "nodes must not be null");
         Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
         Objects.requireNonNull(toolSpecs, "toolSpecs must not be null");
-        nodes = Map.copyOf(nodes);
+        nodes = Collections.unmodifiableMap(new LinkedHashMap<>(nodes));
         toolSpecs = List.copyOf(toolSpecs);
     }
 }

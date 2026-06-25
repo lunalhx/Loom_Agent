@@ -9,8 +9,6 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
@@ -27,24 +25,17 @@ import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
 import cn.lunalhx.ai.domain.agent.flow.node.SubAgentDispatchNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
 import cn.lunalhx.ai.domain.agent.flow.node.UserInputGateNode;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
-import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
-import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
-import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
-import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -55,60 +46,54 @@ import reactor.core.publisher.FluxSink;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
 @Slf4j
 public class DefaultAgentLoopService implements AgentLoopService {
 
     private final AgentRuntimeProperties properties;
-    private final ApprovalStore approvalStore;
-    private final AgentWorkspaceResolver workspaceResolver;
-    private final AgentCheckpointRepository checkpointRepository;
-    private final AgentHookRegistry hookRegistry;
-    private final Executor executor;
-    private final SubAgentCoordinator subAgentCoordinator;
-    private final TraceRecorder traceRecorder;
-    private final BudgetGuard budgetGuard;
-    private final AgentMetrics agentMetrics;
-    private final ContextWindowManager contextWindowManager;
-    private final List<ToolSpec> toolSpecs;
     private final Map<String, AgentNode> nodes;
-    private final boolean subAgentAvailable;
+    private final AgentLoopComponents components;
+    private final Executor executor;
 
-    // ==================== Phase 2 新生产构造器（包内可见，仅供 AgentLoopFactory 调用） ====================
+    // ==================== Phase 3 生产构造器 ====================
 
-    /**
-     * 新生产构造器 — 只做字段赋值，不创建 Repository/Store/Metrics/Context 默认实现，不创建节点和 Hook。
-     *
-     * @param state               状态存储依赖
-     * @param runtime             运行时依赖
-     * @param flow                节点图装配
-     * @param subAgentCoordinator 子 Agent 协调器（可能为 null，表示无子 Agent 能力）
-     * @param executor            异步执行器
-     */
+    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor) {
+        this.properties = assembly.properties();
+        this.nodes = assembly.flow().nodes();
+        this.components = assembly.components();
+        this.executor = executor;
+    }
+
+    // ==================== Phase 2 兼容构造器（委托给新构造器） ====================
+
     DefaultAgentLoopService(AgentLoopStateDependencies state,
                             AgentLoopRuntimeDependencies runtime,
                             AgentFlowDefinition flow,
                             SubAgentCoordinator subAgentCoordinator,
                             Executor executor) {
         this.properties = runtime.properties();
-        this.approvalStore = state.approvalStore();
-        this.workspaceResolver = state.workspaceResolver();
-        this.checkpointRepository = state.checkpointRepository();
-        this.executor = executor;
-        this.subAgentCoordinator = subAgentCoordinator;
-        this.traceRecorder = runtime.traceRecorder();
-        this.budgetGuard = runtime.budgetGuard();
-        this.agentMetrics = runtime.agentMetrics();
-        this.contextWindowManager = runtime.contextWindowManager();
-        this.toolSpecs = flow.toolSpecs();
-        this.hookRegistry = flow.hookRegistry();
         this.nodes = flow.nodes();
-        this.subAgentAvailable = flow.subAgentAvailable();
+        this.components = buildComponents(state, runtime, flow);
+        this.executor = executor;
+    }
+
+    private static AgentLoopComponents buildComponents(AgentLoopStateDependencies state,
+                                                        AgentLoopRuntimeDependencies runtime,
+                                                        AgentFlowDefinition flow) {
+        AgentEventFactory eventFactory = new AgentEventFactory();
+        AgentContextFactory contextFactory = new AgentContextFactory(
+                runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable());
+        AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
+                state.approvalStore(), state.checkpointRepository(), contextFactory, eventFactory);
+        AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
+                runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory);
+        return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory);
     }
 
     // ==================== 旧构造器（Phase 2 兼容层，标记废弃，最终阶段删除） ====================
@@ -251,239 +236,139 @@ public class DefaultAgentLoopService implements AgentLoopService {
                                    BudgetGuard budgetGuard,
                                    AgentMetrics agentMetrics,
                                    ContextWindowManager contextWindowManager) {
-        this.properties = properties;
-        this.approvalStore = approvalStore;
-        this.workspaceResolver = workspaceResolver;
-        this.checkpointRepository = checkpointRepository;
-        this.executor = executor;
-        this.subAgentCoordinator = subAgentCoordinator;
-        this.traceRecorder = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
-        this.budgetGuard = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
-        this.agentMetrics = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
-        this.contextWindowManager = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
-        this.subAgentAvailable = subAgentCoordinator != null;
-        this.toolSpecs = toolRegistry.specs();
-        this.hookRegistry = new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
-        List<AgentNode> nodeList = new java.util.ArrayList<>(List.of(
+        this(legacyAssembly(modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository,
+                checkpointRepository, properties, objectMapper, subAgentCoordinator,
+                traceRecorder, budgetGuard, agentMetrics, contextWindowManager), executor);
+    }
+
+    private static AgentLoopAssembly legacyAssembly(ModelGateway modelGateway,
+                                                     ToolRegistry toolRegistry,
+                                                     ApprovalStore approvalStore,
+                                                     AgentWorkspaceResolver workspaceResolver,
+                                                     AgentRunRepository runRepository,
+                                                     AgentCheckpointRepository checkpointRepository,
+                                                     AgentRuntimeProperties properties,
+                                                     ObjectMapper objectMapper,
+                                                     SubAgentCoordinator subAgentCoordinator,
+                                                     TraceRecorder traceRecorder,
+                                                     BudgetGuard budgetGuard,
+                                                     AgentMetrics agentMetrics,
+                                                     ContextWindowManager contextWindowManager) {
+        TraceRecorder tr = traceRecorder == null ? new InMemoryTraceRecorder() : traceRecorder;
+        BudgetGuard bg = budgetGuard == null ? new DefaultBudgetGuard(properties) : budgetGuard;
+        AgentMetrics am = agentMetrics == null ? new NoopAgentMetrics() : agentMetrics;
+        ContextWindowManager cwm = contextWindowManager == null ? ContextWindowManager.noop(properties) : contextWindowManager;
+
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
+                approvalStore, workspaceResolver, runRepository, checkpointRepository, objectMapper);
+        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(properties, tr, bg, am, cwm);
+
+        boolean subAgentAvailable = subAgentCoordinator != null;
+        List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new StartNode(),
                 new PlannerNode(),
-                new RenderPromptNode(this.contextWindowManager),
-                new ModelCallNode(modelGateway, properties, this.traceRecorder, this.budgetGuard, this.contextWindowManager),
+                new RenderPromptNode(cwm),
+                new ModelCallNode(modelGateway, properties, tr, bg, cwm),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ApprovalGateNode(toolRegistry, approvalStore, properties),
-                new ToolDispatchNode(toolRegistry, properties, hookRegistry, this.contextWindowManager),
+                new ToolDispatchNode(toolRegistry, properties,
+                        new AgentHookRegistry(List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper))),
+                        cwm),
                 new ObservationNode(),
                 new ReplanGuardNode(),
-                new ReplanNode(modelGateway, properties, objectMapper, this.traceRecorder, this.budgetGuard),
+                new ReplanNode(modelGateway, properties, objectMapper, tr, bg),
                 new FinalAnswerNode(),
                 new UserInputGateNode(),
                 new FailNode()));
         if (subAgentAvailable) {
             nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties));
         }
-        this.nodes = registerNodes(nodeList);
+        Map<String, AgentNode> nodes = new LinkedHashMap<>();
+        for (AgentNode node : nodeList) {
+            if (nodes.containsKey(node.name())) {
+                throw new IllegalStateException("重复的 Agent 节点：" + node.name());
+            }
+            nodes.put(node.name(), node);
+        }
+
+        AgentHookRegistry hookRegistry = new AgentHookRegistry(
+                List.of(new CheckpointAgentHook(runRepository, checkpointRepository, objectMapper)));
+        AgentFlowDefinition flow = new AgentFlowDefinition(nodes, hookRegistry, toolRegistry.specs(), subAgentAvailable);
+
+        AgentEventFactory eventFactory = new AgentEventFactory();
+        AgentContextFactory contextFactory = new AgentContextFactory(properties, workspaceResolver, flow.toolSpecs(), subAgentAvailable);
+        AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(approvalStore, checkpointRepository, contextFactory, eventFactory);
+        AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(tr, am, hookRegistry, eventFactory);
+        AgentLoopComponents components = new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory);
+
+        return new AgentLoopAssembly(properties, flow, components);
     }
+
+    // ==================== 公共入口 ====================
 
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
-        return Flux.create(sink -> executor.execute(() -> {
-            try {
-                AgentContext context = toContext(question);
-                emit(sink, hookRegistry.trigger(AgentHookEvent.USER_PROMPT_SUBMIT, AgentHookContext.builder()
-                        .agentContext(context)
-                        .node(AgentNodeNames.START)
-                        .reason("user_prompt_submit")
-                        .build()));
-                runLoop(context, AgentNodeNames.START, sink);
-            } catch (WorkspaceResolutionException e) {
-                emit(sink, List.of(workspaceError(e)));
-                sink.complete();
-            } catch (Exception e) {
-                log.error("Agent loop failed before terminal event, workspace={}, question={}",
-                        question == null ? null : question.getWorkspace(),
-                        question == null ? null : StringUtils.abbreviate(question.getQuestion(), 200),
-                        e);
-                emit(sink, List.of(AgentEvent.builder()
-                        .type(AgentEventType.ERROR)
-                        .code("agent_error")
-                        .message("Agent 执行失败")
-                        .build()));
-                sink.complete();
-            }
-        }), FluxSink.OverflowStrategy.BUFFER);
+        return executeAsync("ask", question == null ? null : question.getWorkspace(), sink -> {
+            AgentContext context = components.contextFactory().create(question);
+            components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
+            runLoop(context, AgentNodeNames.START, sink);
+        });
     }
 
     @Override
     public Flux<AgentEvent> resume(String approvalId, ApprovalDecision decision, String reason) {
-        return Flux.create(sink -> executor.execute(() -> resumeLoop(approvalId, decision, reason, sink)), FluxSink.OverflowStrategy.BUFFER);
+        return executeAsync("resume", approvalId, sink -> {
+            AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(approvalId, decision, reason);
+            continueFrom(plan, sink);
+        });
     }
 
     @Override
     public Flux<AgentEvent> resumeRun(String runId) {
-        return Flux.create(sink -> executor.execute(() -> resumeRunLoop(runId, sink)), FluxSink.OverflowStrategy.BUFFER);
+        return executeAsync("resumeRun", runId, sink -> {
+            AgentResumePlan plan = components.resumeCoordinator().prepareRunResume(runId);
+            continueFrom(plan, sink);
+        });
     }
 
     @Override
     public Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message) {
-        return Flux.create(sink -> executor.execute(
-                () -> resumeWithUserInputLoop(runId, action, message, sink)), FluxSink.OverflowStrategy.BUFFER);
+        return executeAsync("resumeWithUserInput", runId, sink -> {
+            AgentResumePlan plan = components.resumeCoordinator().prepareUserInputResume(runId, action, message);
+            continueFrom(plan, sink);
+        });
     }
 
-    private void resumeLoop(String approvalId,
-                            ApprovalDecision decision,
-                            String reason,
-                            FluxSink<AgentEvent> sink) {
-        PendingApproval approval = approvalStore.consume(approvalId).orElse(null);
-        if (approval == null) {
-            emit(sink, List.of(AgentEvent.builder()
-                    .type(AgentEventType.ERROR)
-                    .approvalId(approvalId)
-                    .code("approval_not_found")
-                    .message("审批不存在或已过期")
-                    .build()));
-            sink.complete();
-            return;
-        }
+    // ==================== 核心编排 ====================
 
-        AgentContext context = approval.getContext();
-        if (StringUtils.isNotBlank(approval.getRunId())) {
-            AgentCheckpoint checkpoint = checkpointRepository.latest(approval.getRunId()).orElse(null);
-            if (checkpoint != null && checkpoint.getContextSnapshot() != null) {
-                context = checkpoint.getContextSnapshot().restore();
-            }
-        }
-        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
-        restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
-        context.setWorkspace(approval.getWorkspace());
-        context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
-        context.setStartedAt(Instant.now());
-        context.setPendingApprovalId(null);
-        emit(sink, List.of(resumeStartedEvent(context)));
-        if (decision == ApprovalDecision.APPROVE) {
-            runLoop(context, AgentNodeNames.TOOL_DISPATCH, sink);
-            return;
-        }
-
-        context.setStep(context.getStep() + 1);
-        context.setToolResult(ToolResult.failure(
-                "approval_rejected",
-                StringUtils.defaultIfBlank(reason, "用户拒绝执行该写操作"),
-                0L));
-        context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
-        runLoop(context, AgentNodeNames.OBSERVATION, sink);
-    }
-
-    private void resumeRunLoop(String runId, FluxSink<AgentEvent> sink) {
-        AgentCheckpoint checkpoint = checkpointRepository.latest(runId).orElse(null);
-        if (checkpoint == null || checkpoint.getContextSnapshot() == null) {
-            emit(sink, List.of(AgentEvent.builder()
-                    .type(AgentEventType.ERROR)
-                    .runId(runId)
-                    .code("checkpoint_not_found")
-                    .message("未找到可恢复的 checkpoint")
-                    .build()));
-            sink.complete();
-            return;
-        }
-        try {
-            AgentContext context = checkpoint.getContextSnapshot().restore();
-            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
-            restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
-            context.setStartedAt(Instant.now());
-            context.setCheckpointVersion(checkpoint.getVersion());
-            emit(sink, List.of(resumeStartedEvent(context)));
-            if (AgentNodeNames.APPROVAL_GATE.equals(checkpoint.getCurrentNode()) && StringUtils.isNotBlank(context.getPendingApprovalId())) {
-                PendingApproval approval = approvalStore.find(context.getPendingApprovalId()).orElse(null);
-                if (approval != null) {
-                    emit(sink, List.of(approvalRequiredEvent(context, approval)));
-                    sink.complete();
-                    return;
-                }
-            }
-            if (AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                    || context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
-                emit(sink, List.of(userInputRequiredEvent(context)));
+    private Flux<AgentEvent> executeAsync(String operation, String reference,
+                                          Consumer<FluxSink<AgentEvent>> action) {
+        return Flux.create(sink -> executor.execute(() -> {
+            try {
+                action.accept(sink);
+            } catch (WorkspaceResolutionException e) {
+                emit(sink, List.of(components.eventFactory().workspaceError(e)));
                 sink.complete();
-                return;
+            } catch (Exception e) {
+                log.error("Agent loop failed before terminal event, operation={}, reference={}",
+                        operation,
+                        reference == null ? null : StringUtils.abbreviate(reference, 200),
+                        e);
+                emit(sink, List.of(components.eventFactory().agentError()));
+                sink.complete();
+            } finally {
+                MDC.clear();
             }
-            String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.RENDER_PROMPT);
-            if (context.isUnsafeResumeRequired() || requiresResumeReplan(currentNode)) {
-                context.setUnsafeResumeRequired(true);
-                currentNode = AgentNodeNames.REPLAN_GUARD;
-            }
-            runLoop(context, currentNode, sink);
-        } catch (WorkspaceResolutionException e) {
-            emit(sink, List.of(workspaceError(e)));
-            sink.complete();
-        }
+        }), FluxSink.OverflowStrategy.BUFFER);
     }
 
-    private void resumeWithUserInputLoop(String runId,
-                                         UserInputAction action,
-                                         String message,
-                                         FluxSink<AgentEvent> sink) {
-        AgentCheckpoint checkpoint = checkpointRepository.latest(runId).orElse(null);
-        if (checkpoint == null || checkpoint.getContextSnapshot() == null) {
-            emit(sink, List.of(AgentEvent.builder()
-                    .type(AgentEventType.ERROR)
-                    .runId(runId)
-                    .code("checkpoint_not_found")
-                    .message("未找到可恢复的 checkpoint")
-                    .build()));
+    private void continueFrom(AgentResumePlan plan, FluxSink<AgentEvent> sink) {
+        emit(sink, plan.initialEvents());
+        if (plan.terminal()) {
             sink.complete();
             return;
         }
-        AgentContext context = checkpoint.getContextSnapshot().restore();
-        if (!AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                && context.getContextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
-            emit(sink, List.of(AgentEvent.builder()
-                    .type(AgentEventType.ERROR)
-                    .runId(runId)
-                    .code("run_not_waiting_user_input")
-                    .message("当前运行不在等待用户输入状态")
-                    .build()));
-            sink.complete();
-            return;
-        }
-        if (action == null || (action == UserInputAction.CONTINUE && StringUtils.isBlank(message))) {
-            emit(sink, List.of(AgentEvent.builder()
-                    .type(AgentEventType.ERROR)
-                    .runId(runId)
-                    .code("invalid_user_input")
-                    .message("CONTINUE 必须提供非空 message")
-                    .build()));
-            sink.complete();
-            return;
-        }
-        try {
-            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
-            restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
-            context.setStartedAt(Instant.now());
-            context.setCheckpointVersion(checkpoint.getVersion());
-            emit(sink, List.of(resumeStartedEvent(context)));
-            if (action == UserInputAction.ABORT) {
-                context.setContextRecoveryStage(ContextRecoveryStage.NONE);
-                fail(context, AgentStopReason.CONTEXT_OVERFLOW,
-                        ModelErrorCode.CONTEXT_OVERFLOW.code(),
-                        "用户在上下文恢复等待阶段终止了本次运行");
-                runLoop(context, AgentNodeNames.FAIL, sink);
-                return;
-            }
-            context.getDynamicText().appendUserInput(context.getStep(), StringUtils.trim(message));
-            context.setContextRecoveryStage(ContextRecoveryStage.NONE);
-            context.setReactiveCompactAttempts(0);
-            context.setRecoveryModelOverride(null);
-            context.setContextTranscriptArtifactId(null);
-            context.setContextBlockedReason(null);
-            context.setFallbackReason(null);
-            context.setStopReason(null);
-            context.setErrorCode(null);
-            context.setErrorMessage(null);
-            runLoop(context, AgentNodeNames.RENDER_PROMPT, sink);
-        } catch (WorkspaceResolutionException e) {
-            emit(sink, List.of(workspaceError(e)));
-            sink.complete();
-        }
+        runLoop(plan.context(), plan.startNode(), sink);
     }
 
     private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {
@@ -500,251 +385,25 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 node = nodes.get(AgentNodeNames.FAIL);
             }
 
-            String parentSpanId = context.getCurrentSpanId();
-            String spanId = traceRecorder.recordNodeStart(context, node, parentSpanId);
-            context.setParentSpanId(parentSpanId);
-            context.setCurrentSpanId(spanId);
-            long startedAt = System.currentTimeMillis();
-            putNodeMdc(context, node.name());
-            emit(sink, hookRegistry.trigger(AgentHookEvent.BEFORE_NODE, AgentHookContext.builder()
-                    .agentContext(context)
-                    .node(node.name())
-                    .reason("before_node:" + node.name())
-                    .build()));
-            emit(sink, List.of(nodeStartEvent(context, node)));
-            NodeResult result = node.apply(context);
-            emit(sink, result.getEvents());
-            recordContextCompactedEvents(context, node, startedAt, result.getEvents());
-            String nextNode = result.isTerminal() ? node.name() : result.getNextNode();
-            long durationMs = System.currentTimeMillis() - startedAt;
-            String status = nodeStatus(context, result);
-            traceRecorder.recordNodeEnd(context, node, spanId, status,
-                    durationMs, "nextNode=" + nextNode, null);
-            agentMetrics.recordNodeDuration(node.name(), status, durationMs);
-            emit(sink, hookRegistry.trigger(AgentHookEvent.AFTER_NODE, AgentHookContext.builder()
-                    .agentContext(context)
-                    .node(node.name())
-                    .nextNode(nextNode)
-                    .reason("after_node:" + node.name())
-                    .build()));
-            if (result.isTerminal()) {
-                traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
-                agentMetrics.recordRun(runKind(context), stopStatus(context), context.getErrorCode());
-                emit(sink, hookRegistry.trigger(AgentHookEvent.STOP, AgentHookContext.builder()
-                        .agentContext(context)
-                        .node(node.name())
-                        .reason("stop:" + node.name())
-                        .build()));
+            AgentNodeExecution execution =
+                    components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
+
+            if (execution.terminal()) {
+                components.nodeLifecycle().stop(context, node, events -> emit(sink, events));
                 sink.complete();
-                MDC.clear();
                 return;
             }
-            MDC.clear();
-            currentNode = nextNode;
+
+            currentNode = execution.nextNode();
         }
     }
 
-    private boolean requiresResumeReplan(String currentNode) {
-        return AgentNodeNames.APPROVAL_GATE.equals(currentNode)
-                || AgentNodeNames.TOOL_DISPATCH.equals(currentNode);
-    }
-
-    private void recordContextCompactedEvents(AgentContext context, AgentNode node, long startedAt, List<AgentEvent> events) {
-        if (events == null || events.isEmpty()) {
-            return;
-        }
-        for (AgentEvent event : events) {
-            if (event.getType() == AgentEventType.CONTEXT_COMPACTED) {
-                traceRecorder.recordModelGatewayEvent(context,
-                        AgentEventType.CONTEXT_COMPACTED.eventName(),
-                        node.name(),
-                        "success",
-                        System.currentTimeMillis() - startedAt,
-                        event.getMessage(),
-                        null,
-                        event.getMetadata());
-            }
-        }
-    }
-
-    private AgentContext toContext(AgentQuestion question) {
-        AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
-        String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
-        AgentContext context = new AgentContext();
-        context.setRunId(runId);
-        context.setParentRunId(question.getParentRunId());
-        context.setRootRunId(StringUtils.defaultIfBlank(question.getRootRunId(), runId));
-        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
-        context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
-        context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
-        context.setAgentRole(question.getAgentRole());
-        context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
-        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
-        context.setQuestion(StringUtils.trim(question.getQuestion()));
-        context.setPathScope(question.getPathScope());
-        context.setResolvedWorkspace(workspace.getRoot());
-        context.setWorkspace(workspace.getWorkspace());
-        context.setWorkspaceDisplayName(workspace.getDisplayName());
-        context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
-        context.setStartedAt(Instant.now());
-        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
-        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
-        if (context.isSubAgentSpawnAllowed()) {
-            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        context.setToolSpecs(specs);
-        context.getDynamicText().appendUserTask(context.getQuestion());
-        return context;
-    }
-
-    private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
-        boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
-        return requested
-                && subAgentAvailable
-                && Boolean.TRUE.equals(properties.getSubAgentEnabled())
-                && context.getAgentDepth() < Math.max(1, properties.getSubAgentMaxDepth() == null ? 1 : properties.getSubAgentMaxDepth());
-    }
-
-    private void restoreWorkspace(AgentContext context, String workspace) {
-        AgentWorkspace resolved = workspaceResolver.resolve(workspace);
-        context.setResolvedWorkspace(resolved.getRoot());
-        context.setWorkspace(resolved.getWorkspace());
-        context.setWorkspaceDisplayName(resolved.getDisplayName());
-    }
-
-    private Map<String, AgentNode> registerNodes(List<AgentNode> nodeList) {
-        Map<String, AgentNode> registeredNodes = new LinkedHashMap<>();
-        for (AgentNode node : nodeList) {
-            if (registeredNodes.containsKey(node.name())) {
-                throw new IllegalStateException("重复的 Agent 节点：" + node.name());
-            }
-            registeredNodes.put(node.name(), node);
-        }
-        return registeredNodes;
-    }
-
-    private AgentEvent nodeStartEvent(AgentContext context, AgentNode node) {
-        return AgentEvent.builder()
-                .type(AgentEventType.NODE_START)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId())
-                .node(node.name())
-                .nodeInputs(node.inputKeys())
-                .build();
-    }
-
-    private AgentEvent resumeStartedEvent(AgentContext context) {
-        return AgentEvent.builder()
-                .type(AgentEventType.RESUME_STARTED)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId())
-                .checkpointVersion(context.getCheckpointVersion())
-                .plan(context.getPlan() == null ? null : context.getPlan().toView())
-                .build();
-    }
-
-    private AgentEvent approvalRequiredEvent(AgentContext context, PendingApproval approval) {
-        return AgentEvent.builder()
-                .type(AgentEventType.APPROVAL_REQUIRED)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(approval.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId())
-                .step(context.getStep() + 1)
-                .tool(approval.getTool())
-                .input(approval.getInput())
-                .approvalId(approval.getApprovalId())
-                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
-                .riskReason(approval.getRiskReason())
-                .operationPreview(approval.getOperationPreview())
-                .expiresAt(approval.getExpiresAt())
-                .build();
-    }
-
-    private AgentEvent userInputRequiredEvent(AgentContext context) {
-        return AgentEvent.builder()
-                .type(AgentEventType.USER_INPUT_REQUIRED)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId())
-                .code(ModelErrorCode.CONTEXT_OVERFLOW.code())
-                .message("自动上下文恢复已耗尽。请补充更聚焦的指令后继续，或终止本次运行。")
-                .metadata(Map.of(
-                        "allowedActions", List.of("CONTINUE", "ABORT"),
-                        "recoveryStage", ContextRecoveryStage.WAITING_USER_INPUT.name(),
-                        "transcriptArtifactId", StringUtils.defaultString(context.getContextTranscriptArtifactId()),
-                        "blockedReason", StringUtils.defaultString(context.getContextBlockedReason())))
-                .build();
-    }
-
-    private AgentEvent workspaceError(WorkspaceResolutionException e) {
-        return AgentEvent.builder()
-                .type(AgentEventType.ERROR)
-                .requestId(UUID.randomUUID().toString())
-                .stopReason(AgentStopReason.MODEL_ERROR)
-                .code(e.getCode())
-                .message(e.getMessage())
-                .build();
-    }
+    // ==================== 私有辅助 ====================
 
     private void fail(AgentContext context, AgentStopReason reason, String code, String message) {
         context.setStopReason(reason);
         context.setErrorCode(code);
         context.setErrorMessage(message);
-    }
-
-    private String nodeStatus(AgentContext context, NodeResult result) {
-        if (StringUtils.isNotBlank(context.getErrorCode())) {
-            return "failed";
-        }
-        if (result != null && result.isTerminal()) {
-            return "terminal";
-        }
-        return "success";
-    }
-
-    private String stopStatus(AgentContext context) {
-        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
-            return "budget_exceeded";
-        }
-        if (StringUtils.isNotBlank(context.getErrorCode())) {
-            return "failed";
-        }
-        if (context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
-            return "waiting_user_input";
-        }
-        return "completed";
-    }
-
-    private String stopSummary(AgentContext context) {
-        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
-            return context.getBudgetBlockedReason();
-        }
-        if (StringUtils.isNotBlank(context.getFinalAnswer())) {
-            return StringUtils.abbreviate(context.getFinalAnswer(), 500);
-        }
-        return StringUtils.defaultString(context.getErrorMessage());
-    }
-
-    private String runKind(AgentContext context) {
-        return StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
-    }
-
-    private void putNodeMdc(AgentContext context, String node) {
-        MDC.put("trace_id", StringUtils.defaultString(context.getTraceId()));
-        MDC.put("run_id", StringUtils.defaultString(context.getRunId()));
-        MDC.put("request_id", StringUtils.defaultString(context.getRequestId()));
-        MDC.put("conversation_id", StringUtils.defaultString(context.getConversationId()));
-        MDC.put("node", StringUtils.defaultString(node));
     }
 
     private boolean isTotalTimeout(AgentContext context) {
@@ -758,5 +417,4 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
         }
     }
-
 }
