@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.infrastructure.gateway;
 
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
@@ -28,8 +29,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,6 +88,7 @@ public class DeepSeekModelGateway implements ModelGateway {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint()))
+                    .timeout(requestTimeout(prompt))
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
                     .header("Authorization", "Bearer " + apiKey)
@@ -92,7 +98,7 @@ public class DeepSeekModelGateway implements ModelGateway {
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 String responseBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                sink.error(toHttpException(response.statusCode(), responseBody));
+                sink.error(toHttpException(response.statusCode(), responseBody, response.headers(), resolvedModel(prompt)));
                 return;
             }
             consumeSse(response.body(), sink);
@@ -113,6 +119,7 @@ public class DeepSeekModelGateway implements ModelGateway {
         }
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint()))
+                .timeout(requestTimeout(prompt))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer " + apiKey)
@@ -120,7 +127,7 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw toHttpException(response.statusCode(), response.body());
+            throw toHttpException(response.statusCode(), response.body(), response.headers(), resolvedModel(prompt));
         }
         return parseChatResult(response.body());
     }
@@ -197,12 +204,13 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .content(textOrNull(choice.path("message").path("content")))
                 .finishReason(textOrNull(choice.path("finish_reason")))
                 .usage(parseUsage(root.path("usage")))
+                .actualModel(textOrNull(root.path("model")))
                 .build();
     }
 
     private String toRequestBody(ChatPrompt prompt, boolean stream) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", StringUtils.defaultIfBlank(prompt.getModel(), defaultModel()));
+        body.put("model", resolvedModel(prompt));
         body.put("messages", messages(prompt));
         body.put("stream", stream);
         if (stream) {
@@ -227,13 +235,26 @@ public class DeepSeekModelGateway implements ModelGateway {
         if (StringUtils.isNotBlank(systemPrompt)) {
             messages.add(Map.of("role", "system", "content", systemPrompt));
         }
+        if (prompt.getMessages() != null && !prompt.getMessages().isEmpty()) {
+            for (ChatMessage message : prompt.getMessages()) {
+                if (message != null && StringUtils.isNotBlank(message.getRole())
+                        && StringUtils.isNotBlank(message.getContent())) {
+                    messages.add(Map.of("role", message.getRole(), "content", message.getContent()));
+                }
+            }
+            return messages;
+        }
         messages.add(Map.of("role", "user", "content", prompt.getMessage()));
         return messages;
     }
 
-    private ModelGatewayException toHttpException(int statusCode, String responseBody) {
+    private ModelGatewayException toHttpException(int statusCode,
+                                                  String responseBody,
+                                                  HttpHeaders headers,
+                                                  String model) {
         ModelErrorCode errorCode;
         boolean retryable = false;
+        String providerMessage = extractErrorMessage(responseBody);
         if (statusCode == 401) {
             errorCode = ModelErrorCode.AUTHENTICATION_FAILED;
         } else if (statusCode == 402) {
@@ -241,17 +262,67 @@ public class DeepSeekModelGateway implements ModelGateway {
         } else if (statusCode == 429) {
             errorCode = ModelErrorCode.RATE_LIMITED;
             retryable = true;
-        } else if (statusCode == 400 || statusCode == 422) {
-            errorCode = ModelErrorCode.INVALID_REQUEST;
-        } else if (statusCode == 500 || statusCode == 503) {
+        } else if (statusCode == 400) {
+            errorCode = isContextOverflowMessage(providerMessage)
+                    ? ModelErrorCode.CONTEXT_OVERFLOW
+                    : ModelErrorCode.BAD_REQUEST;
+        } else if (statusCode == 422) {
+            errorCode = isContextOverflowMessage(providerMessage)
+                    ? ModelErrorCode.CONTEXT_OVERFLOW
+                    : ModelErrorCode.INVALID_PARAMETER;
+        } else if (statusCode == 503 || statusCode == 529) {
+            errorCode = ModelErrorCode.PROVIDER_OVERLOADED;
+            retryable = true;
+        } else if (statusCode == 500) {
             errorCode = ModelErrorCode.PROVIDER_UNAVAILABLE;
             retryable = true;
         } else {
             errorCode = ModelErrorCode.MODEL_ERROR;
         }
-        String message = StringUtils.defaultIfBlank(extractErrorMessage(responseBody), errorCode.message());
+        String message = StringUtils.defaultIfBlank(providerMessage, errorCode.message());
         log.warn("DeepSeek API returned status {}", statusCode);
-        return new ModelGatewayException(errorCode, message, retryable, statusCode, null);
+        return new ModelGatewayException(errorCode, message, retryable, statusCode,
+                retryAfterMs(headers), model, null);
+    }
+
+    private boolean isContextOverflowMessage(String message) {
+        String normalized = StringUtils.lowerCase(message);
+        return StringUtils.contains(normalized, "context length")
+                || StringUtils.contains(normalized, "prompt too long")
+                || StringUtils.contains(normalized, "prompt_too_long")
+                || StringUtils.contains(normalized, "tokens exceed")
+                || StringUtils.contains(normalized, "context_length_exceeded")
+                || StringUtils.contains(normalized, "too many tokens");
+    }
+
+    private Long retryAfterMs(HttpHeaders headers) {
+        String value = headers == null ? null : headers.firstValue("Retry-After").orElse(null);
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return Math.max(0L, Long.parseLong(value.trim()) * 1000L);
+        } catch (NumberFormatException ignored) {
+            try {
+                Instant retryAt = ZonedDateTime.parse(value.trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+                return Math.max(0L, Duration.between(Instant.now(), retryAt).toMillis());
+            } catch (Exception ignoredDate) {
+                return null;
+            }
+        }
+    }
+
+    private Duration requestTimeout(ChatPrompt prompt) {
+        long configured = Math.max(1L, runtimeProperties.getStreamTimeoutMs());
+        if (prompt.getDeadlineEpochMs() == null) {
+            return Duration.ofMillis(configured);
+        }
+        long remaining = Math.max(1L, prompt.getDeadlineEpochMs() - System.currentTimeMillis());
+        return Duration.ofMillis(Math.min(configured, remaining));
+    }
+
+    private String resolvedModel(ChatPrompt prompt) {
+        return StringUtils.defaultIfBlank(prompt.getModel(), defaultModel());
     }
 
     private String extractErrorMessage(String responseBody) {

@@ -34,6 +34,8 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
+import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -866,6 +868,79 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ANSWER
                 && "压缩后成功。".equals(event.getAnswer())));
         assertEquals(1, artifactRepository.listByRootRunId("reactive-run").size());
+    }
+
+    @Test
+    public void controlJsonShouldFailWhenStillTruncatedAfter64k() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Integer> secondMaxTokens = new AtomicReference<>();
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 2) {
+                    secondMaxTokens.set(prompt.getMaxTokens());
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\"")
+                        .finishReason("length")
+                        .build());
+            }
+        };
+
+        List<AgentEvent> events = newService(gateway, List.of())
+                .ask(AgentQuestion.builder().question("生成一个很长的控制决策").maxSteps(2).build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertEquals(2, calls.get());
+        assertEquals(Integer.valueOf(64000), secondMaxTokens.get());
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.MODEL_DECISION_TRUNCATED.code().equals(event.getCode())));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.NODE_START
+                && AgentNodeNames.DECISION.equals(event.getNode())));
+    }
+
+    @Test
+    public void nonContextBadRequestShouldNotTriggerCompact() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.error(new ModelGatewayException(ModelErrorCode.BAD_REQUEST,
+                        "temperature is invalid", false, 400, null));
+            }
+        };
+
+        List<AgentEvent> events = newService(gateway, List.of())
+                .ask(AgentQuestion.builder().question("不要压缩普通 400").maxSteps(2).build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertEquals(1, calls.get());
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.CONTEXT_COMPACTED));
+    }
+
+    @Test
+    public void checkpointShouldRestoreRecoveryState() {
+        AgentContext context = contextForRoot("recovery-checkpoint");
+        context.setCurrentModel("deepseek-v4-pro");
+        context.setReactiveCompactAttempts(1);
+        context.setFallbackReason("provider_overloaded");
+
+        AgentContext restored = AgentContextSnapshot.from(context).restore();
+
+        assertEquals("deepseek-v4-pro", restored.getCurrentModel());
+        assertEquals(1, restored.getReactiveCompactAttempts());
+        assertEquals("provider_overloaded", restored.getFallbackReason());
     }
 
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {

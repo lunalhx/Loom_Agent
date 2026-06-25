@@ -33,6 +33,7 @@ public class AgentRuntimeProperties {
     private Integer subAgentSummaryMaxChars = 12000;
     private BudgetProperties budget = new BudgetProperties();
     private ContextProperties context = new ContextProperties();
+    private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
 
     @Data
     public static class BudgetProperties {
@@ -43,6 +44,16 @@ public class AgentRuntimeProperties {
         private Integer estimatedCharsPerToken = 4;
         private BigDecimal inputPricePer1k = BigDecimal.ZERO;
         private BigDecimal outputPricePer1k = BigDecimal.ZERO;
+        private BigDecimal maxTotalCost;
+
+    }
+
+    @Data
+    public static class ModelRecoveryProperties {
+
+        private Integer escalatedMaxTokens = 64000;
+        private Integer continuationMaxAttempts = 3;
+        private String contextFallbackModel;
 
     }
 

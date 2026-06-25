@@ -63,6 +63,8 @@ public class AgentContext {
     private BigDecimal estimatedCost = BigDecimal.ZERO;
     private String budgetBlockedReason;
     private int reactiveCompactAttempts;
+    private String currentModel;
+    private String fallbackReason;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;

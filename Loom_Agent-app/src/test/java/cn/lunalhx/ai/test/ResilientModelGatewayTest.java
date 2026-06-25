@@ -22,6 +22,8 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
@@ -163,6 +165,119 @@ public class ResilientModelGatewayTest {
         }
     }
 
+    @Test
+    public void shouldStopBeforeRetryAfterExceedsDeadline() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelRuntimeProperties properties = properties(4, 4);
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.error(new ModelGatewayException(ModelErrorCode.RATE_LIMITED,
+                        "429", true, 429, 5000L, prompt.getModel(), null));
+            }
+        }, new InMemoryTraceRecorder(), properties);
+        ChatPrompt prompt = prompt(ModelCapabilities.COMPLETE_AGENT_DECISION);
+        prompt.setDeadlineEpochMs(System.currentTimeMillis() + 30L);
+
+        ModelGatewayException error = assertThrows(ModelGatewayException.class,
+                () -> gateway.complete(prompt).block(Duration.ofSeconds(1)));
+
+        assertEquals(ModelErrorCode.MODEL_CALL_TIMEOUT, error.getErrorCode());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    public void shouldSwitchFallbackAfterConsecutiveOverload() {
+        List<String> models = new ArrayList<>();
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        ModelRuntimeProperties properties = properties(5, 10);
+        properties.getResilience().setOverloadFallbackThreshold(3);
+        properties.getResilience().setFallbackModel("deepseek-v4-pro");
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                models.add(prompt.getModel());
+                if ("deepseek-v4-pro".equals(prompt.getModel())) {
+                    return Mono.just(ModelChatResult.builder().content("{}").finishReason("stop").build());
+                }
+                return Mono.error(new ModelGatewayException(ModelErrorCode.PROVIDER_OVERLOADED,
+                        "503", true, 503, null));
+            }
+        }, traceRecorder, properties);
+
+        AgentContext context = context("fallback-run");
+        ModelChatResult result;
+        try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+            result = gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2));
+        }
+
+        assertEquals(List.of("deepseek-v4-flash", "deepseek-v4-flash", "deepseek-v4-flash", "deepseek-v4-pro"), models);
+        assertEquals("deepseek-v4-pro", result.getActualModel());
+        assertTrue(traceRecorder.timeline("fallback-run").stream()
+                .anyMatch(event -> "model_fallback_switched".equals(event.getEventType())
+                        && "deepseek-v4-flash".equals(event.getMetadata().get("fromModel"))
+                        && "deepseek-v4-pro".equals(event.getMetadata().get("toModel"))));
+    }
+
+    @Test
+    public void shouldNotSwitchWhenFallbackEqualsCurrentModel() {
+        List<String> models = new ArrayList<>();
+        ModelRuntimeProperties properties = properties(4, 10);
+        properties.getResilience().setOverloadFallbackThreshold(1);
+        properties.getResilience().setFallbackModel("deepseek-v4-flash");
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                models.add(prompt.getModel());
+                return Mono.error(new ModelGatewayException(ModelErrorCode.PROVIDER_OVERLOADED,
+                        "503", true, 503, null));
+            }
+        }, new InMemoryTraceRecorder(), properties);
+
+        assertThrows(ModelGatewayException.class,
+                () -> gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2)));
+
+        assertEquals(List.of("deepseek-v4-flash", "deepseek-v4-flash",
+                "deepseek-v4-flash", "deepseek-v4-flash"), models);
+    }
+
+    @Test
+    public void shouldRetryStreamingInsufficientSystemResourceBeforeToken() {
+        AtomicInteger calls = new AtomicInteger();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 1) {
+                    return Flux.just(ModelStreamChunk.builder()
+                            .finishReason("insufficient_system_resource").build());
+                }
+                return Flux.just(ModelStreamChunk.builder().content("ok").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder());
+
+        List<ModelStreamChunk> chunks = gateway.stream(prompt(ModelCapabilities.STREAM_CHAT))
+                .collectList().block(Duration.ofSeconds(2));
+
+        assertEquals(2, calls.get());
+        assertEquals("ok", chunks.getFirst().getContent());
+    }
+
     private ResilientModelGateway gateway(ModelGateway delegate, InMemoryTraceRecorder traceRecorder) {
         return gateway(delegate, traceRecorder, 3, 4);
     }
@@ -185,6 +300,29 @@ public class ResilientModelGatewayTest {
                 traceRecorder,
                 new SimpleMeterRegistry(),
                 new MockEnvironment().withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash"));
+    }
+
+    private ResilientModelGateway gateway(ModelGateway delegate,
+                                          InMemoryTraceRecorder traceRecorder,
+                                          ModelRuntimeProperties properties) {
+        return new ResilientModelGateway(
+                delegate,
+                properties,
+                traceRecorder,
+                new SimpleMeterRegistry(),
+                new MockEnvironment().withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash"));
+    }
+
+    private ModelRuntimeProperties properties(int maxAttempts, int slidingWindowSize) {
+        ModelRuntimeProperties properties = new ModelRuntimeProperties();
+        properties.setFirstTokenTimeoutMs(500L);
+        properties.getResilience().setRetryMaxAttempts(maxAttempts);
+        properties.getResilience().setRetryBackoffInitialMs(1L);
+        properties.getResilience().setRetryBackoffMaxMs(2L);
+        properties.getResilience().setCircuitSlidingWindowSize(slidingWindowSize);
+        properties.getResilience().setCircuitOpenStateWaitMs(5000L);
+        properties.getResilience().setCircuitFailureRateThreshold(50.0F);
+        return properties;
     }
 
     private ResilientModelGateway gateway(ModelGateway delegate,

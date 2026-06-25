@@ -18,6 +18,8 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
+import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
+import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -92,20 +94,52 @@ public class ReplanNode extends AbstractAgentNode {
 
     private boolean applyModelPlanDelta(AgentContext context, String promptText) {
         try {
-            ChatPrompt prompt = ChatPrompt.builder()
-                    .requestId(context.getRequestId())
-                    .conversationId(context.getConversationId())
-                    .message(promptText)
-                    .capability(ModelCapabilities.COMPLETE_REPLAN)
-                    .outputFormat(OutputFormat.JSON_OBJECT)
-                    .build();
-            ModelChatResult result;
-            try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
-                result = modelGateway.complete(prompt)
-                        .timeout(Duration.ofMillis(properties.getStepTimeoutMs()))
-                        .block(Duration.ofMillis(properties.getStepTimeoutMs() + 1000L));
+            long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
+            int maxTokens = 0;
+            ModelChatResult result = null;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                if (budgetGuard != null) {
+                    BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), null,
+                            ModelCallPurpose.CONTROL_JSON, promptText, maxTokens);
+                    if (!check.isAllowed()) {
+                        blockForBudget(context, check);
+                        return false;
+                    }
+                }
+                ChatPrompt prompt = ChatPrompt.builder()
+                        .requestId(context.getRequestId())
+                        .conversationId(context.getConversationId())
+                        .message(promptText)
+                        .maxTokens(maxTokens <= 0 ? null : maxTokens)
+                        .capability(ModelCapabilities.COMPLETE_REPLAN)
+                        .purpose(ModelCallPurpose.CONTROL_JSON)
+                        .deadlineEpochMs(deadlineEpochMs)
+                        .outputFormat(OutputFormat.JSON_OBJECT)
+                        .build();
+                try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+                    long remainingMs = Math.max(1L, deadlineEpochMs - System.currentTimeMillis());
+                    result = modelGateway.complete(prompt)
+                            .timeout(Duration.ofMillis(remainingMs))
+                            .block(Duration.ofMillis(remainingMs + 100L));
+                }
+                if (result == null || !isLength(result.getFinishReason())) {
+                    break;
+                }
+                recordUsage(context, result);
+                if (attempt == 0) {
+                    maxTokens = escalatedMaxTokens();
+                }
             }
             if (result == null || StringUtils.isBlank(result.getContent())) {
+                return false;
+            }
+            if (isLength(result.getFinishReason())) {
+                if (traceRecorder != null) {
+                    traceRecorder.recordModelGatewayEvent(context, "model_recovery_exhausted", name(), "error", 0L,
+                            ModelErrorCode.MODEL_DECISION_TRUNCATED.message(), null,
+                            Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
+                                    "errorCode", ModelErrorCode.MODEL_DECISION_TRUNCATED.code()));
+                }
                 return false;
             }
             recordUsage(context, result);
@@ -154,13 +188,25 @@ public class ReplanNode extends AbstractAgentNode {
     }
 
     private void recordUsage(AgentContext context, ModelChatResult result) {
-        TraceCost cost = budgetGuard == null ? null : budgetGuard.recordModelUsage(context, result.getUsage());
+        TraceCost cost = budgetGuard == null ? null
+                : budgetGuard.recordModelUsage(context, result.getActualModel(), result.getUsage());
         if (traceRecorder != null) {
             Map<String, Object> metadata = result.getUsage() == null
                     ? Map.of("usageMissing", true)
                     : Map.of("finishReason", StringUtils.defaultString(result.getFinishReason()));
             traceRecorder.recordModelUsage(context, name(), result.getUsage(), cost, metadata);
         }
+    }
+
+    private boolean isLength(String finishReason) {
+        return "length".equalsIgnoreCase(StringUtils.trimToEmpty(finishReason))
+                || "max_tokens".equalsIgnoreCase(StringUtils.trimToEmpty(finishReason));
+    }
+
+    private int escalatedMaxTokens() {
+        Integer value = properties.getModelRecovery() == null
+                ? null : properties.getModelRecovery().getEscalatedMaxTokens();
+        return value == null || value <= 0 ? 64000 : value;
     }
 
     private void blockForBudget(AgentContext context, BudgetCheckResult check) {

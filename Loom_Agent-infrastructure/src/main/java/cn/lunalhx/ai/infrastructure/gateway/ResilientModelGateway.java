@@ -2,11 +2,15 @@ package cn.lunalhx.ai.infrastructure.gateway;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
+import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
@@ -19,6 +23,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
@@ -42,53 +47,79 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ResilientModelGateway implements ModelGateway {
 
     private static final String PROVIDER = "deepseek";
-    private static final double JITTER = 0.2D;
-
     private final ModelGateway delegate;
     private final ModelRuntimeProperties properties;
     private final TraceRecorder traceRecorder;
     private final MeterRegistry meterRegistry;
     private final Environment environment;
+    private final BudgetGuard budgetGuard;
     private final CircuitBreakerRegistry circuitBreakers;
     private final Map<String, AtomicInteger> circuitStateGauges = new ConcurrentHashMap<>();
 
+    @Autowired
     public ResilientModelGateway(@Qualifier("deepSeekModelGateway") ModelGateway delegate,
                                  ModelRuntimeProperties properties,
                                  TraceRecorder traceRecorder,
                                  MeterRegistry meterRegistry,
-                                 Environment environment) {
+                                 Environment environment,
+                                 BudgetGuard budgetGuard) {
         this.delegate = delegate;
         this.properties = properties;
         this.traceRecorder = traceRecorder;
         this.meterRegistry = meterRegistry;
         this.environment = environment;
+        this.budgetGuard = budgetGuard;
         this.circuitBreakers = CircuitBreakerRegistry.of(circuitBreakerConfig());
+    }
+
+    public ResilientModelGateway(ModelGateway delegate,
+                                 ModelRuntimeProperties properties,
+                                 TraceRecorder traceRecorder,
+                                 MeterRegistry meterRegistry,
+                                 Environment environment) {
+        this(delegate, properties, traceRecorder, meterRegistry, environment, null);
     }
 
     @Override
     public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-        ChatPrompt normalized = withCapability(prompt, ModelCapabilities.COMPLETE_AGENT_DECISION);
+        ChatPrompt normalized = normalize(prompt, ModelCapabilities.COMPLETE_AGENT_DECISION);
         ResilienceKey key = key(normalized);
         AgentContext context = ModelCallTraceContext.current();
         if (!enabled()) {
             return delegate.complete(normalized);
         }
-        return completeAttempt(normalized, key, context, 1);
+        return completeAttempt(normalized, key, context, 1, 0, null);
     }
 
     @Override
     public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
-        ChatPrompt normalized = withCapability(prompt, ModelCapabilities.STREAM_CHAT);
+        ChatPrompt normalized = normalize(prompt, ModelCapabilities.STREAM_CHAT);
         ResilienceKey key = key(normalized);
         AgentContext context = ModelCallTraceContext.current();
         if (!enabled()) {
             return delegate.stream(normalized);
         }
         AtomicBoolean tokenEmitted = new AtomicBoolean(false);
-        return streamAttempt(normalized, key, context, tokenEmitted, 1);
+        return streamAttempt(normalized, key, context, tokenEmitted, 1, 0);
     }
 
-    private Mono<ModelChatResult> completeAttempt(ChatPrompt prompt, ResilienceKey key, AgentContext context, int attemptNo) {
+    @Override
+    public ModelCapability capability(String model) {
+        String resolved = StringUtils.defaultIfBlank(model,
+                environment.getProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash"));
+        return properties.capability(resolved);
+    }
+
+    private Mono<ModelChatResult> completeAttempt(ChatPrompt prompt,
+                                                  ResilienceKey key,
+                                                  AgentContext context,
+                                                  int attemptNo,
+                                                  int consecutiveOverload,
+                                                  String fallbackReason) {
+        ModelGatewayException preflight = preflight(prompt, key.model(), context);
+        if (preflight != null) {
+            return Mono.error(preflight);
+        }
         CircuitBreaker circuitBreaker = circuitBreaker(key);
         CircuitBreaker.State beforeState = circuitBreaker.getState();
         if (!circuitBreaker.tryAcquirePermission()) {
@@ -101,8 +132,15 @@ public class ResilientModelGateway implements ModelGateway {
 
         long startedAt = System.currentTimeMillis();
         return delegate.complete(prompt)
+                .flatMap(result -> isInsufficientSystemResource(result == null ? null : result.getFinishReason())
+                        ? Mono.error(overloaded(key.model(), "insufficient_system_resource"))
+                        : Mono.just(result))
                 .doOnSuccess(result -> {
                     long durationMs = elapsed(startedAt);
+                    if (StringUtils.isBlank(result.getActualModel())) {
+                        result.setActualModel(key.model());
+                    }
+                    result.setFallbackReason(fallbackReason);
                     circuitBreaker.onSuccess(durationMs, java.util.concurrent.TimeUnit.MILLISECONDS);
                     recordAttempt(context, key, "success", durationMs, attemptNo, null);
                     recordModelCall(key, "success", "none", durationMs);
@@ -111,6 +149,7 @@ public class ResilientModelGateway implements ModelGateway {
                 .onErrorResume(error -> {
                     long durationMs = elapsed(startedAt);
                     Throwable unwrapped = unwrap(error);
+                    attachModel(unwrapped, key.model());
                     boolean retryable = isRetryable(unwrapped);
                     if (retryable) {
                         circuitBreaker.onError(durationMs, java.util.concurrent.TimeUnit.MILLISECONDS, unwrapped);
@@ -127,8 +166,34 @@ public class ResilientModelGateway implements ModelGateway {
                         }
                         return Mono.error(unwrapped);
                     }
+                    int nextOverload = isOverload(unwrapped) ? consecutiveOverload + 1 : 0;
+                    String nextFallbackReason = fallbackReason;
+                    ChatPrompt nextPrompt = prompt;
+                    ResilienceKey nextKey = key;
+                    if (shouldFallback(key.model(), nextOverload)) {
+                        String fallbackModel = resilience().getFallbackModel();
+                        ModelGatewayException budgetError = fallbackBudgetError(context, prompt, fallbackModel);
+                        if (budgetError != null) {
+                            return Mono.error(budgetError);
+                        }
+                        nextFallbackReason = errorCode(unwrapped);
+                        nextPrompt = withModel(prompt, fallbackModel);
+                        nextKey = key(nextPrompt);
+                        traceFallback(context, key.model(), fallbackModel, nextFallbackReason, attemptNo);
+                        nextOverload = 0;
+                    }
+                    long delayMs = retryDelayMs(attemptNo, unwrapped);
+                    if (!canWait(prompt, delayMs)) {
+                        return Mono.error(deadlineExceeded(key.model()));
+                    }
                     recordRetry(key, "scheduled", errorCode(unwrapped));
-                    return Mono.delay(backoff(attemptNo)).then(completeAttempt(prompt, key, context, attemptNo + 1));
+                    ChatPrompt retryPrompt = nextPrompt;
+                    ResilienceKey retryKey = nextKey;
+                    int retryOverload = nextOverload;
+                    String retryFallbackReason = nextFallbackReason;
+                    return Mono.delay(Duration.ofMillis(delayMs))
+                            .then(Mono.defer(() -> completeAttempt(retryPrompt, retryKey, context, attemptNo + 1,
+                                    retryOverload, retryFallbackReason)));
                 });
     }
 
@@ -136,7 +201,12 @@ public class ResilientModelGateway implements ModelGateway {
                                                 ResilienceKey key,
                                                 AgentContext context,
                                                 AtomicBoolean tokenEmitted,
-                                                int attemptNo) {
+                                                int attemptNo,
+                                                int consecutiveOverload) {
+        ModelGatewayException preflight = preflight(prompt, key.model(), context);
+        if (preflight != null) {
+            return Flux.error(preflight);
+        }
         CircuitBreaker circuitBreaker = circuitBreaker(key);
         CircuitBreaker.State beforeState = circuitBreaker.getState();
         if (!circuitBreaker.tryAcquirePermission()) {
@@ -149,7 +219,10 @@ public class ResilientModelGateway implements ModelGateway {
 
         long startedAt = System.currentTimeMillis();
         return delegate.stream(prompt)
-                .timeout(Duration.ofMillis(firstTokenTimeoutMs()))
+                .timeout(Duration.ofMillis(Math.min(firstTokenTimeoutMs(), remainingMs(prompt))))
+                .concatMap(chunk -> isInsufficientSystemResource(chunk.getFinishReason())
+                        ? Mono.error(overloaded(key.model(), "insufficient_system_resource"))
+                        : Mono.just(chunk))
                 .doOnNext(chunk -> {
                     if (StringUtils.isNotEmpty(chunk.getContent())) {
                         tokenEmitted.set(true);
@@ -165,6 +238,7 @@ public class ResilientModelGateway implements ModelGateway {
                 .onErrorResume(error -> {
                     long durationMs = elapsed(startedAt);
                     Throwable unwrapped = unwrap(error);
+                    attachModel(unwrapped, key.model());
                     boolean retryable = !tokenEmitted.get() && isRetryable(unwrapped);
                     if (retryable) {
                         circuitBreaker.onError(durationMs, java.util.concurrent.TimeUnit.MILLISECONDS, unwrapped);
@@ -181,8 +255,32 @@ public class ResilientModelGateway implements ModelGateway {
                         }
                         return Flux.error(unwrapped);
                     }
+                    int nextOverload = isOverload(unwrapped) ? consecutiveOverload + 1 : 0;
+                    ChatPrompt nextPrompt = prompt;
+                    ResilienceKey nextKey = key;
+                    if (shouldFallback(key.model(), nextOverload)) {
+                        String fallbackModel = resilience().getFallbackModel();
+                        ModelGatewayException budgetError = fallbackBudgetError(context, prompt, fallbackModel);
+                        if (budgetError != null) {
+                            return Flux.error(budgetError);
+                        }
+                        String fallbackReason = errorCode(unwrapped);
+                        nextPrompt = withModel(prompt, fallbackModel);
+                        nextKey = key(nextPrompt);
+                        traceFallback(context, key.model(), fallbackModel, fallbackReason, attemptNo);
+                        nextOverload = 0;
+                    }
+                    long delayMs = retryDelayMs(attemptNo, unwrapped);
+                    if (!canWait(prompt, delayMs)) {
+                        return Flux.error(deadlineExceeded(key.model()));
+                    }
                     recordRetry(key, "scheduled", errorCode(unwrapped));
-                    return Mono.delay(backoff(attemptNo)).thenMany(streamAttempt(prompt, key, context, tokenEmitted, attemptNo + 1));
+                    ChatPrompt retryPrompt = nextPrompt;
+                    ResilienceKey retryKey = nextKey;
+                    int retryOverload = nextOverload;
+                    return Mono.delay(Duration.ofMillis(delayMs))
+                            .thenMany(Flux.defer(() -> streamAttempt(retryPrompt, retryKey, context, tokenEmitted,
+                                    attemptNo + 1, retryOverload)));
                 });
     }
 
@@ -204,8 +302,15 @@ public class ResilientModelGateway implements ModelGateway {
                 .build();
     }
 
-    private ChatPrompt withCapability(ChatPrompt prompt, String fallback) {
+    private ChatPrompt normalize(ChatPrompt prompt, String fallback) {
         prompt.setCapability(StringUtils.defaultIfBlank(prompt.getCapability(), fallback));
+        prompt.setModel(StringUtils.defaultIfBlank(prompt.getModel(),
+                environment.getProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash")));
+        if (prompt.getPurpose() == null) {
+            prompt.setPurpose(prompt.getOutputFormat() == cn.lunalhx.ai.domain.model.valobj.OutputFormat.JSON_OBJECT
+                    ? ModelCallPurpose.CONTROL_JSON
+                    : ModelCallPurpose.FINAL_TEXT);
+        }
         return prompt;
     }
 
@@ -329,8 +434,7 @@ public class ResilientModelGateway implements ModelGateway {
 
     private boolean isNonRetryable(ModelGatewayException exception) {
         if (exception.getHttpStatus() != null
-                && (exception.getHttpStatus() == 400
-                || exception.getHttpStatus() == 401
+                && (exception.getHttpStatus() == 401
                 || exception.getHttpStatus() == 402
                 || exception.getHttpStatus() == 422)) {
             return true;
@@ -338,6 +442,11 @@ public class ResilientModelGateway implements ModelGateway {
         ModelErrorCode code = exception.getErrorCode();
         return code == ModelErrorCode.CONFIG_ERROR
                 || code == ModelErrorCode.INVALID_REQUEST
+                || code == ModelErrorCode.BAD_REQUEST
+                || code == ModelErrorCode.INVALID_PARAMETER
+                || code == ModelErrorCode.CONTEXT_OVERFLOW
+                || code == ModelErrorCode.MODEL_CAPABILITY_MISMATCH
+                || code == ModelErrorCode.MODEL_CALL_TIMEOUT
                 || code == ModelErrorCode.AUTHENTICATION_FAILED
                 || code == ModelErrorCode.INSUFFICIENT_BALANCE;
     }
@@ -350,6 +459,12 @@ public class ResilientModelGateway implements ModelGateway {
         return error;
     }
 
+    private void attachModel(Throwable error, String model) {
+        if (error instanceof ModelGatewayException exception && StringUtils.isBlank(exception.getModel())) {
+            exception.setModel(model);
+        }
+    }
+
     private String errorCode(Throwable error) {
         if (error instanceof ModelGatewayException exception && exception.getErrorCode() != null) {
             return exception.getErrorCode().code();
@@ -360,11 +475,14 @@ public class ResilientModelGateway implements ModelGateway {
         return error == null ? "none" : error.getClass().getSimpleName();
     }
 
-    private Duration backoff(int attemptNo) {
+    private long retryDelayMs(int attemptNo, Throwable error) {
+        if (error instanceof ModelGatewayException exception && exception.getRetryAfterMs() != null) {
+            return Math.max(0L, exception.getRetryAfterMs());
+        }
         long base = Math.min(backoffMaxMs(), backoffInitialMs() * (1L << Math.min(20, Math.max(0, attemptNo - 1))));
-        long jitter = Math.round(base * JITTER);
-        long delta = jitter <= 0 ? 0 : ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
-        return Duration.ofMillis(Math.max(0L, base + delta));
+        long jitter = Math.round(base * 0.25D);
+        long delta = jitter <= 0 ? 0 : ThreadLocalRandom.current().nextLong(0, jitter + 1);
+        return Math.max(0L, base + delta);
     }
 
     private boolean enabled() {
@@ -392,6 +510,155 @@ public class ResilientModelGateway implements ModelGateway {
 
     private long firstTokenTimeoutMs() {
         return Math.max(1L, properties.getFirstTokenTimeoutMs());
+    }
+
+    private ModelGatewayException preflight(ChatPrompt prompt, String model, AgentContext context) {
+        if (remainingMs(prompt) <= 0) {
+            return deadlineExceeded(model);
+        }
+        ModelCapability capability;
+        try {
+            capability = properties.capability(model);
+        } catch (ModelGatewayException e) {
+            return e;
+        }
+        int requestedMaxTokens = prompt.getMaxTokens() == null
+                ? environment.getProperty("spring.ai.deepseek.chat.max-tokens", Integer.class, 2048)
+                : prompt.getMaxTokens();
+        long estimatedPromptTokens = Math.max(1L,
+                StringUtils.length(prompt.getMessage()) / 4L
+                        + StringUtils.length(prompt.getSystemPrompt()) / 4L
+                        + (prompt.getMessages() == null ? 0L : prompt.getMessages().stream()
+                        .mapToLong(message -> StringUtils.length(message.getContent()) / 4L).sum()));
+        if (requestedMaxTokens > capability.getMaxOutputTokens()
+                || estimatedPromptTokens + requestedMaxTokens > capability.getContextLength()) {
+            return new ModelGatewayException(ModelErrorCode.MODEL_CAPABILITY_MISMATCH,
+                    "模型能力不足：model=" + model + ", promptTokens=" + estimatedPromptTokens
+                            + ", requestedMaxTokens=" + requestedMaxTokens,
+                    false, null, null);
+        }
+        if (prompt.getPurpose() == ModelCallPurpose.CONTROL_JSON
+                && !Boolean.TRUE.equals(capability.getSupportsJsonOutput())) {
+            return new ModelGatewayException(ModelErrorCode.MODEL_CAPABILITY_MISMATCH,
+                    "模型不支持 JSON 输出：" + model, false, null, null);
+        }
+        if (prompt.getPurpose() == ModelCallPurpose.CONTROL_JSON
+                && prompt.getOutputFormat() != cn.lunalhx.ai.domain.model.valobj.OutputFormat.JSON_OBJECT) {
+            return new ModelGatewayException(ModelErrorCode.MODEL_CAPABILITY_MISMATCH,
+                    "CONTROL_JSON 必须使用 JSON_OBJECT 输出格式", false, null, null);
+        }
+        if (ModelCapabilities.COMPLETE_AGENT_DECISION.equals(prompt.getCapability())
+                && !Boolean.TRUE.equals(capability.getSupportsToolCalls())) {
+            return new ModelGatewayException(ModelErrorCode.MODEL_CAPABILITY_MISMATCH,
+                    "模型不支持 Agent 工具决策：" + model, false, null, null);
+        }
+        ModelGatewayException budgetError = budgetError(context, prompt, model, requestedMaxTokens);
+        if (budgetError != null) {
+            return budgetError;
+        }
+        return null;
+    }
+
+    private boolean shouldFallback(String currentModel, int consecutiveOverload) {
+        String fallbackModel = resilience().getFallbackModel();
+        return consecutiveOverload >= Math.max(1, resilience().getOverloadFallbackThreshold())
+                && StringUtils.isNotBlank(fallbackModel)
+                && !StringUtils.equals(currentModel, fallbackModel)
+                && properties.getAllowedModels().contains(fallbackModel);
+    }
+
+    private boolean isOverload(Throwable error) {
+        return error instanceof ModelGatewayException exception
+                && exception.getErrorCode() == ModelErrorCode.PROVIDER_OVERLOADED;
+    }
+
+    private boolean isInsufficientSystemResource(String finishReason) {
+        return "insufficient_system_resource".equalsIgnoreCase(StringUtils.trimToEmpty(finishReason));
+    }
+
+    private ModelGatewayException overloaded(String model, String message) {
+        return new ModelGatewayException(ModelErrorCode.PROVIDER_OVERLOADED, message, true, 503,
+                null, model, null);
+    }
+
+    private ModelGatewayException deadlineExceeded(String model) {
+        return new ModelGatewayException(ModelErrorCode.MODEL_CALL_TIMEOUT,
+                ModelErrorCode.MODEL_CALL_TIMEOUT.message(), false, null, null, model, null);
+    }
+
+    private long remainingMs(ChatPrompt prompt) {
+        if (prompt.getDeadlineEpochMs() == null) {
+            return Long.MAX_VALUE;
+        }
+        return Math.max(0L, prompt.getDeadlineEpochMs() - System.currentTimeMillis());
+    }
+
+    private boolean canWait(ChatPrompt prompt, long delayMs) {
+        long remaining = remainingMs(prompt);
+        return remaining == Long.MAX_VALUE || delayMs < remaining;
+    }
+
+    private ChatPrompt withModel(ChatPrompt source, String model) {
+        return ChatPrompt.builder()
+                .requestId(source.getRequestId())
+                .conversationId(source.getConversationId())
+                .message(source.getMessage())
+                .systemPrompt(source.getSystemPrompt())
+                .model(model)
+                .temperature(source.getTemperature())
+                .maxTokens(source.getMaxTokens())
+                .outputFormat(source.getOutputFormat())
+                .capability(source.getCapability())
+                .purpose(source.getPurpose())
+                .deadlineEpochMs(source.getDeadlineEpochMs())
+                .messages(source.getMessages())
+                .build();
+    }
+
+    private void traceFallback(AgentContext context,
+                               String fromModel,
+                               String toModel,
+                               String reason,
+                               int attempt) {
+        if (context == null) {
+            return;
+        }
+        traceRecorder.recordModelGatewayEvent(context, "model_fallback_switched",
+                ModelCapabilities.COMPLETE_AGENT_DECISION, "success", 0L,
+                "model fallback switched", null,
+                Map.of("fromModel", fromModel, "toModel", toModel, "reason", safe(reason), "attempt", attempt));
+    }
+
+    private ModelGatewayException fallbackBudgetError(AgentContext context, ChatPrompt prompt, String fallbackModel) {
+        int maxTokens = prompt.getMaxTokens() == null
+                ? environment.getProperty("spring.ai.deepseek.chat.max-tokens", Integer.class, 2048)
+                : prompt.getMaxTokens();
+        return budgetError(context, prompt, fallbackModel, maxTokens);
+    }
+
+    private ModelGatewayException budgetError(AgentContext context,
+                                              ChatPrompt prompt,
+                                              String model,
+                                              int maxTokens) {
+        if (budgetGuard == null || context == null) {
+            return null;
+        }
+        BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context,
+                "model_gateway_preflight", model, prompt.getPurpose(), budgetInput(prompt), maxTokens);
+        if (check.isAllowed()) {
+            return null;
+        }
+        return new ModelGatewayException(ModelErrorCode.BUDGET_EXCEEDED,
+                "model call exceeds remaining budget: " + model, false, null, null);
+    }
+
+    private String budgetInput(ChatPrompt prompt) {
+        StringBuilder input = new StringBuilder(StringUtils.defaultString(prompt.getSystemPrompt()))
+                .append(StringUtils.defaultString(prompt.getMessage()));
+        if (prompt.getMessages() != null) {
+            prompt.getMessages().forEach(message -> input.append(StringUtils.defaultString(message.getContent())));
+        }
+        return input.toString();
     }
 
     private long elapsed(long startedAt) {

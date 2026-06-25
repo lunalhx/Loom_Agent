@@ -73,6 +73,8 @@ public class AgentContextSnapshot {
     private BigDecimal estimatedCost;
     private String budgetBlockedReason;
     private Integer reactiveCompactAttempts;
+    private String currentModel;
+    private String fallbackReason;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -122,6 +124,8 @@ public class AgentContextSnapshot {
                 .estimatedCost(context.getEstimatedCost())
                 .budgetBlockedReason(context.getBudgetBlockedReason())
                 .reactiveCompactAttempts(context.getReactiveCompactAttempts())
+                .currentModel(context.getCurrentModel())
+                .fallbackReason(context.getFallbackReason())
                 .build();
     }
 
@@ -186,6 +190,8 @@ public class AgentContextSnapshot {
         context.setEstimatedCost(estimatedCost == null ? BigDecimal.ZERO : estimatedCost);
         context.setBudgetBlockedReason(budgetBlockedReason);
         context.setReactiveCompactAttempts(reactiveCompactAttempts == null ? 0 : reactiveCompactAttempts);
+        context.setCurrentModel(currentModel);
+        context.setFallbackReason(fallbackReason);
         return context;
     }
 

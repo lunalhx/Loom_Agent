@@ -66,9 +66,32 @@ loom:
       circuit-sliding-window-size: ${AI_RESILIENCE_CIRCUIT_SLIDING_WINDOW_SIZE:10}
       circuit-open-state-wait-ms: ${AI_RESILIENCE_CIRCUIT_OPEN_STATE_WAIT_MS:30000}
       circuit-half-open-permitted-calls: ${AI_RESILIENCE_CIRCUIT_HALF_OPEN_PERMITTED_CALLS:2}
+      overload-fallback-threshold: ${AI_RESILIENCE_OVERLOAD_FALLBACK_THRESHOLD:3}
+      fallback-model: ${AI_RESILIENCE_FALLBACK_MODEL:deepseek-v4-pro}
+      fallback-stickiness-scope: ${AI_RESILIENCE_FALLBACK_STICKINESS_SCOPE:current_step}
     allowed-models:
       - deepseek-v4-flash
       - deepseek-v4-pro
+    model-capabilities:
+      deepseek-v4-flash:
+        model: deepseek-v4-flash
+        context-length: ${DEEPSEEK_FLASH_CONTEXT_LENGTH:1000000}
+        max-output-tokens: ${DEEPSEEK_FLASH_MAX_OUTPUT_TOKENS:384000}
+        supports-json-output: true
+        supports-tool-calls: true
+      deepseek-v4-pro:
+        model: deepseek-v4-pro
+        context-length: ${DEEPSEEK_PRO_CONTEXT_LENGTH:1000000}
+        max-output-tokens: ${DEEPSEEK_PRO_MAX_OUTPUT_TOKENS:384000}
+        supports-json-output: true
+        supports-tool-calls: true
+    model-pricing:
+      deepseek-v4-flash:
+        input-price-per-1k: ${DEEPSEEK_FLASH_INPUT_PRICE_PER_1K:0}
+        output-price-per-1k: ${DEEPSEEK_FLASH_OUTPUT_PRICE_PER_1K:0}
+      deepseek-v4-pro:
+        input-price-per-1k: ${DEEPSEEK_PRO_INPUT_PRICE_PER_1K:0}
+        output-price-per-1k: ${DEEPSEEK_PRO_OUTPUT_PRICE_PER_1K:0}
   agent:
     enabled: ${AGENT_ENABLED:true}
     workspace-root: ${AGENT_WORKSPACE_ROOT:.}
@@ -102,6 +125,10 @@ loom:
       auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
       reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
       summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
+    model-recovery:
+      escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:64000}
+      continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}
+      context-fallback-model: ${AGENT_CONTEXT_FALLBACK_MODEL:}
     budget:
       enabled: ${AGENT_BUDGET_ENABLED:false}
       max-total-tokens: ${AGENT_BUDGET_MAX_TOTAL_TOKENS:200000}
@@ -109,6 +136,7 @@ loom:
       estimated-chars-per-token: ${AGENT_BUDGET_ESTIMATED_CHARS_PER_TOKEN:4}
       input-price-per-1k: ${AGENT_BUDGET_INPUT_PRICE_PER_1K:0}
       output-price-per-1k: ${AGENT_BUDGET_OUTPUT_PRICE_PER_1K:0}
+      max-total-cost: ${AGENT_BUDGET_MAX_TOTAL_COST:}
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

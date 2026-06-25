@@ -6,6 +6,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
+import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
+import cn.lunalhx.ai.domain.model.valobj.ModelPricing;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
@@ -16,10 +19,16 @@ import java.util.concurrent.ConcurrentMap;
 public class DefaultBudgetGuard implements BudgetGuard {
 
     private final AgentRuntimeProperties properties;
+    private final ModelRuntimeProperties modelProperties;
     private final ConcurrentMap<String, BudgetState> states = new ConcurrentHashMap<>();
 
     public DefaultBudgetGuard(AgentRuntimeProperties properties) {
+        this(properties, null);
+    }
+
+    public DefaultBudgetGuard(AgentRuntimeProperties properties, ModelRuntimeProperties modelProperties) {
         this.properties = properties;
+        this.modelProperties = modelProperties;
     }
 
     @Override
@@ -41,6 +50,40 @@ public class DefaultBudgetGuard implements BudgetGuard {
 
     @Override
     public TraceCost recordModelUsage(AgentContext context, TokenUsage usage) {
+        return recordModelUsage(context, null, usage);
+    }
+
+    @Override
+    public BudgetCheckResult checkBeforeModelCall(AgentContext context,
+                                                  String node,
+                                                  String model,
+                                                  ModelCallPurpose purpose,
+                                                  String input,
+                                                  int requestedMaxTokens) {
+        BudgetCheckResult tokenCheck = checkBeforeModelCall(context, node, input);
+        if (!tokenCheck.isAllowed() || !Boolean.TRUE.equals(budget().getEnabled())) {
+            return tokenCheck;
+        }
+        BigDecimal maxTotalCost = budget().getMaxTotalCost();
+        if (maxTotalCost == null || maxTotalCost.signum() <= 0) {
+            return tokenCheck;
+        }
+        long estimatedInputTokens = tokenCheck.getEstimatedInputTokens();
+        ModelPricing pricing = pricing(model);
+        BigDecimal estimatedRequestCost = price(pricing.getInputPricePer1k(), estimatedInputTokens)
+                .add(price(pricing.getOutputPricePer1k(), Math.max(0, requestedMaxTokens)));
+        BigDecimal remainingCost = maxTotalCost.subtract(context.getEstimatedCost());
+        tokenCheck.setEstimatedRequestCost(estimatedRequestCost);
+        tokenCheck.setRemainingCost(remainingCost);
+        if (estimatedRequestCost.compareTo(remainingCost) > 0) {
+            tokenCheck.setAllowed(false);
+            tokenCheck.setReason("estimated_request_cost > remaining_cost");
+        }
+        return tokenCheck;
+    }
+
+    @Override
+    public TraceCost recordModelUsage(AgentContext context, String actualModel, TokenUsage usage) {
         if (context == null || usage == null) {
             return null;
         }
@@ -50,7 +93,7 @@ public class DefaultBudgetGuard implements BudgetGuard {
         if (totalTokens <= 0) {
             totalTokens = promptTokens + completionTokens;
         }
-        TraceCost cost = calculateCost(promptTokens, completionTokens);
+        TraceCost cost = calculateCost(actualModel, promptTokens, completionTokens);
         String rootRunId = rootRunId(context);
         BudgetState state = states.computeIfAbsent(rootRunId, ignored -> new BudgetState());
         synchronized (state) {
@@ -86,15 +129,25 @@ public class DefaultBudgetGuard implements BudgetGuard {
         return context.getUsedTokens();
     }
 
-    private TraceCost calculateCost(long promptTokens, long completionTokens) {
-        AgentRuntimeProperties.BudgetProperties budget = budget();
-        BigDecimal inputCost = price(budget.getInputPricePer1k(), promptTokens);
-        BigDecimal outputCost = price(budget.getOutputPricePer1k(), completionTokens);
+    private TraceCost calculateCost(String model, long promptTokens, long completionTokens) {
+        ModelPricing pricing = pricing(model);
+        BigDecimal inputCost = price(pricing.getInputPricePer1k(), promptTokens);
+        BigDecimal outputCost = price(pricing.getOutputPricePer1k(), completionTokens);
         return TraceCost.builder()
                 .inputCost(inputCost)
                 .outputCost(outputCost)
                 .totalCost(inputCost.add(outputCost))
                 .build();
+    }
+
+    private ModelPricing pricing(String model) {
+        if (modelProperties != null && StringUtils.isNotBlank(model)) {
+            ModelPricing configured = modelProperties.getModelPricing().get(model);
+            if (configured != null) {
+                return configured;
+            }
+        }
+        return new ModelPricing(budget().getInputPricePer1k(), budget().getOutputPricePer1k());
     }
 
     private BigDecimal price(BigDecimal pricePer1k, long tokens) {

@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.StreamEventType;
+import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
 import cn.lunalhx.ai.infrastructure.gateway.ResilientModelGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -92,6 +93,45 @@ public class DefaultChatStreamServiceTest {
         Assert.assertNotNull(events);
         Assert.assertEquals(1, attempts.get());
         Assert.assertEquals(StreamEventType.ERROR, events.get(events.size() - 1).getType());
+    }
+
+    @Test
+    public void finalTextShouldAllowContinuationAfterLength() {
+        AtomicInteger calls = new AtomicInteger();
+        DefaultChatStreamService service = newService(prompt -> {
+            if (calls.incrementAndGet() == 1) {
+                return Flux.just(ModelStreamChunk.builder().content("hello ").finishReason("length").build());
+            }
+            Assert.assertEquals(ModelCallPurpose.FINAL_TEXT, prompt.getPurpose());
+            Assert.assertEquals(OutputFormat.TEXT, prompt.getOutputFormat());
+            Assert.assertNotNull(prompt.getMessages());
+            return Flux.just(ModelStreamChunk.builder().content("world").finishReason("stop").build());
+        });
+
+        List<StreamEvent> events = service.stream(prompt(OutputFormat.TEXT)).collectList().block(Duration.ofSeconds(2));
+        String text = events.stream()
+                .filter(event -> event.getType() == StreamEventType.TOKEN)
+                .map(StreamEvent::getToken)
+                .reduce("", String::concat);
+
+        Assert.assertEquals(2, calls.get());
+        Assert.assertEquals("hello world", text);
+        Assert.assertEquals(StreamEventType.DONE, events.get(events.size() - 1).getType());
+    }
+
+    @Test
+    public void jsonOutputShouldNotUseContinuation() {
+        AtomicInteger calls = new AtomicInteger();
+        DefaultChatStreamService service = newService(prompt -> {
+            calls.incrementAndGet();
+            return Flux.just(ModelStreamChunk.builder().content("{\"type\":").finishReason("length").build());
+        });
+
+        List<StreamEvent> events = service.stream(prompt(OutputFormat.JSON_OBJECT)).collectList().block(Duration.ofSeconds(2));
+
+        Assert.assertEquals(1, calls.get());
+        Assert.assertEquals(StreamEventType.ERROR, events.get(events.size() - 1).getType());
+        Assert.assertEquals(ModelErrorCode.OUTPUT_TRUNCATED.code(), events.get(events.size() - 1).getCode());
     }
 
     private DefaultChatStreamService newService(ModelGateway modelGateway) {

@@ -14,5 +14,7 @@ public class ModelChatResult {
     private String content;
     private String finishReason;
     private TokenUsage usage;
+    private String actualModel;
+    private String fallbackReason;
 
 }

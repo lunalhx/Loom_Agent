@@ -146,8 +146,9 @@ public class AiRuntimeConfig {
     }
 
     @Bean
-    public BudgetGuard budgetGuard(AgentRuntimeProperties agentRuntimeProperties) {
-        return new DefaultBudgetGuard(agentRuntimeProperties);
+    public BudgetGuard budgetGuard(AgentRuntimeProperties agentRuntimeProperties,
+                                   ModelRuntimeProperties modelRuntimeProperties) {
+        return new DefaultBudgetGuard(agentRuntimeProperties, modelRuntimeProperties);
     }
 
     @Bean
@@ -300,6 +301,21 @@ public class AiRuntimeConfig {
             if (Boolean.TRUE.equals(agentRuntimeProperties.getBudget().getEnabled())) {
                 requirePositive(agentRuntimeProperties.getBudget().getMaxTotalTokens(), "AGENT_BUDGET_MAX_TOTAL_TOKENS");
                 requirePositive(agentRuntimeProperties.getBudget().getEstimatedCharsPerToken(), "AGENT_BUDGET_ESTIMATED_CHARS_PER_TOKEN");
+                if (agentRuntimeProperties.getBudget().getMaxTotalCost() != null) {
+                    if (agentRuntimeProperties.getBudget().getMaxTotalCost().signum() <= 0) {
+                        throw new IllegalStateException("AGENT_BUDGET_MAX_TOTAL_COST 必须大于 0");
+                    }
+                    for (String allowedModel : modelRuntimeProperties.getAllowedModels()) {
+                        cn.lunalhx.ai.domain.model.valobj.ModelPricing pricing = modelRuntimeProperties.pricing(allowedModel);
+                        if (pricing.getInputPricePer1k() == null || pricing.getOutputPricePer1k() == null
+                                || pricing.getInputPricePer1k().signum() < 0
+                                || pricing.getOutputPricePer1k().signum() < 0
+                                || (pricing.getInputPricePer1k().signum() == 0
+                                && pricing.getOutputPricePer1k().signum() == 0)) {
+                            throw new IllegalStateException("启用金额预算时必须为模型配置有效价格：" + allowedModel);
+                        }
+                    }
+                }
             }
             if (Boolean.TRUE.equals(modelRuntimeProperties.getResilience().getEnabled())) {
                 requirePositive(modelRuntimeProperties.getResilience().getRetryMaxAttempts(), "AI_RESILIENCE_RETRY_MAX_ATTEMPTS");
@@ -308,6 +324,17 @@ public class AiRuntimeConfig {
                 requirePositive(modelRuntimeProperties.getResilience().getCircuitSlidingWindowSize(), "AI_RESILIENCE_CIRCUIT_SLIDING_WINDOW_SIZE");
                 requirePositive(modelRuntimeProperties.getResilience().getCircuitOpenStateWaitMs(), "AI_RESILIENCE_CIRCUIT_OPEN_STATE_WAIT_MS");
                 requirePositive(modelRuntimeProperties.getResilience().getCircuitHalfOpenPermittedCalls(), "AI_RESILIENCE_CIRCUIT_HALF_OPEN_PERMITTED_CALLS");
+                String fallbackModel = modelRuntimeProperties.getResilience().getFallbackModel();
+                if (StringUtils.isNotBlank(fallbackModel)
+                        && !modelRuntimeProperties.getAllowedModels().contains(fallbackModel)) {
+                    throw new IllegalStateException("AI_RESILIENCE_FALLBACK_MODEL 必须存在于 allowed-models");
+                }
+                if (!"current_step".equalsIgnoreCase(modelRuntimeProperties.getResilience().getFallbackStickinessScope())) {
+                    throw new IllegalStateException("AI_RESILIENCE_FALLBACK_STICKINESS_SCOPE 第一版仅支持 current_step");
+                }
+                for (String allowedModel : modelRuntimeProperties.getAllowedModels()) {
+                    modelRuntimeProperties.capability(allowedModel);
+                }
             }
         };
     }

@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.conversation.service;
 
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.conversation.model.entity.StreamEvent;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -8,6 +9,7 @@ import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
+import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.StreamEventType;
@@ -49,13 +51,9 @@ public class DefaultChatStreamService implements ChatStreamService {
     public Flux<StreamEvent> stream(ChatPrompt rawPrompt) {
         ChatPrompt prompt = normalize(rawPrompt);
         StringBuilder output = new StringBuilder();
-        AtomicBoolean tokenEmitted = new AtomicBoolean(false);
-        AtomicReference<String> finishReason = new AtomicReference<>("stop");
         AtomicReference<TokenUsage> usage = new AtomicReference<>();
-
-        Flux<StreamEvent> tokenEvents = guardedModelStream(prompt, tokenEmitted)
-                .concatMap(chunk -> toEvents(prompt, chunk, output, tokenEmitted, finishReason, usage))
-                .concatWith(Mono.defer(() -> toFinalEvent(prompt, finishReason.get(), usage.get(), output.toString())))
+        AtomicBoolean tokenEmitted = new AtomicBoolean(false);
+        Flux<StreamEvent> tokenEvents = streamAttempt(prompt, output, tokenEmitted, usage, false, 0)
                 .onErrorResume(throwable -> Mono.just(toErrorEvent(prompt, throwable)));
 
         return Flux.concat(Mono.just(toMetaEvent(prompt)), tokenEvents);
@@ -75,14 +73,72 @@ public class DefaultChatStreamService implements ChatStreamService {
                 .temperature(rawPrompt.getTemperature() == null ? defaultTemperature : rawPrompt.getTemperature())
                 .maxTokens(rawPrompt.getMaxTokens() == null ? defaultMaxTokens : rawPrompt.getMaxTokens())
                 .capability(StringUtils.defaultIfBlank(rawPrompt.getCapability(), ModelCapabilities.STREAM_CHAT))
+                .purpose(rawPrompt.getPurpose() == null ? ModelCallPurpose.FINAL_TEXT : rawPrompt.getPurpose())
+                .deadlineEpochMs(rawPrompt.getDeadlineEpochMs() == null
+                        ? System.currentTimeMillis() + properties.getStreamTimeoutMs()
+                        : rawPrompt.getDeadlineEpochMs())
                 .outputFormat(outputFormat)
                 .build();
     }
 
+    private Flux<StreamEvent> streamAttempt(ChatPrompt prompt,
+                                            StringBuilder output,
+                                            AtomicBoolean tokenEmitted,
+                                            AtomicReference<TokenUsage> usage,
+                                            boolean escalated,
+                                            int continuationCount) {
+        AtomicReference<String> finishReason = new AtomicReference<>("stop");
+        int outputStart = output.length();
+        return guardedModelStream(prompt, tokenEmitted)
+                .concatMap(chunk -> toEvents(prompt, chunk, output, tokenEmitted, finishReason, usage))
+                .concatWith(Flux.defer(() -> {
+                    if (!"length".equalsIgnoreCase(finishReason.get())) {
+                        return toFinalEvent(prompt, finishReason.get(), usage.get(), output.toString()).flux();
+                    }
+                    if (output.length() == outputStart && !escalated) {
+                        return streamAttempt(copyPrompt(prompt, 64000, null), output, tokenEmitted, usage, true, continuationCount);
+                    }
+                    if (prompt.getPurpose() == null
+                            || !prompt.getPurpose().isContinuationAllowed()
+                            || prompt.getOutputFormat() != OutputFormat.TEXT
+                            || continuationCount >= 3) {
+                        return Mono.just(toErrorEvent(prompt, ModelErrorCode.OUTPUT_TRUNCATED,
+                                ModelErrorCode.OUTPUT_TRUNCATED.message())).flux();
+                    }
+                    ChatPrompt continuation = copyPrompt(prompt, 64000, java.util.List.of(
+                            ChatMessage.builder().role("user").content(prompt.getMessage()).build(),
+                            ChatMessage.builder().role("assistant").content(output.toString()).build(),
+                            ChatMessage.builder().role("user")
+                                    .content("Continue exactly where the previous output stopped. No apology, no recap.")
+                                    .build()));
+                    return streamAttempt(continuation, output, tokenEmitted, usage, true, continuationCount + 1);
+                }));
+    }
+
+    private ChatPrompt copyPrompt(ChatPrompt source, int maxTokens, java.util.List<ChatMessage> messages) {
+        return ChatPrompt.builder()
+                .requestId(source.getRequestId())
+                .conversationId(source.getConversationId())
+                .message(source.getMessage())
+                .systemPrompt(source.getSystemPrompt())
+                .model(source.getModel())
+                .temperature(source.getTemperature())
+                .maxTokens(maxTokens)
+                .outputFormat(source.getOutputFormat())
+                .capability(source.getCapability())
+                .purpose(source.getPurpose())
+                .deadlineEpochMs(source.getDeadlineEpochMs())
+                .messages(messages)
+                .build();
+    }
+
     private Flux<ModelStreamChunk> guardedModelStream(ChatPrompt prompt, AtomicBoolean tokenEmitted) {
+        long remainingMs = prompt.getDeadlineEpochMs() == null
+                ? properties.getStreamTimeoutMs()
+                : Math.max(1L, prompt.getDeadlineEpochMs() - System.currentTimeMillis());
         return Flux.defer(() -> modelGateway.stream(prompt))
-                .timeout(Duration.ofMillis(properties.getFirstTokenTimeoutMs()),
-                        ignored -> Mono.delay(Duration.ofMillis(properties.getStreamTimeoutMs())));
+                .timeout(Duration.ofMillis(Math.min(properties.getFirstTokenTimeoutMs(), remainingMs)),
+                        ignored -> Mono.delay(Duration.ofMillis(remainingMs)));
     }
 
     private Flux<StreamEvent> toEvents(ChatPrompt prompt,
