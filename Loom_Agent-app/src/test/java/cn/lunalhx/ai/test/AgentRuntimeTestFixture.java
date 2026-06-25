@@ -8,6 +8,9 @@ import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopFactory;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopRuntimeDependencies;
+import cn.lunalhx.ai.domain.agent.service.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
@@ -35,18 +38,14 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 测试装配入口（Phase 1 重构保护网 §2）。
+ * 测试装配入口。
  *
  * <p>集中创建 {@link DefaultAgentLoopService}、{@link SubAgentCoordinator}、
  * {@link ContextWindowManager} 以及配套的内存 Repository/Store/Trace/Metrics、
  * 同步 {@link Executor}、Fake {@link ModelGateway} 与 {@link ToolRegistry}。
  *
- * <p>这是<strong>测试代码与生产构造器之间的唯一耦合点</strong>：当 Phase 2 修改生产构造器
- * 签名时，只需调整本 Fixture，契约测试本身不动。
- *
- * <p>约束：仅存在于测试代码中；不在生产代码引入 Builder；每个测试只覆盖与场景有关的依赖；
- * 迁移前后不得修改原有断言。默认使用最全构造器（14 参数 AgentLoop / 13 参数 SubAgent），
- * 以便后续构造器裁剪时默认行为不变。
+ * <p>生产构造器只通过 {@link AgentLoopFactory} 和 {@link SubAgentCoordinator}
+ * 的 5 参数构造器创建实例，不再使用废弃构造路径。
  */
 public final class AgentRuntimeTestFixture {
 
@@ -81,7 +80,7 @@ public final class AgentRuntimeTestFixture {
         return new AgentRuntimeTestFixture();
     }
 
-    // ---- 显式覆盖方法（只覆盖与场景有关的依赖） ----
+    // ---- 显式覆盖方法 ----
 
     public AgentRuntimeTestFixture modelGateway(ModelGateway modelGateway) {
         this.modelGateway = modelGateway;
@@ -103,7 +102,6 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
-    /** 默认 properties()：与 DefaultAgentLoopServiceTest 一致的内存工作区 + 短超时。 */
     public AgentRuntimeTestFixture defaultProperties() {
         return properties(standardProperties(DEFAULT_WORKSPACE, DEFAULT_WORKSPACE));
     }
@@ -163,7 +161,6 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
-    /** 开启 ContextWindowManager 的真实功能（enabled=true），并装配内存 artifact 仓库。 */
     public AgentRuntimeTestFixture contextEnabled() {
         this.contextEnabled = true;
         return this;
@@ -180,146 +177,134 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
-    /** 显式开启子 Agent（用默认内存依赖构建一个 coordinator，工具与主 loop 共享）。 */
     public AgentRuntimeTestFixture subAgentEnabled() {
         this.subAgentEnabled = true;
         return this;
     }
 
-    // ---- 构建入口 ----
+    // ---- 内部装配 ----
 
-    /** 构建 ContextWindowManager：显式传入则用之；否则按 contextEnabled() 决定 noop 或真实功能。 */
+    private AgentRuntimeProperties props() {
+        return properties != null ? properties : standardProperties();
+    }
+
+    private ApprovalStore effectiveApprovalStore() {
+        return approvalStore != null ? approvalStore : new InMemoryApprovalStore();
+    }
+
+    private AgentRunRepository effectiveRunRepository() {
+        return runRepository != null ? runRepository : new InMemoryAgentRunRepository();
+    }
+
+    private AgentCheckpointRepository effectiveCheckpointRepository() {
+        return checkpointRepository != null ? checkpointRepository : new InMemoryAgentCheckpointRepository();
+    }
+
+    private AgentWorkspaceResolver effectiveWorkspaceResolver(AgentRuntimeProperties props) {
+        return workspaceResolver != null ? workspaceResolver : new AgentWorkspaceResolver(props);
+    }
+
+    private TraceRecorder effectiveTraceRecorder() {
+        return traceRecorder != null ? traceRecorder : new InMemoryTraceRecorder();
+    }
+
+    private BudgetGuard effectiveBudgetGuard(AgentRuntimeProperties props) {
+        return budgetGuard != null ? budgetGuard : new DefaultBudgetGuard(props);
+    }
+
+    private AgentMetrics effectiveAgentMetrics() {
+        return agentMetrics != null ? agentMetrics : new NoopAgentMetrics();
+    }
+
+    private Executor effectiveExecutor() {
+        return executor != null ? executor : Runnable::run;
+    }
+
     private ContextWindowManager resolveContextWindowManager(AgentRuntimeProperties props) {
         if (contextWindowManager != null) {
             return contextWindowManager;
         }
-        if (contextEnabled) {
-            ContextArtifactRepository artifactRepository = this.contextArtifactRepository != null
-                    ? this.contextArtifactRepository : new InMemoryContextArtifactRepository();
-            ContextBlobStore blobStore = this.contextBlobStore != null
-                    ? this.contextBlobStore : new InMemoryContextBlobStore();
-            ContextWindowManager manager = deepContextSummaryService != null
-                    ? new ContextWindowManager(props, artifactRepository, blobStore, deepContextSummaryService)
-                    : new ContextWindowManager(props, artifactRepository, blobStore);
-            builtContextWindowManager.set(manager);
-            return manager;
-        }
-        return ContextWindowManager.noop(props);
+        ContextArtifactRepository artifactRepo = contextArtifactRepository != null
+                ? contextArtifactRepository : new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = contextBlobStore != null
+                ? contextBlobStore : new InMemoryContextBlobStore();
+        ContextWindowManager manager = deepContextSummaryService != null
+                ? new ContextWindowManager(props, artifactRepo, blobStore, deepContextSummaryService)
+                : new ContextWindowManager(props, artifactRepo, blobStore);
+        builtContextWindowManager.set(manager);
+        return manager;
     }
 
-    private SubAgentCoordinator resolveSubAgentCoordinator(AgentRuntimeProperties props,
-                                                           ApprovalStore approvalStore,
-                                                           AgentRunRepository runRepository,
-                                                           AgentCheckpointRepository checkpointRepository,
-                                                           AgentWorkspaceResolver workspaceResolver,
-                                                           TraceRecorder traceRecorder,
-                                                           BudgetGuard budgetGuard,
-                                                           AgentMetrics agentMetrics,
-                                                           ContextWindowManager contextWindowManager,
-                                                           Executor executor) {
+    private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
+                                                     ContextWindowManager cwm) {
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
+                effectiveApprovalStore(),
+                effectiveWorkspaceResolver(props),
+                effectiveRunRepository(),
+                effectiveCheckpointRepository(),
+                objectMapper);
+        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
+                props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
+                effectiveAgentMetrics(), cwm);
+        return new AgentLoopFactory(modelGateway, state, runtime);
+    }
+
+    // ---- 构建入口 ----
+
+    public DefaultAgentLoopService buildAgentLoop() {
+        AgentRuntimeProperties props = props();
+        Executor exec = effectiveExecutor();
+        ContextWindowManager cwm = resolveContextWindowManager(props);
+        AgentLoopFactory factory = createAgentLoopFactory(props, cwm);
+        ToolRegistry registry = new ToolRegistry(tools);
+
+        if (subAgentEnabled) {
+            SubAgentCoordinator coordinator = resolveSubAgentCoordinator(props, cwm, exec, factory);
+            return factory.createRoot(registry, exec, coordinator);
+        }
+        return factory.createStandalone(registry, exec);
+    }
+
+    public SubAgentCoordinator buildSubAgentCoordinator() {
+        AgentRuntimeProperties props = props();
+        Executor exec = effectiveExecutor();
+        ContextWindowManager cwm = resolveContextWindowManager(props);
+        AgentLoopFactory factory = createAgentLoopFactory(props, cwm);
+
         if (subAgentCoordinator != null) {
             return subAgentCoordinator;
         }
-        if (!subAgentEnabled) {
-            return null;
-        }
-        // 13 参数最全构造器：Phase 2 裁剪构造器时此处集中调整。
         return new SubAgentCoordinator(
-                modelGateway,
                 new RoleToolRegistryFactory(tools),
-                approvalStore,
-                workspaceResolver,
-                runRepository,
-                checkpointRepository,
+                factory,
                 props,
                 objectMapper,
-                executor,
-                traceRecorder,
-                budgetGuard,
-                agentMetrics,
-                contextWindowManager);
+                exec);
     }
 
-    /** 构建一个 AgentLoop（最全 14 参数构造器）。 */
-    public DefaultAgentLoopService buildAgentLoop() {
-        AgentRuntimeProperties props = this.properties != null ? this.properties : standardProperties();
-        ApprovalStore approvalStore = this.approvalStore != null ? this.approvalStore : new InMemoryApprovalStore();
-        AgentRunRepository runRepository = this.runRepository != null ? this.runRepository : new InMemoryAgentRunRepository();
-        AgentCheckpointRepository checkpointRepository = this.checkpointRepository != null
-                ? this.checkpointRepository : new InMemoryAgentCheckpointRepository();
-        AgentWorkspaceResolver workspaceResolver = this.workspaceResolver != null
-                ? this.workspaceResolver : new AgentWorkspaceResolver(props);
-        TraceRecorder traceRecorder = this.traceRecorder != null ? this.traceRecorder : new InMemoryTraceRecorder();
-        BudgetGuard budgetGuard = this.budgetGuard != null ? this.budgetGuard : new DefaultBudgetGuard(props);
-        AgentMetrics agentMetrics = this.agentMetrics != null ? this.agentMetrics : new NoopAgentMetrics();
-        Executor executor = this.executor != null ? this.executor : Runnable::run;
-        ContextWindowManager contextWindowManager = resolveContextWindowManager(props);
-        SubAgentCoordinator subAgentCoordinator = resolveSubAgentCoordinator(props, approvalStore, runRepository,
-                checkpointRepository, workspaceResolver, traceRecorder, budgetGuard, agentMetrics,
-                contextWindowManager, executor);
-        // 14 参数最全构造器：Phase 2 裁剪构造器时此处集中调整。
-        return new DefaultAgentLoopService(
-                modelGateway,
-                new ToolRegistry(tools),
-                approvalStore,
-                workspaceResolver,
-                runRepository,
-                checkpointRepository,
-                props,
-                objectMapper,
-                executor,
-                subAgentCoordinator,
-                traceRecorder,
-                budgetGuard,
-                agentMetrics,
-                contextWindowManager);
-    }
-
-    /** 构建一个独立的 SubAgentCoordinator（13 参数最全构造器），不构建 AgentLoop。 */
-    public SubAgentCoordinator buildSubAgentCoordinator() {
-        AgentRuntimeProperties props = this.properties != null ? this.properties : standardProperties();
-        ApprovalStore approvalStore = this.approvalStore != null ? this.approvalStore : new InMemoryApprovalStore();
-        AgentRunRepository runRepository = this.runRepository != null ? this.runRepository : new InMemoryAgentRunRepository();
-        AgentCheckpointRepository checkpointRepository = this.checkpointRepository != null
-                ? this.checkpointRepository : new InMemoryAgentCheckpointRepository();
-        AgentWorkspaceResolver workspaceResolver = this.workspaceResolver != null
-                ? this.workspaceResolver : new AgentWorkspaceResolver(props);
-        TraceRecorder traceRecorder = this.traceRecorder != null ? this.traceRecorder : new InMemoryTraceRecorder();
-        BudgetGuard budgetGuard = this.budgetGuard != null ? this.budgetGuard : new DefaultBudgetGuard(props);
-        AgentMetrics agentMetrics = this.agentMetrics != null ? this.agentMetrics : new NoopAgentMetrics();
-        Executor executor = this.executor != null ? this.executor : Runnable::run;
-        ContextWindowManager contextWindowManager = resolveContextWindowManager(props);
-        SubAgentCoordinator existing = resolveSubAgentCoordinator(props, approvalStore, runRepository,
-                checkpointRepository, workspaceResolver, traceRecorder, budgetGuard, agentMetrics,
-                contextWindowManager, executor);
-        if (existing != null) {
-            return existing;
+    private SubAgentCoordinator resolveSubAgentCoordinator(AgentRuntimeProperties props,
+                                                            ContextWindowManager cwm,
+                                                            Executor exec,
+                                                            AgentLoopFactory factory) {
+        if (subAgentCoordinator != null) {
+            return subAgentCoordinator;
         }
         return new SubAgentCoordinator(
-                modelGateway,
                 new RoleToolRegistryFactory(tools),
-                approvalStore,
-                workspaceResolver,
-                runRepository,
-                checkpointRepository,
+                factory,
                 props,
                 objectMapper,
-                executor,
-                traceRecorder,
-                budgetGuard,
-                agentMetrics,
-                contextWindowManager);
+                exec);
     }
 
-    /** 构建一个真实功能的 ContextWindowManager（4 参数最全构造器，含 deepSummaryService）。 */
     public ContextWindowManager buildContextWindowManager() {
-        AgentRuntimeProperties props = this.properties != null ? this.properties : standardProperties();
+        AgentRuntimeProperties props = props();
         ContextWindowManager resolved = resolveContextWindowManager(props);
         builtContextWindowManager.set(resolved);
         return resolved;
     }
 
-    // ---- 访问器：测试断言副作用时使用 ----
+    // ---- 访问器 ----
 
     public ObjectMapper objectMapper() {
         return objectMapper;
@@ -337,12 +322,11 @@ public final class AgentRuntimeTestFixture {
         return properties;
     }
 
-    /** 获取 buildAgentLoop() 内部装配的 ContextWindowManager（可能为 noop）。 */
     public ContextWindowManager builtContextWindowManager() {
         return builtContextWindowManager.get();
     }
 
-    // ---- 默认 properties 工厂（与 DefaultAgentLoopServiceTest 对齐） ----
+    // ---- 默认 properties 工厂 ----
 
     public static AgentRuntimeProperties standardProperties() {
         return standardProperties(DEFAULT_WORKSPACE, DEFAULT_WORKSPACE);

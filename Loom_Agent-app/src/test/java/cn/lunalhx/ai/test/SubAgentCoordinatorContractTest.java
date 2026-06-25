@@ -7,10 +7,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.SubAgentResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.SubAgentStatus;
-import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
-import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
-import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
-import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
@@ -173,16 +169,13 @@ public class SubAgentCoordinatorContractTest {
         };
         ExecutorService executor = Executors.newFixedThreadPool(taskCount);
         try {
-            SubAgentCoordinator coordinator = new SubAgentCoordinator(
-                    gateway,
-                    new RoleToolRegistryFactory(List.of(fakeTool("code_search", "ok"))),
-                    new InMemoryApprovalStore(),
-                    new AgentWorkspaceResolver(properties),
-                    new InMemoryAgentRunRepository(),
-                    new InMemoryAgentCheckpointRepository(),
-                    properties,
-                    new ObjectMapper(),
-                    executor);
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(gateway)
+                    .tools(List.of(fakeTool("code_search", "ok")))
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
             AtomicReference<SubAgentDispatchResult> ref = new AtomicReference<>();
             Thread runner = new Thread(() -> ref.set(coordinator.dispatch(parentWithDecision(spawnInput(taskCount)))));
             runner.start();
@@ -211,8 +204,8 @@ public class SubAgentCoordinatorContractTest {
         properties.setSubAgentTimeoutMs(100L);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            SubAgentCoordinator coordinator = new SubAgentCoordinator(
-                    new ModelGateway() {
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(new ModelGateway() {
                         @Override
                         public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
                             return Flux.empty();
@@ -225,15 +218,12 @@ public class SubAgentCoordinatorContractTest {
                                 return ModelChatResult.builder().content(finalAnswerJson("ok")).finishReason("stop").build();
                             });
                         }
-                    },
-                    new RoleToolRegistryFactory(List.of(fakeTool("code_search", "ok"))),
-                    new InMemoryApprovalStore(),
-                    new AgentWorkspaceResolver(properties),
-                    new InMemoryAgentRunRepository(),
-                    new InMemoryAgentCheckpointRepository(),
-                    properties,
-                    new ObjectMapper(),
-                    executor);
+                    })
+                    .tools(List.of(fakeTool("code_search", "ok")))
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
             AgentContext parent = parentWithDecision(spawnInput(1));
             SubAgentDispatchResult result = coordinator.dispatch(parent);
             // 子任务被超时取消，全部失败
@@ -422,16 +412,12 @@ public class SubAgentCoordinatorContractTest {
     }
 
     private SubAgentCoordinator coordinatorWithGateway(AgentRuntimeProperties properties, ModelGateway gateway) {
-        return new SubAgentCoordinator(
-                gateway,
-                new RoleToolRegistryFactory(List.of(fakeTool("code_search", "ok"))),
-                new InMemoryApprovalStore(),
-                new AgentWorkspaceResolver(properties),
-                new InMemoryAgentRunRepository(),
-                new InMemoryAgentCheckpointRepository(),
-                properties,
-                new ObjectMapper(),
-                Runnable::run);
+        return AgentRuntimeTestFixture.fixture()
+                .modelGateway(gateway)
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties)
+                .subAgentEnabled()
+                .buildSubAgentCoordinator();
     }
 
     private ModelGateway finalAnswerGateway(String summary, String findings) {

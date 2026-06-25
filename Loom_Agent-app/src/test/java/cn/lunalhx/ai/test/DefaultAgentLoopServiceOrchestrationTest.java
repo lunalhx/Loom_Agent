@@ -40,8 +40,7 @@ import static org.junit.Assert.*;
  * Phase 3 orchestration smoke tests.
  *
  * <p>Verify the refactored Service's entry points (ask/resume/resumeRun/resumeWithUserInput)
- * still produce stable externally observable behavior. These tests use the deprecated
- * constructor path which exercises the legacyAssembly → new constructor chain.
+ * still produce stable externally observable behavior.
  */
 public class DefaultAgentLoopServiceOrchestrationTest {
 
