@@ -1,4 +1,4 @@
-package cn.lunalhx.ai.domain.agent.service;
+package cn.lunalhx.ai.infrastructure.context;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 

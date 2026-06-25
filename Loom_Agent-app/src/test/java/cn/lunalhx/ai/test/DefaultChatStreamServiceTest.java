@@ -12,7 +12,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.StreamEventType;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
-import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.infrastructure.gateway.ResilientModelGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;

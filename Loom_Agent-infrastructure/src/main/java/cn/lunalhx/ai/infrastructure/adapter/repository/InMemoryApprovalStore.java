@@ -1,4 +1,4 @@
-package cn.lunalhx.ai.domain.agent.service;
+package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.PersistentApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;

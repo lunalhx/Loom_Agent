@@ -6,7 +6,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.service.DefaultReplayService;
-import cn.lunalhx.ai.domain.agent.service.InMemoryTraceRecorder;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import org.junit.Test;
 
 import java.util.stream.Collectors;
