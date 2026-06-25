@@ -19,47 +19,27 @@
 
 ---
 
-## 1. 目标类指标（基线快照）
+## 1. 目标类指标（基线快照 — Phase 7 完成后）
 
 | 类 | 路径 | 行数 | 字段数 | 构造器数 | 备注 |
 |---|---|---|---|---|---|
-| `DefaultAgentLoopService` | `Loom_Agent-domain/.../agent/service/DefaultAgentLoopService.java` | 694 | 13 | **8** | God Class 候选，Phase 2 拆分目标 |
-| `SubAgentCoordinator` | `Loom_Agent-domain/.../agent/service/SubAgentCoordinator.java` | 462 | 13 | **4** | |
-| `ContextWindowManager` | `Loom_Agent-domain/.../agent/service/ContextWindowManager.java` | 482 | 4 | **2** + `noop` 工厂 | |
-| `ResilientModelGateway` | `Loom_Agent-infrastructure/.../gateway/ResilientModelGateway.java` | 686 | 8 | **2** | |
-| `AgentCodeController` | `Loom_Agent-trigger/.../http/AgentCodeController.java` | 661 | 8 | 1（`@RequiredArgsConstructor`） | 8 个端点 |
+| `DefaultAgentLoopService` | `Loom_Agent-domain/.../agent/service/DefaultAgentLoopService.java` | **157** | **4** | **1**（package-private） | 只通过 `AgentLoopFactory` 创建 |
+| `SubAgentCoordinator` | `Loom_Agent-domain/.../agent/service/SubAgentCoordinator.java` | **48** | **4** | **1**（5 参数） | |
+| `ContextWindowManager` | `Loom_Agent-domain/.../agent/service/ContextWindowManager.java` | **163** | 2 | **2**（3/4 参数） | `noop()` 已删除 |
+| `ResilientModelGateway` | `Loom_Agent-infrastructure/.../gateway/ResilientModelGateway.java` | 96 | — | — | Phase 6 已拆分 |
+| `AgentCodeController` | `Loom_Agent-trigger/.../http/AgentCodeController.java` | 140 | — | — | Phase 6 已收缩 |
 
-### `DefaultAgentLoopService` 构造器链（8 个，逐级委派）
+### Phase 7 清理摘要
 
-| # | 行 | 参数列表（顺序） |
-|---|---|---|
-| 1 | 81 | `modelGateway, toolRegistry, properties, objectMapper, executor`（5） |
-| 2 | 90 | `modelGateway, toolRegistry, approvalStore, properties, objectMapper, executor`（6） |
-| 3 | 100 | `modelGateway, toolRegistry, approvalStore, workspaceResolver, properties, objectMapper, executor`（7） |
-| 4 | 111 | `modelGateway, toolRegistry, approvalStore, workspaceResolver, runRepository, checkpointRepository, properties, objectMapper, executor`（9） |
-| 5 | 124 | + `subAgentCoordinator`（10，传 `null` trace/budget/metrics） |
-| 6 | 139 | + `traceRecorder, budgetGuard`（12，传 `null` metrics） |
-| 7 | 155 | + `agentMetrics`（13，传 `ContextWindowManager.noop`） |
-| 8 | 173 | + `contextWindowManager`（**14，最全构造器**） |
-
-> 14 参数构造器是唯一显式装配全部依赖的入口；其余构造器通过默认 InMemory/Noop 实现逐级委派到它。
-
-### `SubAgentCoordinator` 构造器链（4 个）
-
-| # | 行 | 参数列表 |
-|---|---|---|
-| 1 | 54 | `modelGateway, toolRegistryFactory, approvalStore, workspaceResolver, runRepository, checkpointRepository, properties, objectMapper, executor`（9） |
-| 2 | 67 | + `traceRecorder, budgetGuard`（11，metrics=null） |
-| 3 | 82 | + `agentMetrics`（12，contextWindowManager=noop） |
-| 4 | 99 | + `contextWindowManager`（**13，最全构造器**） |
-
-### `ContextWindowManager` 构造器（2 + 1 工厂）
-
-| # | 行 | 参数列表 |
-|---|---|---|
-| 1 | 32 | `properties, artifactRepository, blobStore`（3，deepSummary=null） |
-| 2 | 38 | `properties, artifactRepository, blobStore, deepSummaryService`（4） |
-| 工厂 | 48 | `noop(properties)` → 用 `InMemoryContextArtifactRepository` + `InMemoryContextBlobStore` |
+| 操作 | 详情 |
+|---|---|
+| 删除废弃构造器 | `DefaultAgentLoopService` 8 个 + `SubAgentCoordinator` 4 个 + `ModelCallNode` 2 个 + `ToolDispatchNode` 2 个 + `RenderPromptNode` 1 个 |
+| 删除 Legacy 实现 | `LegacyChildServiceFactory`、`legacyAssembly()`、nullable 回退逻辑 |
+| 删除 `noop()` | `ContextWindowManager.noop()` 移除；测试改用真实 3 参数构造器 + InMemory 实现 |
+| 降级逻辑内聚 | `fallbackDeepSummary()` 逻辑由 `DeepSummaryStrategy` 内部 catch 分支承担；`ContextWindowComponents` 始终提供非 null 的 `DeepSummaryStrategy` |
+| 防御性编程 | 所有活跃构造器添加 `Objects.requireNonNull()`，不再用 null 隐式创建默认实现 |
+| 测试迁移 | `AgentRuntimeTestFixture` 改为通过 `AgentLoopFactory` 和 5 参数 `SubAgentCoordinator` 构造器创建实例 |
+| ArchUnit 防回归 | 新增 9 条架构规则，覆盖构造器数量/参数上限/依赖方向/package-private 可见性 |
 
 ---
 
@@ -198,17 +178,29 @@ fail → done（终态，错误/超时/预算）
 
 ---
 
-## 7. 完成标准（本阶段）
+## 7. 完成标准
 
-- [ ] 原有 79 个测试全部通过。
-- [ ] 新增契约测试全部通过且无固定时间等待（`Thread.sleep` 判断并发）。
-- [ ] Controller 8 个端点都有至少一个成功和一个失败场景。
-- [ ] `SubAgentCoordinator` 和 `ContextWindowManager` 有独立测试类。
-- [ ] 测试代码不再大面积直接调用 14 参数或 13 参数构造器（改走 Fixture）。
-- [ ] 未修改任何 HTTP、SSE 或领域接口。
-- [ ] 未删除或调整生产构造器。
-- [ ] 未开始 God Class 的职责拆分。
+- [x] 原有 79 个测试全部通过。（Phase 7 后为 160 个功能测试 + 9 个架构测试 = 169 个）
+- [x] 新增契约测试全部通过且无固定时间等待（`Thread.sleep` 判断并发）。
+- [x] Controller 8 个端点都有至少一个成功和一个失败场景。
+- [x] `SubAgentCoordinator` 和 `ContextWindowManager` 有独立测试类。
+- [x] 测试代码不再大面积直接调用 14 参数或 13 参数构造器（改走 Fixture）。
+- [x] 未修改任何 HTTP、SSE 或领域接口。
+- [x] 所有废弃构造器已删除。
+- [x] God Class 职责拆分完成。
 - [x] 形成后续阶段可直接使用的行为不变量清单（即本文 §6）。
+
+### Phase 7 收口完成（2026-06-26）
+
+- [x] 所有 `@Deprecated(forRemoval = true)` 构造器已删除
+- [x] `LegacyChildServiceFactory`、`legacyAssembly()` 已删除
+- [x] `ContextWindowManager.noop()` 已删除
+- [x] `fallbackDeepSummary()` 逻辑已内聚到 `DeepSummaryStrategy`
+- [x] 活跃构造器使用 `Objects.requireNonNull()`
+- [x] ArchUnit 9 条架构规则全部通过
+- [x] 文档已更新：`refactor-baseline.md`、`backend-architecture.md`
+- [x] 除 `AgentLoopFactory` 外，不存在直接构造 `DefaultAgentLoopService` 的代码
+- [x] `mvn clean verify` 全部通过（169 个测试）
 
 ---
 
