@@ -30,6 +30,9 @@ import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
+import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
+import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
+import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -72,6 +75,7 @@ public class AgentCodeController {
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final Validator validator;
     private final ThreadPoolExecutor threadPoolExecutor;
+    private final AgentHttpQueryService queryService;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request) {
@@ -143,16 +147,7 @@ public class AgentCodeController {
 
     @GetMapping("/approvals/{approvalId}")
     public Response<AgentApprovalResponse> approval(@PathVariable String approvalId) {
-        return approvalStore.find(approvalId)
-                .map(approval -> Response.<AgentApprovalResponse>builder()
-                        .code(ResponseCode.SUCCESS.getCode())
-                        .info(ResponseCode.SUCCESS.getInfo())
-                        .data(toApprovalResponse(approval))
-                        .build())
-                .orElseGet(() -> Response.<AgentApprovalResponse>builder()
-                        .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                        .info("审批不存在或已过期")
-                .build());
+        return queryService.approval(approvalId);
     }
 
     @PostMapping(value = "/runs/{runId}/resume/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -214,45 +209,13 @@ public class AgentCodeController {
 
     @GetMapping("/runs/{runId}/trace")
     public Response<AgentTraceTimelineResponse> trace(@PathVariable String runId) {
-        if (StringUtils.isBlank(runId)) {
-            return traceError("runId 不能为空");
-        }
-        AgentRun run = agentRunRepository.find(runId).orElse(null);
-        if (run == null) {
-            return traceError("未找到 run");
-        }
-        List<AgentTraceEvent> events = traceRecorder.timeline(runId);
-        if (events.isEmpty()) {
-            return traceError("未找到 trace");
-        }
-        AgentTraceEvent first = events.get(0);
-        return Response.<AgentTraceTimelineResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(AgentTraceTimelineResponse.builder()
-                        .runId(runId)
-                        .traceId(first.getTraceId())
-                        .rootRunId(first.getRootRunId())
-                        .events(events.stream().map(this::toTraceDto).toList())
-                        .build())
-                .build();
+        return queryService.trace(runId);
     }
 
     @GetMapping("/runs/{runId}/replay")
     public Response<AgentReplayResponse> replay(@PathVariable String runId,
                                                 @RequestParam(required = false) Boolean includeChildren) {
-        if (StringUtils.isBlank(runId)) {
-            return replayError("runId 不能为空");
-        }
-        AgentReplayTimeline timeline = replayService.replayRun(runId, includeChildren(includeChildren, null));
-        if (timeline.getEvents().isEmpty()) {
-            return replayError("未找到可 replay 的 trace");
-        }
-        return Response.<AgentReplayResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(toReplayResponse(timeline))
-                .build();
+        return queryService.replay(runId, includeChildren(includeChildren, null));
     }
 
     @PostMapping(value = "/runs/{runId}/replay/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

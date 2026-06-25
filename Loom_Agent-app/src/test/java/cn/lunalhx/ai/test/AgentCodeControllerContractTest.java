@@ -24,6 +24,8 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.trigger.http.AgentCodeController;
+import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
+import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validation;
@@ -89,8 +91,11 @@ public class AgentCodeControllerContractTest {
                                  AgentRuntimeProperties properties,
                                  ThreadPoolExecutor executor) {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+        AgentResponseMapper responseMapper = new AgentResponseMapper();
+        AgentHttpQueryService queryService = new AgentHttpQueryService(approvalStore,
+                agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentCodeController controller = new AgentCodeController(agentLoopService, approvalStore,
-                agentRunRepository, traceRecorder, replayService, properties, validator, executor);
+                agentRunRepository, traceRecorder, replayService, properties, validator, executor, queryService);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 
