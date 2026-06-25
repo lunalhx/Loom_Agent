@@ -13,13 +13,18 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentDispatchResult;
+import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
+import cn.lunalhx.ai.domain.agent.service.DeepContextSummaryService;
 import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
@@ -34,6 +39,7 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
@@ -871,6 +877,242 @@ public class DefaultAgentLoopServiceTest {
     }
 
     @Test
+    public void reactiveCompactShouldRetainLatestFiveEntriesAndReportOversize() {
+        AgentRuntimeProperties properties = properties();
+        properties.getBudget().setEstimatedCharsPerToken(1);
+        properties.getContext().setReactiveKeepRecentEntries(5);
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+        AgentContext context = contextForRoot("reactive-size-run");
+        context.getDynamicText().appendUserTask("original task");
+        for (int i = 1; i <= 7; i++) {
+            context.getDynamicText().appendSystemNote(i, "test", "entry-" + i, "entry-" + i);
+        }
+
+        ContextCompactResult result = manager.reactiveCompact(context, 10);
+
+        assertFalse(result.isFitsTarget());
+        assertEquals(5, result.getRetainedEntryCount());
+        assertNotNull(result.getTranscriptArtifactId());
+        assertEquals(7, context.getDynamicText().entries().size());
+        assertEquals("entry-3", context.getDynamicText().entries().get(2).getContent());
+        assertEquals("entry-7", context.getDynamicText().entries().get(6).getContent());
+    }
+
+    @Test
+    public void deepSummaryShouldSummarizeChunksAndMergeThem() {
+        AgentRuntimeProperties properties = properties();
+        properties.getBudget().setEstimatedCharsPerToken(1);
+        properties.getContext().setDeepSummaryChunkTokenLimit(10);
+        properties.getContext().setDeepSummaryMaxCalls(8);
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                int call = calls.incrementAndGet();
+                return Mono.just(ModelChatResult.builder()
+                        .content(call == 3 ? "merged" : "s" + call)
+                        .actualModel("summary-model")
+                        .finishReason("stop")
+                        .build());
+            }
+        };
+        DeepContextSummaryService service = new DeepContextSummaryService(
+                gateway, properties, new DefaultBudgetGuard(properties), new InMemoryTraceRecorder());
+        AgentContext context = contextForRoot("deep-summary-run");
+        context.setRequestId("request-deep-summary");
+
+        DeepContextSummaryService.DeepSummaryResult result = service.summarize(
+                context, List.of("12345678", "abcdefgh"), System.currentTimeMillis() + 1000L);
+
+        assertEquals(3, calls.get());
+        assertEquals(3, result.getCalls());
+        assertEquals("merged", result.getSummary());
+    }
+
+    @Test
+    public void shouldBoundRecoveryWaitForUserAndContinueFromCheckpoint() {
+        AgentRuntimeProperties properties = properties();
+        properties.getContext().setReactiveCompactMaxAttempts(1);
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway gateway = overflowThenFinalGateway(calls, 3, "用户补充后成功。");
+        DefaultAgentLoopService service = statefulService(
+                gateway, properties, runRepository, checkpointRepository, manager);
+
+        List<AgentEvent> waiting = service.ask(AgentQuestion.builder()
+                        .runId("waiting-input-run")
+                        .question("触发完整上下文恢复链")
+                        .maxSteps(4)
+                        .build())
+                .collectList()
+                .block(Duration.ofSeconds(3));
+
+        assertEquals(3, calls.get());
+        assertTrue(waiting.stream().anyMatch(event -> event.getType() == AgentEventType.USER_INPUT_REQUIRED));
+        assertEquals(AgentRunStatus.WAITING_USER_INPUT,
+                runRepository.find("waiting-input-run").orElseThrow().getStatus());
+        AgentContext waitingContext = checkpointRepository.latest("waiting-input-run")
+                .orElseThrow().getContextSnapshot().restore();
+        assertEquals(ContextRecoveryStage.WAITING_USER_INPUT, waitingContext.getContextRecoveryStage());
+        assertEquals(1, waitingContext.getReactiveCompactAttempts());
+
+        List<AgentEvent> replayed = service.resumeRun("waiting-input-run")
+                .collectList().block(Duration.ofSeconds(3));
+        assertTrue(replayed.stream().anyMatch(event -> event.getType() == AgentEventType.USER_INPUT_REQUIRED));
+        assertEquals(3, calls.get());
+
+        List<AgentEvent> resumed = service.resumeWithUserInput(
+                        "waiting-input-run", UserInputAction.CONTINUE, "只处理当前最小范围")
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertEquals(4, calls.get());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.ANSWER
+                && "用户补充后成功。".equals(event.getAnswer())));
+        assertEquals(AgentRunStatus.COMPLETED,
+                runRepository.find("waiting-input-run").orElseThrow().getStatus());
+        AgentContext completed = checkpointRepository.latest("waiting-input-run")
+                .orElseThrow().getContextSnapshot().restore();
+        assertEquals(ContextRecoveryStage.NONE, completed.getContextRecoveryStage());
+        assertEquals(0, completed.getReactiveCompactAttempts());
+    }
+
+    @Test
+    public void shouldCompactBeforeSwitchingToLargerContextModel() {
+        AgentRuntimeProperties properties = properties();
+        properties.getModelRecovery().setContextFallbackModel("large-context");
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        List<String> models = new java.util.ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                models.add(prompt.getModel());
+                if (calls.incrementAndGet() <= 2) {
+                    return Mono.error(new ModelGatewayException(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            "context_length_exceeded",
+                            false,
+                            422,
+                            null));
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"大窗口恢复成功。\",\"evidence\":[]}")
+                        .actualModel("large-context")
+                        .finishReason("stop")
+                        .build());
+            }
+
+            @Override
+            public ModelCapability capability(String model) {
+                return "large-context".equals(model)
+                        ? new ModelCapability(model, 200000L, 64000, true, true)
+                        : new ModelCapability("small-context", 100000L, 64000, true, true);
+            }
+        };
+
+        List<AgentEvent> events = newServiceWithContext(
+                gateway,
+                List.of(),
+                properties,
+                artifactRepository,
+                blobStore)
+                .ask(AgentQuestion.builder()
+                        .runId("fallback-order-run")
+                        .question("先压缩再切大模型")
+                        .maxSteps(4)
+                        .build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertEquals(3, calls.get());
+        assertEquals(java.util.Arrays.asList(null, null, "large-context"), models);
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.CONTEXT_COMPACTED
+                && event.getMetadata().get("strategies").toString().contains("reactive_summary")));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.CONTEXT_COMPACTED
+                && event.getMetadata().get("strategies").toString().contains("deep_summary")));
+    }
+
+    @Test
+    public void shouldAbortWhileWaitingForUserInputWithContextOverflowReason() {
+        AgentRuntimeProperties properties = properties();
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+        AtomicInteger calls = new AtomicInteger();
+        DefaultAgentLoopService service = statefulService(
+                overflowThenFinalGateway(calls, Integer.MAX_VALUE, "never"),
+                properties,
+                runRepository,
+                checkpointRepository,
+                manager);
+
+        service.ask(AgentQuestion.builder()
+                        .runId("abort-input-run")
+                        .question("触发等待后终止")
+                        .maxSteps(4)
+                        .build())
+                .collectList().block(Duration.ofSeconds(3));
+        List<AgentEvent> aborted = service.resumeWithUserInput(
+                        "abort-input-run", UserInputAction.ABORT, null)
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertTrue(aborted.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
+        assertTrue(aborted.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+        assertEquals(3, calls.get());
+    }
+
+    @Test
+    public void childAgentShouldFailInsteadOfWaitingForUserInput() {
+        AgentRuntimeProperties properties = properties();
+        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        ContextBlobStore blobStore = new InMemoryContextBlobStore();
+        AtomicInteger calls = new AtomicInteger();
+        List<AgentEvent> events = newServiceWithContext(
+                overflowThenFinalGateway(calls, Integer.MAX_VALUE, "never"),
+                List.of(),
+                properties,
+                artifactRepository,
+                blobStore)
+                .ask(AgentQuestion.builder()
+                        .runId("child-overflow-run")
+                        .rootRunId("root-overflow-run")
+                        .parentRunId("root-overflow-run")
+                        .agentRole(AgentRole.EXPLORER)
+                        .agentDepth(1)
+                        .question("子 Agent 上下文超限")
+                        .maxSteps(4)
+                        .build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertEquals(3, calls.get());
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.USER_INPUT_REQUIRED));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+    }
+
+    @Test
     public void controlJsonShouldFailWhenStillTruncatedAfter64k() {
         AtomicInteger calls = new AtomicInteger();
         AtomicReference<Integer> secondMaxTokens = new AtomicReference<>();
@@ -935,12 +1177,18 @@ public class DefaultAgentLoopServiceTest {
         context.setCurrentModel("deepseek-v4-pro");
         context.setReactiveCompactAttempts(1);
         context.setFallbackReason("provider_overloaded");
+        context.setContextRecoveryStage(ContextRecoveryStage.FALLBACK_MODEL_SELECTED);
+        context.setRecoveryModelOverride("deepseek-v4-pro");
+        context.setContextTranscriptArtifactId("ctx-transcript");
 
         AgentContext restored = AgentContextSnapshot.from(context).restore();
 
         assertEquals("deepseek-v4-pro", restored.getCurrentModel());
         assertEquals(1, restored.getReactiveCompactAttempts());
         assertEquals("provider_overloaded", restored.getFallbackReason());
+        assertEquals(ContextRecoveryStage.FALLBACK_MODEL_SELECTED, restored.getContextRecoveryStage());
+        assertEquals("deepseek-v4-pro", restored.getRecoveryModelOverride());
+        assertEquals("ctx-transcript", restored.getContextTranscriptArtifactId());
     }
 
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
@@ -965,6 +1213,28 @@ public class DefaultAgentLoopServiceTest {
                 new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
                 new InMemoryAgentRunRepository(),
                 new InMemoryAgentCheckpointRepository(),
+                properties,
+                new ObjectMapper(),
+                Runnable::run,
+                null,
+                new InMemoryTraceRecorder(),
+                new DefaultBudgetGuard(properties),
+                null,
+                contextWindowManager);
+    }
+
+    private DefaultAgentLoopService statefulService(ModelGateway modelGateway,
+                                                    AgentRuntimeProperties properties,
+                                                    AgentRunRepository runRepository,
+                                                    AgentCheckpointRepository checkpointRepository,
+                                                    ContextWindowManager contextWindowManager) {
+        return new DefaultAgentLoopService(
+                modelGateway,
+                new ToolRegistry(List.of()),
+                new InMemoryApprovalStore(),
+                new cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver(properties),
+                runRepository,
+                checkpointRepository,
                 properties,
                 new ObjectMapper(),
                 Runnable::run,
@@ -1070,6 +1340,31 @@ public class DefaultAgentLoopServiceTest {
                 calls.incrementAndGet();
                 return Mono.just(ModelChatResult.builder()
                         .content("{\"type\":\"final\",\"answer\":\"不应调用。\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway overflowThenFinalGateway(AtomicInteger calls, int overflowCalls, String answer) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() <= overflowCalls) {
+                    return Mono.error(new ModelGatewayException(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            "context_length_exceeded",
+                            false,
+                            422,
+                            null));
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + answer + "\",\"evidence\":[]}")
                         .finishReason("stop")
                         .build());
             }

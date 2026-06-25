@@ -9,6 +9,7 @@ import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentStreamEvent;
 import cn.lunalhx.ai.api.dto.AgentTraceEventDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
+import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
 import cn.lunalhx.ai.api.dto.TokenUsageDTO;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
@@ -25,6 +26,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
+import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
@@ -181,6 +183,35 @@ public class AgentCodeController {
         return emitter;
     }
 
+    @PostMapping(value = "/runs/{runId}/input/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter resumeWithUserInput(@PathVariable String runId,
+                                          @RequestBody(required = false) AgentUserInputRequest request) {
+        SseEmitter emitter = new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L);
+        AtomicBoolean completed = new AtomicBoolean(false);
+
+        AgentEvent validationError = validateUserInputRequest(runId, request);
+        if (validationError != null) {
+            threadPoolExecutor.execute(() -> sendAndComplete(emitter, completed, validationError));
+            return emitter;
+        }
+        UserInputAction action = parseUserInputAction(request.getAction());
+        Disposable disposable = agentLoopService.resumeWithUserInput(runId, action, request.getMessage())
+                .subscribe(event -> withMdc(event, () -> send(emitter, event)),
+                        throwable -> sendAndComplete(emitter, completed, fallbackError(throwable)),
+                        () -> complete(emitter, completed));
+
+        emitter.onCompletion(disposable::dispose);
+        emitter.onTimeout(() -> {
+            disposable.dispose();
+            sendAndComplete(emitter, completed, timeoutError());
+        });
+        emitter.onError(throwable -> {
+            disposable.dispose();
+            log.warn("Agent user-input SSE connection closed with error: {}", throwable.getMessage());
+        });
+        return emitter;
+    }
+
     @GetMapping("/runs/{runId}/trace")
     public Response<AgentTraceTimelineResponse> trace(@PathVariable String runId) {
         if (StringUtils.isBlank(runId)) {
@@ -308,6 +339,34 @@ public class AgentCodeController {
         return null;
     }
 
+    private AgentEvent validateUserInputRequest(String runId, AgentUserInputRequest request) {
+        if (StringUtils.isBlank(runId)) {
+            return error("invalid_request", "runId 不能为空");
+        }
+        if (request == null) {
+            return error("invalid_request", "请求体不能为空");
+        }
+        if (!Boolean.TRUE.equals(agentRuntimeProperties.getEnabled())) {
+            return error("agent_disabled", "Agent 功能未启用");
+        }
+        Set<ConstraintViolation<AgentUserInputRequest>> violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            String message = violations.stream()
+                    .map(ConstraintViolation::getMessage)
+                    .distinct()
+                    .collect(Collectors.joining("; "));
+            return error("invalid_request", message);
+        }
+        UserInputAction action = parseUserInputAction(request.getAction());
+        if (action == null) {
+            return error("invalid_request", "action 只能是 CONTINUE 或 ABORT");
+        }
+        if (action == UserInputAction.CONTINUE && StringUtils.isBlank(request.getMessage())) {
+            return error("invalid_request", "CONTINUE 必须提供非空 message");
+        }
+        return null;
+    }
+
     private AgentQuestion toQuestion(AgentAskRequest request, String requestId) {
         return AgentQuestion.builder()
                 .requestId(requestId)
@@ -351,6 +410,7 @@ public class AgentCodeController {
                 || event.getType() == AgentEventType.SUB_AGENT_FAILED
                 || event.getType() == AgentEventType.SUB_AGENT_SUMMARY
                 || event.getType() == AgentEventType.APPROVAL_REQUIRED
+                || event.getType() == AgentEventType.USER_INPUT_REQUIRED
                 || event.getType() == AgentEventType.POLICY_DENIED
                 || event.getType() == AgentEventType.ANSWER
                 || event.getType() == AgentEventType.DONE
@@ -443,6 +503,14 @@ public class AgentCodeController {
     private ApprovalDecision parseApprovalDecision(String value) {
         try {
             return ApprovalDecision.valueOf(StringUtils.upperCase(StringUtils.trim(value)));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private UserInputAction parseUserInputAction(String value) {
+        try {
+            return UserInputAction.valueOf(StringUtils.upperCase(StringUtils.trim(value)));
         } catch (Exception e) {
             return null;
         }

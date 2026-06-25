@@ -26,6 +26,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
 import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
 import cn.lunalhx.ai.domain.agent.flow.node.SubAgentDispatchNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
+import cn.lunalhx.ai.domain.agent.flow.node.UserInputGateNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -37,8 +38,11 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -204,6 +208,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 new ReplanGuardNode(),
                 new ReplanNode(modelGateway, properties, objectMapper, this.traceRecorder, this.budgetGuard),
                 new FinalAnswerNode(),
+                new UserInputGateNode(),
                 new FailNode()));
         if (subAgentCoordinator != null) {
             nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties));
@@ -248,6 +253,12 @@ public class DefaultAgentLoopService implements AgentLoopService {
     @Override
     public Flux<AgentEvent> resumeRun(String runId) {
         return Flux.create(sink -> executor.execute(() -> resumeRunLoop(runId, sink)), FluxSink.OverflowStrategy.BUFFER);
+    }
+
+    @Override
+    public Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message) {
+        return Flux.create(sink -> executor.execute(
+                () -> resumeWithUserInputLoop(runId, action, message, sink)), FluxSink.OverflowStrategy.BUFFER);
     }
 
     private void resumeLoop(String approvalId,
@@ -321,12 +332,86 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     return;
                 }
             }
+            if (AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
+                    || context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+                emit(sink, List.of(userInputRequiredEvent(context)));
+                sink.complete();
+                return;
+            }
             String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.RENDER_PROMPT);
             if (context.isUnsafeResumeRequired() || requiresResumeReplan(currentNode)) {
                 context.setUnsafeResumeRequired(true);
                 currentNode = AgentNodeNames.REPLAN_GUARD;
             }
             runLoop(context, currentNode, sink);
+        } catch (WorkspaceResolutionException e) {
+            emit(sink, List.of(workspaceError(e)));
+            sink.complete();
+        }
+    }
+
+    private void resumeWithUserInputLoop(String runId,
+                                         UserInputAction action,
+                                         String message,
+                                         FluxSink<AgentEvent> sink) {
+        AgentCheckpoint checkpoint = checkpointRepository.latest(runId).orElse(null);
+        if (checkpoint == null || checkpoint.getContextSnapshot() == null) {
+            emit(sink, List.of(AgentEvent.builder()
+                    .type(AgentEventType.ERROR)
+                    .runId(runId)
+                    .code("checkpoint_not_found")
+                    .message("未找到可恢复的 checkpoint")
+                    .build()));
+            sink.complete();
+            return;
+        }
+        AgentContext context = checkpoint.getContextSnapshot().restore();
+        if (!AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
+                && context.getContextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
+            emit(sink, List.of(AgentEvent.builder()
+                    .type(AgentEventType.ERROR)
+                    .runId(runId)
+                    .code("run_not_waiting_user_input")
+                    .message("当前运行不在等待用户输入状态")
+                    .build()));
+            sink.complete();
+            return;
+        }
+        if (action == null || (action == UserInputAction.CONTINUE && StringUtils.isBlank(message))) {
+            emit(sink, List.of(AgentEvent.builder()
+                    .type(AgentEventType.ERROR)
+                    .runId(runId)
+                    .code("invalid_user_input")
+                    .message("CONTINUE 必须提供非空 message")
+                    .build()));
+            sink.complete();
+            return;
+        }
+        try {
+            context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentCoordinator != null);
+            restoreWorkspace(context, context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString());
+            context.setStartedAt(Instant.now());
+            context.setCheckpointVersion(checkpoint.getVersion());
+            emit(sink, List.of(resumeStartedEvent(context)));
+            if (action == UserInputAction.ABORT) {
+                context.setContextRecoveryStage(ContextRecoveryStage.NONE);
+                fail(context, AgentStopReason.CONTEXT_OVERFLOW,
+                        ModelErrorCode.CONTEXT_OVERFLOW.code(),
+                        "用户在上下文恢复等待阶段终止了本次运行");
+                runLoop(context, AgentNodeNames.FAIL, sink);
+                return;
+            }
+            context.getDynamicText().appendUserInput(context.getStep(), StringUtils.trim(message));
+            context.setContextRecoveryStage(ContextRecoveryStage.NONE);
+            context.setReactiveCompactAttempts(0);
+            context.setRecoveryModelOverride(null);
+            context.setContextTranscriptArtifactId(null);
+            context.setContextBlockedReason(null);
+            context.setFallbackReason(null);
+            context.setStopReason(null);
+            context.setErrorCode(null);
+            context.setErrorMessage(null);
+            runLoop(context, AgentNodeNames.RENDER_PROMPT, sink);
         } catch (WorkspaceResolutionException e) {
             emit(sink, List.of(workspaceError(e)));
             sink.complete();
@@ -515,6 +600,24 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .build();
     }
 
+    private AgentEvent userInputRequiredEvent(AgentContext context) {
+        return AgentEvent.builder()
+                .type(AgentEventType.USER_INPUT_REQUIRED)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .code(ModelErrorCode.CONTEXT_OVERFLOW.code())
+                .message("自动上下文恢复已耗尽。请补充更聚焦的指令后继续，或终止本次运行。")
+                .metadata(Map.of(
+                        "allowedActions", List.of("CONTINUE", "ABORT"),
+                        "recoveryStage", ContextRecoveryStage.WAITING_USER_INPUT.name(),
+                        "transcriptArtifactId", StringUtils.defaultString(context.getContextTranscriptArtifactId()),
+                        "blockedReason", StringUtils.defaultString(context.getContextBlockedReason())))
+                .build();
+    }
+
     private AgentEvent workspaceError(WorkspaceResolutionException e) {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
@@ -545,7 +648,13 @@ public class DefaultAgentLoopService implements AgentLoopService {
         if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
             return "budget_exceeded";
         }
-        return StringUtils.isBlank(context.getErrorCode()) ? "completed" : "failed";
+        if (StringUtils.isNotBlank(context.getErrorCode())) {
+            return "failed";
+        }
+        if (context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+            return "waiting_user_input";
+        }
+        return "completed";
     }
 
     private String stopSummary(AgentContext context) {

@@ -14,6 +14,7 @@ public final class AgentNodeNames {
     public static final String REPLAN_GUARD = "replan_guard";
     public static final String REPLAN = "replan";
     public static final String FINAL_ANSWER = "final_answer";
+    public static final String USER_INPUT_GATE = "user_input_gate";
     public static final String FAIL = "fail";
 
     private AgentNodeNames() {

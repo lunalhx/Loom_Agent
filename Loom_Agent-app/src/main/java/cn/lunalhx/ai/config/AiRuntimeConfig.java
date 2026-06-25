@@ -16,6 +16,7 @@ import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.DefaultReplayService;
+import cn.lunalhx.ai.domain.agent.service.DeepContextSummaryService;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.domain.agent.service.InMemoryApprovalStore;
@@ -133,10 +134,20 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public DeepContextSummaryService deepContextSummaryService(ModelGateway modelGateway,
+                                                               AgentRuntimeProperties agentRuntimeProperties,
+                                                               BudgetGuard budgetGuard,
+                                                               TraceRecorder traceRecorder) {
+        return new DeepContextSummaryService(modelGateway, agentRuntimeProperties, budgetGuard, traceRecorder);
+    }
+
+    @Bean
     public ContextWindowManager contextWindowManager(AgentRuntimeProperties agentRuntimeProperties,
                                                      ContextArtifactRepository contextArtifactRepository,
-                                                     ContextBlobStore contextBlobStore) {
-        return new ContextWindowManager(agentRuntimeProperties, contextArtifactRepository, contextBlobStore);
+                                                     ContextBlobStore contextBlobStore,
+                                                     DeepContextSummaryService deepContextSummaryService) {
+        return new ContextWindowManager(agentRuntimeProperties, contextArtifactRepository, contextBlobStore,
+                deepContextSummaryService);
     }
 
     @Bean
@@ -295,6 +306,36 @@ public class AiRuntimeConfig {
             requirePositive(agentRuntimeProperties.getContext().getMaxDynamicEntries(), "AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES");
             requirePositive(agentRuntimeProperties.getContext().getAutoCompactTokenLimit(), "AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT");
             requirePositive(agentRuntimeProperties.getContext().getSummaryMaxChars(), "AGENT_CONTEXT_SUMMARY_MAX_CHARS");
+            Integer reactiveAttempts = agentRuntimeProperties.getContext().getReactiveCompactMaxAttempts();
+            if (reactiveAttempts == null || reactiveAttempts < 0 || reactiveAttempts > 1) {
+                throw new IllegalStateException("AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS 只能是 0 或 1");
+            }
+            requirePositive(agentRuntimeProperties.getContext().getReactiveKeepRecentEntries(),
+                    "AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES");
+            requirePositive(agentRuntimeProperties.getContext().getContextSafetyMarginTokens(),
+                    "AGENT_CONTEXT_SAFETY_MARGIN_TOKENS");
+            requirePositive(agentRuntimeProperties.getContext().getDeepSummaryChunkTokenLimit(),
+                    "AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT");
+            requirePositive(agentRuntimeProperties.getContext().getDeepSummaryMaxCalls(),
+                    "AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS");
+            requirePositive(agentRuntimeProperties.getContext().getDeepSummaryMaxOutputTokens(),
+                    "AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS");
+            String deepSummaryModel = agentRuntimeProperties.getContext().getDeepSummaryModel();
+            if (StringUtils.isNotBlank(deepSummaryModel)
+                    && !modelRuntimeProperties.getAllowedModels().contains(deepSummaryModel)) {
+                throw new IllegalStateException("AGENT_CONTEXT_DEEP_SUMMARY_MODEL 必须存在于 allowed-models");
+            }
+            String contextFallbackModel = agentRuntimeProperties.getModelRecovery().getContextFallbackModel();
+            if (StringUtils.isNotBlank(contextFallbackModel)) {
+                if (!modelRuntimeProperties.getAllowedModels().contains(contextFallbackModel)) {
+                    throw new IllegalStateException("AGENT_CONTEXT_FALLBACK_MODEL 必须存在于 allowed-models");
+                }
+                Long currentLength = modelRuntimeProperties.capability(model).getContextLength();
+                Long fallbackLength = modelRuntimeProperties.capability(contextFallbackModel).getContextLength();
+                if (currentLength == null || fallbackLength == null || fallbackLength <= currentLength) {
+                    throw new IllegalStateException("AGENT_CONTEXT_FALLBACK_MODEL 的 context-length 必须大于默认模型");
+                }
+            }
             if (threadPoolExecutor.getMaximumPoolSize() < agentRuntimeProperties.getSubAgentMaxConcurrency() + 1) {
                 throw new IllegalStateException("线程池最大线程数必须大于 AGENT_SUB_AGENT_MAX_CONCURRENCY");
             }

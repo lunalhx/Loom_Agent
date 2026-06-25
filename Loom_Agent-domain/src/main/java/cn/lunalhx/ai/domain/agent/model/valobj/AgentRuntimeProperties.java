@@ -68,7 +68,13 @@ public class AgentRuntimeProperties {
         private Integer maxDynamicEntries = 60;
         private Integer autoCompactTokenLimit = 64000;
         private Integer reactiveCompactMaxAttempts = 1;
+        private Integer reactiveKeepRecentEntries = 5;
+        private Integer contextSafetyMarginTokens = 4096;
         private Integer summaryMaxChars = 6000;
+        private String deepSummaryModel;
+        private Integer deepSummaryChunkTokenLimit = 12000;
+        private Integer deepSummaryMaxCalls = 8;
+        private Integer deepSummaryMaxOutputTokens = 2048;
 
     }
 

@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -75,6 +76,10 @@ public class AgentContextSnapshot {
     private Integer reactiveCompactAttempts;
     private String currentModel;
     private String fallbackReason;
+    private ContextRecoveryStage contextRecoveryStage;
+    private String recoveryModelOverride;
+    private String contextTranscriptArtifactId;
+    private String contextBlockedReason;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -126,6 +131,10 @@ public class AgentContextSnapshot {
                 .reactiveCompactAttempts(context.getReactiveCompactAttempts())
                 .currentModel(context.getCurrentModel())
                 .fallbackReason(context.getFallbackReason())
+                .contextRecoveryStage(context.getContextRecoveryStage())
+                .recoveryModelOverride(context.getRecoveryModelOverride())
+                .contextTranscriptArtifactId(context.getContextTranscriptArtifactId())
+                .contextBlockedReason(context.getContextBlockedReason())
                 .build();
     }
 
@@ -192,6 +201,10 @@ public class AgentContextSnapshot {
         context.setReactiveCompactAttempts(reactiveCompactAttempts == null ? 0 : reactiveCompactAttempts);
         context.setCurrentModel(currentModel);
         context.setFallbackReason(fallbackReason);
+        context.setContextRecoveryStage(contextRecoveryStage == null ? ContextRecoveryStage.NONE : contextRecoveryStage);
+        context.setRecoveryModelOverride(recoveryModelOverride);
+        context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
+        context.setContextBlockedReason(contextBlockedReason);
         return context;
     }
 

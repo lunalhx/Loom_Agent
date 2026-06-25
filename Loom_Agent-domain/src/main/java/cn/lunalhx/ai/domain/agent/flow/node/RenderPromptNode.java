@@ -97,8 +97,13 @@ public class RenderPromptNode extends AbstractAgentNode {
                 .metadata(Map.of(
                         "beforeEstimatedTokens", result.getBeforeEstimatedTokens(),
                         "afterEstimatedTokens", result.getAfterEstimatedTokens(),
+                        "targetTokens", result.getTargetTokens(),
+                        "fitsTarget", result.isFitsTarget(),
+                        "retainedEntryCount", result.getRetainedEntryCount(),
                         "strategies", result.getStrategies(),
-                        "artifactCount", result.getArtifactCount()))
+                        "artifactCount", result.getArtifactCount(),
+                        "transcriptArtifactId", result.getTranscriptArtifactId() == null
+                                ? "" : result.getTranscriptArtifactId()))
                 .build();
     }
 

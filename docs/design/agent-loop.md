@@ -193,6 +193,12 @@ AGENT_SUB_AGENT_MAX_CONCURRENCY=4
 AGENT_SUB_AGENT_MAX_DEPTH=1
 AGENT_SUB_AGENT_TIMEOUT_MS=60000
 AGENT_SUB_AGENT_SUMMARY_MAX_CHARS=12000
+AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS=1
+AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES=5
+AGENT_CONTEXT_SAFETY_MARGIN_TOKENS=4096
+AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT=12000
+AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS=8
+AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS=2048
 ```
 
 ## 演示
@@ -224,3 +230,15 @@ curl -N \
   -X POST http://localhost:8091/api/v1/agent/code/approvals/{approvalId}/decide/stream \
   -d '{"decision":"APPROVE","reason":"允许本次修改"}'
 ```
+
+上下文恢复耗尽时会返回 `user_input_required`。补充范围后继续：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/runs/{runId}/input/stream \
+  -d '{"action":"CONTINUE","message":"只处理当前模块，忽略其余历史分支"}'
+```
+
+恢复顺序固定为：一次 reactive compact → 更大上下文模型 → 分块深度摘要 → 根 Agent 等待用户输入。恢复阶段写入 checkpoint，重新连接不会重置或重复已执行阶段；子 Agent 不直接询问用户，恢复耗尽后返回 `CONTEXT_OVERFLOW`。

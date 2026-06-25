@@ -153,7 +153,9 @@ Agent SSE 事件：
 - `node_start`：节点开始执行，包含 `node` 和 `nodeInputs`，`includeTrace=true` 时返回。
 - `thought`：下一步行动意图摘要。
 - `tool_call`：工具名和参数。
+- `context_compacted`：上下文已执行预压缩、reactive compact 或深度摘要，metadata 包含压缩前后 token 估算、目标大小、策略和 transcript artifact ID。
 - `approval_required`：写操作等待人工确认，包含 `approvalId`、`permissionLevel`、`riskReason`、`operationPreview`、`expiresAt`。
+- `user_input_required`：自动上下文恢复已耗尽，运行进入 `WAITING_USER_INPUT`；可提交更聚焦的指令继续，或终止运行。
 - `policy_denied`：高危动作被拦截，不会执行真实操作。
 - `sub_agent_started`：子 Agent 子任务开始，包含 `subAgentTaskId`、`subAgentRunId`、`subAgentRole`。
 - `sub_agent_completed`：子 Agent 成功完成，只返回轻量元信息。
@@ -182,6 +184,20 @@ curl -N \
 
 `decision` 只能是 `APPROVE` 或 `REJECT`。批准后从暂停的工具调用继续执行；拒绝后会把 `approval_rejected` 作为工具观察结果反馈给模型。
 
+`POST /api/v1/agent/code/runs/{runId}/input/stream`
+
+上下文恢复等待阶段补充用户输入：
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8091/api/v1/agent/code/runs/{runId}/input/stream \
+  -d '{"action":"CONTINUE","message":"只处理当前模块，忽略其余历史分支"}'
+```
+
+`action` 支持 `CONTINUE` 和 `ABORT`。`CONTINUE` 必须提供 1–4000 字符的 `message`，并从压缩后的 checkpoint 继续；`ABORT` 以 `CONTEXT_OVERFLOW` 结束。
+
 写类工具：
 
 - `replace_in_file`：按精确文本替换文件内容，要求匹配次数符合 `expectedOccurrences`。
@@ -197,6 +213,7 @@ curl -N \
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
 - Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要 HITL 审批，`HIGH_RISK_DENY` 直接拦截。
 - 子 Agent：主 Agent 可通过内建虚拟工具 `spawn_agents` 派生 explorer/reviewer/editor 子 Agent；explorer/reviewer 强制只读并可并发，editor 默认只允许单个串行执行。
+- 上下文恢复：模型上下文超限后依次执行一次 reactive compact、切换更大上下文模型、分块深度摘要；根 Agent 最终进入可恢复的 `WAITING_USER_INPUT`，子 Agent 则以 `CONTEXT_OVERFLOW` 返回主 Agent。
 - Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
 - 多工作区：`loom.agent.workspace-root` 是默认工作区；`loom.agent.allowed-workspace-roots` 是可选择工作区的白名单。为空时默认只允许 `workspace-root`。
 

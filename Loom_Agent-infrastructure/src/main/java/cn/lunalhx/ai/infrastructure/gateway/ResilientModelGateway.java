@@ -530,12 +530,18 @@ public class ResilientModelGateway implements ModelGateway {
                         + StringUtils.length(prompt.getSystemPrompt()) / 4L
                         + (prompt.getMessages() == null ? 0L : prompt.getMessages().stream()
                         .mapToLong(message -> StringUtils.length(message.getContent()) / 4L).sum()));
-        if (requestedMaxTokens > capability.getMaxOutputTokens()
-                || estimatedPromptTokens + requestedMaxTokens > capability.getContextLength()) {
+        if (requestedMaxTokens > capability.getMaxOutputTokens()) {
             return new ModelGatewayException(ModelErrorCode.MODEL_CAPABILITY_MISMATCH,
-                    "模型能力不足：model=" + model + ", promptTokens=" + estimatedPromptTokens
-                            + ", requestedMaxTokens=" + requestedMaxTokens,
+                    "模型输出能力不足：model=" + model + ", requestedMaxTokens=" + requestedMaxTokens
+                            + ", maxOutputTokens=" + capability.getMaxOutputTokens(),
                     false, null, null);
+        }
+        if (estimatedPromptTokens + requestedMaxTokens > capability.getContextLength()) {
+            return new ModelGatewayException(ModelErrorCode.CONTEXT_OVERFLOW,
+                    "模型上下文长度超限：model=" + model + ", promptTokens=" + estimatedPromptTokens
+                            + ", requestedMaxTokens=" + requestedMaxTokens
+                            + ", contextLength=" + capability.getContextLength(),
+                    false, null, null, model, null);
         }
         if (prompt.getPurpose() == ModelCallPurpose.CONTROL_JSON
                 && !Boolean.TRUE.equals(capability.getSupportsJsonOutput())) {

@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.model.valobj;
 public enum DynamicTextRole {
 
     USER_TASK("user_task"),
+    USER_INPUT("user_input"),
     ASSISTANT_ACTION("assistant_action"),
     TOOL_RESULT("tool_result"),
     SYSTEM_NOTE("system_note");

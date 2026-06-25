@@ -83,6 +83,8 @@ public class CheckpointAgentHook implements AgentHook {
         }
         if ("approval_gate".equals(currentNode) && context.getStopReason() == null) {
             status = AgentRunStatus.WAITING_APPROVAL;
+        } else if ("user_input_gate".equals(currentNode) && context.getStopReason() == null) {
+            status = AgentRunStatus.WAITING_USER_INPUT;
         }
         runRepository.save(AgentRun.builder()
                 .runId(context.getRunId())
@@ -101,7 +103,8 @@ public class CheckpointAgentHook implements AgentHook {
                 .step(context.getStep())
                 .checkpointVersion(context.getCheckpointVersion())
                 .summaryJson(context.getAgentRole() == null ? null : context.getFinalAnswer())
-                .blockedReason(context.getBudgetBlockedReason())
+                .blockedReason(StringUtils.defaultIfBlank(
+                        context.getBudgetBlockedReason(), context.getContextBlockedReason()))
                 .usedTokens(context.getUsedTokens())
                 .estimatedCost(context.getEstimatedCost())
                 .updatedAt(Instant.now())

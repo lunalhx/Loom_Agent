@@ -4,7 +4,8 @@ public enum ModelCallPurpose {
 
     CONTROL_JSON(false, false),
     FINAL_TEXT(true, false),
-    TOOL_RESULT_SUMMARY(false, true);
+    TOOL_RESULT_SUMMARY(false, true),
+    CONTEXT_SUMMARY(false, true);
 
     private final boolean continuationAllowed;
     private final boolean inputCompactionPreferred;

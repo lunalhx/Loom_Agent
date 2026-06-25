@@ -124,7 +124,13 @@ loom:
       max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
       auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
       reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
+      reactive-keep-recent-entries: ${AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES:5}
+      context-safety-margin-tokens: ${AGENT_CONTEXT_SAFETY_MARGIN_TOKENS:4096}
       summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
+      deep-summary-model: ${AGENT_CONTEXT_DEEP_SUMMARY_MODEL:}
+      deep-summary-chunk-token-limit: ${AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT:12000}
+      deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
+      deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
     model-recovery:
       escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:64000}
       continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}

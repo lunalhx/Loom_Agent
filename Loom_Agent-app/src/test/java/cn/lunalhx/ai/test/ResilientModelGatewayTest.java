@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
@@ -31,6 +32,33 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class ResilientModelGatewayTest {
+
+    @Test
+    public void preflightContextLimitShouldReportContextOverflow() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelRuntimeProperties properties = properties(3, 4);
+        properties.getModelCapabilities().put("deepseek-v4-flash",
+                new ModelCapability("deepseek-v4-flash", 100L, 4096, true, true));
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.just(ModelChatResult.builder().content("{}").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder(), properties);
+
+        ModelGatewayException error = assertThrows(ModelGatewayException.class,
+                () -> gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION))
+                        .block(Duration.ofSeconds(2)));
+
+        assertEquals(ModelErrorCode.CONTEXT_OVERFLOW, error.getErrorCode());
+        assertEquals(0, calls.get());
+    }
 
     @Test
     public void shouldNotRetryNonRetryableCompleteError() {

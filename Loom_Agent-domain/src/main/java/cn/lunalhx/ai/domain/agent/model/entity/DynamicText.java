@@ -21,6 +21,10 @@ public class DynamicText {
         append(0, DynamicTextRole.USER_TASK, "start", "User Task", null, null, question);
     }
 
+    public void appendUserInput(int step, String content) {
+        append(step, DynamicTextRole.USER_INPUT, "user_input", "User Input", null, null, content);
+    }
+
     public void appendAssistantAction(int step, String sourceNode, AgentDecision decision) {
         if (decision == null) {
             return;

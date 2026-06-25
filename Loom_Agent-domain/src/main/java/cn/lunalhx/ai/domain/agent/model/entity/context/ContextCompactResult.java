@@ -14,6 +14,10 @@ public class ContextCompactResult {
     int afterEstimatedTokens;
     int artifactCount;
     List<String> strategies;
+    int targetTokens;
+    boolean fitsTarget;
+    int retainedEntryCount;
+    String transcriptArtifactId;
 
     public static ContextCompactResult none(int estimatedTokens) {
         return ContextCompactResult.builder()
@@ -22,6 +26,9 @@ public class ContextCompactResult {
                 .afterEstimatedTokens(estimatedTokens)
                 .artifactCount(0)
                 .strategies(List.of())
+                .targetTokens(estimatedTokens)
+                .fitsTarget(true)
+                .retainedEntryCount(0)
                 .build();
     }
 

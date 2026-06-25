@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
@@ -27,6 +28,7 @@ import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -67,8 +69,7 @@ public class ModelCallNode extends AbstractAgentNode {
         long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
         int requestedMaxTokens = 0;
         boolean escalated = false;
-        boolean contextFallbackAttempted = false;
-        String requestedModel = null;
+        String requestedModel = context.getRecoveryModelOverride();
         try {
             while (true) {
                 if (budgetGuard != null) {
@@ -102,7 +103,8 @@ public class ModelCallNode extends AbstractAgentNode {
                 }
                 recordUsage(context, result);
                 context.setCurrentModel(result.getActualModel());
-                context.setFallbackReason(result.getFallbackReason());
+                context.setFallbackReason(StringUtils.defaultIfBlank(
+                        result.getFallbackReason(), context.getFallbackReason()));
                 if (isLength(result.getFinishReason())) {
                     if (!escalated) {
                         escalated = true;
@@ -121,6 +123,7 @@ public class ModelCallNode extends AbstractAgentNode {
                     return NodeResult.next(AgentNodeNames.FAIL, List.of());
                 }
                 context.setModelOutput(result.getContent());
+                resetContextRecovery(context);
                 return NodeResult.next(AgentNodeNames.DECISION, List.of());
             }
         } catch (Exception e) {
@@ -135,112 +138,67 @@ public class ModelCallNode extends AbstractAgentNode {
                         ModelErrorCode.MODEL_CALL_TIMEOUT.code(), ModelErrorCode.MODEL_CALL_TIMEOUT.message());
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
             }
-            String attemptedModel = attemptedModel(e);
-            String contextFallbackModel = properties.getModelRecovery().getContextFallbackModel();
-            if (isContextOverflow(e) && !contextFallbackAttempted
-                    && StringUtils.isNotBlank(contextFallbackModel)
-                    && canUseContextFallback(attemptedModel, contextFallbackModel)) {
-                contextFallbackAttempted = true;
-                context.setCurrentModel(contextFallbackModel);
-                context.setFallbackReason("context_overflow");
-                return retryContextFallback(context, deadlineEpochMs, escalated, requestedMaxTokens);
-            }
-            if (isContextOverflow(e) && canReactiveCompact(context)) {
-                context.setReactiveCompactAttempts(context.getReactiveCompactAttempts() + 1);
-                ContextCompactResult compactResult = contextWindowManager.reactiveCompact(context);
-                AgentEvent event = event(context, AgentEventType.CONTEXT_COMPACTED)
-                        .message("Reactive context compact triggered by provider context length error")
-                        .metadata(Map.of(
-                                "beforeEstimatedTokens", compactResult.getBeforeEstimatedTokens(),
-                                "afterEstimatedTokens", compactResult.getAfterEstimatedTokens(),
-                                "strategies", compactResult.getStrategies(),
-                                "artifactCount", compactResult.getArtifactCount(),
-                                "attempt", context.getReactiveCompactAttempts()))
-                        .build();
-                return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(event));
-            }
             if (isContextOverflow(e)) {
-                fail(context, AgentStopReason.MODEL_ERROR, "context_overflow", "模型上下文超限，压缩后仍无法完成调用");
-                return NodeResult.next(AgentNodeNames.FAIL, List.of());
+                return recoverContextOverflow(context, e, deadlineEpochMs, requestedMaxTokens);
             }
             fail(context, AgentStopReason.MODEL_ERROR, "model_error", "模型决策失败");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
     }
 
-    private NodeResult retryContextFallback(AgentContext context,
-                                            long deadlineEpochMs,
-                                            boolean escalated,
-                                            int requestedMaxTokens) {
-        try {
-            int maxTokens = escalated ? requestedMaxTokens : 0;
-            ModelChatResult result = null;
-            for (int attempt = 0; attempt < (escalated ? 1 : 2); attempt++) {
-                if (budgetGuard != null) {
-                    BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), context.getCurrentModel(),
-                            ModelCallPurpose.CONTROL_JSON, context.getCurrentPrompt(), maxTokens);
-                    if (!check.isAllowed()) {
-                        blockForBudget(context, check);
-                        return NodeResult.next(AgentNodeNames.FAIL, List.of());
-                    }
-                }
-                ChatPrompt prompt = ChatPrompt.builder()
-                        .requestId(context.getRequestId())
-                        .conversationId(context.getConversationId())
-                        .message(context.getCurrentPrompt())
-                        .model(context.getCurrentModel())
-                        .maxTokens(maxTokens <= 0 ? null : maxTokens)
-                        .capability(ModelCapabilities.COMPLETE_AGENT_DECISION)
-                        .purpose(ModelCallPurpose.CONTROL_JSON)
-                        .deadlineEpochMs(deadlineEpochMs)
-                        .outputFormat(OutputFormat.JSON_OBJECT)
-                        .build();
-                try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
-                    long remainingMs = Math.max(1L, deadlineEpochMs - System.currentTimeMillis());
-                    result = modelGateway.complete(prompt)
-                            .timeout(Duration.ofMillis(remainingMs))
-                            .block(Duration.ofMillis(remainingMs + 100L));
-                }
-                if (result == null || !isLength(result.getFinishReason())) {
-                    break;
-                }
-                recordUsage(context, result);
-                maxTokens = escalatedMaxTokens();
+    private NodeResult recoverContextOverflow(AgentContext context,
+                                              Throwable error,
+                                              long deadlineEpochMs,
+                                              int requestedMaxTokens) {
+        List<AgentEvent> events = new ArrayList<>();
+        ContextRecoveryStage stage = recoveryStage(context);
+        String attemptedModel = StringUtils.defaultIfBlank(
+                attemptedModel(error), context.getRecoveryModelOverride());
+
+        if (stage == ContextRecoveryStage.NONE && canReactiveCompact(context)) {
+            context.setReactiveCompactAttempts(context.getReactiveCompactAttempts() + 1);
+            int targetTokens = targetTokens(attemptedModel, requestedMaxTokens);
+            ContextCompactResult compactResult = contextWindowManager.reactiveCompact(context, targetTokens);
+            context.setContextRecoveryStage(ContextRecoveryStage.REACTIVE_COMPACTED);
+            context.setContextTranscriptArtifactId(compactResult.getTranscriptArtifactId());
+            events.add(compactEvent(context, compactResult,
+                    "Reactive context compact triggered by context length error"));
+            if (compactResult.isFitsTarget()) {
+                return NodeResult.next(AgentNodeNames.RENDER_PROMPT, events);
             }
-            if (result == null || StringUtils.isBlank(result.getContent())) {
-                throw new IllegalStateException("模型响应为空");
-            }
-            if (isLength(result.getFinishReason())) {
-                fail(context, AgentStopReason.MODEL_ERROR,
-                        ModelErrorCode.MODEL_DECISION_TRUNCATED.code(),
-                        ModelErrorCode.MODEL_DECISION_TRUNCATED.message());
-                return NodeResult.next(AgentNodeNames.FAIL, List.of());
-            }
-            recordUsage(context, result);
-            context.setCurrentModel(result.getActualModel());
-            context.setModelOutput(result.getContent());
-            traceRecovery(context, "model_context_fallback",
-                    Map.of("model", StringUtils.defaultString(context.getCurrentModel()),
-                            "reason", "context_overflow"));
-            return NodeResult.next(AgentNodeNames.DECISION, List.of());
-        } catch (Exception fallbackError) {
-            if (isContextOverflow(fallbackError) && canReactiveCompact(context)) {
-                context.setReactiveCompactAttempts(context.getReactiveCompactAttempts() + 1);
-                ContextCompactResult compactResult = contextWindowManager.reactiveCompact(context);
-                AgentEvent event = event(context, AgentEventType.CONTEXT_COMPACTED)
-                        .message("Reactive context compact triggered after context fallback failed")
-                        .metadata(Map.of(
-                                "beforeEstimatedTokens", compactResult.getBeforeEstimatedTokens(),
-                                "afterEstimatedTokens", compactResult.getAfterEstimatedTokens(),
-                                "strategies", compactResult.getStrategies(),
-                                "artifactCount", compactResult.getArtifactCount(),
-                                "attempt", context.getReactiveCompactAttempts()))
-                        .build();
-                return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(event));
-            }
-            fail(context, AgentStopReason.MODEL_ERROR, "model_error", "模型决策失败");
-            return NodeResult.next(AgentNodeNames.FAIL, List.of());
+            stage = ContextRecoveryStage.REACTIVE_COMPACTED;
         }
+
+        if (stage.ordinal() <= ContextRecoveryStage.REACTIVE_COMPACTED.ordinal()) {
+            String fallbackModel = contextFallbackModel(attemptedModel, requestedMaxTokens, context);
+            if (StringUtils.isNotBlank(fallbackModel)) {
+                context.setRecoveryModelOverride(fallbackModel);
+                context.setFallbackReason("context_overflow");
+                context.setContextRecoveryStage(ContextRecoveryStage.FALLBACK_MODEL_SELECTED);
+                traceRecovery(context, "model_context_fallback_selected",
+                        Map.of("model", fallbackModel, "reason", "context_overflow"));
+                return NodeResult.next(AgentNodeNames.RENDER_PROMPT, events);
+            }
+        }
+
+        stage = recoveryStage(context);
+        if (stage.ordinal() <= ContextRecoveryStage.FALLBACK_MODEL_SELECTED.ordinal()) {
+            String summaryModel = StringUtils.defaultIfBlank(context.getRecoveryModelOverride(), attemptedModel);
+            int targetTokens = targetTokens(summaryModel, requestedMaxTokens);
+            ContextCompactResult compactResult = contextWindowManager.deepSummaryCompact(
+                    context, targetTokens, deadlineEpochMs);
+            context.setContextRecoveryStage(ContextRecoveryStage.DEEP_SUMMARY_APPLIED);
+            context.setContextTranscriptArtifactId(compactResult.getTranscriptArtifactId());
+            events.add(compactEvent(context, compactResult,
+                    "Deep context summary applied after context recovery was exhausted"));
+            if (compactResult.isFitsTarget()) {
+                return NodeResult.next(AgentNodeNames.RENDER_PROMPT, events);
+            }
+        }
+
+        return context.getAgentRole() == null
+                ? waitForUserInput(context, events)
+                : failContextOverflow(context, events);
     }
 
     private boolean canReactiveCompact(AgentContext context) {
@@ -248,6 +206,102 @@ public class ModelCallNode extends AbstractAgentNode {
                 ? 1
                 : Math.max(0, properties.getContext().getReactiveCompactMaxAttempts());
         return context.getReactiveCompactAttempts() < maxAttempts;
+    }
+
+    private String contextFallbackModel(String attemptedModel,
+                                        int requestedMaxTokens,
+                                        AgentContext context) {
+        String fallbackModel = properties.getModelRecovery() == null
+                ? null : properties.getModelRecovery().getContextFallbackModel();
+        if (StringUtils.isBlank(fallbackModel)
+                || !canUseContextFallback(attemptedModel, fallbackModel)) {
+            return null;
+        }
+        if (budgetGuard == null) {
+            return fallbackModel;
+        }
+        BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), fallbackModel,
+                ModelCallPurpose.CONTROL_JSON, compactedBudgetInput(context), Math.max(0, requestedMaxTokens));
+        return check.isAllowed() ? fallbackModel : null;
+    }
+
+    private String compactedBudgetInput(AgentContext context) {
+        StringBuilder input = new StringBuilder(StringUtils.defaultString(context.getQuestion()));
+        if (context.getPlan() != null) {
+            input.append(context.getPlan().render());
+        }
+        if (context.getDynamicText() != null) {
+            input.append(context.getDynamicText().render());
+        }
+        context.getToolSpecs().forEach(spec -> input.append(spec.getName())
+                .append(spec.getDescription())
+                .append(spec.getInputSchema()));
+        return input.toString();
+    }
+
+    private int targetTokens(String model, int requestedMaxTokens) {
+        int configuredLimit = positive(contextProperties().getAutoCompactTokenLimit(), 64000);
+        ModelCapability capability;
+        try {
+            capability = modelGateway.capability(model);
+        } catch (RuntimeException e) {
+            capability = null;
+        }
+        if (capability == null || capability.getContextLength() == null) {
+            return configuredLimit;
+        }
+        int outputReserve = requestedMaxTokens > 0
+                ? requestedMaxTokens
+                : positive(properties.getBudget().getReservedOutputTokens(), 2048);
+        int safetyMargin = positive(contextProperties().getContextSafetyMarginTokens(), 4096);
+        long modelTarget = capability.getContextLength() - outputReserve - safetyMargin;
+        return (int) Math.max(1L, Math.min(configuredLimit, modelTarget));
+    }
+
+    private AgentEvent compactEvent(AgentContext context,
+                                    ContextCompactResult result,
+                                    String message) {
+        return event(context, AgentEventType.CONTEXT_COMPACTED)
+                .message(message)
+                .metadata(Map.of(
+                        "beforeEstimatedTokens", result.getBeforeEstimatedTokens(),
+                        "afterEstimatedTokens", result.getAfterEstimatedTokens(),
+                        "targetTokens", result.getTargetTokens(),
+                        "fitsTarget", result.isFitsTarget(),
+                        "retainedEntryCount", result.getRetainedEntryCount(),
+                        "strategies", result.getStrategies(),
+                        "artifactCount", result.getArtifactCount(),
+                        "attempt", context.getReactiveCompactAttempts(),
+                        "transcriptArtifactId", StringUtils.defaultString(result.getTranscriptArtifactId())))
+                .build();
+    }
+
+    private NodeResult waitForUserInput(AgentContext context, List<AgentEvent> events) {
+        context.setContextRecoveryStage(ContextRecoveryStage.WAITING_USER_INPUT);
+        context.setContextBlockedReason("context_overflow: automatic recovery exhausted"
+                + (StringUtils.isBlank(context.getContextTranscriptArtifactId())
+                ? "" : ", transcriptArtifactId=" + context.getContextTranscriptArtifactId()));
+        return NodeResult.next(AgentNodeNames.USER_INPUT_GATE, events);
+    }
+
+    private NodeResult failContextOverflow(AgentContext context, List<AgentEvent> events) {
+        fail(context, AgentStopReason.CONTEXT_OVERFLOW,
+                ModelErrorCode.CONTEXT_OVERFLOW.code(),
+                "模型上下文超限，自动压缩、模型回退和深度摘要均未能恢复");
+        return NodeResult.next(AgentNodeNames.FAIL, events);
+    }
+
+    private ContextRecoveryStage recoveryStage(AgentContext context) {
+        return context.getContextRecoveryStage() == null
+                ? ContextRecoveryStage.NONE : context.getContextRecoveryStage();
+    }
+
+    private void resetContextRecovery(AgentContext context) {
+        context.setContextRecoveryStage(ContextRecoveryStage.NONE);
+        context.setReactiveCompactAttempts(0);
+        context.setRecoveryModelOverride(null);
+        context.setContextTranscriptArtifactId(null);
+        context.setContextBlockedReason(null);
     }
 
     private boolean isContextOverflow(Throwable throwable) {
@@ -294,11 +348,17 @@ public class ModelCallNode extends AbstractAgentNode {
     }
 
     private boolean canUseContextFallback(String currentModel, String fallbackModel) {
-        if (StringUtils.isBlank(currentModel) || StringUtils.equals(currentModel, fallbackModel)) {
+        if (StringUtils.equals(currentModel, fallbackModel)) {
             return false;
         }
-        ModelCapability current = modelGateway.capability(currentModel);
-        ModelCapability fallback = modelGateway.capability(fallbackModel);
+        ModelCapability current;
+        ModelCapability fallback;
+        try {
+            current = modelGateway.capability(currentModel);
+            fallback = modelGateway.capability(fallbackModel);
+        } catch (RuntimeException e) {
+            return false;
+        }
         return current != null && fallback != null
                 && current.getContextLength() != null
                 && fallback.getContextLength() != null
@@ -325,6 +385,17 @@ public class ModelCallNode extends AbstractAgentNode {
         Integer value = properties.getModelRecovery() == null
                 ? null : properties.getModelRecovery().getEscalatedMaxTokens();
         return value == null || value <= 0 ? 64000 : value;
+    }
+
+    private AgentRuntimeProperties.ContextProperties contextProperties() {
+        if (properties.getContext() == null) {
+            properties.setContext(new AgentRuntimeProperties.ContextProperties());
+        }
+        return properties.getContext();
+    }
+
+    private int positive(Integer value, int fallback) {
+        return value == null || value <= 0 ? fallback : value;
     }
 
     private void traceRecovery(AgentContext context, String eventType, Map<String, Object> metadata) {

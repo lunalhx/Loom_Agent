@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -65,6 +66,10 @@ public class AgentContext {
     private int reactiveCompactAttempts;
     private String currentModel;
     private String fallbackReason;
+    private ContextRecoveryStage contextRecoveryStage = ContextRecoveryStage.NONE;
+    private String recoveryModelOverride;
+    private String contextTranscriptArtifactId;
+    private String contextBlockedReason;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;
