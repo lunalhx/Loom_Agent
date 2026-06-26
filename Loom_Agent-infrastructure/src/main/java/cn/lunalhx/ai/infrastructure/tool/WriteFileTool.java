@@ -71,13 +71,7 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
             if (content.length() > properties.getFileMaxBytes()) {
                 return null;
             }
-            return ApprovalDiff.builder()
-                    .format("OLD_NEW")
-                    .path(relative(call, targetPath))
-                    .oldText(oldText)
-                    .newText(content)
-                    .editable(false)
-                    .build();
+            return StructuredDiffBuilder.oldNew(relative(call, targetPath), oldText, content);
         } catch (Exception e) {
             return null;
         }

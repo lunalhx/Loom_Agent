@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -80,6 +81,40 @@ public class AgentFileToolTest {
 
         assertTrue(result.isSuccess());
         assertTrue(Files.readString(temporaryFolder.getRoot().toPath().resolve("Demo.java")).contains("int n = 2"));
+    }
+
+    @Test
+    public void replaceInFilePolicyShouldBuildStructuredLineDiff() throws Exception {
+        String oldText = String.join("\n",
+                "#include <iostream>",
+                "",
+                "int main() {",
+                "    std::cout << \"Hello, Loom Agent!\" << std::endl;",
+                "    return 0;",
+                "}");
+        Files.writeString(temporaryFolder.getRoot().toPath().resolve("helloworld.cpp"), oldText, StandardCharsets.UTF_8);
+
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("path", "helloworld.cpp");
+        input.put("oldText", "\"Hello, Loom Agent!\"");
+        input.put("newText", "\"hello,loom!\"");
+        input.put("expectedOccurrences", 1);
+
+        ToolPolicyDecision policy = new ReplaceInFileTool(properties()).policy(call("replace_in_file", input));
+        ApprovalDiff diff = policy.getDiff();
+
+        assertTrue(diff != null);
+        assertEquals(Integer.valueOf(1), diff.getStats().getAdded());
+        assertEquals(Integer.valueOf(1), diff.getStats().getRemoved());
+        assertEquals(Integer.valueOf(1), diff.getStats().getModified());
+        assertTrue(diff.getHunks().get(0).getLines().stream()
+                .anyMatch(line -> "context".equals(line.getType()) && "#include <iostream>".equals(line.getText())));
+        assertTrue(diff.getHunks().get(0).getLines().stream()
+                .anyMatch(line -> "removed".equals(line.getType()) && line.getInlineDiff() != null
+                        && line.getText().contains("Hello, Loom Agent!")));
+        assertTrue(diff.getHunks().get(0).getLines().stream()
+                .anyMatch(line -> "added".equals(line.getType()) && line.getInlineDiff() != null
+                        && line.getText().contains("hello,loom!")));
     }
 
     @Test

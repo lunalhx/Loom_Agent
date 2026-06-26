@@ -69,13 +69,7 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
                 return null;
             }
             String replaced = content.replace(oldText, newText);
-            return ApprovalDiff.builder()
-                    .format("OLD_NEW")
-                    .path(relative(call, filePath))
-                    .oldText(content)
-                    .newText(replaced)
-                    .editable(false)
-                    .build();
+            return StructuredDiffBuilder.oldNew(relative(call, filePath), content, replaced);
         } catch (Exception e) {
             return null;
         }

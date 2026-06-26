@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -17,5 +19,7 @@ public class DiffPayload {
     private String newText;
     private String unifiedDiff;
     private Boolean editable;
+    private List<DiffHunkPayload> hunks;
+    private DiffStatsPayload stats;
 
 }
