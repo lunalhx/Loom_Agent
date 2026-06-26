@@ -113,19 +113,16 @@ public class DefaultBudgetGuard implements BudgetGuard {
         }
         TraceCost cost = calculateCost(actualModel, promptTokens, completionTokens);
         String rootRunId = rootRunId(context);
-        BudgetState state = states.computeIfAbsent(rootRunId, ignored -> new BudgetState());
-        synchronized (state) {
-            state.usedPromptTokens += promptTokens;
-            state.usedCompletionTokens += completionTokens;
-            state.usedTokens += totalTokens;
-            if (cost != null && cost.getTotalCost() != null) {
-                state.estimatedCost = state.estimatedCost.add(cost.getTotalCost());
-            }
-            context.setUsedPromptTokens(state.usedPromptTokens);
-            context.setUsedCompletionTokens(state.usedCompletionTokens);
-            context.setUsedTokens(state.usedTokens);
-            context.setEstimatedCost(state.estimatedCost);
-        }
+        final long finalTotalTokens = totalTokens;
+        final BigDecimal costAmount = cost != null ? cost.getTotalCost() : null;
+        BudgetState updated = states.compute(rootRunId, (key, existing) -> {
+            BudgetState base = existing != null ? existing : new BudgetState();
+            return base.plus(promptTokens, completionTokens, finalTotalTokens, costAmount);
+        });
+        context.setUsedPromptTokens(updated.usedPromptTokens);
+        context.setUsedCompletionTokens(updated.usedCompletionTokens);
+        context.setUsedTokens(updated.usedTokens);
+        context.setEstimatedCost(updated.estimatedCost);
         return cost;
     }
 
@@ -135,13 +132,11 @@ public class DefaultBudgetGuard implements BudgetGuard {
         }
         BudgetState state = states.get(rootRunId(context));
         if (state != null) {
-            synchronized (state) {
-                context.setUsedPromptTokens(Math.max(context.getUsedPromptTokens(), state.usedPromptTokens));
-                context.setUsedCompletionTokens(Math.max(context.getUsedCompletionTokens(), state.usedCompletionTokens));
-                context.setUsedTokens(Math.max(context.getUsedTokens(), state.usedTokens));
-                if (state.estimatedCost.compareTo(context.getEstimatedCost()) > 0) {
-                    context.setEstimatedCost(state.estimatedCost);
-                }
+            context.setUsedPromptTokens(Math.max(context.getUsedPromptTokens(), state.usedPromptTokens));
+            context.setUsedCompletionTokens(Math.max(context.getUsedCompletionTokens(), state.usedCompletionTokens));
+            context.setUsedTokens(Math.max(context.getUsedTokens(), state.usedTokens));
+            if (state.estimatedCost.compareTo(context.getEstimatedCost()) > 0) {
+                context.setEstimatedCost(state.estimatedCost);
             }
         }
         return context.getUsedTokens();
@@ -208,10 +203,29 @@ public class DefaultBudgetGuard implements BudgetGuard {
     }
 
     private static class BudgetState {
-        private long usedPromptTokens;
-        private long usedCompletionTokens;
-        private long usedTokens;
-        private BigDecimal estimatedCost = BigDecimal.ZERO;
+        final long usedPromptTokens;
+        final long usedCompletionTokens;
+        final long usedTokens;
+        final BigDecimal estimatedCost;
+
+        BudgetState() {
+            this(0L, 0L, 0L, BigDecimal.ZERO);
+        }
+
+        BudgetState(long usedPromptTokens, long usedCompletionTokens, long usedTokens, BigDecimal estimatedCost) {
+            this.usedPromptTokens = usedPromptTokens;
+            this.usedCompletionTokens = usedCompletionTokens;
+            this.usedTokens = usedTokens;
+            this.estimatedCost = estimatedCost;
+        }
+
+        BudgetState plus(long promptTokens, long completionTokens, long totalTokens, BigDecimal cost) {
+            return new BudgetState(
+                    usedPromptTokens + promptTokens,
+                    usedCompletionTokens + completionTokens,
+                    usedTokens + totalTokens,
+                    cost != null ? estimatedCost.add(cost) : estimatedCost);
+        }
     }
 
 }
