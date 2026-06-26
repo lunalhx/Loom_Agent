@@ -9,17 +9,17 @@ import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class InMemoryTraceRecorder implements TraceRecorder {
 
-    private final ConcurrentMap<String, List<AgentTraceEvent>> events = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CopyOnWriteArrayList<AgentTraceEvent>> events = new ConcurrentHashMap<>();
 
     @Override
     public String recordNodeStart(AgentContext context, AgentNode node, String parentSpanId) {
@@ -179,7 +179,13 @@ public class InMemoryTraceRecorder implements TraceRecorder {
         event.setRunId(runId);
         event.setParentRunId(context.getParentRunId());
         event.setCreatedAt(Instant.now());
-        events.computeIfAbsent(runId, ignored -> new ArrayList<>()).add(event);
+        events.compute(runId, (key, list) -> {
+            if (list == null) {
+                list = new CopyOnWriteArrayList<>();
+            }
+            list.add(event);
+            return list;
+        });
     }
 
     private String errorCode(Throwable error) {
