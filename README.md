@@ -217,5 +217,58 @@ curl -N \
 - Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
 - 多工作区：`loom.agent.workspace-root` 是默认工作区；`loom.agent.allowed-workspace-roots` 是可选择工作区的白名单。为空时默认只允许 `workspace-root`。
 
+## 状态持久化
+
+Agent 运行时状态（run、checkpoint、approval、trace、context artifact）可通过 MySQL + 本地文件系统持久化，支持重启后恢复。
+
+### 持久化模式
+
+通过 `loom.agent.persistence.mode` 配置：
+
+| 模式 | 行为 |
+|------|------|
+| `auto`（默认） | 检测到 MyBatis DAO 可用则使用 MySQL；否则回退内存。dev/test 环境推荐 |
+| `mysql` | 强制所有状态组件使用 MySQL + 本地文件。缺少任一 DAO 或存储目录则启动失败 |
+| `memory` | 强制内存模式，不依赖 MySQL。仅适用于测试和临时 demo |
+
+通过 `loom.agent.persistence.required` 控制 `auto` 模式下是否允许回退内存（`true` = 必须持久化，`false` = 允许回退）。dev/test 默认 `false`，prod 默认 `true`。
+
+环境变量：`AGENT_PERSISTENCE_MODE`、`AGENT_PERSISTENCE_REQUIRED`、`AGENT_CONTEXT_STORAGE_ROOT`。
+
+### 存储内容
+
+| 存储 | 保存内容 |
+|------|---------|
+| MySQL `agent_run` | Agent 运行的元数据、状态、token 用量、父子关系 |
+| MySQL `agent_run_checkpoint` | 上下文快照和计划 JSON，按版本号管理 |
+| MySQL `agent_pending_approval` | 待审批操作及其过期时间 |
+| MySQL `agent_trace_event` | 每步 trace 事件（thought/tool_call/observation），支持 replay |
+| MySQL `agent_context_artifact` | Context artifact 元数据（artifact ID、root run、preview 文本） |
+| 本地文件 `AGENT_CONTEXT_STORAGE_ROOT` | Artifact blob 内容（`.txt` 文件，按 `rootRunId/artifactId` 组织） |
+
+### 数据库迁移
+
+- **新库**：启动时 MySQL 自动执行 `docs/dev-ops/mysql/sql/xfg-frame-archetype.sql`，包含全部 7 张表。
+- **老库**：按 `docs/dev-ops/mysql/sql/` 下的迁移脚本顺序执行。注意 `ALTER ADD COLUMN` 脚本不是幂等的，执行前先 `SHOW COLUMNS` 或备份。
+
+### 验证步骤
+
+1. 启动 MySQL 和 Redis：
+   ```bash
+   cd docs/dev-ops
+   docker-compose --env-file ../env/.env -f docker-compose-environment.yml up -d
+   ```
+2. 启动应用，检查启动日志确认每个状态组件的实际实现（MyBatis 或 InMemory）
+3. 跑一次带 trace 的 agent 请求：
+   ```bash
+   curl -N -H "Accept: text/event-stream" -H "Content-Type: application/json" \
+     -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
+     -d '{"question":"分析项目结构","maxSteps":3,"includeTrace":true}'
+   ```
+4. 重启应用后验证：
+   - `GET /api/v1/agent/code/approvals/{approvalId}` — 审批记录仍可查
+   - `GET /api/v1/agent/code/runs/{runId}/replay` — trace timeline 仍可查
+   - context artifact 通过 `context_recall` 工具可读回
+
 更多设计细节见 [backend-architecture.md](docs/design/backend-architecture.md)。
 Agent Loop 设计见 [agent-loop.md](docs/design/agent-loop.md)。

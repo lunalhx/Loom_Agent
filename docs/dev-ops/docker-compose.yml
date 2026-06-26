@@ -62,11 +62,13 @@ services:
       AGENT_WORKSPACE_ROOT: ${CONTAINER_WORKSPACE_ROOT:-/workspace}
       AGENT_ALLOWED_WORKSPACE_ROOT: ${CONTAINER_WORKSPACE_ROOT:-/workspace}
       AGENT_ALLOWED_WORKSPACE_ROOTS: ${CONTAINER_WORKSPACE_ROOTS:-${CONTAINER_WORKSPACE_ROOT:-/workspace}}
+      AGENT_CONTEXT_STORAGE_ROOT: /app/data/context-artifacts
     ports:
       - "${APP_HOST_PORT:-8091}:${SERVER_PORT:-8091}"
     volumes:
       - ${HOST_WORKSPACE_ROOT:-../..}:${CONTAINER_WORKSPACE_ROOT:-/workspace}
       - app-log:/app/data/log
+      - app-context-artifacts:/app/data/context-artifacts
     depends_on:
       mysql:
         condition: service_healthy
@@ -120,3 +122,4 @@ volumes:
   mysql-data:
   redis-data:
   app-log:
+  app-context-artifacts:

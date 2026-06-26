@@ -9,6 +9,8 @@ import java.nio.file.Path;
 
 public class LocalFileContextBlobStore implements ContextBlobStore {
 
+    private static final String URI_PREFIX = "loom-agent:context-artifact:";
+
     private final Path storageRoot;
 
     public LocalFileContextBlobStore(String storageRoot) {
@@ -31,7 +33,7 @@ public class LocalFileContextBlobStore implements ContextBlobStore {
                 throw new IllegalArgumentException("invalid artifactId");
             }
             Files.writeString(file, StringUtils.defaultString(content), StandardCharsets.UTF_8);
-            return file.toString();
+            return URI_PREFIX + safeRootRunId + "/" + safeArtifactId;
         } catch (Exception e) {
             throw new IllegalStateException("write context artifact failed", e);
         }
@@ -40,7 +42,7 @@ public class LocalFileContextBlobStore implements ContextBlobStore {
     @Override
     public String read(String storageUri) {
         try {
-            Path file = Path.of(storageUri).toAbsolutePath().normalize();
+            Path file = resolveFile(storageUri);
             if (!file.startsWith(storageRoot)) {
                 throw new IllegalArgumentException("storageUri out of context storage root");
             }
@@ -48,6 +50,20 @@ public class LocalFileContextBlobStore implements ContextBlobStore {
         } catch (Exception e) {
             throw new IllegalStateException("read context artifact failed", e);
         }
+    }
+
+    private Path resolveFile(String storageUri) {
+        if (storageUri.startsWith(URI_PREFIX)) {
+            String relative = storageUri.substring(URI_PREFIX.length());
+            String[] parts = relative.split("/", 2);
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("invalid logical URI: " + storageUri);
+            }
+            String safeRootRunId = safeSegment(parts[0]);
+            String safeArtifactId = safeSegment(parts[1]);
+            return storageRoot.resolve(safeRootRunId).resolve(safeArtifactId + ".txt").normalize();
+        }
+        return Path.of(storageUri).toAbsolutePath().normalize();
     }
 
     private String safeSegment(String value) {

@@ -122,6 +122,9 @@ loom:
       deep-summary-chunk-token-limit: ${AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT:12000}
       deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
       deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
+    persistence:
+      mode: ${AGENT_PERSISTENCE_MODE:auto}
+      required: ${AGENT_PERSISTENCE_REQUIRED:false}
     model-recovery:
       escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:64000}
       continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}
