@@ -13,4 +13,6 @@ public interface AgentRunRepository {
 
     List<AgentRun> findChildren(String parentRunId);
 
+    Optional<AgentRun> findLatestRootByConversationId(String conversationId);
+
 }

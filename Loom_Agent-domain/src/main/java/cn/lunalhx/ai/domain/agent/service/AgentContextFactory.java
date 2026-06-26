@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -33,6 +34,51 @@ public final class AgentContextFactory {
         AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
         String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
         AgentContext context = new AgentContext();
+        applyCommonFields(context, question, workspace, runId);
+        if (StringUtils.isBlank(question.getConversationId())) {
+            context.setConversationId(UUID.randomUUID().toString());
+        }
+        context.getDynamicText().appendUserTask(context.getQuestion());
+        return context;
+    }
+
+    public AgentContext createContinuation(AgentQuestion question, AgentContextSnapshot previous) {
+        AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
+        String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
+        String requestId = StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString());
+
+        AgentContext context = new AgentContext();
+        context.setRunId(runId);
+        context.setRequestId(requestId);
+        context.setConversationId(question.getConversationId());
+        context.setAgentRole(question.getAgentRole());
+        context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
+        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
+        context.setQuestion(StringUtils.trim(question.getQuestion()));
+        context.setPathScope(question.getPathScope());
+        context.setResolvedWorkspace(workspace.getRoot());
+        context.setWorkspace(workspace.getWorkspace());
+        context.setWorkspaceDisplayName(workspace.getDisplayName());
+        context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
+        context.setStartedAt(Instant.now());
+        context.setStep(0);
+        context.setParseErrors(0);
+        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
+        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
+        if (context.isSubAgentSpawnAllowed()) {
+            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        context.setToolSpecs(specs);
+        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRunId()));
+
+        if (previous != null && previous.getDynamicTextEntries() != null) {
+            context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
+        }
+        context.getDynamicText().appendUserTask(context.getQuestion());
+        return context;
+    }
+
+    private void applyCommonFields(AgentContext context, AgentQuestion question, AgentWorkspace workspace, String runId) {
         context.setRunId(runId);
         context.setParentRunId(question.getParentRunId());
         context.setRootRunId(StringUtils.defaultIfBlank(question.getRootRunId(), runId));
@@ -55,8 +101,6 @@ public final class AgentContextFactory {
             specs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
         context.setToolSpecs(specs);
-        context.getDynamicText().appendUserTask(context.getQuestion());
-        return context;
     }
 
     public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {

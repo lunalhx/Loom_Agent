@@ -68,6 +68,7 @@ public class AgentRequestMapper {
         String requestId = UUID.randomUUID().toString();
         AgentQuestion question = AgentQuestion.builder()
                 .requestId(requestId)
+                .conversationId(StringUtils.trimToNull(request.getConversationId()))
                 .question(StringUtils.defaultIfBlank(StringUtils.trim(request.getQuestion()), StringUtils.trim(request.getMessage())))
                 .workspace(request.getWorkspace())
                 .maxSteps(request.getMaxSteps())

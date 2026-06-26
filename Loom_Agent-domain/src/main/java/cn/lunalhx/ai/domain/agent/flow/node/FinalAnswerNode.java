@@ -21,6 +21,8 @@ public class FinalAnswerNode extends AbstractAgentNode {
         String answer = StringUtils.defaultIfBlank(context.getDecision().getAnswer(), "未能生成最终回答");
         context.setFinalAnswer(answer);
         context.setStopReason(AgentStopReason.FINAL_ANSWER);
+        context.getDynamicText().appendSystemNote(context.getStep(), AgentNodeNames.FINAL_ANSWER,
+                "Final Answer", answer);
         return NodeResult.terminal(List.of(
                 event(context, AgentEventType.ANSWER).answer(answer).build(),
                 event(context, AgentEventType.DONE)

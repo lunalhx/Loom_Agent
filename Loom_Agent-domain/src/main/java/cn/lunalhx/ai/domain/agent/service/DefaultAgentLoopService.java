@@ -3,9 +3,12 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
@@ -46,10 +49,26 @@ public class DefaultAgentLoopService implements AgentLoopService {
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), sink -> {
-            AgentContext context = components.contextFactory().create(question);
+            AgentContext context = resolveContext(question);
             components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
             runLoop(context, AgentNodeNames.START, sink);
         });
+    }
+
+    private AgentContext resolveContext(AgentQuestion question) {
+        String conversationId = question.getConversationId();
+        if (StringUtils.isBlank(conversationId)) {
+            return components.contextFactory().create(question);
+        }
+
+        AgentRun previousRun = components.runRepository().findLatestRootByConversationId(conversationId).orElse(null);
+        if (previousRun == null) {
+            return components.contextFactory().create(question);
+        }
+
+        AgentCheckpoint checkpoint = components.checkpointRepository().latest(previousRun.getRunId()).orElse(null);
+        AgentContextSnapshot previous = checkpoint != null ? checkpoint.getContextSnapshot() : null;
+        return components.contextFactory().createContinuation(question, previous);
     }
 
     @Override

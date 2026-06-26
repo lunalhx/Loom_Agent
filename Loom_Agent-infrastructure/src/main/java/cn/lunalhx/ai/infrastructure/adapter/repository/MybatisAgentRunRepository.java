@@ -40,6 +40,11 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .toList();
     }
 
+    @Override
+    public Optional<AgentRun> findLatestRootByConversationId(String conversationId) {
+        return Optional.ofNullable(agentRunDao.selectLatestRootByConversationId(conversationId)).map(this::toEntity);
+    }
+
     private AgentRunPO toPo(AgentRun run) {
         AgentRunPO po = new AgentRunPO();
         po.setRunId(run.getRunId());

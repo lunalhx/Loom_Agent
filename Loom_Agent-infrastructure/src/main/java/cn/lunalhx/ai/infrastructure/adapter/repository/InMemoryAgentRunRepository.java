@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -43,6 +44,17 @@ public class InMemoryAgentRunRepository implements AgentRunRepository {
                 .filter(run -> parentRunId.equals(run.getParentRunId()))
                 .sorted(Comparator.comparing(run -> run.getChildOrdinal() == null ? 0 : run.getChildOrdinal()))
                 .toList();
+    }
+
+    @Override
+    public Optional<AgentRun> findLatestRootByConversationId(String conversationId) {
+        if (StringUtils.isBlank(conversationId)) {
+            return Optional.empty();
+        }
+        return runs.values().stream()
+                .filter(run -> conversationId.equals(run.getConversationId())
+                        && run.getRunKind() == AgentRunKind.ROOT)
+                .max(Comparator.comparing(run -> run.getUpdatedAt() != null ? run.getUpdatedAt() : run.getCreatedAt()));
     }
 
 }

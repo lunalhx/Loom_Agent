@@ -14,4 +14,6 @@ public interface AgentRunDao {
 
     List<AgentRunPO> selectByParentRunId(String parentRunId);
 
+    AgentRunPO selectLatestRootByConversationId(String conversationId);
+
 }

@@ -64,4 +64,12 @@
         SELECT * FROM agent_run WHERE parent_run_id = #{parentRunId} ORDER BY child_ordinal ASC, create_time ASC
     </select>
 
+    <select id="selectLatestRootByConversationId" resultMap="AgentRunMap">
+        SELECT * FROM agent_run
+        WHERE conversation_id = #{conversationId}
+          AND run_kind = 'ROOT'
+        ORDER BY update_time DESC, create_time DESC
+        LIMIT 1
+    </select>
+
 </mapper>
