@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -37,12 +38,21 @@ public class AgentCodeController {
     private final AgentRequestMapper requestMapper;
     private final AgentHttpQueryService queryService;
     private final AgentSseResponder sseResponder;
+    private final StreamRequestLimiter streamRequestLimiter;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request) {
+    public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
+                           HttpServletRequest httpRequest) {
         AgentRequestMapper.Result<AgentQuestion> result = requestMapper.mapAsk(request);
         if (!result.valid()) {
             return sseResponder.completedAgentError(result.problem());
+        }
+
+        String clientKey = streamRequestLimiter.resolveClientKey(httpRequest);
+        StreamRequestLimiter.Lease lease = streamRequestLimiter.tryAcquire(clientKey, "agent-ask");
+        if (!lease.isAllowed()) {
+            return sseResponder.completedAgentError(
+                    new AgentRequestMapper.Problem(lease.rejectCode(), lease.rejectMessage()));
         }
 
         AgentSseResponder.StreamProfile profile = Boolean.TRUE.equals(request.getIncludeTrace())
@@ -53,7 +63,8 @@ public class AgentCodeController {
                 "ask",
                 result.value().getRequestId(),
                 () -> agentLoopService.ask(result.value()),
-                profile
+                profile,
+                lease::release
         );
     }
 

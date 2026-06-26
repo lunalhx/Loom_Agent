@@ -159,7 +159,21 @@ loom:
       input-price-per-1k: ${AGENT_BUDGET_INPUT_PRICE_PER_1K:0}
       output-price-per-1k: ${AGENT_BUDGET_OUTPUT_PRICE_PER_1K:0}
       max-total-cost: ${AGENT_BUDGET_MAX_TOTAL_COST:}
-
+  http:
+    stream-limit:
+      enabled: ${LOOM_HTTP_STREAM_LIMIT_ENABLED:true}
+      max-client-states: ${LOOM_HTTP_STREAM_LIMIT_MAX_CLIENT_STATES:10000}
+      client-state-ttl-seconds: ${LOOM_HTTP_STREAM_LIMIT_CLIENT_STATE_TTL_SECONDS:3600}
+      agent-ask:
+        max-concurrent-global: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_CONCURRENT_GLOBAL:8}
+        max-concurrent-per-client: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_CONCURRENT_PER_CLIENT:2}
+        max-starts-per-window: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_STARTS_PER_WINDOW:6}
+        window-seconds: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_WINDOW_SECONDS:60}
+      chat-stream:
+        max-concurrent-global: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_CONCURRENT_GLOBAL:20}
+        max-concurrent-per-client: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_CONCURRENT_PER_CLIENT:4}
+        max-starts-per-window: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_STARTS_PER_WINDOW:30}
+        window-seconds: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_WINDOW_SECONDS:60}
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml
   config-location: classpath:/mybatis/config/mybatis-config.xml

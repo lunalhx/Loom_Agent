@@ -24,6 +24,7 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.trigger.http.AgentCodeController;
+import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
@@ -92,6 +93,18 @@ public class AgentCodeControllerContractTest {
                                  ReplayService replayService,
                                  AgentRuntimeProperties properties,
                                  ThreadPoolExecutor executor) {
+        return buildMockMvc(agentLoopService, approvalStore, agentRunRepository,
+                traceRecorder, replayService, properties, executor, null);
+    }
+
+    private MockMvc buildMockMvc(AgentLoopService agentLoopService,
+                                 ApprovalStore approvalStore,
+                                 AgentRunRepository agentRunRepository,
+                                 TraceRecorder traceRecorder,
+                                 ReplayService replayService,
+                                 AgentRuntimeProperties properties,
+                                 ThreadPoolExecutor executor,
+                                 StreamRequestLimiter limiter) {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         AgentResponseMapper responseMapper = new AgentResponseMapper();
         AgentRequestMapper requestMapper = new AgentRequestMapper(properties, validator);
@@ -99,8 +112,21 @@ public class AgentCodeControllerContractTest {
                 agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
-                queryService, sseResponder);
+                queryService, sseResponder, limiter != null ? limiter : noopLimiter());
         return MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    private StreamRequestLimiter noopLimiter() {
+        StreamRequestLimiter.Config config = new StreamRequestLimiter.Config();
+        config.enabled = false;
+        return new StreamRequestLimiter(config);
+    }
+
+    private StreamRequestLimiter restrictiveLimiter() {
+        StreamRequestLimiter.Config config = new StreamRequestLimiter.Config();
+        config.enabled = true;
+        config.agentAsk = new StreamRequestLimiter.EndpointLimit(1, 1, 0, 60);
+        return new StreamRequestLimiter(config);
     }
 
     private String json(Object value) throws Exception {
@@ -469,6 +495,52 @@ public class AgentCodeControllerContractTest {
         String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
         // replay 异常 -> replay_failed
         assertTrue(content.contains("\"code\":\"replay_failed\""));
+    }
+
+    // ===== rate limiting =====
+
+    @Test
+    public void askStreamRateLimitedShouldReturnErrorWithoutCallingService() throws Exception {
+        AgentLoopService svc = mock(AgentLoopService.class);
+        MockMvc mvc = buildMockMvc(svc, mock(ApprovalStore.class), mock(AgentRunRepository.class),
+                mock(TraceRecorder.class), mock(ReplayService.class), enabledProperties(),
+                syncExecutor(), restrictiveLimiter());
+        MvcResult r = mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/ask/stream")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"hi\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
+        assertTrue(content.contains("event:error"));
+        assertTrue(content.contains("\"code\":\"rate_limited\""));
+        verify(svc, never()).ask(any());
+    }
+
+    @Test
+    public void askStreamFirstRequestHoldsLeaseSecondSameClientRejected() throws Exception {
+        AgentLoopService svc = mock(AgentLoopService.class);
+        when(svc.ask(any())).thenReturn(Flux.never());
+
+        StreamRequestLimiter.Config testConfig = new StreamRequestLimiter.Config();
+        testConfig.enabled = true;
+        testConfig.agentAsk = new StreamRequestLimiter.EndpointLimit(5, 1, 10, 60);
+        StreamRequestLimiter limiter = new StreamRequestLimiter(testConfig);
+
+        MockMvc mvc = buildMockMvc(svc, mock(ApprovalStore.class), mock(AgentRunRepository.class),
+                mock(TraceRecorder.class), mock(ReplayService.class), enabledProperties(),
+                syncExecutor(), limiter);
+
+        // First request: starts the flux and holds the lease
+        mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/ask/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"question\":\"first\"}"));
+
+        // Second request: same client, should be rejected
+        MvcResult r2 = mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/ask/stream")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"second\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String content2 = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r2)).andReturn().getResponse().getContentAsString();
+        assertTrue(content2.contains("\"code\":\"rate_limited\""));
     }
 
     // ===== 辅助 =====

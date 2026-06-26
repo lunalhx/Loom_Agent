@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.config.AiRuntimeConfig;
+import cn.lunalhx.ai.config.StreamRequestLimitProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import org.junit.Test;
@@ -22,7 +23,7 @@ public class AiRuntimeConfigValidationTest {
         agentProperties.getContext().setReactiveCompactMaxAttempts(2);
         ThreadPoolExecutor executor = executor();
         InitializingBean validator = new AiRuntimeConfig()
-                .aiConfigValidator(modelProperties, agentProperties, environment(), executor);
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
 
         try {
             assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
@@ -38,7 +39,7 @@ public class AiRuntimeConfigValidationTest {
         agentProperties.getModelRecovery().setContextFallbackModel("deepseek-v4-pro");
         ThreadPoolExecutor executor = executor();
         InitializingBean validator = new AiRuntimeConfig()
-                .aiConfigValidator(modelProperties, agentProperties, environment(), executor);
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
 
         try {
             assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
@@ -60,7 +61,7 @@ public class AiRuntimeConfigValidationTest {
                 .withProperty("spring.ai.deepseek.api-key", "test-key")
                 .withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash");
         InitializingBean validator = new AiRuntimeConfig()
-                .aiConfigValidator(modelProperties, agentProperties, environment, executor);
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment, executor);
 
         try {
             assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
@@ -81,4 +82,9 @@ public class AiRuntimeConfigValidationTest {
                 .withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash");
     }
 
+    private StreamRequestLimitProperties streamLimitProps() {
+        StreamRequestLimitProperties props = new StreamRequestLimitProperties();
+        props.setEnabled(false);
+        return props;
+    }
 }

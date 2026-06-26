@@ -90,11 +90,18 @@ public class AgentSseResponder {
     public SseEmitter streamAgentEvents(String operation, String requestId,
                                          Supplier<Flux<AgentEvent>> source,
                                          StreamProfile profile) {
+        return streamAgentEvents(operation, requestId, source, profile, null);
+    }
+
+    public SseEmitter streamAgentEvents(String operation, String requestId,
+                                         Supplier<Flux<AgentEvent>> source,
+                                         StreamProfile profile,
+                                         Runnable onTerminate) {
         Session session = new Session(new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L));
 
-        emitterOnCompletion(session);
-        emitterOnTimeout(session);
-        emitterOnError(session);
+        emitterOnCompletion(session, onTerminate);
+        emitterOnTimeout(session, onTerminate);
+        emitterOnError(session, onTerminate);
 
         MDC.put("request_id", requestId);
         try {
@@ -104,6 +111,9 @@ public class AgentSseResponder {
             } catch (Exception e) {
                 log.warn("Agent {} source supplier threw exception: {}", operation, e.getMessage(), e);
                 sendAndComplete(session, fallbackAgentEvent());
+                if (onTerminate != null) {
+                    onTerminate.run();
+                }
                 MDC.clear();
                 return session.emitter;
             }
@@ -112,8 +122,18 @@ public class AgentSseResponder {
                     .filter(event -> shouldSend(event, profile))
                     .subscribe(
                             event -> withMdc(event, () -> send(session, event)),
-                            throwable -> sendAndComplete(session, fallbackAgentEvent()),
-                            () -> complete(session)
+                            throwable -> {
+                                sendAndComplete(session, fallbackAgentEvent());
+                                if (onTerminate != null) {
+                                    onTerminate.run();
+                                }
+                            },
+                            () -> {
+                                complete(session);
+                                if (onTerminate != null) {
+                                    onTerminate.run();
+                                }
+                            }
                     );
             session.subscription.set(disposable);
         } finally {
@@ -243,21 +263,31 @@ public class AgentSseResponder {
     // ---- emitter lifecycle callbacks ----
 
     private void emitterOnCompletion(Session session) {
+        emitterOnCompletion(session, null);
+    }
+
+    private void emitterOnCompletion(Session session, Runnable onTerminate) {
         session.emitter.onCompletion(() -> {
             Disposable d = session.subscription.get();
             if (d != null) {
                 d.dispose();
             }
+            if (onTerminate != null) {
+                onTerminate.run();
+            }
         });
     }
 
-    private void emitterOnTimeout(Session session) {
+    private void emitterOnTimeout(Session session, Runnable onTerminate) {
         session.emitter.onTimeout(() -> {
             Disposable d = session.subscription.get();
             if (d != null) {
                 d.dispose();
             }
             sendAndComplete(session, timeoutEvent());
+            if (onTerminate != null) {
+                onTerminate.run();
+            }
         });
     }
 
@@ -272,12 +302,19 @@ public class AgentSseResponder {
     }
 
     private void emitterOnError(Session session) {
+        emitterOnError(session, null);
+    }
+
+    private void emitterOnError(Session session, Runnable onTerminate) {
         session.emitter.onError(throwable -> {
             Disposable d = session.subscription.get();
             if (d != null) {
                 d.dispose();
             }
             log.warn("Agent SSE connection closed with error: {}", throwable.getMessage());
+            if (onTerminate != null) {
+                onTerminate.run();
+            }
         });
     }
 

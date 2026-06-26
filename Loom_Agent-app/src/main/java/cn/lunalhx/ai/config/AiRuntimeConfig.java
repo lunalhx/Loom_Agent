@@ -38,6 +38,7 @@ import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
@@ -93,6 +94,12 @@ public class AiRuntimeConfig {
     @ConfigurationProperties(prefix = "loom.agent.memory-store")
     public MemoryStoreProperties memoryStoreProperties() {
         return new MemoryStoreProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "loom.http.stream-limit")
+    public StreamRequestLimitProperties streamRequestLimitProperties() {
+        return new StreamRequestLimitProperties();
     }
 
     @Bean
@@ -380,6 +387,25 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public StreamRequestLimiter streamRequestLimiter(StreamRequestLimitProperties properties) {
+        StreamRequestLimiter.Config config = new StreamRequestLimiter.Config();
+        config.enabled = properties.isEnabled();
+        config.clientIdHeader = properties.getClientIdHeader();
+        config.trustForwardedHeaders = properties.isTrustForwardedHeaders();
+        config.maxClientStates = properties.getMaxClientStates();
+        config.clientStateTtlSeconds = properties.getClientStateTtlSeconds();
+        config.agentAsk = toEndpointLimit(properties.getAgentAsk());
+        config.chatStream = toEndpointLimit(properties.getChatStream());
+        return new StreamRequestLimiter(config);
+    }
+
+    private StreamRequestLimiter.EndpointLimit toEndpointLimit(StreamRequestLimitProperties.EndpointLimit p) {
+        return new StreamRequestLimiter.EndpointLimit(
+                p.getMaxConcurrentGlobal(), p.getMaxConcurrentPerClient(),
+                p.getMaxStartsPerWindow(), p.getWindowSeconds());
+    }
+
+    @Bean
     public AgentMetrics agentMetrics(MeterRegistry meterRegistry) {
         return new MicrometerAgentMetrics(meterRegistry);
     }
@@ -450,6 +476,7 @@ public class AiRuntimeConfig {
     @Bean
     public InitializingBean aiConfigValidator(ModelRuntimeProperties modelRuntimeProperties,
                                              AgentRuntimeProperties agentRuntimeProperties,
+                                             StreamRequestLimitProperties streamLimitProperties,
                                              Environment environment,
                                              ThreadPoolExecutor threadPoolExecutor) {
         return () -> {
@@ -574,7 +601,36 @@ public class AiRuntimeConfig {
                     modelRuntimeProperties.capability(allowedModel);
                 }
             }
+            if (streamLimitProperties.isEnabled()) {
+                validateEndpointLimit(streamLimitProperties.getAgentAsk(), "agent-ask");
+                validateEndpointLimit(streamLimitProperties.getChatStream(), "chat-stream");
+                if (streamLimitProperties.getClientStateTtlSeconds() <= streamLimitProperties.getAgentAsk().getWindowSeconds()
+                        || streamLimitProperties.getClientStateTtlSeconds() <= streamLimitProperties.getChatStream().getWindowSeconds()) {
+                    throw new IllegalStateException("loom.http.stream-limit.client-state-ttl-seconds 必须大于各 endpoint 的 window-seconds");
+                }
+                if (streamLimitProperties.getMaxClientStates() <= 0) {
+                    throw new IllegalStateException("loom.http.stream-limit.max-client-states 必须大于 0");
+                }
+            }
         };
+    }
+
+    private void validateEndpointLimit(StreamRequestLimitProperties.EndpointLimit limit, String name) {
+        if (limit.getMaxConcurrentGlobal() <= 0) {
+            throw new IllegalStateException("loom.http.stream-limit." + name + ".max-concurrent-global 必须大于 0");
+        }
+        if (limit.getMaxConcurrentPerClient() <= 0) {
+            throw new IllegalStateException("loom.http.stream-limit." + name + ".max-concurrent-per-client 必须大于 0");
+        }
+        if (limit.getMaxStartsPerWindow() <= 0) {
+            throw new IllegalStateException("loom.http.stream-limit." + name + ".max-starts-per-window 必须大于 0");
+        }
+        if (limit.getWindowSeconds() <= 0) {
+            throw new IllegalStateException("loom.http.stream-limit." + name + ".window-seconds 必须大于 0");
+        }
+        if (limit.getMaxConcurrentPerClient() > limit.getMaxConcurrentGlobal()) {
+            throw new IllegalStateException("loom.http.stream-limit." + name + ".max-concurrent-per-client 不能大于 max-concurrent-global");
+        }
     }
 
     private void requirePositive(Long value, String name) {

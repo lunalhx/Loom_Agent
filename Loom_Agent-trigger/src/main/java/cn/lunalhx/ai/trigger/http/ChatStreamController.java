@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.StreamEventType;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -42,11 +44,14 @@ public class ChatStreamController {
     private final ModelRuntimeProperties modelRuntimeProperties;
     private final Validator validator;
     private final ThreadPoolExecutor threadPoolExecutor;
+    private final StreamRequestLimiter streamRequestLimiter;
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestBody(required = false) ChatStreamRequest request) {
+    public SseEmitter stream(@RequestBody(required = false) ChatStreamRequest request,
+                              HttpServletRequest httpRequest) {
         SseEmitter emitter = new SseEmitter(modelRuntimeProperties.getStreamTimeoutMs() + 5000L);
         AtomicBoolean completed = new AtomicBoolean(false);
+        AtomicReference<Runnable> terminateRef = new AtomicReference<>();
 
         StreamEvent validationError = validateRequest(request);
         if (validationError != null) {
@@ -54,23 +59,53 @@ public class ChatStreamController {
             return emitter;
         }
 
+        String clientKey = streamRequestLimiter.resolveClientKey(httpRequest);
+        StreamRequestLimiter.Lease lease = streamRequestLimiter.tryAcquire(clientKey, "chat-stream");
+        if (!lease.isAllowed()) {
+            StreamEvent rejectEvent = StreamEvent.builder()
+                    .type(StreamEventType.ERROR)
+                    .requestId(UUID.randomUUID().toString())
+                    .code(lease.rejectCode())
+                    .message(lease.rejectMessage())
+                    .build();
+            sendAndComplete(emitter, completed, rejectEvent);
+            return emitter;
+        }
+        terminateRef.set(lease::release);
+
         String requestId = UUID.randomUUID().toString();
         MDC.put("request_id", requestId);
         MDC.put("conversation_id", StringUtils.defaultString(request.getConversationId()));
         Disposable disposable = chatStreamService.stream(toPrompt(request, requestId))
                 .subscribe(event -> withMdc(event, () -> send(emitter, event)),
-                        throwable -> sendAndComplete(emitter, completed, fallbackError(request, throwable)),
-                        () -> complete(emitter, completed));
+                        throwable -> {
+                            sendAndComplete(emitter, completed, fallbackError(request, throwable));
+                            Runnable t = terminateRef.get();
+                            if (t != null) t.run();
+                        },
+                        () -> {
+                            complete(emitter, completed);
+                            Runnable t = terminateRef.get();
+                            if (t != null) t.run();
+                        });
         MDC.clear();
 
-        emitter.onCompletion(disposable::dispose);
+        emitter.onCompletion(() -> {
+            disposable.dispose();
+            Runnable t = terminateRef.get();
+            if (t != null) t.run();
+        });
         emitter.onTimeout(() -> {
             disposable.dispose();
             sendAndComplete(emitter, completed, timeoutError(request));
+            Runnable t = terminateRef.get();
+            if (t != null) t.run();
         });
         emitter.onError(throwable -> {
             disposable.dispose();
             log.warn("SSE connection closed with error: {}", throwable.getMessage());
+            Runnable t = terminateRef.get();
+            if (t != null) t.run();
         });
         return emitter;
     }
