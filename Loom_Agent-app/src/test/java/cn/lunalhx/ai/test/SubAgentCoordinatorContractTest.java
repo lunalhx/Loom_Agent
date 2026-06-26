@@ -202,6 +202,9 @@ public class SubAgentCoordinatorContractTest {
         // 必须用真实异步 Executor：Runnable::run 会同步阻塞调度线程，使 allOf.get 超时失效。
         AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
         properties.setSubAgentTimeoutMs(100L);
+        properties.setSubAgentRecoveryEnabled(true);
+        properties.setSubAgentIdleRecoveryMs(100L);
+        properties.setSubAgentRecoveryPollIntervalMs(10L);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
@@ -226,7 +229,7 @@ public class SubAgentCoordinatorContractTest {
                     .buildSubAgentCoordinator();
             AgentContext parent = parentWithDecision(spawnInput(1));
             SubAgentDispatchResult result = coordinator.dispatch(parent);
-            // 子任务被超时取消，全部失败
+            // 子任务超时：先进入 IDLE_RECOVERY 收尾窗口，再确认超时
             assertFalse(result.isSuccess());
             assertEquals("sub_agent_all_failed", result.getErrorCode());
             assertEquals(SubAgentStatus.TIMEOUT, result.getResults().get(0).getStatus());

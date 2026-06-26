@@ -80,7 +80,8 @@ public class SubAgentDispatchNode extends AbstractAgentNode {
                     .subAgentRole(child.getRole() == null ? null : child.getRole().name())
                     .subAgentStatus("STARTED")
                     .build());
-            AgentEventType type = child.getStatus() == SubAgentStatus.SUCCEEDED
+            AgentEventType type = (child.getStatus() == SubAgentStatus.SUCCEEDED
+                    || child.getStatus() == SubAgentStatus.PARTIAL)
                     ? AgentEventType.SUB_AGENT_COMPLETED
                     : AgentEventType.SUB_AGENT_FAILED;
             events.add(event(context, type)

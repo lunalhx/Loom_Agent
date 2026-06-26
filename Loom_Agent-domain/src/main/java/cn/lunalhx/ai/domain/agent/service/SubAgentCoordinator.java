@@ -24,9 +24,10 @@ public class SubAgentCoordinator {
         SubAgentResultFactory resultFactory = new SubAgentResultFactory();
         ChildAgentServiceFactory serviceFactory = new AgentLoopFactoryChildServiceFactory(agentLoopFactory);
         this.planner = new SubAgentDispatchPlanner(properties, new SubAgentDecisionParser());
-        this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory);
+        this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties);
         this.aggregator = new SubAgentResultAggregator(properties, objectMapper);
         this.runner = new ChildAgentRunner(toolRegistryFactory, serviceFactory, properties, resultFactory);
+        agentLoopFactory.setSubAgentControlInbox(scheduler.inbox());
     }
 
     public SubAgentDispatchResult dispatch(AgentContext parent) {

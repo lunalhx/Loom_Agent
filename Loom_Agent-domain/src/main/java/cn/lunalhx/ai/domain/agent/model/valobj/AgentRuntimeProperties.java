@@ -30,6 +30,9 @@ public class AgentRuntimeProperties {
     private Integer subAgentMaxConcurrency = 4;
     private Integer subAgentMaxDepth = 1;
     private Long subAgentTimeoutMs = 60000L;
+    private Boolean subAgentRecoveryEnabled = true;
+    private Long subAgentIdleRecoveryMs = 60000L;
+    private Long subAgentRecoveryPollIntervalMs = 1000L;
     private Integer subAgentSummaryMaxChars = 12000;
     private BudgetProperties budget = new BudgetProperties();
     private ContextProperties context = new ContextProperties();

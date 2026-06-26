@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
@@ -8,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.IncompletePlanStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.PendingApprovalConsistencyStopHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.SubAgentGracefulStopHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
@@ -48,6 +50,7 @@ public class AgentFlowFactory {
     private final AgentLoopStateDependencies state;
     private final AgentLoopRuntimeDependencies runtime;
     private final ObjectMapper objectMapper;
+    private final SubAgentGracefulStopHook gracefulStopHook;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -56,6 +59,11 @@ public class AgentFlowFactory {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.objectMapper = state.objectMapper();
+        this.gracefulStopHook = new SubAgentGracefulStopHook(new SubAgentPartialSummaryGenerator(objectMapper));
+    }
+
+    public void setControlInbox(SubAgentControlInbox controlInbox) {
+        this.gracefulStopHook.setInbox(controlInbox);
     }
 
     /**
@@ -129,6 +137,7 @@ public class AgentFlowFactory {
         return new AgentHookRegistry(List.of(
                 new IncompletePlanStopHook(runtime.properties()),
                 new PendingApprovalConsistencyStopHook(state.approvalStore()),
-                new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper)));
+                new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper),
+                gracefulStopHook));
     }
 }

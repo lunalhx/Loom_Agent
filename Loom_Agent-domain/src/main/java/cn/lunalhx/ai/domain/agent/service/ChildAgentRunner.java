@@ -34,8 +34,7 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
     }
 
     @Override
-    public SubAgentResult run(AgentContext parent, SubAgentTask task, int ordinal, long startedAt) {
-        String childRunId = UUID.randomUUID().toString();
+    public SubAgentResult run(AgentContext parent, SubAgentTask task, int ordinal, String childRunId, long startedAt) {
         try {
             AgentRole role = task.getRole() == null ? AgentRole.EXPLORER : task.getRole();
             ToolRegistry childRegistry = toolRegistryFactory.create(role);

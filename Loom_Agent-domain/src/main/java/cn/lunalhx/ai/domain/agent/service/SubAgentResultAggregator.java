@@ -32,11 +32,13 @@ class SubAgentResultAggregator {
             observation = StringUtils.abbreviate(observation, maxChars);
             truncated = true;
         }
-        boolean anySucceeded = results.stream().anyMatch(result -> result.getStatus() == SubAgentStatus.SUCCEEDED);
+        boolean anyUsable = results.stream().anyMatch(result ->
+                result.getStatus() == SubAgentStatus.SUCCEEDED
+                        || result.getStatus() == SubAgentStatus.PARTIAL);
         return SubAgentDispatchResult.builder()
-                .success(anySucceeded)
-                .errorCode(anySucceeded ? null : "sub_agent_all_failed")
-                .message(anySucceeded ? null : "所有子 Agent 均未成功完成")
+                .success(anyUsable)
+                .errorCode(anyUsable ? null : "sub_agent_all_failed")
+                .message(anyUsable ? null : "所有子 Agent 均未成功完成")
                 .observation(observation)
                 .truncated(truncated)
                 .elapsedMs(elapsed(startedAt))
@@ -51,7 +53,10 @@ class SubAgentResultAggregator {
         root.put("reason", reason);
         root.put("total", results.size());
         root.put("succeeded", results.stream().filter(result -> result.getStatus() == SubAgentStatus.SUCCEEDED).count());
-        root.put("failed", results.stream().filter(result -> result.getStatus() != SubAgentStatus.SUCCEEDED).count());
+        root.put("partial", results.stream().filter(result -> result.getStatus() == SubAgentStatus.PARTIAL).count());
+        root.put("failed", results.stream().filter(result ->
+                result.getStatus() != SubAgentStatus.SUCCEEDED
+                        && result.getStatus() != SubAgentStatus.PARTIAL).count());
         List<Map<String, Object>> resultViews = new ArrayList<>();
         for (SubAgentResult result : results) {
             Map<String, Object> view = new LinkedHashMap<>();

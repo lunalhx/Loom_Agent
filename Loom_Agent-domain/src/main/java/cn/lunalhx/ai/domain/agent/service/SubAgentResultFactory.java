@@ -69,4 +69,18 @@ class SubAgentResultFactory {
                 .elapsedMs(elapsedMs)
                 .build();
     }
+
+    SubAgentResult partial(SubAgentTask task, String runId, AgentRole role, String summary,
+                           boolean truncated, int stepCount, long elapsedMs) {
+        return SubAgentResult.builder()
+                .taskId(task.getTaskId())
+                .runId(runId)
+                .role(role)
+                .status(SubAgentStatus.PARTIAL)
+                .summary(summary)
+                .truncated(truncated)
+                .stepCount(stepCount)
+                .elapsedMs(elapsedMs)
+                .build();
+    }
 }

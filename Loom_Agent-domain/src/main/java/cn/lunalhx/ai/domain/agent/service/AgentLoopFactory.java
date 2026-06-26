@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -35,6 +36,10 @@ public class AgentLoopFactory {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime);
+    }
+
+    public void setSubAgentControlInbox(SubAgentControlInbox controlInbox) {
+        flowFactory.setControlInbox(controlInbox);
     }
 
     /**
