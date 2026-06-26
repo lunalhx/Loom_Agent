@@ -5,8 +5,10 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
@@ -158,6 +160,31 @@ public class AgentEventFactoryTest {
         assertEquals(AgentEventType.ERROR, event.getType());
         assertEquals("invalid_user_input", event.getCode());
         assertEquals("input-run", event.getRunId());
+    }
+
+    @Test
+    public void runAlreadyTerminalShouldContainStatusInMetadata() {
+        AgentRun run = AgentRun.builder()
+                .runId("run-terminal")
+                .requestId("request-terminal")
+                .conversationId("conversation-terminal")
+                .workspace("test-workspace")
+                .parentRunId("parent-terminal")
+                .status(AgentRunStatus.COMPLETED)
+                .build();
+
+        AgentEvent event = factory.runAlreadyTerminal(run);
+
+        assertEquals(AgentEventType.ERROR, event.getType());
+        assertEquals("run_already_terminal", event.getCode());
+        assertEquals("当前运行已结束，不能再次恢复", event.getMessage());
+        assertEquals("run-terminal", event.getRunId());
+        assertEquals("request-terminal", event.getRequestId());
+        assertEquals("conversation-terminal", event.getConversationId());
+        assertEquals("test-workspace", event.getWorkspace());
+        assertEquals("parent-terminal", event.getParentRunId());
+        assertNotNull(event.getMetadata());
+        assertEquals("COMPLETED", event.getMetadata().get("status"));
     }
 
     private AgentContext basicContext(String runId, String requestId, String conversationId) {

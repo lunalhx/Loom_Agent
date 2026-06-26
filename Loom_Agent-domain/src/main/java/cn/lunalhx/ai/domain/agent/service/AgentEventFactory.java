@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -131,6 +132,20 @@ public final class AgentEventFactory {
                 .runId(runId)
                 .code("invalid_user_input")
                 .message("CONTINUE 必须提供非空 message")
+                .build();
+    }
+
+    public AgentEvent runAlreadyTerminal(AgentRun run) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .runId(run.getRunId())
+                .requestId(run.getRequestId())
+                .conversationId(run.getConversationId())
+                .workspace(run.getWorkspace())
+                .parentRunId(run.getParentRunId())
+                .code("run_already_terminal")
+                .message("当前运行已结束，不能再次恢复")
+                .metadata(Map.of("status", run.getStatus().name()))
                 .build();
     }
 }

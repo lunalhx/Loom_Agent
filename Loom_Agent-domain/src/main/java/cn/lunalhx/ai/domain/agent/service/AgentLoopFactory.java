@@ -92,7 +92,7 @@ public class AgentLoopFactory {
         AgentContextFactory contextFactory = new AgentContextFactory(
                 runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable());
         AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
-                state.approvalStore(), state.checkpointRepository(), contextFactory, eventFactory);
+                state.approvalStore(), state.checkpointRepository(), state.runRepository(), contextFactory, eventFactory);
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory);
         return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory, state.runRepository(), state.checkpointRepository());

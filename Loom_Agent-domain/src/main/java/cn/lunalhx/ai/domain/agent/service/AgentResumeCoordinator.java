@@ -1,16 +1,19 @@
 package cn.lunalhx.ai.domain.agent.service;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
@@ -22,15 +25,18 @@ public final class AgentResumeCoordinator {
 
     private final ApprovalStore approvalStore;
     private final AgentCheckpointRepository checkpointRepository;
+    private final AgentRunRepository runRepository;
     private final AgentContextFactory contextFactory;
     private final AgentEventFactory eventFactory;
 
     public AgentResumeCoordinator(ApprovalStore approvalStore,
                                   AgentCheckpointRepository checkpointRepository,
+                                  AgentRunRepository runRepository,
                                   AgentContextFactory contextFactory,
                                   AgentEventFactory eventFactory) {
         this.approvalStore = approvalStore;
         this.checkpointRepository = checkpointRepository;
+        this.runRepository = runRepository;
         this.contextFactory = contextFactory;
         this.eventFactory = eventFactory;
     }
@@ -67,6 +73,11 @@ public final class AgentResumeCoordinator {
     }
 
     public AgentResumePlan prepareRunResume(String runId) {
+        AgentRun run = runRepository.find(runId).orElse(null);
+        if (run != null && isTerminalStatus(run.getStatus())) {
+            return AgentResumePlan.complete(List.of(eventFactory.runAlreadyTerminal(run)));
+        }
+
         AgentCheckpoint checkpoint = checkpointRepository.latest(runId).orElse(null);
         if (checkpoint == null || checkpoint.getContextSnapshot() == null) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
@@ -161,5 +172,11 @@ public final class AgentResumeCoordinator {
     private boolean requiresResumeReplan(String currentNode) {
         return AgentNodeNames.APPROVAL_GATE.equals(currentNode)
                 || AgentNodeNames.TOOL_DISPATCH.equals(currentNode);
+    }
+
+    private boolean isTerminalStatus(AgentRunStatus status) {
+        return status == AgentRunStatus.COMPLETED
+                || status == AgentRunStatus.FAILED
+                || status == AgentRunStatus.BUDGET_EXCEEDED;
     }
 }

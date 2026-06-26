@@ -8,7 +8,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
@@ -201,6 +203,141 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ANSWER
                 && "resumed ok".equals(e.getAnswer())));
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
+    }
+
+    @Test
+    public void resumeRunWithCompletedStatusShouldReturnRunAlreadyTerminal() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+
+        runRepository.save(AgentRun.builder()
+                .runId("completed-run")
+                .requestId("req-1")
+                .conversationId("conv-1")
+                .workspace(".")
+                .status(AgentRunStatus.COMPLETED)
+                .build());
+
+        AgentContext context = new AgentContext();
+        context.setRunId("completed-run");
+        context.setRequestId("req-1");
+        context.setConversationId("conv-1");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(Instant.now());
+        context.setStep(3);
+        context.setToolSpecs(List.of());
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("completed-run")
+                .currentNode(AgentNodeNames.FINAL_ANSWER)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:final_answer")
+                .build());
+
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway("{}"))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .buildAgentLoop();
+
+        List<AgentEvent> events = service.resumeRun("completed-run")
+                .collectList().block(TIMEOUT);
+
+        assertEquals(1, events.size());
+        assertEquals(AgentEventType.ERROR, events.get(0).getType());
+        assertEquals("run_already_terminal", events.get(0).getCode());
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.RESUME_STARTED));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.ANSWER));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
+    }
+
+    @Test
+    public void resumeRunWithFailedStatusShouldReturnRunAlreadyTerminal() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+
+        runRepository.save(AgentRun.builder()
+                .runId("failed-run")
+                .requestId("req-2")
+                .conversationId("conv-2")
+                .workspace(".")
+                .status(AgentRunStatus.FAILED)
+                .build());
+
+        AgentContext context = new AgentContext();
+        context.setRunId("failed-run");
+        context.setRequestId("req-2");
+        context.setConversationId("conv-2");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(Instant.now());
+        context.setStep(1);
+        context.setToolSpecs(List.of());
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("failed-run")
+                .currentNode(AgentNodeNames.FAIL)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:fail")
+                .build());
+
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway("{}"))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .buildAgentLoop();
+
+        List<AgentEvent> events = service.resumeRun("failed-run")
+                .collectList().block(TIMEOUT);
+
+        assertEquals(1, events.size());
+        assertEquals(AgentEventType.ERROR, events.get(0).getType());
+        assertEquals("run_already_terminal", events.get(0).getCode());
+    }
+
+    @Test
+    public void resumeRunWithBudgetExceededStatusShouldReturnRunAlreadyTerminal() {
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        InMemoryAgentCheckpointRepository checkpointRepository = new InMemoryAgentCheckpointRepository();
+
+        runRepository.save(AgentRun.builder()
+                .runId("budget-run")
+                .requestId("req-3")
+                .conversationId("conv-3")
+                .workspace(".")
+                .status(AgentRunStatus.BUDGET_EXCEEDED)
+                .build());
+
+        AgentContext context = new AgentContext();
+        context.setRunId("budget-run");
+        context.setRequestId("req-3");
+        context.setConversationId("conv-3");
+        context.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        context.setWorkspaceDisplayName(".");
+        context.setMaxSteps(6);
+        context.setStartedAt(Instant.now());
+        context.setStep(2);
+        context.setToolSpecs(List.of());
+        checkpointRepository.save(AgentCheckpoint.builder()
+                .runId("budget-run")
+                .currentNode(AgentNodeNames.RENDER_PROMPT)
+                .contextSnapshot(AgentContextSnapshot.from(context))
+                .reason("after_node:render_prompt")
+                .build());
+
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway("{}"))
+                .runRepository(runRepository)
+                .checkpointRepository(checkpointRepository)
+                .buildAgentLoop();
+
+        List<AgentEvent> events = service.resumeRun("budget-run")
+                .collectList().block(TIMEOUT);
+
+        assertEquals(1, events.size());
+        assertEquals(AgentEventType.ERROR, events.get(0).getType());
+        assertEquals("run_already_terminal", events.get(0).getCode());
     }
 
     private ModelGateway completeGateway(String output) {
