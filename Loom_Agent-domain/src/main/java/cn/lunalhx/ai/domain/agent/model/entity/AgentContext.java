@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -39,6 +40,8 @@ public class AgentContext {
     private List<AgentStep> history = new ArrayList<>();
     private DynamicText dynamicText = new DynamicText();
     private String currentPrompt;
+    @JsonIgnore
+    private transient String promptRenderCacheKey;
     private String modelOutput;
     private AgentDecision decision;
     private ToolResult toolResult;

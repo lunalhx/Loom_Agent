@@ -47,6 +47,7 @@ class MicroCompactionStrategy implements ContextCompactionStrategy {
         if (!changed) {
             return ContextStrategyResult.unchanged();
         }
+        context.getDynamicText().replaceEntries(entries);
         return new ContextStrategyResult(true, "micro", entries.size(), null);
     }
 

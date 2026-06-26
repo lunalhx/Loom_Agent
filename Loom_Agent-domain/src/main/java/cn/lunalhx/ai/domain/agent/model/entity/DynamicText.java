@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 public class DynamicText {
 
     private final List<DynamicTextEntry> entries = new ArrayList<>();
+    private int version;
 
     public void appendSystemNote(int step, String sourceNode, String title, String content) {
         append(step, DynamicTextRole.SYSTEM_NOTE, sourceNode, title, null, null, content);
@@ -62,6 +63,7 @@ public class DynamicText {
             entry.setRenderChars(StringUtils.length(content));
         }
         entries.add(entry);
+        version++;
     }
 
     private void append(int step,
@@ -75,6 +77,7 @@ public class DynamicText {
             return;
         }
         entries.add(newEntry(step, role, sourceNode, title, tool, input, content));
+        version++;
     }
 
     private DynamicTextEntry newEntry(int step,
@@ -99,6 +102,10 @@ public class DynamicText {
                 .build();
     }
 
+    public int getVersion() {
+        return version;
+    }
+
     public boolean isEmpty() {
         return entries.isEmpty();
     }
@@ -112,6 +119,7 @@ public class DynamicText {
         if (newEntries != null) {
             entries.addAll(newEntries);
         }
+        version++;
     }
 
     public String render() {

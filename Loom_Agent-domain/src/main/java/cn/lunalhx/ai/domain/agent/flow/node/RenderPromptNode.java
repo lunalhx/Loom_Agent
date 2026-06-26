@@ -32,7 +32,11 @@ public class RenderPromptNode extends AbstractAgentNode {
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
         ContextCompactResult compactResult = contextWindowManager.compactBeforePrompt(context);
-        context.setCurrentPrompt(renderPromptText(context));
+        String cacheKey = computeCacheKey(context);
+        if (!cacheKey.equals(context.getPromptRenderCacheKey()) || context.getCurrentPrompt() == null) {
+            context.setCurrentPrompt(renderPromptText(context));
+            context.setPromptRenderCacheKey(cacheKey);
+        }
         return NodeResult.next(AgentNodeNames.MODEL_CALL,
                 compactResult.isCompacted() ? List.of(compactEvent(context, compactResult)) : List.of());
     }
@@ -81,6 +85,25 @@ public class RenderPromptNode extends AbstractAgentNode {
             prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"{\\\"summary\\\":\\\"结论摘要\\\",\\\"findings\\\":[{\\\"file\\\":\\\"path\\\",\\\"line\\\":1,\\\"symbol\\\":\\\"Name\\\",\\\"reason\\\":\\\"为什么相关\\\"}],\\\"confidence\\\":\\\"high\\\",\\\"truncated\\\":false,\\\"followUp\\\":\\\"可选\\\"}\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");
         }
         return prompt.toString();
+    }
+
+    private String computeCacheKey(AgentContext context) {
+        StringBuilder key = new StringBuilder();
+        key.append("role=").append(context.getAgentRole()).append('|');
+        key.append("spawn=").append(context.isSubAgentSpawnAllowed()).append('|');
+        key.append("pathScope=").append(context.getPathScope()).append('|');
+        key.append("question=").append(context.getQuestion()).append('|');
+        key.append("plan@").append(System.identityHashCode(context.getPlan()))
+                .append(":v").append(context.getPlan() == null ? 0 : context.getPlan().getVersion()).append('|');
+        key.append("dynamicText@").append(System.identityHashCode(context.getDynamicText()))
+                .append(":v").append(context.getDynamicText().getVersion()).append('|');
+        key.append("toolSpecs=");
+        for (ToolSpec spec : context.getToolSpecs()) {
+            key.append(spec.getName()).append(':')
+                    .append(spec.getDescription()).append(':')
+                    .append(spec.getInputSchema()).append(';');
+        }
+        return key.toString();
     }
 
     private AgentEvent compactEvent(AgentContext context, ContextCompactResult result) {
