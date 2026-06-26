@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -94,6 +95,24 @@ public class AgentFileToolTest {
         dangerousInput.put("command", "rm -rf .");
         ToolPolicyDecision dangerousPolicy = tool.policy(call("run_shell", dangerousInput));
         assertTrue(dangerousPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
+    }
+
+    @Test
+    public void runShellShouldPreserveInterruptFlagAndReturnInterruptedError() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+
+        Thread.currentThread().interrupt();
+        try {
+            ObjectNode input = objectMapper.createObjectNode();
+            input.put("command", "pwd");
+            ToolResult result = tool.call(call("run_shell", input));
+
+            assertFalse(result.isSuccess());
+            assertEquals("process_interrupted", result.getErrorCode());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

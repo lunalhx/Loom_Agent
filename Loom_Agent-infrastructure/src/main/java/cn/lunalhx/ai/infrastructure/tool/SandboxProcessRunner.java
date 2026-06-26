@@ -20,6 +20,8 @@ final class SandboxProcessRunner {
     static ToolResult run(List<String> command, Path cwd, long timeoutMs, int maxOutputChars, long startedAt) {
         StringBuilder output = new StringBuilder();
         boolean[] truncated = new boolean[]{false};
+        Process process = null;
+        Thread reader = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .directory(cwd.toFile())
@@ -32,8 +34,9 @@ final class SandboxProcessRunner {
                 }
             });
 
-            Process process = builder.start();
-            Thread reader = new Thread(() -> readOutput(process.getInputStream(), output, maxOutputChars, truncated), "agent-tool-process-output");
+            process = builder.start();
+            InputStream processInput = process.getInputStream();
+            reader = new Thread(() -> readOutput(processInput, output, maxOutputChars, truncated), "agent-tool-process-output");
             reader.setDaemon(true);
             reader.start();
 
@@ -60,6 +63,12 @@ final class SandboxProcessRunner {
                     .truncated(truncated[0])
                     .elapsedMs(elapsed(startedAt))
                     .build();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+            return ToolResult.failure("process_interrupted", "命令执行被中断", elapsed(startedAt));
         } catch (Exception e) {
             return ToolResult.failure("process_failed", e.getMessage(), elapsed(startedAt));
         }
