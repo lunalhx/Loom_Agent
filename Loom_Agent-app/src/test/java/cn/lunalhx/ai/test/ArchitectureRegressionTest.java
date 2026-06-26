@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaConstructor;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.junit.ArchUnitRunner;
@@ -98,6 +99,13 @@ public class ArchitectureRegressionTest {
                     .resideInAnyPackage("cn.lunalhx.ai.infrastructure..")
                     .orShould().dependOnClassesThat()
                     .haveNameMatching(".*HashUtil.*");
+
+    // ---- Rule 6b: ContextWindowManager 不得声明名为 noop 的公开静态工厂方法 ----
+
+    @ArchTest
+    public static final ArchRule context_window_manager_must_not_have_noop_factory =
+            classes().that().haveFullyQualifiedName(ContextWindowManager.class.getName())
+                    .should(notHavePublicStaticMethodNamedNoop());
 
     // ---- Rule 7: Controller 不得直接依赖基础设施实现 ----
 
@@ -202,6 +210,22 @@ public class ArchitectureRegressionTest {
                                 constructor.getFullName() + " has "
                                         + constructor.getRawParameterTypes().size()
                                         + " parameters (max 6)"));
+                    }
+                }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> notHavePublicStaticMethodNamedNoop() {
+        return new ArchCondition<>("not have a public static method named noop") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                for (JavaMethod method : javaClass.getMethods()) {
+                    if (method.getName().equals("noop")
+                            && method.getModifiers().contains(java.lang.reflect.Modifier.PUBLIC)
+                            && method.getModifiers().contains(java.lang.reflect.Modifier.STATIC)) {
+                        events.add(SimpleConditionEvent.violated(method,
+                                method.getFullName() + " is a public static noop() factory"));
                     }
                 }
             }

@@ -53,7 +53,6 @@
 | `DefaultAgentLoopService` | `SubAgentCoordinator#runChild`（`SubAgentCoordinator.java:224`） | 14 参数（子 Agent 服务，`subAgentCoordinator=null`） |
 | `SubAgentCoordinator` | `AiRuntimeConfig#subAgentCoordinator`（`AiRuntimeConfig.java:237`） | 最全 13 参数 |
 | `ContextWindowManager` | `AiRuntimeConfig#contextWindowManager`（`AiRuntimeConfig.java:149`） | 4 参数（含 `deepSummaryService`） |
-| `ContextWindowManager.noop` | `DefaultAgentLoopService` / `SubAgentCoordinator` / `RenderPromptNode` / `ModelCallNode` / `ToolDispatchNode`（多处默认值分支） | 工厂 |
 
 ### 测试调用点（`src/test`）
 
@@ -114,7 +113,6 @@ fail → done（终态，错误/超时/预算）
 | `InMemoryAgentCheckpointRepository` | `AgentCheckpointRepository` 实现 | 内存；`latest(runId)` 返回最新 checkpoint |
 | `InMemoryTraceRecorder` | `TraceRecorder` 实现 | `ConcurrentMap<runId, List<AgentTraceEvent>>`；`timeline(runId)` 按 `sequenceNo` 升序；`timelineByTraceId` 跨 run 聚合并按 `createdAt` 排序；`recordNodeStart/End/Stop/ModelUsage/ModelGatewayEvent` 全部追加事件 |
 | `NoopAgentMetrics` | `AgentMetrics` 实现 | 所有方法空实现 |
-| `ContextWindowManager.noop` | 工厂 | `new ContextWindowManager(properties, new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore())`，功能关闭时 `prepareToolResult`/`compact*` 不修改上下文 |
 | `DefaultBudgetGuard` | `BudgetGuard` 实现 | `budget.enabled=false`（默认）时 `checkBeforeModelCall` 恒 allowed；`enabled=true` 时按 `usedTokens + estimatedInputTokens + reservedOutputTokens > maxTotalTokens` 拦截；`maxTotalCost>0` 时额外做成本预估拦截 |
 
 ---
