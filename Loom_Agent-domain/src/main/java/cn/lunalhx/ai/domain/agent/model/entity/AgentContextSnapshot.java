@@ -83,6 +83,15 @@ public class AgentContextSnapshot {
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
     private Integer stopHookContinuationCount;
+    private Integer segmentIndex;
+    private Integer segmentStartStep;
+    private Integer maxSegments;
+    private Integer maxTotalSteps;
+    private String lastActionFingerprint;
+    private Integer sameActionRepeats;
+    private String lastFailureFingerprint;
+    private Integer sameFailureRepeats;
+    private Integer noProgressRounds;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -141,6 +150,15 @@ public class AgentContextSnapshot {
                 .contextTranscriptArtifactId(context.getContextTranscriptArtifactId())
                 .contextBlockedReason(context.getContextBlockedReason())
                 .stopHookContinuationCount(context.getStopHookContinuationCount())
+                .segmentIndex(context.getSegmentIndex())
+                .segmentStartStep(context.getSegmentStartStep())
+                .maxSegments(context.getMaxSegments())
+                .maxTotalSteps(context.getMaxTotalSteps())
+                .lastActionFingerprint(context.getLastActionFingerprint())
+                .sameActionRepeats(context.getSameActionRepeats())
+                .lastFailureFingerprint(context.getLastFailureFingerprint())
+                .sameFailureRepeats(context.getSameFailureRepeats())
+                .noProgressRounds(context.getNoProgressRounds())
                 .build();
     }
 
@@ -214,6 +232,15 @@ public class AgentContextSnapshot {
         context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
         context.setContextBlockedReason(contextBlockedReason);
         context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
+        context.setSegmentIndex(segmentIndex == null ? 0 : segmentIndex);
+        context.setSegmentStartStep(segmentStartStep == null ? 0 : segmentStartStep);
+        context.setMaxSegments(maxSegments == null ? 1 : maxSegments);
+        context.setMaxTotalSteps(maxTotalSteps == null ? context.getMaxSteps() : maxTotalSteps);
+        context.setLastActionFingerprint(lastActionFingerprint);
+        context.setSameActionRepeats(sameActionRepeats == null ? 0 : sameActionRepeats);
+        context.setLastFailureFingerprint(lastFailureFingerprint);
+        context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
+        context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
         return context;
     }
 

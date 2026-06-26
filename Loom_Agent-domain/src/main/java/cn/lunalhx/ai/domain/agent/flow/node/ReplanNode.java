@@ -175,13 +175,20 @@ public class ReplanNode extends AbstractAgentNode {
     }
 
     private String renderReplanPrompt(AgentContext context, ReplanReason reason) {
-        return "你是代码 Agent 的重规划器。只能输出 JSON 对象，格式为 "
-                + "{\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"evidence\":\"可选\",\"blocker\":\"可选\"}]}。\n"
-                + "不要删除历史任务；只能更新状态或追加任务。\n"
-                + "用户任务：" + context.getQuestion() + "\n"
-                + "重规划原因：" + reason + "\n"
-                + "失败信息：" + StringUtils.defaultString(context.getReplanMessage()) + "\n"
-                + "当前计划：\n" + context.getPlan().render() + "\n";
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象，格式为 "
+                + "{\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"evidence\":\"可选\",\"blocker\":\"可选\"}]}。\n");
+        prompt.append("不要删除历史任务；只能更新状态或追加任务。\n");
+        prompt.append("用户任务：").append(context.getQuestion()).append("\n");
+        prompt.append("重规划原因：").append(reason).append("\n");
+        if (reason == ReplanReason.STEP_BUDGET_CONTINUATION) {
+            prompt.append("当前是第 ").append(context.getSegmentIndex() + 1).append("/")
+                    .append(context.getMaxSegments()).append(" 段执行。请总结已完成内容，选择下一步方向，"
+                    + "不要重复上一段最后的动作。\n");
+        }
+        prompt.append("失败信息：").append(StringUtils.defaultString(context.getReplanMessage())).append("\n");
+        prompt.append("当前计划：\n").append(context.getPlan().render()).append("\n");
+        return prompt.toString();
     }
 
     private String fallbackItem(ReplanReason reason) {
@@ -190,6 +197,8 @@ public class ReplanNode extends AbstractAgentNode {
             case APPROVAL_REJECTED -> "根据用户拒绝原因选择只读解释、替代方案或更小范围修改";
             case POLICY_DENIED -> "绕开被策略拦截的高危动作，选择安全的只读检查或人工说明";
             case INCOMPLETE_PLAN -> "补齐尚未完成的计划项，再输出最终结论";
+            case STEP_BUDGET_CONTINUATION -> "总结已完成内容，选择下一步方向，避免重复上一段最后的动作";
+            case REPEATED_ACTION -> "检测到重复动作无进展，换一种方式或工具继续任务";
             default -> "检查失败原因，修复问题后重新运行必要验证";
         };
     }

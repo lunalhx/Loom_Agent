@@ -563,6 +563,18 @@ public class AiRuntimeConfig {
             if (threadPoolExecutor.getMaximumPoolSize() < agentRuntimeProperties.getSubAgentMaxConcurrency() + 1) {
                 throw new IllegalStateException("线程池最大线程数必须大于 AGENT_SUB_AGENT_MAX_CONCURRENCY");
             }
+            AgentRuntimeProperties.StepBudgetProperties stepBudget = agentRuntimeProperties.getStepBudget();
+            if (stepBudget != null) {
+                requirePositive(stepBudget.getMaxSegments(), "AGENT_STEP_BUDGET_MAX_SEGMENTS");
+                requirePositive(stepBudget.getChildMaxSegments(), "AGENT_STEP_BUDGET_CHILD_MAX_SEGMENTS");
+                requirePositive(stepBudget.getMaxTotalSteps(), "AGENT_STEP_BUDGET_MAX_TOTAL_STEPS");
+                requirePositive(stepBudget.getSameActionMaxRepeats(), "AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS");
+                requirePositive(stepBudget.getSameFailureMaxRepeats(), "AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS");
+                requirePositive(stepBudget.getNoProgressMaxRounds(), "AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS");
+                if (stepBudget.getMaxTotalSteps() < agentRuntimeProperties.getMaxSteps()) {
+                    throw new IllegalStateException("AGENT_STEP_BUDGET_MAX_TOTAL_STEPS 不能小于 AGENT_MAX_STEPS");
+                }
+            }
             if (Boolean.TRUE.equals(agentRuntimeProperties.getBudget().getEnabled())) {
                 requirePositive(agentRuntimeProperties.getBudget().getMaxTotalTokens(), "AGENT_BUDGET_MAX_TOTAL_TOKENS");
                 requirePositive(agentRuntimeProperties.getBudget().getEstimatedCharsPerToken(), "AGENT_BUDGET_ESTIMATED_CHARS_PER_TOKEN");

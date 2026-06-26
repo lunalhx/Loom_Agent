@@ -71,6 +71,8 @@ public final class AgentContextFactory {
         context.setToolSpecs(specs);
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRunId()));
 
+        initStepBudget(context, question);
+
         if (previous != null && previous.getDynamicTextEntries() != null) {
             context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
         }
@@ -101,6 +103,31 @@ public final class AgentContextFactory {
             specs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
         context.setToolSpecs(specs);
+        initStepBudget(context, question);
+    }
+
+    private void initStepBudget(AgentContext context, AgentQuestion question) {
+        AgentRuntimeProperties.StepBudgetProperties stepBudget = properties.getStepBudget();
+        if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
+            context.setMaxSegments(1);
+            context.setMaxTotalSteps(context.getMaxSteps());
+            context.setSegmentIndex(0);
+            context.setSegmentStartStep(0);
+            return;
+        }
+        boolean isRoot = StringUtils.isBlank(question.getParentRunId());
+        if (isRoot) {
+            context.setMaxSegments(question.getMaxSegments() != null
+                    ? question.getMaxSegments() : stepBudget.getMaxSegments());
+        } else {
+            int configMax = stepBudget.getMaxSegments() != null ? stepBudget.getMaxSegments() : 5;
+            int childMax = stepBudget.getChildMaxSegments() != null ? stepBudget.getChildMaxSegments() : 2;
+            context.setMaxSegments(Math.min(configMax, childMax));
+        }
+        context.setMaxTotalSteps(stepBudget.getMaxTotalSteps() != null
+                ? stepBudget.getMaxTotalSteps() : 150);
+        context.setSegmentIndex(0);
+        context.setSegmentStartStep(0);
     }
 
     public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {

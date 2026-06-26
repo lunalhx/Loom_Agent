@@ -117,10 +117,31 @@ public class AgentRequestMapperTest {
     }
 
     @Test
+    public void mapAskShouldPreserveMaxSegments() {
+        AgentAskRequest request = new AgentAskRequest();
+        request.setQuestion("hi");
+        request.setMaxSegments(3);
+        AgentRequestMapper.Result<?> result = mapper.mapAsk(request);
+        assertTrue(result.valid());
+        cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion q = (cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion) result.value();
+        assertEquals(Integer.valueOf(3), q.getMaxSegments());
+    }
+
+    @Test
     public void mapAskBeanValidationFailureShouldReturnInvalidRequest() {
         AgentAskRequest request = new AgentAskRequest();
         request.setQuestion("hi");
         request.setMaxSteps(100); // exceeds max 30
+        AgentRequestMapper.Result<?> result = mapper.mapAsk(request);
+        assertFalse(result.valid());
+        assertEquals("invalid_request", result.problem().code());
+    }
+
+    @Test
+    public void mapAskMaxSegmentsExceededShouldReturnInvalidRequest() {
+        AgentAskRequest request = new AgentAskRequest();
+        request.setQuestion("hi");
+        request.setMaxSegments(11); // exceeds max 10
         AgentRequestMapper.Result<?> result = mapper.mapAsk(request);
         assertFalse(result.valid());
         assertEquals("invalid_request", result.problem().code());

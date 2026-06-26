@@ -9,6 +9,7 @@ public enum AgentStopReason {
     TIMEOUT,
     MODEL_ERROR,
     BUDGET_EXCEEDED,
-    CONTEXT_OVERFLOW
+    CONTEXT_OVERFLOW,
+    NO_PROGRESS
 
 }

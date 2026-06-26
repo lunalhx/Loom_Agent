@@ -24,6 +24,7 @@ public class AgentQuestion {
     private String pathScope;
     private String workspace;
     private Integer maxSteps;
+    private Integer maxSegments;
     private Boolean includeTrace;
     private Boolean subAgentSpawnAllowed;
     private String traceId;

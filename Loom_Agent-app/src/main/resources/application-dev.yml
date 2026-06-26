@@ -159,6 +159,14 @@ loom:
       input-price-per-1k: ${AGENT_BUDGET_INPUT_PRICE_PER_1K:0}
       output-price-per-1k: ${AGENT_BUDGET_OUTPUT_PRICE_PER_1K:0}
       max-total-cost: ${AGENT_BUDGET_MAX_TOTAL_COST:}
+    step-budget:
+      continuation-enabled: ${AGENT_STEP_BUDGET_CONTINUATION_ENABLED:true}
+      max-segments: ${AGENT_STEP_BUDGET_MAX_SEGMENTS:5}
+      child-max-segments: ${AGENT_STEP_BUDGET_CHILD_MAX_SEGMENTS:2}
+      max-total-steps: ${AGENT_STEP_BUDGET_MAX_TOTAL_STEPS:150}
+      same-action-max-repeats: ${AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS:2}
+      same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
+      no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
   http:
     stream-limit:
       enabled: ${LOOM_HTTP_STREAM_LIMIT_ENABLED:true}

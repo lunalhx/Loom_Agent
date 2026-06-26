@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.IncompletePlanStopHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.MaxStepContinuationStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.PendingApprovalConsistencyStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.SubAgentGracefulStopHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
@@ -102,7 +103,7 @@ public class AgentFlowFactory {
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry(), contextWindowManager),
                 new ObservationNode(),
-                new ReplanGuardNode(),
+                new ReplanGuardNode(new ProgressGuard(properties)),
                 new ReplanNode(modelGateway, properties, objectMapper, traceRecorder, budgetGuard),
                 new FinalAnswerNode(),
                 new UserInputGateNode(),
@@ -135,6 +136,7 @@ public class AgentFlowFactory {
 
     private AgentHookRegistry hookRegistry() {
         return new AgentHookRegistry(List.of(
+                new MaxStepContinuationStopHook(runtime.properties()),
                 new IncompletePlanStopHook(runtime.properties()),
                 new PendingApprovalConsistencyStopHook(state.approvalStore()),
                 new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper),

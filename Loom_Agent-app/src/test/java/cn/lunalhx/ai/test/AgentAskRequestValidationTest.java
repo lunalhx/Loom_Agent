@@ -46,4 +46,55 @@ public class AgentAskRequestValidationTest {
         Assert.assertEquals(Long.valueOf(1800000L), properties.getTotalTimeoutMs());
         Assert.assertEquals(Long.valueOf(120000L), properties.getStepTimeoutMs());
     }
+
+    @Test
+    public void testMaxSegmentsAllowsTen() {
+        AgentAskRequest request = AgentAskRequest.builder()
+                .question("complex task")
+                .maxSegments(10)
+                .build();
+
+        Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
+
+        Assert.assertTrue(violations.isEmpty());
+    }
+
+    @Test
+    public void testMaxSegmentsRejectsEleven() {
+        AgentAskRequest request = AgentAskRequest.builder()
+                .question("complex task")
+                .maxSegments(11)
+                .build();
+
+        Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
+
+        Assert.assertFalse(violations.isEmpty());
+    }
+
+    @Test
+    public void testMaxSegmentsRejectsZero() {
+        AgentAskRequest request = AgentAskRequest.builder()
+                .question("complex task")
+                .maxSegments(0)
+                .build();
+
+        Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
+
+        Assert.assertFalse(violations.isEmpty());
+    }
+
+    @Test
+    public void testStepBudgetDefaults() {
+        AgentRuntimeProperties properties = new AgentRuntimeProperties();
+        AgentRuntimeProperties.StepBudgetProperties stepBudget = properties.getStepBudget();
+
+        Assert.assertNotNull(stepBudget);
+        Assert.assertTrue(stepBudget.getContinuationEnabled());
+        Assert.assertEquals(Integer.valueOf(5), stepBudget.getMaxSegments());
+        Assert.assertEquals(Integer.valueOf(2), stepBudget.getChildMaxSegments());
+        Assert.assertEquals(Integer.valueOf(150), stepBudget.getMaxTotalSteps());
+        Assert.assertEquals(Integer.valueOf(2), stepBudget.getSameActionMaxRepeats());
+        Assert.assertEquals(Integer.valueOf(2), stepBudget.getSameFailureMaxRepeats());
+        Assert.assertEquals(Integer.valueOf(3), stepBudget.getNoProgressMaxRounds());
+    }
 }

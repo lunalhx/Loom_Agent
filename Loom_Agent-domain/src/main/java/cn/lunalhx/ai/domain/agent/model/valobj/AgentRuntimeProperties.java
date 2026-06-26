@@ -38,6 +38,7 @@ public class AgentRuntimeProperties {
     private ContextProperties context = new ContextProperties();
     private StopHooksProperties stopHooks = new StopHooksProperties();
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
+    private StepBudgetProperties stepBudget = new StepBudgetProperties();
 
     @Data
     public static class BudgetProperties {
@@ -96,6 +97,19 @@ public class AgentRuntimeProperties {
             private Boolean rootOnly = true;
 
         }
+
+    }
+
+    @Data
+    public static class StepBudgetProperties {
+
+        private Boolean continuationEnabled = true;
+        private Integer maxSegments = 5;
+        private Integer childMaxSegments = 2;
+        private Integer maxTotalSteps = 150;
+        private Integer sameActionMaxRepeats = 2;
+        private Integer sameFailureMaxRepeats = 2;
+        private Integer noProgressMaxRounds = 3;
 
     }
 

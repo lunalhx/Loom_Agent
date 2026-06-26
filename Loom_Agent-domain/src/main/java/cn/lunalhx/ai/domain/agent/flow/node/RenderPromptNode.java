@@ -21,14 +21,22 @@ public class RenderPromptNode extends AbstractAgentNode {
     private final ContextWindowManager contextWindowManager;
 
     public RenderPromptNode(ContextWindowManager contextWindowManager) {
-        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps"));
+        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
-        if (context.getStep() >= context.getMaxSteps()) {
-            fail(context, AgentStopReason.MAX_STEPS, "max_steps", "达到最大步骤数，已停止");
+        if (context.getMaxTotalSteps() > 0 && context.getStep() >= context.getMaxTotalSteps()) {
+            fail(context, AgentStopReason.MAX_STEPS, "max_steps_total", "达到全局最大步骤数，已停止");
+            return NodeResult.next(AgentNodeNames.FAIL, List.of());
+        }
+        if (context.getMaxSegments() > 1 && context.getSegmentIndex() >= context.getMaxSegments()) {
+            fail(context, AgentStopReason.MAX_STEPS, "max_segments_exhausted", "所有分段已用完，已停止");
+            return NodeResult.next(AgentNodeNames.FAIL, List.of());
+        }
+        if (context.getMaxSteps() > 0 && context.getStep() - context.getSegmentStartStep() >= context.getMaxSteps()) {
+            fail(context, AgentStopReason.MAX_STEPS, "max_steps_segment", "当前分段步骤数已用完");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
         ContextCompactResult compactResult = contextWindowManager.compactBeforePrompt(context);
@@ -58,6 +66,12 @@ public class RenderPromptNode extends AbstractAgentNode {
         prompt.append("旧 Observation 可能已压缩成 context_artifact 引用；需要完整细节时先调用 context_recall，不要凭摘要臆测。\n");
         prompt.append("写文件、运行测试、Git 暂存/提交可能需要人工确认；如果操作被拒绝或高危拦截，请改用更安全的下一步，不要重复同一个被拦截动作。\n\n");
         prompt.append("用户问题：").append(context.getQuestion()).append("\n\n");
+        if (context.getMaxSegments() > 1) {
+            prompt.append("执行预算：第 ").append(context.getSegmentIndex() + 1).append("/")
+                    .append(context.getMaxSegments()).append(" 段，全局步数 ")
+                    .append(context.getStep() + 1).append("/").append(context.getMaxTotalSteps())
+                    .append("（当前段 ").append(context.getMaxSteps()).append(" 步预算）\n\n");
+        }
         if (context.getPlan() != null) {
             prompt.append("当前计划：\n");
             prompt.append(context.getPlan().render()).append("\n\n");

@@ -170,13 +170,15 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 配置
 
+`maxSteps` 是每个 segment 的工具步预算（默认 30），不再是全局硬停止。当单段步数耗尽但未触发死循环保护时，系统自动保存 checkpoint、进入下一段并重规划后继续。全局硬保险丝为 `maxTotalSteps`、`maxSegments`、`totalTimeoutMs`、进度守卫和预算守卫。
+
 ```properties
 AGENT_ENABLED=true
 AGENT_WORKSPACE_ROOT=.
 AGENT_ALLOWED_WORKSPACE_ROOT=.
-AGENT_MAX_STEPS=6
-AGENT_TOTAL_TIMEOUT_MS=120000
-AGENT_STEP_TIMEOUT_MS=30000
+AGENT_MAX_STEPS=30
+AGENT_TOTAL_TIMEOUT_MS=1800000
+AGENT_STEP_TIMEOUT_MS=120000
 AGENT_TOOL_TIMEOUT_MS=3000
 AGENT_OBSERVATION_MAX_CHARS=8000
 AGENT_PARSE_ERROR_MAX_ATTEMPTS=2
@@ -193,6 +195,13 @@ AGENT_SUB_AGENT_MAX_CONCURRENCY=4
 AGENT_SUB_AGENT_MAX_DEPTH=1
 AGENT_SUB_AGENT_TIMEOUT_MS=60000
 AGENT_SUB_AGENT_SUMMARY_MAX_CHARS=12000
+AGENT_STEP_BUDGET_CONTINUATION_ENABLED=true
+AGENT_STEP_BUDGET_MAX_SEGMENTS=5
+AGENT_STEP_BUDGET_CHILD_MAX_SEGMENTS=2
+AGENT_STEP_BUDGET_MAX_TOTAL_STEPS=150
+AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS=2
+AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS=2
+AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS=3
 AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS=1
 AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES=5
 AGENT_CONTEXT_SAFETY_MARGIN_TOKENS=4096
@@ -201,6 +210,26 @@ AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS=8
 AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS=2048
 ```
 
+### 分步预算（Step Budget）
+
+Agent 执行分为多个 segment，每个 segment 有 `maxSteps` 步预算：
+
+- 单段步数耗尽时触发 `max_steps_segment`，由 `MaxStepContinuationStopHook` 拦截后自动进入下一段
+- 全局步数耗尽（`maxTotalSteps`）时触发 `max_steps_total`，直接终止
+- 所有 segment 用完（`maxSegments`）时触发 `max_segments_exhausted`，直接终止
+- 子 Agent 的 segment 数受 `childMaxSegments` 限制，为 `min(config.maxSegments, childMaxSegments)`
+- 请求可通过 `maxSegments` 参数（1..10）覆盖默认值
+- 可通过 `AGENT_STEP_BUDGET_CONTINUATION_ENABLED=false` 关闭自动续跑，恢复旧行为
+
+### 循环/无进展保护
+
+`ProgressGuard` 在每次 Observation 后评估进展：
+
+- 相同工具 + 相同输入连续超过 `sameActionMaxRepeats` 次，终止为 `NO_PROGRESS/repeated_action`
+- 相同工具 + 相同错误连续超过 `sameFailureMaxRepeats` 次，终止为 `NO_PROGRESS/repeated_failure`
+- `todo_write` 成功、写工具成功、测试命令成功、计划版本变化均重置计数器
+- 普通只读工具成功但 fingerprint 重复不视为新进展
+
 ## 演示
 
 ```bash
@@ -208,7 +237,7 @@ curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
-  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":30,"maxSegments":5,"includeTrace":true}'
 ```
 
 选择白名单下的工作区：
@@ -218,7 +247,7 @@ curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
-  -d '{"message":"帮我分析这个项目","workspace":"Agentic_RAG","maxSteps":6,"includeTrace":true}'
+  -d '{"message":"帮我分析这个项目","workspace":"Agentic_RAG","maxSteps":30,"maxSegments":5,"includeTrace":true}'
 ```
 
 写操作会返回 `approval_required`：

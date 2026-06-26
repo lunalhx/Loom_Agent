@@ -17,6 +17,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.AgentContextFactory;
+import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
@@ -405,8 +407,9 @@ public class AgentLoopContractTest {
         // totalTimeoutMs 设到极小值；gateway 始终返回 action（永不 final），
         // runLoop 在后续迭代命中 isTotalTimeout -> FAIL -> ERROR(agent_timeout) + DONE(TIMEOUT)
         AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        properties.setTotalTimeoutMs(1L);
-        properties.setMaxSteps(20);
+        properties.setTotalTimeoutMs(-1L);
+        properties.setMaxSteps(200);
+        properties.getStepBudget().setMaxTotalSteps(10000);
         AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
                 .modelGateway(completeGateway(new ArrayList<>(),
                         "{\"type\":\"action\",\"thought\":\"循环\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}"))
@@ -415,7 +418,8 @@ public class AgentLoopContractTest {
 
         List<AgentEvent> events = fixture.buildAgentLoop().ask(AgentQuestion.builder()
                         .question("触发总超时")
-                        .maxSteps(20)
+                        .maxSteps(200)
+                        .maxSegments(1)
                         .build())
                 .collectList()
                 .block(TIMEOUT);
@@ -676,6 +680,213 @@ public class AgentLoopContractTest {
         AgentContext restored = snapshot.restore();
 
         assertEquals(2, restored.getStopHookContinuationCount());
+    }
+
+    // ===== 10. Step budget 行为契约 =====
+
+    @Test
+    public void segmentContinuationShouldAutoContinueToReplanAndReachAnswer() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setMaxSteps(2);
+        properties.getStepBudget().setMaxSegments(3);
+        properties.getStepBudget().setMaxTotalSteps(20);
+        properties.getStepBudget().setSameActionMaxRepeats(10);
+        properties.getStepBudget().setSameFailureMaxRepeats(10);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"再搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"final\",\"answer\":\"完成\",\"evidence\":[]}"))
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("segment-continue")
+                        .requestId("segment-continue")
+                        .conversationId("segment-continue")
+                        .question("分段续跑测试")
+                        .maxSteps(2)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+        assertFalse("不应以 ERROR 结束",
+                events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR));
+    }
+
+    @Test
+    public void singleSegmentShouldStopWithMaxStepsError() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setMaxSteps(3);
+        properties.getStepBudget().setMaxSegments(1);
+        properties.getStepBudget().setMaxTotalSteps(10);
+        properties.getStepBudget().setSameActionMaxRepeats(10);
+        properties.getStepBudget().setSameFailureMaxRepeats(10);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"再搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"action\",\"thought\":\"三搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}"))
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("single-segment")
+                        .requestId("single-segment")
+                        .conversationId("single-segment")
+                        .question("单段测试")
+                        .maxSteps(3)
+                        .maxSegments(1)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR));
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
+                && e.getStopReason() == AgentStopReason.MAX_STEPS));
+    }
+
+    @Test
+    public void maxTotalStepsShouldTerminateBeforeSegmentExhaustion() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setMaxSteps(10);
+        properties.getStepBudget().setMaxSegments(5);
+        properties.getStepBudget().setMaxTotalSteps(3);
+        properties.getStepBudget().setSameActionMaxRepeats(10);
+        properties.getStepBudget().setSameFailureMaxRepeats(10);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
+                        "{\"type\":\"action\",\"thought\":\"再搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
+                        "{\"type\":\"action\",\"thought\":\"三搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
+                        "{\"type\":\"action\",\"thought\":\"四搜\",\"tool\":\"code_search\",\"input\":{\"query\":\"d\"}}"))
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("total-steps")
+                        .requestId("total-steps")
+                        .conversationId("total-steps")
+                        .question("全局步数测试")
+                        .maxSteps(10)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR
+                && "max_steps_total".equals(e.getCode())));
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
+                && e.getStopReason() == AgentStopReason.MAX_STEPS));
+    }
+
+    @Test
+    public void repeatedActionShouldTriggerNoProgress() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setMaxSteps(10);
+        properties.getStepBudget().setMaxSegments(5);
+        properties.getStepBudget().setMaxTotalSteps(100);
+        properties.getStepBudget().setSameActionMaxRepeats(2);
+        properties.getStepBudget().setSameFailureMaxRepeats(10);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}",
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}",
+                        "{\"type\":\"action\",\"thought\":\"搜索\",\"tool\":\"code_search\",\"input\":{\"query\":\"x\"}}"))
+                .tools(List.of(fakeTool("code_search", "ok")))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("no-progress")
+                        .requestId("no-progress")
+                        .conversationId("no-progress")
+                        .question("重复动作测试")
+                        .maxSteps(10)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR
+                && "repeated_action".equals(e.getCode())));
+        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
+                && e.getStopReason() == AgentStopReason.NO_PROGRESS));
+    }
+
+    @Test
+    public void segmentFieldsShouldSurviveSnapshotRoundTrip() {
+        AgentContext context = new AgentContext();
+        context.setRunId("snapshot-segment");
+        context.setSegmentIndex(2);
+        context.setSegmentStartStep(10);
+        context.setMaxSegments(5);
+        context.setMaxTotalSteps(150);
+        context.setLastActionFingerprint("abc123");
+        context.setSameActionRepeats(1);
+        context.setLastFailureFingerprint("def456");
+        context.setSameFailureRepeats(0);
+        context.setNoProgressRounds(2);
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
+        AgentContext restored = snapshot.restore();
+
+        assertEquals(2, restored.getSegmentIndex());
+        assertEquals(10, restored.getSegmentStartStep());
+        assertEquals(5, restored.getMaxSegments());
+        assertEquals(150, restored.getMaxTotalSteps());
+        assertEquals("abc123", restored.getLastActionFingerprint());
+        assertEquals(1, restored.getSameActionRepeats());
+        assertEquals("def456", restored.getLastFailureFingerprint());
+        assertEquals(0, restored.getSameFailureRepeats());
+        assertEquals(2, restored.getNoProgressRounds());
+    }
+
+    @Test
+    public void childAgentShouldHaveLimitedSegments() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getStepBudget().setMaxSegments(5);
+        properties.getStepBudget().setChildMaxSegments(2);
+
+        AgentContext context = new AgentContext();
+        context.setRunId("child-run");
+        context.setParentRunId("parent-run");
+        context.setRootRunId("parent-run");
+        context.setAgentRole(cn.lunalhx.ai.domain.agent.model.valobj.AgentRole.EXPLORER);
+        context.setAgentDepth(1);
+
+        AgentQuestion question = AgentQuestion.builder()
+                .runId("child-run")
+                .parentRunId("parent-run")
+                .rootRunId("parent-run")
+                .agentRole(cn.lunalhx.ai.domain.agent.model.valobj.AgentRole.EXPLORER)
+                .agentDepth(1)
+                .question("子 agent 任务")
+                .maxSteps(6)
+                .build();
+
+        AgentContextFactory factory = new AgentContextFactory(
+                properties,
+                new AgentWorkspaceResolver(properties),
+                List.of(),
+                false);
+        AgentContext created = factory.create(question);
+
+        assertEquals("子 Agent maxSegments 应为 min(5,2)", 2, created.getMaxSegments());
     }
 
     // ===== 辅助 =====

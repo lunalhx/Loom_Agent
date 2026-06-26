@@ -76,6 +76,15 @@ public class AgentContext {
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
     private int stopHookContinuationCount;
+    private int segmentIndex;
+    private int segmentStartStep;
+    private int maxSegments;
+    private int maxTotalSteps;
+    private String lastActionFingerprint;
+    private int sameActionRepeats;
+    private String lastFailureFingerprint;
+    private int sameFailureRepeats;
+    private int noProgressRounds;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;
