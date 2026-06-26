@@ -63,6 +63,8 @@ public class AgentContextSnapshot {
     private Long checkpointVersion;
     private Boolean unsafeResumeRequired;
     private String pendingApprovalId;
+    private Boolean approvalExpired;
+    private String expiredApprovalId;
     private Boolean subAgentSpawnAllowed;
     private String traceId;
     private String currentSpanId;
@@ -119,6 +121,8 @@ public class AgentContextSnapshot {
                 .checkpointVersion(context.getCheckpointVersion())
                 .unsafeResumeRequired(context.isUnsafeResumeRequired())
                 .pendingApprovalId(context.getPendingApprovalId())
+                .approvalExpired(context.isApprovalExpired())
+                .expiredApprovalId(context.getExpiredApprovalId())
                 .subAgentSpawnAllowed(context.isSubAgentSpawnAllowed())
                 .traceId(context.getTraceId())
                 .currentSpanId(context.getCurrentSpanId())
@@ -190,6 +194,8 @@ public class AgentContextSnapshot {
         context.setCheckpointVersion(checkpointVersion);
         context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
         context.setPendingApprovalId(pendingApprovalId);
+        context.setApprovalExpired(Boolean.TRUE.equals(approvalExpired));
+        context.setExpiredApprovalId(expiredApprovalId);
         context.setSubAgentSpawnAllowed(Boolean.TRUE.equals(subAgentSpawnAllowed));
         context.setTraceId(traceId);
         context.setCurrentSpanId(currentSpanId);

@@ -87,6 +87,17 @@ public final class AgentResumeCoordinator {
                 events.add(eventFactory.approvalRequired(context, approval));
                 return AgentResumePlan.complete(events);
             }
+            String expiredId = context.getPendingApprovalId();
+            context.setPendingApprovalId(null);
+            context.setApprovalExpired(true);
+            context.setExpiredApprovalId(expiredId);
+            context.setStep(context.getStep() + 1);
+            context.setToolResult(ToolResult.failure(
+                    "policy_denied",
+                    "审批已过期或不可用，写操作未执行",
+                    0L));
+            context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
+            return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
         }
 
         if (AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())

@@ -591,7 +591,11 @@ public class DefaultAgentLoopServiceTest {
 
         assertEquals(0, calls.get());
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.RESUME_STARTED));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation() != null
+                && event.getObservation().contains("policy_denied")));
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.REPLAN_STARTED));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.TOOL_CALL));
         assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED));
     }
 
@@ -1246,6 +1250,34 @@ public class DefaultAgentLoopServiceTest {
         assertEquals(ContextRecoveryStage.FALLBACK_MODEL_SELECTED, restored.getContextRecoveryStage());
         assertEquals("deepseek-v4-pro", restored.getRecoveryModelOverride());
         assertEquals("ctx-transcript", restored.getContextTranscriptArtifactId());
+    }
+
+    @Test
+    public void checkpointShouldRestoreApprovalExpiredState() {
+        AgentContext context = contextForRoot("approval-expired-checkpoint");
+        context.setPendingApprovalId("pending-1");
+        context.setApprovalExpired(true);
+        context.setExpiredApprovalId("pending-1");
+
+        AgentContext restored = AgentContextSnapshot.from(context).restore();
+
+        assertTrue(restored.isApprovalExpired());
+        assertEquals("pending-1", restored.getExpiredApprovalId());
+        assertEquals("pending-1", restored.getPendingApprovalId());
+    }
+
+    @Test
+    public void checkpointShouldRestoreApprovalNotExpiredState() {
+        AgentContext context = contextForRoot("approval-active-checkpoint");
+        context.setPendingApprovalId("pending-2");
+        context.setApprovalExpired(false);
+        context.setExpiredApprovalId(null);
+
+        AgentContext restored = AgentContextSnapshot.from(context).restore();
+
+        assertFalse(restored.isApprovalExpired());
+        assertNull(restored.getExpiredApprovalId());
+        assertEquals("pending-2", restored.getPendingApprovalId());
     }
 
     private DefaultAgentLoopService newService(ModelGateway modelGateway, List<AgentTool> tools) {
