@@ -3,6 +3,8 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -11,10 +13,23 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 public class InMemoryAgentRunRepository implements AgentRunRepository {
 
-    private final ConcurrentMap<String, AgentRun> runs = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AgentRun> runs;
+
+    public InMemoryAgentRunRepository() {
+        this.runs = new ConcurrentHashMap<>();
+    }
+
+    public InMemoryAgentRunRepository(MemoryStoreProperties props) {
+        this.runs = CacheBuilder.newBuilder()
+                .maximumSize(props.getMaxRuns())
+                .expireAfterAccess(props.getTtlSeconds(), TimeUnit.SECONDS)
+                .<String, AgentRun>build()
+                .asMap();
+    }
 
     @Override
     public AgentRun save(AgentRun run) {

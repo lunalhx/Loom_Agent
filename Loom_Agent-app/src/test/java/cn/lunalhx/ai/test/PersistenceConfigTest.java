@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
@@ -37,6 +38,7 @@ public class PersistenceConfigTest {
     private final AiRuntimeConfig config = new AiRuntimeConfig();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgentRuntimeProperties runtimeProperties = new AgentRuntimeProperties();
+    private final MemoryStoreProperties memProps = new MemoryStoreProperties();
 
     // ---- mode=auto, DAOs available ----
 
@@ -44,11 +46,11 @@ public class PersistenceConfigTest {
     public void autoModeWithDaosReturnsMybatisBeans() {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
 
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()));
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper);
-        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()));
+        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
+        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
+        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper, memProps);
+        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper, memProps);
+        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()), memProps);
 
         assertTrue("AgentRunRepository should be MyBatis", runRepo instanceof MybatisAgentRunRepository);
         assertTrue("AgentCheckpointRepository should be MyBatis", checkpointRepo instanceof MybatisAgentCheckpointRepository);
@@ -63,11 +65,11 @@ public class PersistenceConfigTest {
     public void autoModeWithoutDaosReturnsInMemoryBeans() {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
 
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, emptyProvider());
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper);
-        ApprovalStore approvalStore = config.approvalStore(persistence, emptyProvider(), objectMapper);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, emptyProvider(), objectMapper);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, emptyProvider());
+        AgentRunRepository runRepo = config.agentRunRepository(persistence, emptyProvider(), memProps);
+        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper, memProps);
+        ApprovalStore approvalStore = config.approvalStore(persistence, emptyProvider(), objectMapper, memProps);
+        TraceRecorder traceRecorder = config.traceRecorder(persistence, emptyProvider(), objectMapper, memProps);
+        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, emptyProvider(), memProps);
 
         assertTrue(runRepo instanceof InMemoryAgentRunRepository);
         assertTrue(checkpointRepo instanceof InMemoryAgentCheckpointRepository);
@@ -82,11 +84,11 @@ public class PersistenceConfigTest {
     public void memoryModeForcesInMemoryEvenWithDaos() {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY, false);
 
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()));
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper);
-        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()));
+        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
+        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
+        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper, memProps);
+        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper, memProps);
+        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()), memProps);
 
         assertTrue(runRepo instanceof InMemoryAgentRunRepository);
         assertTrue(checkpointRepo instanceof InMemoryAgentCheckpointRepository);
@@ -101,11 +103,11 @@ public class PersistenceConfigTest {
     public void mysqlModeWithAllDaosReturnsMybatisBeans() {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
 
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()));
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper);
-        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()));
+        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
+        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
+        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper, memProps);
+        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper, memProps);
+        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()), memProps);
 
         assertTrue(runRepo instanceof MybatisAgentRunRepository);
         assertTrue(checkpointRepo instanceof MybatisAgentCheckpointRepository);
@@ -121,7 +123,7 @@ public class PersistenceConfigTest {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
 
         try {
-            config.agentRunRepository(persistence, emptyProvider());
+            config.agentRunRepository(persistence, emptyProvider(), memProps);
             fail("Should have thrown");
         } catch (IllegalStateException e) {
             assertTrue(e.getMessage().contains("AgentRunDao"));
@@ -133,7 +135,7 @@ public class PersistenceConfigTest {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
 
         try {
-            config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper);
+            config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper, memProps);
             fail("Should have thrown");
         } catch (IllegalStateException e) {
             assertTrue(e.getMessage().contains("AgentRunCheckpointDao"));
@@ -148,7 +150,7 @@ public class PersistenceConfigTest {
         AgentRuntimeProperties props = new AgentRuntimeProperties();
         props.getContext().setStorageRoot("/tmp/test-artifacts");
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider());
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider(), memProps);
         assertTrue(blobStore instanceof LocalFileContextBlobStore);
     }
 
@@ -159,7 +161,7 @@ public class PersistenceConfigTest {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY, false);
         AgentRuntimeProperties props = new AgentRuntimeProperties();
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()));
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()), memProps);
         assertTrue(blobStore instanceof InMemoryContextBlobStore);
     }
 
@@ -171,7 +173,7 @@ public class PersistenceConfigTest {
         AgentRuntimeProperties props = new AgentRuntimeProperties();
         props.getContext().setStorageRoot("/tmp/test-artifacts");
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()));
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()), memProps);
         assertTrue(blobStore instanceof LocalFileContextBlobStore);
     }
 
@@ -182,7 +184,7 @@ public class PersistenceConfigTest {
         PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
         AgentRuntimeProperties props = new AgentRuntimeProperties();
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider());
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider(), memProps);
         assertTrue(blobStore instanceof InMemoryContextBlobStore);
     }
 

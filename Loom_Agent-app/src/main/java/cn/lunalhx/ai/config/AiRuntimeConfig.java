@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
@@ -25,6 +26,7 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepositor
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
+import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
@@ -88,6 +90,12 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    @ConfigurationProperties(prefix = "loom.agent.memory-store")
+    public MemoryStoreProperties memoryStoreProperties() {
+        return new MemoryStoreProperties();
+    }
+
+    @Bean
     public OutputFormatValidator outputFormatValidator(ObjectMapper objectMapper) {
         return new OutputFormatValidator(objectMapper);
     }
@@ -104,12 +112,13 @@ public class AiRuntimeConfig {
 
     @Bean
     public AgentRunRepository agentRunRepository(PersistenceProperties persistence,
-                                                  ObjectProvider<AgentRunDao> daoProvider) {
+                                                  ObjectProvider<AgentRunDao> daoProvider,
+                                                  MemoryStoreProperties memoryStoreProperties) {
         AgentRunDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("AgentRunRepository: InMemory (mode=memory)");
-                yield new InMemoryAgentRunRepository();
+                yield new InMemoryAgentRunRepository(memoryStoreProperties);
             }
             case MYSQL -> {
                 if (dao == null) {
@@ -125,7 +134,7 @@ public class AiRuntimeConfig {
                     yield new MybatisAgentRunRepository(dao);
                 }
                 log.info("AgentRunRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryAgentRunRepository();
+                yield new InMemoryAgentRunRepository(memoryStoreProperties);
             }
         };
     }
@@ -133,12 +142,13 @@ public class AiRuntimeConfig {
     @Bean
     public AgentCheckpointRepository agentCheckpointRepository(PersistenceProperties persistence,
                                                                 ObjectProvider<AgentRunCheckpointDao> daoProvider,
-                                                                ObjectMapper objectMapper) {
+                                                                ObjectMapper objectMapper,
+                                                                MemoryStoreProperties memoryStoreProperties) {
         AgentRunCheckpointDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("AgentCheckpointRepository: InMemory (mode=memory)");
-                yield new InMemoryAgentCheckpointRepository();
+                yield new InMemoryAgentCheckpointRepository(memoryStoreProperties);
             }
             case MYSQL -> {
                 if (dao == null) {
@@ -154,7 +164,7 @@ public class AiRuntimeConfig {
                     yield new MybatisAgentCheckpointRepository(dao, objectMapper);
                 }
                 log.info("AgentCheckpointRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryAgentCheckpointRepository();
+                yield new InMemoryAgentCheckpointRepository(memoryStoreProperties);
             }
         };
     }
@@ -162,12 +172,13 @@ public class AiRuntimeConfig {
     @Bean
     public ApprovalStore approvalStore(PersistenceProperties persistence,
                                         ObjectProvider<AgentPendingApprovalDao> daoProvider,
-                                        ObjectMapper objectMapper) {
+                                        ObjectMapper objectMapper,
+                                        MemoryStoreProperties memoryStoreProperties) {
         AgentPendingApprovalDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("ApprovalStore: InMemory (mode=memory)");
-                yield new InMemoryApprovalStore();
+                yield new InMemoryApprovalStore(memoryStoreProperties);
             }
             case MYSQL -> {
                 if (dao == null) {
@@ -183,7 +194,7 @@ public class AiRuntimeConfig {
                     yield new MybatisApprovalStore(dao, objectMapper);
                 }
                 log.info("ApprovalStore: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryApprovalStore();
+                yield new InMemoryApprovalStore(memoryStoreProperties);
             }
         };
     }
@@ -191,12 +202,13 @@ public class AiRuntimeConfig {
     @Bean
     public TraceRecorder traceRecorder(PersistenceProperties persistence,
                                         ObjectProvider<AgentTraceEventDao> daoProvider,
-                                        ObjectMapper objectMapper) {
+                                        ObjectMapper objectMapper,
+                                        MemoryStoreProperties memoryStoreProperties) {
         AgentTraceEventDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("TraceRecorder: InMemory (mode=memory)");
-                yield new InMemoryTraceRecorder();
+                yield new InMemoryTraceRecorder(memoryStoreProperties);
             }
             case MYSQL -> {
                 if (dao == null) {
@@ -212,19 +224,20 @@ public class AiRuntimeConfig {
                     yield new MybatisTraceRecorder(dao, objectMapper);
                 }
                 log.info("TraceRecorder: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryTraceRecorder();
+                yield new InMemoryTraceRecorder(memoryStoreProperties);
             }
         };
     }
 
     @Bean
     public ContextArtifactRepository contextArtifactRepository(PersistenceProperties persistence,
-                                                                ObjectProvider<AgentContextArtifactDao> daoProvider) {
+                                                                ObjectProvider<AgentContextArtifactDao> daoProvider,
+                                                                MemoryStoreProperties memoryStoreProperties) {
         AgentContextArtifactDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("ContextArtifactRepository: InMemory (mode=memory)");
-                yield new InMemoryContextArtifactRepository();
+                yield new InMemoryContextArtifactRepository(memoryStoreProperties);
             }
             case MYSQL -> {
                 if (dao == null) {
@@ -240,7 +253,7 @@ public class AiRuntimeConfig {
                     yield new MybatisContextArtifactRepository(dao);
                 }
                 log.info("ContextArtifactRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryContextArtifactRepository();
+                yield new InMemoryContextArtifactRepository(memoryStoreProperties);
             }
         };
     }
@@ -248,11 +261,12 @@ public class AiRuntimeConfig {
     @Bean
     public ContextBlobStore contextBlobStore(PersistenceProperties persistence,
                                               AgentRuntimeProperties agentRuntimeProperties,
-                                              ObjectProvider<AgentContextArtifactDao> artifactDaoProvider) {
+                                              ObjectProvider<AgentContextArtifactDao> artifactDaoProvider,
+                                              MemoryStoreProperties memoryStoreProperties) {
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("ContextBlobStore: InMemory (mode=memory)");
-                yield new InMemoryContextBlobStore();
+                yield new InMemoryContextBlobStore(memoryStoreProperties);
             }
             case MYSQL -> {
                 log.info("ContextBlobStore: LocalFile (mode=mysql)");
@@ -265,7 +279,7 @@ public class AiRuntimeConfig {
                     yield new LocalFileContextBlobStore(agentRuntimeProperties.getContext().getStorageRoot());
                 }
                 log.info("ContextBlobStore: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryContextBlobStore();
+                yield new InMemoryContextBlobStore(memoryStoreProperties);
             }
         };
     }
@@ -355,8 +369,9 @@ public class AiRuntimeConfig {
 
     @Bean
     public BudgetGuard budgetGuard(AgentRuntimeProperties agentRuntimeProperties,
-                                   ModelRuntimeProperties modelRuntimeProperties) {
-        return new DefaultBudgetGuard(agentRuntimeProperties, modelRuntimeProperties);
+                                   ModelRuntimeProperties modelRuntimeProperties,
+                                   MemoryStoreProperties memoryStoreProperties) {
+        return new DefaultBudgetGuard(agentRuntimeProperties, modelRuntimeProperties, memoryStoreProperties);
     }
 
     @Bean
@@ -425,9 +440,11 @@ public class AiRuntimeConfig {
                                                    AgentLoopFactory agentLoopFactory,
                                                    AgentRuntimeProperties agentRuntimeProperties,
                                                    ObjectMapper objectMapper,
-                                                   ThreadPoolExecutor threadPoolExecutor) {
+                                                   ThreadPoolExecutor threadPoolExecutor,
+                                                   MemoryStoreProperties memoryStoreProperties) {
+        InMemorySubAgentControlInbox inbox = new InMemorySubAgentControlInbox(memoryStoreProperties);
         return new SubAgentCoordinator(roleToolRegistryFactory, agentLoopFactory,
-                agentRuntimeProperties, objectMapper, threadPoolExecutor);
+                agentRuntimeProperties, objectMapper, threadPoolExecutor, inbox);
     }
 
     @Bean

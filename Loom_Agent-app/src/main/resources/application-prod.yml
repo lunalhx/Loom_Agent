@@ -133,8 +133,21 @@ loom:
       deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
       deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
     persistence:
-      mode: ${AGENT_PERSISTENCE_MODE:auto}
+      mode: ${AGENT_PERSISTENCE_MODE:mysql}
       required: ${AGENT_PERSISTENCE_REQUIRED:true}
+    memory-store:
+      ttl-seconds: ${AGENT_MEMORY_STORE_TTL_SECONDS:3600}
+      max-runs: ${AGENT_MEMORY_STORE_MAX_RUNS:1000}
+      max-approvals: ${AGENT_MEMORY_STORE_MAX_APPROVALS:1000}
+      max-trace-runs: ${AGENT_MEMORY_STORE_MAX_TRACE_RUNS:1000}
+      max-trace-events-per-run: ${AGENT_MEMORY_STORE_MAX_TRACE_EVENTS_PER_RUN:1000}
+      max-checkpoint-runs: ${AGENT_MEMORY_STORE_MAX_CHECKPOINT_RUNS:1000}
+      max-checkpoints-per-run: ${AGENT_MEMORY_STORE_MAX_CHECKPOINTS_PER_RUN:5}
+      max-context-artifacts: ${AGENT_MEMORY_STORE_MAX_CONTEXT_ARTIFACTS:2000}
+      max-context-blobs: ${AGENT_MEMORY_STORE_MAX_CONTEXT_BLOBS:2000}
+      max-budget-states: ${AGENT_MEMORY_STORE_MAX_BUDGET_STATES:1000}
+      max-sub-agent-inboxes: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_INBOXES:1000}
+      max-sub-agent-messages-per-run: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_MESSAGES_PER_RUN:10}
     model-recovery:
       escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:64000}
       continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}

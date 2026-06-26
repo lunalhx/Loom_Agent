@@ -4,7 +4,9 @@ import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
+import com.google.common.cache.CacheBuilder;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelPricing;
@@ -15,20 +17,36 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 public class DefaultBudgetGuard implements BudgetGuard {
 
     private final AgentRuntimeProperties properties;
     private final ModelRuntimeProperties modelProperties;
-    private final ConcurrentMap<String, BudgetState> states = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, BudgetState> states;
 
     public DefaultBudgetGuard(AgentRuntimeProperties properties) {
         this(properties, null);
     }
 
     public DefaultBudgetGuard(AgentRuntimeProperties properties, ModelRuntimeProperties modelProperties) {
+        this(properties, modelProperties, null);
+    }
+
+    public DefaultBudgetGuard(AgentRuntimeProperties properties,
+                               ModelRuntimeProperties modelProperties,
+                               MemoryStoreProperties memProps) {
         this.properties = properties;
         this.modelProperties = modelProperties;
+        if (memProps != null) {
+            this.states = CacheBuilder.newBuilder()
+                    .maximumSize(memProps.getMaxBudgetStates())
+                    .expireAfterAccess(memProps.getTtlSeconds(), TimeUnit.SECONDS)
+                    .<String, BudgetState>build()
+                    .asMap();
+        } else {
+            this.states = new ConcurrentHashMap<>();
+        }
     }
 
     @Override

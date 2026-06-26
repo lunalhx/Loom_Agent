@@ -4,8 +4,10 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
+import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -16,10 +18,26 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 public class InMemoryTraceRecorder implements TraceRecorder {
 
-    private final ConcurrentMap<String, CopyOnWriteArrayList<AgentTraceEvent>> events = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CopyOnWriteArrayList<AgentTraceEvent>> events;
+    private final int maxEventsPerRun;
+
+    public InMemoryTraceRecorder() {
+        this.events = new ConcurrentHashMap<>();
+        this.maxEventsPerRun = Integer.MAX_VALUE;
+    }
+
+    public InMemoryTraceRecorder(MemoryStoreProperties props) {
+        this.events = CacheBuilder.newBuilder()
+                .maximumSize(props.getMaxTraceRuns())
+                .expireAfterAccess(props.getTtlSeconds(), TimeUnit.SECONDS)
+                .<String, CopyOnWriteArrayList<AgentTraceEvent>>build()
+                .asMap();
+        this.maxEventsPerRun = props.getMaxTraceEventsPerRun();
+    }
 
     @Override
     public String recordNodeStart(AgentContext context, AgentNode node, String parentSpanId) {
@@ -179,13 +197,12 @@ public class InMemoryTraceRecorder implements TraceRecorder {
         event.setRunId(runId);
         event.setParentRunId(context.getParentRunId());
         event.setCreatedAt(Instant.now());
-        events.compute(runId, (key, list) -> {
-            if (list == null) {
-                list = new CopyOnWriteArrayList<>();
-            }
-            list.add(event);
-            return list;
-        });
+        CopyOnWriteArrayList<AgentTraceEvent> list = events.computeIfAbsent(runId,
+                k -> new CopyOnWriteArrayList<>());
+        while (list.size() >= maxEventsPerRun) {
+            list.remove(0);
+        }
+        list.add(event);
     }
 
     private String errorCode(Throwable error) {

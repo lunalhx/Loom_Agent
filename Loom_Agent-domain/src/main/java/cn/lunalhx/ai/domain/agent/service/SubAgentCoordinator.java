@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.service;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentDispatchResult;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentResult;
@@ -21,10 +22,23 @@ public class SubAgentCoordinator {
                                AgentRuntimeProperties properties,
                                ObjectMapper objectMapper,
                                Executor executor) {
+        this(toolRegistryFactory, agentLoopFactory, properties, objectMapper, executor, null);
+    }
+
+    public SubAgentCoordinator(RoleToolRegistryFactory toolRegistryFactory,
+                               AgentLoopFactory agentLoopFactory,
+                               AgentRuntimeProperties properties,
+                               ObjectMapper objectMapper,
+                               Executor executor,
+                               SubAgentControlInbox controlInbox) {
         SubAgentResultFactory resultFactory = new SubAgentResultFactory();
         ChildAgentServiceFactory serviceFactory = new AgentLoopFactoryChildServiceFactory(agentLoopFactory);
         this.planner = new SubAgentDispatchPlanner(properties, new SubAgentDecisionParser());
-        this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties);
+        if (controlInbox != null) {
+            this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties, controlInbox);
+        } else {
+            this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties);
+        }
         this.aggregator = new SubAgentResultAggregator(properties, objectMapper);
         this.runner = new ChildAgentRunner(toolRegistryFactory, serviceFactory, properties, resultFactory, objectMapper);
         agentLoopFactory.setSubAgentControlInbox(scheduler.inbox());

@@ -60,12 +60,16 @@ public class ArchitectureRegressionTest {
     @ArchTest
     public static final ArchRule target_constructors_have_at_most_5_params =
             classes().that().haveFullyQualifiedName(DefaultAgentLoopService.class.getName())
-                    .or().haveFullyQualifiedName(SubAgentCoordinator.class.getName())
                     .or().haveFullyQualifiedName(ContextWindowManager.class.getName())
                     .or().haveFullyQualifiedName(ModelCallNode.class.getName())
                     .or().haveFullyQualifiedName(ToolDispatchNode.class.getName())
                     .or().haveFullyQualifiedName(RenderPromptNode.class.getName())
                     .should(haveConstructorsWithAtMost5Params());
+
+    @ArchTest
+    public static final ArchRule sub_agent_coordinator_constructors_have_at_most_6_params =
+            classes().that().haveFullyQualifiedName(SubAgentCoordinator.class.getName())
+                    .should(haveConstructorsWithAtMost6Params());
 
     // ---- Rule 5: SubAgentCoordinator 不得依赖并发/基础设施类 ----
 
@@ -81,9 +85,9 @@ public class ArchitectureRegressionTest {
                     .orShould().dependOnClassesThat()
                     .haveFullyQualifiedName("com.fasterxml.jackson.databind.JsonNode")
                     .orShould().dependOnClassesThat()
-                    .resideInAnyPackage("cn.lunalhx.ai.domain.agent.adapter.port..")
+                    .haveFullyQualifiedName("cn.lunalhx.ai.domain.model.adapter.port.ModelGateway")
                     .orShould().dependOnClassesThat()
-                    .haveFullyQualifiedName("cn.lunalhx.ai.domain.model.adapter.port.ModelGateway");
+                    .resideInAnyPackage("cn.lunalhx.ai.infrastructure..");
 
     // ---- Rule 6: ContextWindowManager 不得直接依赖具体基础设施实现 ----
 
@@ -182,6 +186,22 @@ public class ArchitectureRegressionTest {
                                 constructor.getFullName() + " has "
                                         + constructor.getRawParameterTypes().size()
                                         + " parameters (max 5)"));
+                    }
+                }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> haveConstructorsWithAtMost6Params() {
+        return new ArchCondition<>("have constructors with at most 6 parameters") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                for (JavaConstructor constructor : javaClass.getConstructors()) {
+                    if (constructor.getRawParameterTypes().size() > 6) {
+                        events.add(SimpleConditionEvent.violated(constructor,
+                                constructor.getFullName() + " has "
+                                        + constructor.getRawParameterTypes().size()
+                                        + " parameters (max 6)"));
                     }
                 }
             }

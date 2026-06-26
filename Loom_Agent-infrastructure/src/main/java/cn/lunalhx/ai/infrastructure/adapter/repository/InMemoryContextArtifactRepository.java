@@ -2,6 +2,8 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -10,10 +12,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 public class InMemoryContextArtifactRepository implements ContextArtifactRepository {
 
-    private final Map<String, ContextArtifact> artifacts = new ConcurrentHashMap<>();
+    private final Map<String, ContextArtifact> artifacts;
+
+    public InMemoryContextArtifactRepository() {
+        this.artifacts = new ConcurrentHashMap<>();
+    }
+
+    public InMemoryContextArtifactRepository(MemoryStoreProperties props) {
+        this.artifacts = CacheBuilder.newBuilder()
+                .maximumSize(props.getMaxContextArtifacts())
+                .expireAfterAccess(props.getTtlSeconds(), TimeUnit.SECONDS)
+                .<String, ContextArtifact>build()
+                .asMap();
+    }
 
     @Override
     public ContextArtifact save(ContextArtifact artifact) {

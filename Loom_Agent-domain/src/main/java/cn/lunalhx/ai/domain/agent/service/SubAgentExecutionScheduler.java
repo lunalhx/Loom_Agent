@@ -29,10 +29,21 @@ class SubAgentExecutionScheduler {
     SubAgentExecutionScheduler(Executor executor,
                                SubAgentResultFactory resultFactory,
                                AgentRuntimeProperties properties) {
+        this(executor, resultFactory, properties, defaultInbox());
+    }
+
+    SubAgentExecutionScheduler(Executor executor,
+                               SubAgentResultFactory resultFactory,
+                               AgentRuntimeProperties properties,
+                               SubAgentControlInbox inbox) {
         this.executor = executor;
         this.resultFactory = resultFactory;
         this.properties = properties;
-        this.inbox = new SubAgentControlInbox() {
+        this.inbox = inbox;
+    }
+
+    private static SubAgentControlInbox defaultInbox() {
+        return new SubAgentControlInbox() {
             private final java.util.concurrent.ConcurrentHashMap<String, java.util.List<SubAgentControlMessage>> store =
                     new java.util.concurrent.ConcurrentHashMap<>();
 
