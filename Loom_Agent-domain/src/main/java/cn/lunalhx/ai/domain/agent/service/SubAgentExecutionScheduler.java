@@ -38,15 +38,19 @@ class SubAgentExecutionScheduler {
 
             @Override
             public void send(String childRunId, SubAgentControlMessage message) {
-                store.computeIfAbsent(childRunId, k -> new java.util.ArrayList<>()).add(message);
+                if (childRunId == null || childRunId.isBlank() || message == null) {
+                    return;
+                }
+                store.computeIfAbsent(childRunId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(message);
             }
 
             @Override
             public java.util.List<SubAgentControlMessage> poll(String childRunId) {
                 java.util.List<SubAgentControlMessage> messages = store.getOrDefault(childRunId, java.util.List.of());
+                long now = System.currentTimeMillis();
                 java.util.List<SubAgentControlMessage> active = new java.util.ArrayList<>();
                 for (SubAgentControlMessage m : messages) {
-                    if (m.getDeadlineMs() > System.currentTimeMillis()) {
+                    if (m.getDeadlineMs() > now) {
                         active.add(m);
                     }
                 }
@@ -74,7 +78,7 @@ class SubAgentExecutionScheduler {
             CompletableFuture<SubAgentResult> future = CompletableFuture.supplyAsync(
                     () -> runWithPermit(parent, task, ordinal, childRunId, semaphore, runner), executor);
             handles.add(new SubAgentRunHandle(task, ordinal, childRunId, future,
-                    System.currentTimeMillis(), "RUNNING"));
+                    System.currentTimeMillis()));
         }
 
         CompletableFuture<Void> all = CompletableFuture.allOf(
@@ -106,32 +110,26 @@ class SubAgentExecutionScheduler {
 
         for (SubAgentRunHandle handle : handles) {
             if (!handle.future().isDone()) {
-                if (inbox != null) {
-                    inbox.send(handle.childRunId(), SubAgentControlMessage.builder()
-                            .type(SubAgentControlMessageType.GRACEFUL_STOP_REQUESTED)
-                            .childRunId(handle.childRunId())
-                            .deadlineMs(deadline)
-                            .reason("sub_agent_timeout_recovery")
-                            .build());
-                }
+                inbox.send(handle.childRunId(), SubAgentControlMessage.builder()
+                        .type(SubAgentControlMessageType.GRACEFUL_STOP_REQUESTED)
+                        .childRunId(handle.childRunId())
+                        .deadlineMs(deadline)
+                        .reason("sub_agent_timeout_recovery")
+                        .build());
             }
         }
 
         long pollInterval = positive(properties.getSubAgentRecoveryPollIntervalMs(), 1000L);
-        for (SubAgentRunHandle handle : handles) {
-            if (handle.future().isDone()) {
-                continue;
+        while (System.currentTimeMillis() < deadline) {
+            boolean allDone = handles.stream().allMatch(h -> h.future().isDone());
+            if (allDone) {
+                break;
             }
-            long waitUntil = Math.min(deadline, System.currentTimeMillis() + pollInterval);
-            while (System.currentTimeMillis() < waitUntil) {
-                if (handle.future().isDone()) {
-                    break;
-                }
+            long remaining = deadline - System.currentTimeMillis();
+            long sleepMs = Math.min(pollInterval, remaining);
+            if (sleepMs > 0) {
                 try {
-                    long remaining = waitUntil - System.currentTimeMillis();
-                    if (remaining > 0) {
-                        Thread.sleep(Math.min(100L, remaining));
-                    }
+                    Thread.sleep(sleepMs);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -145,9 +143,7 @@ class SubAgentExecutionScheduler {
             }
         }
 
-        if (inbox != null) {
-            handles.forEach(h -> inbox.clear(h.childRunId()));
-        }
+        handles.forEach(h -> inbox.clear(h.childRunId()));
 
         return collectResults(handles, plan);
     }

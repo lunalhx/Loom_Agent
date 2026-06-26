@@ -402,7 +402,386 @@ public class SubAgentCoordinatorContractTest {
         assertFalse(editorPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
     }
 
+    // ===== 优雅停止恢复 (Phase 1 §4 补充) =====
+
+    @Test
+    public void subAgentTimeoutShouldRequestGracefulStopAndReturnPartial() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(100L);
+        properties.setSubAgentRecoveryEnabled(true);
+        properties.setSubAgentIdleRecoveryMs(1000L);
+        properties.setSubAgentRecoveryPollIntervalMs(10L);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(new ModelGateway() {
+                        @Override
+                        public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                            return Flux.empty();
+                        }
+
+                        @Override
+                        public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                            return Mono.fromCallable(() -> {
+                                Thread.sleep(150);
+                                return ModelChatResult.builder()
+                                        .content("{\"type\":\"action\",\"tool\":\"code_search\",\"thought\":\"searching\",\"input\":{\"query\":\"test\"}}")
+                                        .finishReason("stop")
+                                        .build();
+                            });
+                        }
+                    })
+                    .tools(List.of(fakeTool("code_search", "ok")))
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
+            AgentContext parent = parentWithDecision(spawnInput(1));
+            SubAgentDispatchResult result = coordinator.dispatch(parent);
+            assertTrue("recovery 内应拿到 PARTIAL", result.isSuccess());
+            assertEquals(SubAgentStatus.PARTIAL, result.getResults().get(0).getStatus());
+            assertTrue("observation 中应包含 partial=1",
+                    result.getObservation().contains("\"partial\":1"));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void gracefulStopDeadlineShouldNotCancelEarly() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(100L);
+        properties.setSubAgentRecoveryEnabled(true);
+        properties.setSubAgentIdleRecoveryMs(800L);
+        properties.setSubAgentRecoveryPollIntervalMs(10L);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(new ModelGateway() {
+                        @Override
+                        public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                            return Flux.empty();
+                        }
+
+                        @Override
+                        public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                            return Mono.fromCallable(() -> {
+                                Thread.sleep(400);
+                                return ModelChatResult.builder()
+                                        .content("{\"type\":\"action\",\"tool\":\"code_search\",\"thought\":\"searching\",\"input\":{\"query\":\"test\"}}")
+                                        .finishReason("stop")
+                                        .build();
+                            });
+                        }
+                    })
+                    .tools(List.of(fakeTool("code_search", "ok")))
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
+            AgentContext parent = parentWithDecision(spawnInput(1));
+            SubAgentDispatchResult result = coordinator.dispatch(parent);
+            assertTrue("400ms 模型在 800ms recovery 内，应拿到 PARTIAL 而非提前 cancel", result.isSuccess());
+            assertEquals(SubAgentStatus.PARTIAL, result.getResults().get(0).getStatus());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void hardTimeoutBeyondRecoveryShouldReturnTimeout() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(100L);
+        properties.setSubAgentRecoveryEnabled(true);
+        properties.setSubAgentIdleRecoveryMs(200L);
+        properties.setSubAgentRecoveryPollIntervalMs(10L);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            SubAgentCoordinator coordinator = AgentRuntimeTestFixture.fixture()
+                    .modelGateway(new ModelGateway() {
+                        @Override
+                        public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                            return Flux.empty();
+                        }
+
+                        @Override
+                        public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                            return Mono.fromCallable(() -> {
+                                Thread.sleep(2000);
+                                return ModelChatResult.builder()
+                                        .content(finalAnswerJson("ok"))
+                                        .finishReason("stop")
+                                        .build();
+                            });
+                        }
+                    })
+                    .tools(List.of(fakeTool("code_search", "ok")))
+                    .properties(properties)
+                    .executor(executor)
+                    .subAgentEnabled()
+                    .buildSubAgentCoordinator();
+            AgentContext parent = parentWithDecision(spawnInput(1));
+            SubAgentDispatchResult result = coordinator.dispatch(parent);
+            assertFalse("超出 timeout+recovery 应返回 TIMEOUT", result.isSuccess());
+            assertEquals("sub_agent_all_failed", result.getErrorCode());
+            assertEquals(SubAgentStatus.TIMEOUT, result.getResults().get(0).getStatus());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void partialAnswerShouldReturnPartialStatus() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String partialJson = "{\"summary\":\"部分结果\",\"findings\":[],\"confidence\":0.3,\"truncated\":true,\"followUp\":\"重试\",\"partial\":true}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(partialJson) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals(SubAgentStatus.PARTIAL, result.getResults().get(0).getStatus());
+        assertTrue("observation 中应包含 partial=1",
+                result.getObservation().contains("\"partial\":1"));
+    }
+
+    @Test
+    public void nonPartialAnswerShouldReturnSucceeded() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String fullJson = "{\"summary\":\"完整结果\",\"findings\":[],\"confidence\":\"high\",\"truncated\":false,\"followUp\":\"\"}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(fullJson) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals(SubAgentStatus.SUCCEEDED, result.getResults().get(0).getStatus());
+    }
+
+    // ===== partial JSON 解析边界 =====
+
+    @Test
+    public void partialAnswerWithWhitespaceShouldReturnPartial() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String json = "{\"summary\":\"部分结果\",\"findings\":[],\"confidence\":0.3,\"truncated\":true,\"followUp\":\"重试\", \"partial\" : true}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(json) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals(SubAgentStatus.PARTIAL, result.getResults().get(0).getStatus());
+    }
+
+    @Test
+    public void partialTextInSummaryShouldNotReturnPartial() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String json = "{\"summary\":\"看到 \\\"partial\\\":true 但顶层没有\",\"findings\":[],\"confidence\":\"high\",\"truncated\":false,\"followUp\":\"\"}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(json) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals("summary 中的 partial 文本不算顶层 partial", SubAgentStatus.SUCCEEDED,
+                result.getResults().get(0).getStatus());
+    }
+
+    @Test
+    public void partialFalseShouldReturnSucceeded() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String json = "{\"summary\":\"完整\",\"findings\":[],\"confidence\":\"high\",\"truncated\":false,\"followUp\":\"\",\"partial\":false}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(json) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals(SubAgentStatus.SUCCEEDED, result.getResults().get(0).getStatus());
+    }
+
+    @Test
+    public void partialStringTrueShouldReturnSucceeded() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String json = "{\"summary\":\"部分\",\"findings\":[],\"confidence\":\"high\",\"truncated\":false,\"followUp\":\"\",\"partial\":\"true\"}";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(json) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue(result.isSuccess());
+        assertEquals("字符串 true 不是布尔值，应返回 SUCCEEDED", SubAgentStatus.SUCCEEDED,
+                result.getResults().get(0).getStatus());
+    }
+
+    @Test
+    public void malformedAnswerContainingPartialTextShouldReturnSucceeded() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.setSubAgentTimeoutMs(5000L);
+        SubAgentCoordinator coordinator = coordinatorWithGateway(properties, new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                String text = "这不是 JSON 但包含 \"partial\":true 文本";
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"" + escapeJson(text) + "\",\"evidence\":[]}")
+                        .finishReason("stop")
+                        .build());
+            }
+        });
+        AgentContext parent = parentWithDecision(spawnInput(1));
+        SubAgentDispatchResult result = coordinator.dispatch(parent);
+        assertTrue("非 JSON 不应返回 partial", result.isSuccess());
+        assertEquals(SubAgentStatus.SUCCEEDED, result.getResults().get(0).getStatus());
+    }
+
+    // ===== inbox 并发测试 =====
+
+    @Test
+    public void inboxConcurrentSendAndPollShouldNotCorrupt() throws InterruptedException {
+        cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox inbox =
+                new cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox();
+        int threads = 8;
+        int messagesPerThread = 100;
+        String childRunId = "child-1";
+        long deadline = System.currentTimeMillis() + 60000L;
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threads);
+        AtomicInteger sentCount = new AtomicInteger();
+        for (int t = 0; t < threads; t++) {
+            final int threadIdx = t;
+            new Thread(() -> {
+                try {
+                    startLatch.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                for (int i = 0; i < messagesPerThread; i++) {
+                    inbox.send(childRunId, cn.lunalhx.ai.domain.agent.model.entity.SubAgentControlMessage.builder()
+                            .type(cn.lunalhx.ai.domain.agent.model.valobj.SubAgentControlMessageType.GRACEFUL_STOP_REQUESTED)
+                            .childRunId(childRunId)
+                            .deadlineMs(deadline)
+                            .reason("test-" + threadIdx + "-" + i)
+                            .build());
+                    sentCount.incrementAndGet();
+                }
+                doneLatch.countDown();
+            }).start();
+        }
+        startLatch.countDown();
+        doneLatch.await(5, TimeUnit.SECONDS);
+        assertEquals(threads * messagesPerThread, sentCount.get());
+        // poll 不应抛异常，返回所有活跃消息
+        List<cn.lunalhx.ai.domain.agent.model.entity.SubAgentControlMessage> polled = inbox.poll(childRunId);
+        assertEquals(threads * messagesPerThread, polled.size());
+        inbox.clear(childRunId);
+        assertTrue(inbox.poll(childRunId).isEmpty());
+    }
+
+    @Test
+    public void inboxSendBlankOrNullShouldBeIgnored() {
+        cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox inbox =
+                new cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox();
+        long deadline = System.currentTimeMillis() + 60000L;
+        cn.lunalhx.ai.domain.agent.model.entity.SubAgentControlMessage msg =
+                cn.lunalhx.ai.domain.agent.model.entity.SubAgentControlMessage.builder()
+                        .type(cn.lunalhx.ai.domain.agent.model.valobj.SubAgentControlMessageType.GRACEFUL_STOP_REQUESTED)
+                        .childRunId("child-1")
+                        .deadlineMs(deadline)
+                        .reason("test")
+                        .build();
+        inbox.send(null, msg);
+        inbox.send("", msg);
+        inbox.send("  ", msg);
+        inbox.send("child-1", null);
+        assertTrue("blank id / null msg 不应入队", inbox.poll("child-1").isEmpty());
+        inbox.send("child-1", msg);
+        assertEquals(1, inbox.poll("child-1").size());
+        inbox.clear("child-1");
+    }
+
     // ===== 辅助 =====
+
+    private static String escapeJson(String raw) {
+        return raw.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
 
     private SubAgentCoordinator coordinator(boolean subAgentEnabled) {
         AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();

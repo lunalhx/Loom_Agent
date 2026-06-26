@@ -2,16 +2,13 @@ package cn.lunalhx.ai.domain.agent.flow.hook;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentControlMessage;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.SubAgentControlMessageType;
 import cn.lunalhx.ai.domain.agent.service.SubAgentPartialSummaryGenerator;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
-import java.util.Map;
 
 public class SubAgentGracefulStopHook implements AgentHook {
 
@@ -50,20 +47,15 @@ public class SubAgentGracefulStopHook implements AgentHook {
         }
 
         String partialSummary = summaryGenerator.generate(context.getAgentContext());
-        context.getAgentContext().setFinalAnswer(partialSummary);
-        context.getAgentContext().setStopReason(AgentStopReason.FINAL_ANSWER);
-
-        AgentEvent answerEvent = AgentEvent.builder()
-                .type(AgentEventType.ANSWER)
-                .runId(runId)
-                .requestId(context.getAgentContext().getRequestId())
-                .conversationId(context.getAgentContext().getConversationId())
-                .workspace(context.getAgentContext().getWorkspaceDisplayName())
+        context.getAgentContext().setDecision(AgentDecision.builder()
+                .type("final")
                 .answer(partialSummary)
-                .step(context.getAgentContext().getStep())
-                .metadata(Map.of("partial", true))
-                .build();
+                .thought("sub_agent_graceful_stop")
+                .build());
 
-        return AgentHookResult.proceed(List.of(answerEvent));
+        inbox.clear(runId);
+
+        return AgentHookResult.interrupt(
+                AgentHookAction.continueAt(AgentNodeNames.FINAL_ANSWER, "sub_agent_graceful_stop", false));
     }
 }

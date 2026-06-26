@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 
@@ -22,15 +24,18 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
     private final ChildAgentServiceFactory serviceFactory;
     private final AgentRuntimeProperties properties;
     private final SubAgentResultFactory resultFactory;
+    private final ObjectMapper objectMapper;
 
     ChildAgentRunner(RoleToolRegistryFactory toolRegistryFactory,
                      ChildAgentServiceFactory serviceFactory,
                      AgentRuntimeProperties properties,
-                     SubAgentResultFactory resultFactory) {
+                     SubAgentResultFactory resultFactory,
+                     ObjectMapper objectMapper) {
         this.toolRegistryFactory = toolRegistryFactory;
         this.serviceFactory = serviceFactory;
         this.properties = properties;
         this.resultFactory = resultFactory;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -39,6 +44,7 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
             AgentRole role = task.getRole() == null ? AgentRole.EXPLORER : task.getRole();
             ToolRegistry childRegistry = toolRegistryFactory.create(role);
             DefaultAgentLoopService childService = serviceFactory.create(childRegistry);
+            long blockMs = blockTimeoutMs();
             List<AgentEvent> events = childService.ask(childQuestion(parent, task, ordinal, childRunId, role))
                     .onErrorResume(error -> Flux.just(AgentEvent.builder()
                             .type(AgentEventType.ERROR)
@@ -47,7 +53,7 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
                             .message(error.getMessage())
                             .build()))
                     .collectList()
-                    .block(Duration.ofMillis(positive(properties.getSubAgentTimeoutMs(), 60000L) + 1000L));
+                    .block(Duration.ofMillis(blockMs));
             if (events == null) {
                 return resultFactory.timeout(task, childRunId, elapsed(startedAt));
             }
@@ -57,9 +63,12 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
                     .orElse(null);
             if (answer != null && StringUtils.isNotBlank(answer.getAnswer())) {
                 String clamped = clamp(answer.getAnswer());
-                return resultFactory.success(task, childRunId, role, clamped,
-                        StringUtils.length(answer.getAnswer()) > positive(properties.getSubAgentSummaryMaxChars(), 12000),
-                        stepCount(events), elapsed(startedAt));
+                boolean truncated = StringUtils.length(answer.getAnswer()) > positive(properties.getSubAgentSummaryMaxChars(), 12000);
+                int steps = stepCount(events);
+                if (isPartialAnswer(answer)) {
+                    return resultFactory.partial(task, childRunId, role, clamped, truncated, steps, elapsed(startedAt));
+                }
+                return resultFactory.success(task, childRunId, role, clamped, truncated, steps, elapsed(startedAt));
             }
             AgentEvent error = events.stream()
                     .filter(event -> event.getType() == AgentEventType.ERROR)
@@ -71,6 +80,28 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
                     elapsed(startedAt));
         } catch (Exception e) {
             return resultFactory.failed(task, childRunId, "sub_agent_failed", e.getMessage(), elapsed(startedAt));
+        }
+    }
+
+    private long blockTimeoutMs() {
+        long timeoutMs = positive(properties.getSubAgentTimeoutMs(), 60000L);
+        long recoveryMs = Boolean.TRUE.equals(properties.getSubAgentRecoveryEnabled())
+                ? positive(properties.getSubAgentIdleRecoveryMs(), 60000L)
+                : 0L;
+        return timeoutMs + recoveryMs + 1000L;
+    }
+
+    private boolean isPartialAnswer(AgentEvent answer) {
+        String content = answer.getAnswer();
+        if (StringUtils.isBlank(content)) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(content);
+            JsonNode partial = root.get("partial");
+            return partial != null && partial.isBoolean() && partial.asBoolean();
+        } catch (Exception e) {
+            return false;
         }
     }
 

@@ -51,4 +51,28 @@ public class AgentHookRegistry {
         return StopHookResult.proceed(events);
     }
 
+    /**
+     * Trigger hooks with interruptible semantics: collect events from all hooks,
+     * but if any hook returns {@link AgentHookAction.Type#CONTINUE_AT_NODE},
+     * return that action immediately (short-circuit) along with events collected so far.
+     *
+     * <p>Unlike {@link #triggerStop}, this is used for {@link AgentHookEvent#BEFORE_NODE}
+     * to allow hooks to intercept and redirect control flow before a node executes.
+     */
+    public StopHookResult triggerInterruptible(AgentHookEvent event, AgentHookContext context) {
+        List<AgentEvent> events = new ArrayList<>();
+        for (AgentHook hook : hooks) {
+            AgentHookResult result = hook.onEvent(event, context);
+            if (result != null) {
+                if (result.getEvents() != null && !result.getEvents().isEmpty()) {
+                    events.addAll(result.getEvents());
+                }
+                if (result.isContinue()) {
+                    return StopHookResult.continued(result.getAction(), events);
+                }
+            }
+        }
+        return StopHookResult.proceed(events);
+    }
+
 }

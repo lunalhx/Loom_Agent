@@ -26,7 +26,7 @@ public class SubAgentCoordinator {
         this.planner = new SubAgentDispatchPlanner(properties, new SubAgentDecisionParser());
         this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties);
         this.aggregator = new SubAgentResultAggregator(properties, objectMapper);
-        this.runner = new ChildAgentRunner(toolRegistryFactory, serviceFactory, properties, resultFactory);
+        this.runner = new ChildAgentRunner(toolRegistryFactory, serviceFactory, properties, resultFactory, objectMapper);
         agentLoopFactory.setSubAgentControlInbox(scheduler.inbox());
     }
 

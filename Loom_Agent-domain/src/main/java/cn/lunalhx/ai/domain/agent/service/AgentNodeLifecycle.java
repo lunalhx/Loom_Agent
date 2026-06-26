@@ -53,11 +53,31 @@ public final class AgentNodeLifecycle {
         context.setCurrentSpanId(spanId);
         long startedAt = System.currentTimeMillis();
         putNodeMdc(context, node.name());
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.BEFORE_NODE, AgentHookContext.builder()
-                .agentContext(context)
-                .node(node.name())
-                .reason("before_node:" + node.name())
-                .build()));
+
+        StopHookResult beforeResult = hookRegistry.triggerInterruptible(AgentHookEvent.BEFORE_NODE,
+                AgentHookContext.builder()
+                        .agentContext(context)
+                        .node(node.name())
+                        .reason("before_node:" + node.name())
+                        .build());
+        emitter.accept(beforeResult.events());
+
+        if (beforeResult.continued()) {
+            AgentHookAction action = beforeResult.action();
+            if (action.isClearTerminalState()) {
+                context.setStopReason(null);
+                context.setFinalAnswer(null);
+                context.setErrorCode(null);
+                context.setErrorMessage(null);
+                context.setPendingApprovalId(null);
+            }
+            traceRecorder.recordStop(context, "continued",
+                    "before_node_hook_continued to " + action.getNextNode());
+            agentMetrics.recordRun(runKind(context), "continued", context.getErrorCode());
+            MDC.clear();
+            return AgentNodeExecution.stopContinued(action.getNextNode(), action);
+        }
+
         emitter.accept(List.of(eventFactory.nodeStarted(context, node)));
 
         NodeResult result;

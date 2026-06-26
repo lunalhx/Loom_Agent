@@ -10,10 +10,5 @@ record SubAgentRunHandle(
         int ordinal,
         String childRunId,
         CompletableFuture<SubAgentResult> future,
-        long startedAt,
-        String phase) {
-
-    SubAgentRunHandle withPhase(String newPhase) {
-        return new SubAgentRunHandle(task, ordinal, childRunId, future, startedAt, newPhase);
-    }
+        long startedAt) {
 }
