@@ -24,12 +24,14 @@ import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 public class ReplanNode extends AbstractAgentNode {
 
     private final ModelGateway modelGateway;
@@ -93,6 +95,7 @@ public class ReplanNode extends AbstractAgentNode {
     }
 
     private boolean applyModelPlanDelta(AgentContext context, String promptText) {
+        long startedAt = System.currentTimeMillis();
         try {
             long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
             int maxTokens = 0;
@@ -154,6 +157,19 @@ public class ReplanNode extends AbstractAgentNode {
             context.getPlan().applyTodoWrite(objectMapper.createObjectNode().set("todos", todos));
             return true;
         } catch (Exception e) {
+            log.warn("Replan model call failed, fallback to generic item", e);
+            if (traceRecorder != null) {
+                long durationMs = System.currentTimeMillis() - startedAt;
+                traceRecorder.recordModelGatewayEvent(context,
+                        "model_replan_call_failed", name(), "error", durationMs,
+                        "Replan model call failed, fallback to generic item", e,
+                        Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
+                                "capability", ModelCapabilities.COMPLETE_REPLAN,
+                                "fallback", "generic_item",
+                                "replanReason", context.getReplanReason() != null
+                                        ? context.getReplanReason().name()
+                                        : ReplanReason.TOOL_FAILURE.name()));
+            }
             return false;
         }
     }
