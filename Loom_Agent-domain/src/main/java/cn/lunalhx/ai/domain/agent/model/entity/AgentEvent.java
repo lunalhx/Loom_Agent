@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -38,6 +39,7 @@ public class AgentEvent {
     private String permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private ApprovalDiff diff;
     private Instant expiresAt;
     private String observation;
     private Boolean truncated;

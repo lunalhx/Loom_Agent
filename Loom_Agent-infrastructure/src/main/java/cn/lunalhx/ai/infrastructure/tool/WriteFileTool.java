@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.tool;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -41,9 +42,45 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolPolicyDecision policy(ToolCall call) {
         String path = text(call.getInput(), "path", "");
         String mode = text(call.getInput(), "mode", "create");
-        return ToolPolicyDecision.writeConfirm(
+        String content = text(call.getInput(), "content", "");
+
+        ToolPolicyDecision decision = ToolPolicyDecision.writeConfirm(
                 "文件写入会修改工作区内容，需要人工确认",
-                "write_file mode=" + mode + " path=" + path + " chars=" + StringUtils.length(text(call.getInput(), "content", "")));
+                "write_file mode=" + mode + " path=" + path + " chars=" + StringUtils.length(content));
+        decision.setDiff(buildWriteDiff(call, mode, content));
+        return decision;
+    }
+
+    private ApprovalDiff buildWriteDiff(ToolCall call, String mode, String content) {
+        if (!"create".equals(mode) && !"overwrite".equals(mode)) {
+            return null;
+        }
+        try {
+            Path targetPath;
+            String oldText;
+            if ("create".equals(mode)) {
+                targetPath = resolveWritablePath(call, "path", null);
+                oldText = "";
+            } else {
+                targetPath = resolvePath(call, "path", null);
+                if (!isAllowedRegularFile(call, targetPath)) {
+                    return null;
+                }
+                oldText = Files.readString(targetPath, StandardCharsets.UTF_8);
+            }
+            if (content.length() > properties.getFileMaxBytes()) {
+                return null;
+            }
+            return ApprovalDiff.builder()
+                    .format("OLD_NEW")
+                    .path(relative(call, targetPath))
+                    .oldText(oldText)
+                    .newText(content)
+                    .editable(false)
+                    .build();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override

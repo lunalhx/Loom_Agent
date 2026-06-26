@@ -35,6 +35,7 @@ public class AgentStreamEvent {
     private String permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private DiffPayload diff;
     private String expiresAt;
     private String observation;
     private Boolean truncated;

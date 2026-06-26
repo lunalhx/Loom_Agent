@@ -14,6 +14,7 @@ public class ToolPolicyDecision {
     private ToolPermissionLevel permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private ApprovalDiff diff;
 
     public static ToolPolicyDecision readOnly(String reason, String preview) {
         return of(ToolPermissionLevel.READ_ONLY, reason, preview);

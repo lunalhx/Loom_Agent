@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -61,6 +62,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
         String approvalId = UUID.randomUUID().toString();
         context.setPendingApprovalId(approvalId);
         Map<String, Object> inputSummary = summarizeInput(context.getDecision().getInputView());
+        ApprovalDiff diff = policy.getDiff();
         PendingApproval approval = PendingApproval.builder()
                 .approvalId(approvalId)
                 .runId(context.getRunId())
@@ -74,6 +76,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .permissionLevel(policy.getPermissionLevel())
                 .riskReason(policy.getRiskReason())
                 .operationPreview(policy.getOperationPreview())
+                .diff(diff)
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
                 .context(context)
@@ -88,6 +91,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .permissionLevel(policy.getPermissionLevel().name())
                 .riskReason(policy.getRiskReason())
                 .operationPreview(policy.getOperationPreview())
+                .diff(diff)
                 .expiresAt(approval.getExpiresAt())
                 .build()));
     }

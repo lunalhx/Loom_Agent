@@ -19,6 +19,7 @@ public class AgentPendingApprovalPO {
     private String permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private String diffJson;
     private String contextJson;
     private LocalDateTime createdAt;
     private LocalDateTime expiresAt;

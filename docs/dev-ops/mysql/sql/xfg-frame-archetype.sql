@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS agent_pending_approval (
     permission_level VARCHAR(32) NOT NULL COMMENT '权限等级',
     risk_reason VARCHAR(512) DEFAULT NULL COMMENT '风险原因',
     operation_preview MEDIUMTEXT DEFAULT NULL COMMENT '操作预览',
+    diff_json MEDIUMTEXT DEFAULT NULL COMMENT '审批 diff JSON',
     context_json LONGTEXT DEFAULT NULL COMMENT '审批暂停时的上下文快照',
     created_at DATETIME DEFAULT NULL COMMENT '审批创建时间',
     expires_at DATETIME DEFAULT NULL COMMENT '审批过期时间',

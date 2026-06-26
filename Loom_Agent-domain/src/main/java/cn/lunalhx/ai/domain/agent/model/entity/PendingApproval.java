@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
@@ -29,6 +30,7 @@ public class PendingApproval {
     private ToolPermissionLevel permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private ApprovalDiff diff;
     private Instant createdAt;
     private Instant expiresAt;
     private AgentContext context;

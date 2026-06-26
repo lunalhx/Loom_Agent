@@ -15,6 +15,7 @@
         <result column="permission_level" property="permissionLevel"/>
         <result column="risk_reason" property="riskReason"/>
         <result column="operation_preview" property="operationPreview"/>
+        <result column="diff_json" property="diffJson"/>
         <result column="context_json" property="contextJson"/>
         <result column="created_at" property="createdAt"/>
         <result column="expires_at" property="expiresAt"/>
@@ -26,10 +27,10 @@
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO">
         INSERT INTO agent_pending_approval
         (approval_id, run_id, request_id, conversation_id, resolved_workspace, workspace_display_name,
-         tool, input_json, permission_level, risk_reason, operation_preview, context_json, created_at, expires_at, consumed)
+         tool, input_json, permission_level, risk_reason, operation_preview, diff_json, context_json, created_at, expires_at, consumed)
         VALUES
         (#{approvalId}, #{runId}, #{requestId}, #{conversationId}, #{resolvedWorkspace}, #{workspaceDisplayName},
-         #{tool}, #{inputJson}, #{permissionLevel}, #{riskReason}, #{operationPreview}, #{contextJson}, #{createdAt}, #{expiresAt}, #{consumed})
+         #{tool}, #{inputJson}, #{permissionLevel}, #{riskReason}, #{operationPreview}, #{diffJson}, #{contextJson}, #{createdAt}, #{expiresAt}, #{consumed})
         ON DUPLICATE KEY UPDATE
         run_id = VALUES(run_id),
         request_id = VALUES(request_id),
@@ -41,6 +42,7 @@
         permission_level = VALUES(permission_level),
         risk_reason = VALUES(risk_reason),
         operation_preview = VALUES(operation_preview),
+        diff_json = VALUES(diff_json),
         context_json = VALUES(context_json),
         created_at = VALUES(created_at),
         expires_at = VALUES(expires_at),

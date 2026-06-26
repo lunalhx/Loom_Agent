@@ -24,6 +24,7 @@ public class AgentApprovalResponse {
     private String permissionLevel;
     private String riskReason;
     private String operationPreview;
+    private DiffPayload diff;
     private String expiresAt;
 
 }

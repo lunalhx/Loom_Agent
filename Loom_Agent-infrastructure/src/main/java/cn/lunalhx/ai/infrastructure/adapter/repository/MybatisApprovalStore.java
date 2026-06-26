@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 import cn.lunalhx.ai.domain.agent.adapter.port.PersistentApprovalStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO;
@@ -66,6 +67,7 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         po.setPermissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name());
         po.setRiskReason(approval.getRiskReason());
         po.setOperationPreview(approval.getOperationPreview());
+        po.setDiffJson(writeJson(approval.getDiff()));
         po.setContextJson(writeJson(approval.getContext() == null ? null : AgentContextSnapshot.from(approval.getContext())));
         po.setCreatedAt(toLocalDateTime(approval.getCreatedAt()));
         po.setExpiresAt(toLocalDateTime(approval.getExpiresAt()));
@@ -88,6 +90,7 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
                 .permissionLevel(po.getPermissionLevel() == null ? null : ToolPermissionLevel.valueOf(po.getPermissionLevel()))
                 .riskReason(po.getRiskReason())
                 .operationPreview(po.getOperationPreview())
+                .diff(readJson(po.getDiffJson(), ApprovalDiff.class))
                 .createdAt(toInstant(po.getCreatedAt()))
                 .expiresAt(toInstant(po.getExpiresAt()))
                 .context(snapshot == null ? null : snapshot.restore())

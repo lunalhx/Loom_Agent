@@ -6,6 +6,7 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentStreamEvent;
 import cn.lunalhx.ai.api.dto.AgentTraceEventDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
+import cn.lunalhx.ai.api.dto.DiffPayload;
 import cn.lunalhx.ai.api.dto.TokenUsageDTO;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
@@ -13,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -45,6 +47,7 @@ public class AgentResponseMapper {
                 .permissionLevel(event.getPermissionLevel())
                 .riskReason(event.getRiskReason())
                 .operationPreview(event.getOperationPreview())
+                .diff(toDiffPayload(event.getDiff()))
                 .expiresAt(event.getExpiresAt() == null ? null : event.getExpiresAt().toString())
                 .observation(event.getObservation())
                 .truncated(event.getTruncated())
@@ -72,6 +75,7 @@ public class AgentResponseMapper {
                 .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
+                .diff(toDiffPayload(approval.getDiff()))
                 .expiresAt(approval.getExpiresAt() == null ? null : approval.getExpiresAt().toString())
                 .build();
     }
@@ -145,6 +149,20 @@ public class AgentResponseMapper {
                 .replayable(event.getReplayable())
                 .sensitiveRedacted(event.getSensitiveRedacted())
                 .createdAt(event.getCreatedAt() == null ? null : event.getCreatedAt().toString())
+                .build();
+    }
+
+    private DiffPayload toDiffPayload(ApprovalDiff diff) {
+        if (diff == null) {
+            return null;
+        }
+        return DiffPayload.builder()
+                .format(diff.getFormat())
+                .path(diff.getPath())
+                .oldText(diff.getOldText())
+                .newText(diff.getNewText())
+                .unifiedDiff(diff.getUnifiedDiff())
+                .editable(diff.getEditable())
                 .build();
     }
 

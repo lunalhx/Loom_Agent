@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.tool;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
+import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -40,11 +41,44 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
     @Override
     public ToolPolicyDecision policy(ToolCall call) {
         String path = text(call.getInput(), "path", "");
-        return ToolPolicyDecision.writeConfirm(
+        String oldText = text(call.getInput(), "oldText", "");
+        String newText = text(call.getInput(), "newText", "");
+        int expectedOccurrences = Math.max(1, integer(call.getInput(), "expectedOccurrences", 1));
+
+        ToolPolicyDecision decision = ToolPolicyDecision.writeConfirm(
                 "文件替换会修改工作区内容，需要人工确认",
                 "replace_in_file path=" + path
-                        + " oldChars=" + StringUtils.length(text(call.getInput(), "oldText", ""))
-                        + " newChars=" + StringUtils.length(text(call.getInput(), "newText", "")));
+                        + " oldChars=" + StringUtils.length(oldText)
+                        + " newChars=" + StringUtils.length(newText));
+        decision.setDiff(buildReplaceDiff(call, path, oldText, newText, expectedOccurrences));
+        return decision;
+    }
+
+    private ApprovalDiff buildReplaceDiff(ToolCall call, String path, String oldText, String newText, int expectedOccurrences) {
+        if (oldText.isEmpty()) {
+            return null;
+        }
+        try {
+            Path filePath = resolvePath(call, "path", null);
+            if (!isAllowedRegularFile(call, filePath)) {
+                return null;
+            }
+            String content = Files.readString(filePath, StandardCharsets.UTF_8);
+            int occurrences = countOccurrences(content, oldText);
+            if (occurrences != expectedOccurrences) {
+                return null;
+            }
+            String replaced = content.replace(oldText, newText);
+            return ApprovalDiff.builder()
+                    .format("OLD_NEW")
+                    .path(relative(call, filePath))
+                    .oldText(content)
+                    .newText(replaced)
+                    .editable(false)
+                    .build();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
