@@ -376,6 +376,11 @@ public class ModelCallNode extends AbstractAgentNode {
                     || current instanceof TimeoutException) {
                 return true;
             }
+            if (current instanceof IllegalStateException
+                    && current.getMessage() != null
+                    && current.getMessage().contains("Timeout on blocking read")) {
+                return true;
+            }
             current = current.getCause();
         }
         return false;

@@ -1259,6 +1259,31 @@ public class DefaultAgentLoopServiceTest {
     }
 
     @Test
+    public void blockTimeoutShouldMapToModelCallTimeout() {
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                return Mono.error(new IllegalStateException(
+                        "Timeout on blocking read for 101 MILLISECONDS"));
+            }
+        };
+
+        List<AgentEvent> events = newService(gateway, List.of())
+                .ask(AgentQuestion.builder().question("触发 block 超时").maxSteps(2).build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.TIMEOUT));
+    }
+
+    @Test
     public void nonContextBadRequestShouldNotTriggerCompact() {
         AtomicInteger calls = new AtomicInteger();
         ModelGateway gateway = new ModelGateway() {
