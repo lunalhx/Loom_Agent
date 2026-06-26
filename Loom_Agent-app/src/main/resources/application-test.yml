@@ -139,7 +139,7 @@ loom:
       max-sub-agent-inboxes: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_INBOXES:1000}
       max-sub-agent-messages-per-run: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_MESSAGES_PER_RUN:10}
     model-recovery:
-      escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:64000}
+      escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:8192}
       continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}
       context-fallback-model: ${AGENT_CONTEXT_FALLBACK_MODEL:}
     budget:

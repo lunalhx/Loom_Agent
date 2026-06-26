@@ -1171,7 +1171,7 @@ public class DefaultAgentLoopServiceTest {
     }
 
     @Test
-    public void controlJsonShouldFailWhenStillTruncatedAfter64k() {
+    public void controlJsonShouldFailWhenStillTruncatedAfterEscalation() {
         AtomicInteger calls = new AtomicInteger();
         AtomicReference<Integer> secondMaxTokens = new AtomicReference<>();
         ModelGateway gateway = new ModelGateway() {
@@ -1197,11 +1197,65 @@ public class DefaultAgentLoopServiceTest {
                 .collectList().block(Duration.ofSeconds(3));
 
         assertEquals(2, calls.get());
-        assertEquals(Integer.valueOf(64000), secondMaxTokens.get());
+        assertEquals(Integer.valueOf(8192), secondMaxTokens.get());
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.MODEL_DECISION_TRUNCATED.code().equals(event.getCode())));
         assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.NODE_START
                 && AgentNodeNames.DECISION.equals(event.getNode())));
+    }
+
+    @Test
+    public void httpTimeoutShouldMapToModelCallTimeout() {
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                return Mono.error(new java.net.http.HttpTimeoutException("request timed out"));
+            }
+        };
+
+        List<AgentEvent> events = newService(gateway, List.of())
+                .ask(AgentQuestion.builder().question("触发 HTTP 超时").maxSteps(2).build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.TIMEOUT));
+    }
+
+    @Test
+    public void reactorTimeoutShouldMapToModelCallTimeout() {
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                return Mono.never();
+            }
+        };
+
+        AgentRuntimeProperties props = AgentRuntimeTestFixture.standardProperties();
+        props.setStepTimeoutMs(100L);
+
+        List<AgentEvent> events = AgentRuntimeTestFixture.fixture()
+                .modelGateway(gateway)
+                .properties(props)
+                .buildAgentLoop()
+                .ask(AgentQuestion.builder().question("触发 Reactor 超时").maxSteps(2).build())
+                .collectList().block(Duration.ofSeconds(3));
+
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
+                && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
+        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
+                && event.getStopReason() == AgentStopReason.TIMEOUT));
     }
 
     @Test

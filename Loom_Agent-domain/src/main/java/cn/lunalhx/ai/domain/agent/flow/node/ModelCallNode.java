@@ -28,11 +28,13 @@ import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
 import org.apache.commons.lang3.StringUtils;
 
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 
 public class ModelCallNode extends AbstractAgentNode {
 
@@ -135,7 +137,7 @@ public class ModelCallNode extends AbstractAgentNode {
                         ModelErrorCode.BUDGET_EXCEEDED.code(), ModelErrorCode.BUDGET_EXCEEDED.message());
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
             }
-            if (hasErrorCode(e, ModelErrorCode.MODEL_CALL_TIMEOUT)) {
+            if (hasErrorCode(e, ModelErrorCode.MODEL_CALL_TIMEOUT) || isTimeoutException(e)) {
                 fail(context, AgentStopReason.TIMEOUT,
                         ModelErrorCode.MODEL_CALL_TIMEOUT.code(), ModelErrorCode.MODEL_CALL_TIMEOUT.message());
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
@@ -367,6 +369,18 @@ public class ModelCallNode extends AbstractAgentNode {
         return false;
     }
 
+    private boolean isTimeoutException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof HttpTimeoutException
+                    || current instanceof TimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private String attemptedModel(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
@@ -416,7 +430,7 @@ public class ModelCallNode extends AbstractAgentNode {
     private int escalatedMaxTokens() {
         Integer value = properties.getModelRecovery() == null
                 ? null : properties.getModelRecovery().getEscalatedMaxTokens();
-        return value == null || value <= 0 ? 64000 : value;
+        return value == null || value <= 0 ? 8192 : value;
     }
 
     private AgentRuntimeProperties.ContextProperties contextProperties() {

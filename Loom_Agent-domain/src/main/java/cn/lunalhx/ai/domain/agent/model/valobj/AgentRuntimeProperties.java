@@ -56,7 +56,7 @@ public class AgentRuntimeProperties {
     @Data
     public static class ModelRecoveryProperties {
 
-        private Integer escalatedMaxTokens = 64000;
+        private Integer escalatedMaxTokens = 8192;
         private Integer continuationMaxAttempts = 3;
         private String contextFallbackModel;
 

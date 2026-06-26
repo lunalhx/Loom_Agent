@@ -231,7 +231,7 @@ public class ReplanNode extends AbstractAgentNode {
     private int escalatedMaxTokens() {
         Integer value = properties.getModelRecovery() == null
                 ? null : properties.getModelRecovery().getEscalatedMaxTokens();
-        return value == null || value <= 0 ? 64000 : value;
+        return value == null || value <= 0 ? 8192 : value;
     }
 
     private void blockForBudget(AgentContext context, BudgetCheckResult check) {
