@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.IncompletePlanStopHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.PendingApprovalConsistencyStopHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
@@ -125,6 +127,8 @@ public class AgentFlowFactory {
 
     private AgentHookRegistry hookRegistry() {
         return new AgentHookRegistry(List.of(
+                new IncompletePlanStopHook(runtime.properties()),
+                new PendingApprovalConsistencyStopHook(state.approvalStore()),
                 new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper)));
     }
 }

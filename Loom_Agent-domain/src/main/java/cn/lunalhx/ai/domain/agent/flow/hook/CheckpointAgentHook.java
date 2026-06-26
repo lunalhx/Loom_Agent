@@ -31,13 +31,13 @@ public class CheckpointAgentHook implements AgentHook {
     }
 
     @Override
-    public List<AgentEvent> onEvent(AgentHookEvent event, AgentHookContext hookContext) {
+    public AgentHookResult onEvent(AgentHookEvent event, AgentHookContext hookContext) {
         if (!shouldCheckpoint(event)) {
-            return List.of();
+            return AgentHookResult.proceed();
         }
         AgentContext context = hookContext.getAgentContext();
         if (context == null || StringUtils.isBlank(context.getRunId())) {
-            return List.of();
+            return AgentHookResult.proceed();
         }
         String currentNode = StringUtils.defaultIfBlank(hookContext.getNextNode(), hookContext.getNode());
         context.setCurrentNode(currentNode);
@@ -52,7 +52,7 @@ public class CheckpointAgentHook implements AgentHook {
                 .build());
         context.setCheckpointVersion(checkpoint.getVersion());
         saveRun(context, currentNode);
-        return List.of(AgentEvent.builder()
+        return AgentHookResult.proceed(List.of(AgentEvent.builder()
                 .type(AgentEventType.CHECKPOINT_SAVED)
                 .runId(context.getRunId())
                 .requestId(context.getRequestId())
@@ -61,7 +61,7 @@ public class CheckpointAgentHook implements AgentHook {
                 .node(currentNode)
                 .step(context.getStep())
                 .checkpointVersion(checkpoint.getVersion())
-                .build());
+                .build()));
     }
 
     private boolean shouldCheckpoint(AgentHookEvent event) {
@@ -69,7 +69,7 @@ public class CheckpointAgentHook implements AgentHook {
                 || event == AgentHookEvent.AFTER_NODE
                 || event == AgentHookEvent.BEFORE_TOOL
                 || event == AgentHookEvent.AFTER_TOOL
-                || event == AgentHookEvent.STOP;
+                || event == AgentHookEvent.AFTER_STOP;
     }
 
     private void saveRun(AgentContext context, String currentNode) {

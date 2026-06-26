@@ -49,6 +49,7 @@ public class AgentSseResponder {
             AgentEventType.USER_INPUT_REQUIRED,
             AgentEventType.POLICY_DENIED,
             AgentEventType.ANSWER,
+            AgentEventType.STOP_HOOK_RESULT,
             AgentEventType.DONE,
             AgentEventType.ERROR
     );

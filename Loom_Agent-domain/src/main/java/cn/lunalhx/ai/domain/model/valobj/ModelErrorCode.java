@@ -22,7 +22,8 @@ public enum ModelErrorCode {
     TOOL_RESULT_SUMMARY_TRUNCATED("tool_result_summary_truncated", "工具结果摘要输出被截断"),
     CONTENT_FILTERED("content_filtered", "模型输出被内容安全策略拦截"),
     VALIDATION_ERROR("validation_error", "模型输出格式校验失败"),
-    MODEL_ERROR("model_error", "模型调用失败");
+    MODEL_ERROR("model_error", "模型调用失败"),
+    APPROVAL_STATE_MISSING("approval_state_missing", "审批状态不一致，审批记录已不可查");
 
     private final String code;
     private final String message;

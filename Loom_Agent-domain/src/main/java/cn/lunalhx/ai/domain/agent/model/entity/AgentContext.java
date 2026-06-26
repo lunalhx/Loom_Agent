@@ -70,6 +70,7 @@ public class AgentContext {
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
+    private int stopHookContinuationCount;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;

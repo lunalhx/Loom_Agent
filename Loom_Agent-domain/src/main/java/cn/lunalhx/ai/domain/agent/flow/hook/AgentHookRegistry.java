@@ -20,12 +20,35 @@ public class AgentHookRegistry {
     public List<AgentEvent> trigger(AgentHookEvent event, AgentHookContext context) {
         List<AgentEvent> events = new ArrayList<>();
         for (AgentHook hook : hooks) {
-            List<AgentEvent> hookEvents = hook.onEvent(event, context);
-            if (hookEvents != null && !hookEvents.isEmpty()) {
-                events.addAll(hookEvents);
+            AgentHookResult result = hook.onEvent(event, context);
+            if (result != null) {
+                if (result.getEvents() != null && !result.getEvents().isEmpty()) {
+                    events.addAll(result.getEvents());
+                }
             }
         }
         return events;
+    }
+
+    /**
+     * Trigger hooks with stop-hook semantics: collect events from all hooks,
+     * but if any hook returns {@link AgentHookAction.Type#CONTINUE_AT_NODE},
+     * return that action immediately (short-circuit) along with events collected so far.
+     */
+    public StopHookResult triggerStop(AgentHookEvent event, AgentHookContext context) {
+        List<AgentEvent> events = new ArrayList<>();
+        for (AgentHook hook : hooks) {
+            AgentHookResult result = hook.onEvent(event, context);
+            if (result != null) {
+                if (result.getEvents() != null && !result.getEvents().isEmpty()) {
+                    events.addAll(result.getEvents());
+                }
+                if (result.isContinue()) {
+                    return StopHookResult.continued(result.getAction(), events);
+                }
+            }
+        }
+        return StopHookResult.proceed(events);
     }
 
 }

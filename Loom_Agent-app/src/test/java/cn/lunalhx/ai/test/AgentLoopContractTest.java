@@ -427,6 +427,257 @@ public class AgentLoopContractTest {
                 && event.getStopReason() == AgentStopReason.TIMEOUT));
     }
 
+    // ===== 6. Stop hook 行为契约 =====
+
+    @Test
+    public void incompletePlanStopHookShouldSuppressAnswerAndRouteToReplan() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getStopHooks().getIncompletePlan().setMaxContinuations(1);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"in_progress\"},{\"id\":\"task-3\",\"content\":\"编写测试\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"完成了！\",\"evidence\":[]}",
+                        "{\"type\":\"final\",\"answer\":\"现在真的完成了。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-continue")
+                        .requestId("stop-hook-continue")
+                        .conversationId("stop-hook-continue")
+                        .question("实现某功能")
+                        .maxSteps(10)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 REPLAN_STARTED", types.contains(AgentEventType.REPLAN_STARTED));
+        assertTrue("应只有一次 DONE", types.stream().filter(t -> t == AgentEventType.DONE).count() == 1);
+
+        AgentEvent hookResult = events.stream()
+                .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
+                .findFirst().orElseThrow();
+        assertEquals("continued", hookResult.getMetadata().get("decision"));
+        assertEquals("replan", hookResult.getMetadata().get("nextNode"));
+
+        // DONE 后只允许 CHECKPOINT_SAVED
+        int doneIndex = types.lastIndexOf(AgentEventType.DONE);
+        List<AgentEventType> afterDone = types.subList(doneIndex + 1, types.size());
+        assertTrue("DONE 后只允许 CHECKPOINT_SAVED，实际：" + afterDone,
+                afterDone.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+    }
+
+    @Test
+    public void incompletePlanStopHookShouldBypassWhenMaxContinuationsExceeded() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getStopHooks().getIncompletePlan().setMaxContinuations(0);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-bypass")
+                        .requestId("stop-hook-bypass")
+                        .conversationId("stop-hook-bypass")
+                        .question("实现某功能")
+                        .maxSteps(10)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+
+        AgentEvent hookResult = events.stream()
+                .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
+                .findFirst().orElseThrow();
+        assertEquals("bypassed", hookResult.getMetadata().get("decision"));
+    }
+
+    @Test
+    public void noPlanShouldNotTriggerIncompletePlanStopHook() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"直接完成。\",\"evidence\":[]}"))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-no-plan")
+                        .requestId("stop-hook-no-plan")
+                        .conversationId("stop-hook-no-plan")
+                        .question("简单问题")
+                        .maxSteps(4)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertFalse("无计划时不应触发 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+    }
+
+    @Test
+    public void completedPlanShouldNotTriggerIncompletePlanStopHook() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"设定并完成计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"计划已全部完成。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-completed")
+                        .requestId("stop-hook-completed")
+                        .conversationId("stop-hook-completed")
+                        .question("简单问题")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertFalse("计划已完成时不应触发 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+    }
+
+    @Test
+    public void childRunShouldNotTriggerIncompletePlanStopHookWhenRootOnly() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getStopHooks().getIncompletePlan().setRootOnly(true);
+        properties.getStopHooks().getIncompletePlan().setMaxContinuations(1);
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析\",\"status\":\"in_progress\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"子Agent完成。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-child")
+                        .requestId("stop-hook-child")
+                        .conversationId("stop-hook-child")
+                        .parentRunId("parent-run")
+                        .rootRunId("parent-run")
+                        .agentRole(cn.lunalhx.ai.domain.agent.model.valobj.AgentRole.EXPLORER)
+                        .agentDepth(1)
+                        .question("子Agent搜索任务")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertFalse("子Agent不应触发 incomplete plan stop hook", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+    }
+
+    @Test
+    public void pendingApprovalConsistencyStopHookShouldRouteToFailWhenApprovalMissing() {
+        // 使用一个 "丢失写入" 的 ApprovalStore：save 正常但 find 永远查不到
+        ApprovalStore forgetfulStore = new ApprovalStore() {
+            private final java.util.Map<String, cn.lunalhx.ai.domain.agent.model.entity.PendingApproval> store =
+                    new java.util.concurrent.ConcurrentHashMap<>();
+
+            @Override
+            public cn.lunalhx.ai.domain.agent.model.entity.PendingApproval save(
+                    cn.lunalhx.ai.domain.agent.model.entity.PendingApproval approval) {
+                store.put(approval.getApprovalId(), approval);
+                return approval;
+            }
+
+            @Override
+            public java.util.Optional<cn.lunalhx.ai.domain.agent.model.entity.PendingApproval> find(String approvalId) {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public java.util.Optional<cn.lunalhx.ai.domain.agent.model.entity.PendingApproval> consume(String approvalId) {
+                return java.util.Optional.ofNullable(store.remove(approvalId));
+            }
+        };
+
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"写文件\",\"tool\":\"replace_in_file\",\"input\":{\"path\":\"Demo.java\",\"oldText\":\"a\",\"newText\":\"b\"}}"))
+                .tools(List.of(fakeWriteTool("replace_in_file", "updated", new AtomicInteger())))
+                .approvalStore(forgetfulStore)
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("stop-hook-approval-missing")
+                        .requestId("stop-hook-approval-missing")
+                        .conversationId("stop-hook-approval-missing")
+                        .question("修改 Demo.java")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
+        AgentEvent hookResult = events.stream()
+                .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
+                .findFirst().orElseThrow();
+        assertEquals("intercepted", hookResult.getMetadata().get("decision"));
+        assertEquals("approval_state_missing", hookResult.getMetadata().get("reason"));
+
+        assertTrue("应包含 ERROR", types.contains(AgentEventType.ERROR));
+        AgentEvent error = events.stream()
+                .filter(e -> e.getType() == AgentEventType.ERROR)
+                .findFirst().orElseThrow();
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.ModelErrorCode.APPROVAL_STATE_MISSING.code(), error.getCode());
+
+        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+        assertFalse("不应包含 APPROVAL_REQUIRED", types.contains(AgentEventType.APPROVAL_REQUIRED));
+    }
+
+    @Test
+    public void stopHookContinuationCountShouldSurviveSnapshotRoundTrip() {
+        AgentContext context = new AgentContext();
+        context.setRunId("snapshot-run");
+        context.setStopHookContinuationCount(2);
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
+        AgentContext restored = snapshot.restore();
+
+        assertEquals(2, restored.getStopHookContinuationCount());
+    }
+
     // ===== 辅助 =====
 
     private AgentContext waitingUserInputContext(String runId) {

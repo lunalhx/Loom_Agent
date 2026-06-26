@@ -80,6 +80,7 @@ public class AgentContextSnapshot {
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
+    private Integer stopHookContinuationCount;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -135,6 +136,7 @@ public class AgentContextSnapshot {
                 .recoveryModelOverride(context.getRecoveryModelOverride())
                 .contextTranscriptArtifactId(context.getContextTranscriptArtifactId())
                 .contextBlockedReason(context.getContextBlockedReason())
+                .stopHookContinuationCount(context.getStopHookContinuationCount())
                 .build();
     }
 
@@ -205,6 +207,7 @@ public class AgentContextSnapshot {
         context.setRecoveryModelOverride(recoveryModelOverride);
         context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
         context.setContextBlockedReason(contextBlockedReason);
+        context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
         return context;
     }
 

@@ -33,6 +33,7 @@ public class AgentRuntimeProperties {
     private Integer subAgentSummaryMaxChars = 12000;
     private BudgetProperties budget = new BudgetProperties();
     private ContextProperties context = new ContextProperties();
+    private StopHooksProperties stopHooks = new StopHooksProperties();
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
 
     @Data
@@ -75,6 +76,23 @@ public class AgentRuntimeProperties {
         private Integer deepSummaryChunkTokenLimit = 12000;
         private Integer deepSummaryMaxCalls = 8;
         private Integer deepSummaryMaxOutputTokens = 2048;
+
+    }
+
+    @Data
+    public static class StopHooksProperties {
+
+        private Boolean enabled = true;
+        private IncompletePlanProperties incompletePlan = new IncompletePlanProperties();
+
+        @Data
+        public static class IncompletePlanProperties {
+
+            private Boolean enabled = true;
+            private Integer maxContinuations = 1;
+            private Boolean rootOnly = true;
+
+        }
 
     }
 

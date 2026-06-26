@@ -7,6 +7,7 @@ public enum AgentHookEvent {
     AFTER_NODE,
     BEFORE_TOOL,
     AFTER_TOOL,
-    STOP
+    STOP,
+    AFTER_STOP
 
 }

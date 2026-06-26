@@ -125,8 +125,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
             AgentNodeExecution execution =
                     components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
 
+            if (execution.terminal() && execution.hasDeferredTerminalEvents()) {
+                execution = components.nodeLifecycle().resolveStop(
+                        context, node, execution.terminalEvents(), events -> emit(sink, events));
+            }
+
+            if (execution.isStopContinued()) {
+                currentNode = execution.nextNode();
+                continue;
+            }
+
             if (execution.terminal()) {
-                components.nodeLifecycle().stop(context, node, events -> emit(sink, events));
                 sink.complete();
                 return;
             }

@@ -20,6 +20,7 @@ public enum AgentEventType {
     POLICY_DENIED("policy_denied"),
     OBSERVATION("observation"),
     ANSWER("answer"),
+    STOP_HOOK_RESULT("stop_hook_result"),
     DONE("done"),
     ERROR("error");
 
