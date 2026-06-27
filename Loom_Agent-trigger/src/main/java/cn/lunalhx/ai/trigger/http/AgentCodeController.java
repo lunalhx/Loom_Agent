@@ -7,12 +7,16 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
+import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
+import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
+import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
+import cn.lunalhx.ai.trigger.http.agent.AgentUndoHttpService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +43,7 @@ public class AgentCodeController {
     private final AgentHttpQueryService queryService;
     private final AgentSseResponder sseResponder;
     private final StreamRequestLimiter streamRequestLimiter;
+    private final AgentUndoHttpService undoHttpService;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
@@ -147,5 +152,16 @@ public class AgentCodeController {
                 resolvedIncludeChildren,
                 () -> queryService.replayTimeline(runId, resolvedIncludeChildren)
         );
+    }
+
+    @GetMapping("/runs/{runId}/undo")
+    public Response<UndoStatusResponse> undoStatus(@PathVariable String runId) {
+        return undoHttpService.query(runId);
+    }
+
+    @PostMapping("/runs/{runId}/undo")
+    public Response<UndoExecuteResponse> undoExecute(@PathVariable String runId,
+                                                       @RequestBody UndoExecuteRequest request) {
+        return undoHttpService.execute(runId, request);
     }
 }

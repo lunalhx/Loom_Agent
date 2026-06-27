@@ -6,6 +6,9 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.UndoSnapshotRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceSnapshotPort;
+import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceUndoLockRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -15,6 +18,8 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.UndoSessionCoordinator;
+import cn.lunalhx.ai.domain.agent.service.WorkspaceUndoService;
 import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
@@ -29,6 +34,7 @@ import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
+import cn.lunalhx.ai.domain.agent.flow.hook.UndoSnapshotAgentHook;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
@@ -39,17 +45,25 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryUndoSnapshotRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryWorkspaceUndoLockRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisContextArtifactRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisUndoSnapshotRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisWorkspaceUndoLockRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisTraceRecorder;
+import cn.lunalhx.ai.infrastructure.adapter.snapshot.GitWorkspaceSnapshotAdapter;
+import cn.lunalhx.ai.infrastructure.adapter.snapshot.UndoSnapshotCleanupTask;
 import cn.lunalhx.ai.infrastructure.context.LocalFileContextBlobStore;
 import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
 import cn.lunalhx.ai.infrastructure.metrics.MicrometerAgentMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -449,8 +463,10 @@ public class AiRuntimeConfig {
     @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
-                                             AgentLoopRuntimeDependencies runtime) {
-        return new AgentLoopFactory(modelGateway, state, runtime);
+                                             AgentLoopRuntimeDependencies runtime,
+                                             UndoSessionCoordinator undoSessionCoordinator,
+                                             UndoSnapshotAgentHook undoSnapshotAgentHook) {
+        return new AgentLoopFactory(modelGateway, state, runtime, undoSessionCoordinator, undoSnapshotAgentHook);
     }
 
     @Bean
@@ -471,6 +487,107 @@ public class AiRuntimeConfig {
         InMemorySubAgentControlInbox inbox = new InMemorySubAgentControlInbox(memoryStoreProperties);
         return new SubAgentCoordinator(roleToolRegistryFactory, agentLoopFactory,
                 agentRuntimeProperties, objectMapper, threadPoolExecutor, inbox);
+    }
+
+    @Bean
+    public WorkspaceSnapshotPort workspaceSnapshotPort(AgentRuntimeProperties agentRuntimeProperties) {
+        return new GitWorkspaceSnapshotAdapter(agentRuntimeProperties.getUndo());
+    }
+
+    @Bean
+    public UndoSnapshotRepository undoSnapshotRepository(PersistenceProperties persistence,
+                                                          ObjectProvider<AgentUndoSnapshotDao> daoProvider,
+                                                          ObjectMapper objectMapper,
+                                                          MemoryStoreProperties memoryStoreProperties) {
+        AgentUndoSnapshotDao dao = daoProvider.getIfAvailable();
+        return switch (persistence.getMode()) {
+            case MEMORY -> {
+                log.info("UndoSnapshotRepository: InMemory (mode=memory)");
+                yield new InMemoryUndoSnapshotRepository(memoryStoreProperties);
+            }
+            case MYSQL -> {
+                if (dao == null) {
+                    throw new IllegalStateException(
+                            "persistence mode=mysql requires AgentUndoSnapshotDao, but MyBatis DAO is not available");
+                }
+                log.info("UndoSnapshotRepository: MyBatis (mode=mysql)");
+                yield new MybatisUndoSnapshotRepository(dao, objectMapper);
+            }
+            case AUTO -> {
+                if (dao != null) {
+                    log.info("UndoSnapshotRepository: MyBatis (mode=auto, DAO available)");
+                    yield new MybatisUndoSnapshotRepository(dao, objectMapper);
+                }
+                log.info("UndoSnapshotRepository: InMemory (mode=auto, DAO unavailable)");
+                yield new InMemoryUndoSnapshotRepository(memoryStoreProperties);
+            }
+        };
+    }
+
+    @Bean
+    public WorkspaceUndoLockRepository workspaceUndoLockRepository(PersistenceProperties persistence,
+                                                                     ObjectProvider<AgentWorkspaceUndoLockDao> daoProvider,
+                                                                     MemoryStoreProperties memoryStoreProperties) {
+        AgentWorkspaceUndoLockDao dao = daoProvider.getIfAvailable();
+        return switch (persistence.getMode()) {
+            case MEMORY -> {
+                log.info("WorkspaceUndoLockRepository: InMemory (mode=memory)");
+                yield new InMemoryWorkspaceUndoLockRepository();
+            }
+            case MYSQL -> {
+                if (dao == null) {
+                    throw new IllegalStateException(
+                            "persistence mode=mysql requires AgentWorkspaceUndoLockDao, but MyBatis DAO is not available");
+                }
+                log.info("WorkspaceUndoLockRepository: MyBatis (mode=mysql)");
+                yield new MybatisWorkspaceUndoLockRepository(dao);
+            }
+            case AUTO -> {
+                if (dao != null) {
+                    log.info("WorkspaceUndoLockRepository: MyBatis (mode=auto, DAO available)");
+                    yield new MybatisWorkspaceUndoLockRepository(dao);
+                }
+                log.info("WorkspaceUndoLockRepository: InMemory (mode=auto, DAO unavailable)");
+                yield new InMemoryWorkspaceUndoLockRepository();
+            }
+        };
+    }
+
+    @Bean
+    public UndoSessionCoordinator undoSessionCoordinator(WorkspaceSnapshotPort workspaceSnapshotPort,
+                                                          UndoSnapshotRepository undoSnapshotRepository,
+                                                          WorkspaceUndoLockRepository workspaceUndoLockRepository,
+                                                          AgentWorkspaceResolver workspaceResolver,
+                                                          AgentRuntimeProperties agentRuntimeProperties) {
+        return new UndoSessionCoordinator(workspaceSnapshotPort, undoSnapshotRepository,
+                workspaceUndoLockRepository, workspaceResolver, agentRuntimeProperties.getUndo());
+    }
+
+    @Bean
+    public WorkspaceUndoService workspaceUndoService(UndoSnapshotRepository undoSnapshotRepository,
+                                                       WorkspaceUndoLockRepository workspaceUndoLockRepository,
+                                                       WorkspaceSnapshotPort workspaceSnapshotPort,
+                                                       AgentRunRepository agentRunRepository,
+                                                       AgentWorkspaceResolver workspaceResolver) {
+        return new WorkspaceUndoService(undoSnapshotRepository, workspaceUndoLockRepository,
+                workspaceSnapshotPort, agentRunRepository, workspaceResolver);
+    }
+
+    @Bean
+    public UndoSnapshotAgentHook undoSnapshotAgentHook(UndoSessionCoordinator undoSessionCoordinator,
+                                                         UndoSnapshotRepository undoSnapshotRepository,
+                                                         AgentRuntimeProperties agentRuntimeProperties) {
+        return new UndoSnapshotAgentHook(undoSessionCoordinator,
+                undoSnapshotRepository, agentRuntimeProperties.getUndo());
+    }
+
+    @Bean
+    public UndoSnapshotCleanupTask undoSnapshotCleanupTask(UndoSnapshotRepository undoSnapshotRepository,
+                                                            WorkspaceUndoLockRepository workspaceUndoLockRepository,
+                                                            WorkspaceSnapshotPort workspaceSnapshotPort,
+                                                            AgentRuntimeProperties agentRuntimeProperties) {
+        return new UndoSnapshotCleanupTask(undoSnapshotRepository, workspaceUndoLockRepository,
+                workspaceSnapshotPort, agentRuntimeProperties.getUndo());
     }
 
     @Bean

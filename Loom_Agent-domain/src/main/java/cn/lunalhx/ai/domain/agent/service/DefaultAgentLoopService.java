@@ -34,6 +34,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, AgentNode> nodes;
     private final AgentLoopComponents components;
     private final Executor executor;
+    private final UndoSessionCoordinator undoCoordinator;
 
     // ==================== 生产构造器 ====================
 
@@ -42,6 +43,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
         this.executor = executor;
+        this.undoCoordinator = assembly.undoCoordinator();
     }
 
     // ==================== 公共入口 ====================
@@ -50,6 +52,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
     public Flux<AgentEvent> ask(AgentQuestion question) {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), sink -> {
             AgentContext context = resolveContext(question);
+            if (undoCoordinator != null) {
+                undoCoordinator.onRunStart(context);
+            }
             components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
             runLoop(context, AgentNodeNames.START, sink);
         });

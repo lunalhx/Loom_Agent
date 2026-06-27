@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao">
+
+    <resultMap id="AgentUndoSnapshotMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO">
+        <id column="id" property="id"/>
+        <result column="snapshot_id" property="snapshotId"/>
+        <result column="run_id" property="runId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="workspace" property="workspace"/>
+        <result column="status" property="status"/>
+        <result column="before_head" property="beforeHead"/>
+        <result column="after_head" property="afterHead"/>
+        <result column="branch" property="branch"/>
+        <result column="before_worktree_oid" property="beforeWorktreeOid"/>
+        <result column="before_index_oid" property="beforeIndexOid"/>
+        <result column="after_worktree_oid" property="afterWorktreeOid"/>
+        <result column="after_index_oid" property="afterIndexOid"/>
+        <result column="changed_paths_json" property="changedPathsJson"/>
+        <result column="changed_file_count" property="changedFileCount"/>
+        <result column="changed_byte_count" property="changedByteCount"/>
+        <result column="unavailability_reason" property="unavailabilityReason"/>
+        <result column="error_info" property="errorInfo"/>
+        <result column="version" property="version"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="finalized_at" property="finalizedAt"/>
+        <result column="undone_at" property="undoneAt"/>
+        <result column="expires_at" property="expiresAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO">
+        INSERT INTO agent_undo_snapshot
+        (snapshot_id, run_id, conversation_id, workspace, status,
+         before_head, after_head, branch,
+         before_worktree_oid, before_index_oid, after_worktree_oid, after_index_oid,
+         changed_paths_json, changed_file_count, changed_byte_count,
+         unavailability_reason, error_info, version,
+         created_at, finalized_at, undone_at, expires_at)
+        VALUES
+        (#{snapshotId}, #{runId}, #{conversationId}, #{workspace}, #{status},
+         #{beforeHead}, #{afterHead}, #{branch},
+         #{beforeWorktreeOid}, #{beforeIndexOid}, #{afterWorktreeOid}, #{afterIndexOid},
+         #{changedPathsJson}, #{changedFileCount}, #{changedByteCount},
+         #{unavailabilityReason}, #{errorInfo}, #{version},
+         #{createdAt}, #{finalizedAt}, #{undoneAt}, #{expiresAt})
+    </insert>
+
+    <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO">
+        INSERT INTO agent_undo_snapshot
+        (snapshot_id, run_id, conversation_id, workspace, status,
+         before_head, after_head, branch,
+         before_worktree_oid, before_index_oid, after_worktree_oid, after_index_oid,
+         changed_paths_json, changed_file_count, changed_byte_count,
+         unavailability_reason, error_info, version,
+         created_at, finalized_at, undone_at, expires_at)
+        VALUES
+        (#{snapshotId}, #{runId}, #{conversationId}, #{workspace}, #{status},
+         #{beforeHead}, #{afterHead}, #{branch},
+         #{beforeWorktreeOid}, #{beforeIndexOid}, #{afterWorktreeOid}, #{afterIndexOid},
+         #{changedPathsJson}, #{changedFileCount}, #{changedByteCount},
+         #{unavailabilityReason}, #{errorInfo}, #{version},
+         #{createdAt}, #{finalizedAt}, #{undoneAt}, #{expiresAt})
+        ON DUPLICATE KEY UPDATE
+        run_id = VALUES(run_id),
+        conversation_id = VALUES(conversation_id),
+        workspace = VALUES(workspace),
+        status = VALUES(status),
+        before_head = VALUES(before_head),
+        after_head = VALUES(after_head),
+        branch = VALUES(branch),
+        before_worktree_oid = VALUES(before_worktree_oid),
+        before_index_oid = VALUES(before_index_oid),
+        after_worktree_oid = VALUES(after_worktree_oid),
+        after_index_oid = VALUES(after_index_oid),
+        changed_paths_json = VALUES(changed_paths_json),
+        changed_file_count = VALUES(changed_file_count),
+        changed_byte_count = VALUES(changed_byte_count),
+        unavailability_reason = VALUES(unavailability_reason),
+        error_info = VALUES(error_info),
+        version = VALUES(version),
+        finalized_at = VALUES(finalized_at),
+        undone_at = VALUES(undone_at),
+        expires_at = VALUES(expires_at)
+    </insert>
+
+    <select id="selectBySnapshotId" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot WHERE snapshot_id = #{snapshotId} LIMIT 1
+    </select>
+
+    <select id="selectByRunId" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot WHERE run_id = #{runId} LIMIT 1
+    </select>
+
+    <select id="selectLatestByWorkspace" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot
+        WHERE workspace = #{workspace}
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectLatestByConversationId" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot
+        WHERE conversation_id = #{conversationId}
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <update id="updateStatus">
+        UPDATE agent_undo_snapshot
+        SET status = #{next}, version = version + 1
+        WHERE snapshot_id = #{snapshotId}
+          AND status = #{expected}
+          AND version = #{expectedVersion}
+    </update>
+
+    <update id="deleteExpiredBefore">
+        UPDATE agent_undo_snapshot
+        SET status = 'EXPIRED'
+        WHERE status = 'READY' AND expires_at IS NOT NULL AND expires_at &lt; #{threshold}
+    </update>
+
+</mapper>

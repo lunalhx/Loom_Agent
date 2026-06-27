@@ -39,6 +39,7 @@ public class AgentRuntimeProperties {
     private StopHooksProperties stopHooks = new StopHooksProperties();
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
     private StepBudgetProperties stepBudget = new StepBudgetProperties();
+    private UndoProperties undo = new UndoProperties();
 
     @Data
     public static class BudgetProperties {
@@ -110,6 +111,18 @@ public class AgentRuntimeProperties {
         private Integer sameActionMaxRepeats = 2;
         private Integer sameFailureMaxRepeats = 2;
         private Integer noProgressMaxRounds = 3;
+
+    }
+
+    @Data
+    public static class UndoProperties {
+
+        private boolean enabled = true;
+        private int retentionHours = 168;
+        private int maxChangedFiles = 500;
+        private long maxChangedBytes = 104_857_600L;
+        private long commandTimeoutMs = 30_000L;
+        private long cleanupIntervalMs = 3_600_000L;
 
     }
 
