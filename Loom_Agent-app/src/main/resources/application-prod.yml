@@ -108,7 +108,7 @@ loom:
     approval-ttl-seconds: ${AGENT_APPROVAL_TTL_SECONDS:900}
     shell-timeout-ms: ${AGENT_SHELL_TIMEOUT_MS:120000}
     shell-max-output-chars: ${AGENT_SHELL_MAX_OUTPUT_CHARS:12000}
-    high-risk-policy: ${AGENT_HIGH_RISK_POLICY:DENY}
+    high-risk-policy: ${AGENT_HIGH_RISK_POLICY:CONFIRM}
     allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
     sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
     sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}

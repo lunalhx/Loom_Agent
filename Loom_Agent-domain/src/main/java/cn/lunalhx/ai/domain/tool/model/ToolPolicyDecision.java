@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,6 +17,8 @@ public class ToolPolicyDecision {
     private String riskReason;
     private String operationPreview;
     private ApprovalDiff diff;
+    private String policyFingerprint;
+    private Map<String, Object> metadata;
 
     public static ToolPolicyDecision readOnly(String reason, String preview) {
         return of(ToolPermissionLevel.READ_ONLY, reason, preview);

@@ -110,27 +110,36 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void deleteDirectoryShouldBeRejected() throws Exception {
+    public void deleteDirectoryShouldRequireApprovalAndDeleteRecursively() throws Exception {
         Path dir = temporaryFolder.getRoot().toPath().resolve("mydir");
-        Files.createDirectories(dir);
+        Files.createDirectories(dir.resolve("nested"));
+        Files.writeString(dir.resolve("nested/file.py"), "print('bye')", StandardCharsets.UTF_8);
 
         ToolPolicyDecision policy = tool().policy(call(deleteInput("mydir")));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("目录"));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertTrue(policy.getOperationPreview().contains("递归删除"));
+        assertTrue(policy.getPolicyFingerprint() != null);
+        assertEquals(1L, deletePreview(policy).get("fileCount"));
         assertTrue(Files.exists(dir));
+
+        ToolResult result = tool().call(call(deleteInput("mydir")));
+        assertTrue(result.isSuccess());
+        assertFalse(Files.exists(dir));
     }
 
     @Test
-    public void deleteSymlinkShouldBeRejected() throws Exception {
+    public void deleteSymlinkShouldDeleteOnlyTheLink() throws Exception {
         Path target = temporaryFolder.getRoot().toPath().resolve("target.txt");
         Files.writeString(target, "real", StandardCharsets.UTF_8);
         Path link = temporaryFolder.getRoot().toPath().resolve("link.txt");
         Files.createSymbolicLink(link, target);
 
         ToolPolicyDecision policy = tool().policy(call(deleteInput("link.txt")));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("符号链接"));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        ToolResult result = tool().call(call(deleteInput("link.txt")));
+        assertTrue(result.isSuccess());
         assertTrue(Files.exists(target));
+        assertFalse(Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS));
     }
 
     @Test
@@ -223,23 +232,38 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void deleteEnvFileShouldBeRejected() throws Exception {
+    public void deleteEnvFileShouldRequireApprovalWithSecretWarning() throws Exception {
         Path envDir = temporaryFolder.getRoot().toPath().resolve("docs/env");
         Files.createDirectories(envDir);
         Files.writeString(envDir.resolve(".env"), "SECRET=1", StandardCharsets.UTF_8);
 
         ToolPolicyDecision policy = tool().policy(call(deleteInput("docs/env/.env")));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertTrue(riskFlags(policy).contains("SECRET_LIKE"));
         assertTrue(Files.exists(envDir.resolve(".env")));
     }
 
     @Test
-    public void deleteKeyFileShouldBeRejected() throws Exception {
+    public void deleteKeyFileShouldRequireApprovalWithSecretWarning() throws Exception {
         Path keyFile = temporaryFolder.getRoot().toPath().resolve("secret.key");
         Files.writeString(keyFile, "keydata", StandardCharsets.UTF_8);
 
         ToolPolicyDecision policy = tool().policy(call(deleteInput("secret.key")));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertTrue(riskFlags(policy).contains("SECRET_LIKE"));
+    }
+
+    @Test
+    public void generatedAndIdeDirectoriesShouldBeApprovable() throws Exception {
+        for (String directory : new String[]{"target", "node_modules", ".idea"}) {
+            Path dir = temporaryFolder.getRoot().toPath().resolve(directory);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve("content.txt"), "generated", StandardCharsets.UTF_8);
+
+            ToolPolicyDecision policy = tool().policy(call(deleteInput(directory)));
+
+            assertEquals(directory, ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        }
     }
 
     // ==================== RunShell rm tests ====================
@@ -261,6 +285,16 @@ public class DeleteFilesAndHighRiskPolicyTest {
         input.put("command", "rm -rf .");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
         assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellRmdirShouldBeDeniedAndPointToDeleteTool() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "rmdir old-module");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.getRiskReason().contains("delete_files"));
     }
 
     @Test
@@ -464,7 +498,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void deleteDuplicatePathsShouldBeRejected() throws Exception {
+    public void deleteDuplicatePathsShouldBeDeduplicated() throws Exception {
         Path file = temporaryFolder.getRoot().toPath().resolve("dup.txt");
         Files.writeString(file, "dup", StandardCharsets.UTF_8);
 
@@ -473,8 +507,58 @@ public class DeleteFilesAndHighRiskPolicyTest {
         arr.add("dup.txt");
         arr.add("dup.txt");
         ToolPolicyDecision policy = tool().policy(call("delete_files", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("重复"));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertEquals(1, deletePreview(policy).get("targetCount"));
+    }
+
+    @Test
+    public void parentDirectoryShouldCoverNestedExplicitTarget() throws Exception {
+        Path dir = temporaryFolder.getRoot().toPath().resolve("covered");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("nested.txt"), "nested", StandardCharsets.UTF_8);
+
+        ToolPolicyDecision policy = tool().policy(call(deleteInput("covered", "covered/nested.txt")));
+
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertEquals(1, deletePreview(policy).get("targetCount"));
+    }
+
+    @Test
+    public void internalSymlinkShouldNotDeleteExternalTarget() throws Exception {
+        Path outside = temporaryFolder.getRoot().toPath().resolve("outside.txt");
+        Files.writeString(outside, "keep", StandardCharsets.UTF_8);
+        Path dir = temporaryFolder.getRoot().toPath().resolve("tree");
+        Files.createDirectories(dir);
+        Files.createSymbolicLink(dir.resolve("outside-link"), outside);
+
+        ToolResult result = tool().call(call(deleteInput("tree")));
+
+        assertTrue(result.isSuccess());
+        assertFalse(Files.exists(dir));
+        assertTrue(Files.exists(outside));
+    }
+
+    @Test
+    public void changedDirectoryAfterApprovalShouldRequireReapproval() throws Exception {
+        Path dir = temporaryFolder.getRoot().toPath().resolve("changing");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("before.txt"), "before", StandardCharsets.UTF_8);
+        ObjectNode input = deleteInput("changing");
+        ToolPolicyDecision policy = tool().policy(call(input));
+        Files.writeString(dir.resolve("after.txt"), "after", StandardCharsets.UTF_8);
+
+        ToolCall approvedCall = ToolCall.builder()
+                .name("delete_files")
+                .input(input)
+                .workspaceRoot(temporaryFolder.getRoot().toPath().toRealPath())
+                .approvedPolicyFingerprint(policy.getPolicyFingerprint())
+                .build();
+        ToolResult result = tool().call(approvedCall);
+
+        assertFalse(result.isSuccess());
+        assertEquals("approval_stale", result.getErrorCode());
+        assertTrue(Files.exists(dir.resolve("before.txt")));
+        assertTrue(Files.exists(dir.resolve("after.txt")));
     }
 
     @Test
@@ -521,5 +605,15 @@ public class DeleteFilesAndHighRiskPolicyTest {
         properties.setShellMaxOutputChars(12000);
         properties.setHighRiskPolicy("CONFIRM");
         return properties;
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> deletePreview(ToolPolicyDecision policy) {
+        return (java.util.Map<String, Object>) policy.getMetadata().get("deletePreview");
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<String> riskFlags(ToolPolicyDecision policy) {
+        return (java.util.List<String>) deletePreview(policy).get("riskFlags");
     }
 }

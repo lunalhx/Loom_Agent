@@ -60,6 +60,11 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return ToolPolicyDecision.highRiskDeny("command 不能为空", command);
         }
         String executable = tokens.get(0);
+        if ("rm".equals(executable) || "rmdir".equals(executable)) {
+            return ToolPolicyDecision.highRiskDeny(
+                    "禁止通过 shell 执行 " + executable + "，请使用 delete_files 工具",
+                    command);
+        }
         if (!allowedShellCommands().contains(executable)) {
             return ToolPolicyDecision.highRiskDeny("命令不在允许列表：" + executable, command);
         }
@@ -71,9 +76,6 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         }
         if ("git".equals(executable)) {
             return gitPolicy(tokens, command);
-        }
-        if ("rm".equals(executable)) {
-            return ToolPolicyDecision.highRiskDeny("禁止通过 shell 执行 rm，请使用 delete_files 工具", command);
         }
         if (READ_ONLY_COMMANDS.contains(executable)) {
             return ToolPolicyDecision.readOnly("允许的只读 shell 命令", command);

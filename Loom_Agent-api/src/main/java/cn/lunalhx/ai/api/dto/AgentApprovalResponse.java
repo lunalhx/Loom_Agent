@@ -25,6 +25,7 @@ public class AgentApprovalResponse {
     private String riskReason;
     private String operationPreview;
     private DiffPayload diff;
+    private Map<String, Object> metadata;
     private String expiresAt;
 
 }

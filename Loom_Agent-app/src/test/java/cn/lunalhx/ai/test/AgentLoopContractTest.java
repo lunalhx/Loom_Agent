@@ -253,6 +253,88 @@ public class AgentLoopContractTest {
                 && event.getObservation().contains("approval_rejected")));
     }
 
+    @Test
+    public void defaultHighRiskPolicyShouldPauseForApprovalAndExecuteAfterApprove() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool deleteTool = fakeHighRiskConfirmTool("delete_files", "deleted: demo.py", calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"删除文件\",\"tool\":\"delete_files\",\"input\":{\"paths\":[\"demo.py\"]}}",
+                        "{\"type\":\"final\",\"answer\":\"文件已删除。\",\"evidence\":[]}"))
+                .tools(List.of(deleteTool))
+                .approvalStore(approvalStore);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> paused = service.ask(AgentQuestion.builder()
+                        .question("删除 demo.py")
+                        .maxSteps(6)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        AgentEvent approval = paused.stream()
+                .filter(event -> event.getType() == AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("HIGH_RISK_CONFIRM", approval.getPermissionLevel());
+        assertEquals(0, calls.get());
+        assertFalse(paused.stream().anyMatch(event -> event.getType() == AgentEventType.POLICY_DENIED));
+
+        List<AgentEvent> resumed = service.resume(approval.getApprovalId(), ApprovalDecision.APPROVE, "允许删除")
+                .collectList()
+                .block(TIMEOUT);
+
+        assertEquals(1, calls.get());
+        assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
+                && event.getObservation().contains("deleted: demo.py")));
+    }
+
+    @Test
+    public void changedDeleteManifestShouldRequireASecondApprovalBeforeExecution() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<String> fingerprint = new AtomicReference<>("manifest-v1");
+        AgentTool deleteTool = fakeFingerprintedDeleteTool(fingerprint, calls);
+        ApprovalStore approvalStore = new InMemoryApprovalStore();
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"删除目录\",\"tool\":\"delete_files\",\"input\":{\"paths\":[\"old-module\"]}}",
+                        "{\"type\":\"final\",\"answer\":\"目录已删除。\",\"evidence\":[]}"))
+                .tools(List.of(deleteTool))
+                .approvalStore(approvalStore)
+                .buildAgentLoop();
+
+        AgentEvent firstApproval = service.ask(AgentQuestion.builder()
+                        .question("删除 old-module")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(TIMEOUT)
+                .stream()
+                .filter(event -> event.getType() == AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+
+        fingerprint.set("manifest-v2");
+        List<AgentEvent> staleResume = service.resume(
+                        firstApproval.getApprovalId(), ApprovalDecision.APPROVE, "批准旧清单")
+                .collectList()
+                .block(TIMEOUT);
+        AgentEvent secondApproval = staleResume.stream()
+                .filter(event -> event.getType() == AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(0, calls.get());
+        assertFalse(firstApproval.getApprovalId().equals(secondApproval.getApprovalId()));
+        assertEquals("manifest-v2", secondApproval.getMetadata().get("manifest"));
+
+        service.resume(secondApproval.getApprovalId(), ApprovalDecision.APPROVE, "批准新清单")
+                .collectList()
+                .block(TIMEOUT);
+        assertEquals(1, calls.get());
+    }
+
     // ===== 3. Checkpoint 恢复 =====
 
     @Test
@@ -966,6 +1048,49 @@ public class AgentLoopContractTest {
                 calls.incrementAndGet();
                 calledWorkspace.set(call.getWorkspaceRoot());
                 return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool fakeHighRiskConfirmTool(String name, String observation, AtomicInteger calls) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name(name).description(name).inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.highRiskConfirm("high risk", name);
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.success(observation, false, 1L);
+            }
+        };
+    }
+
+    private AgentTool fakeFingerprintedDeleteTool(AtomicReference<String> fingerprint, AtomicInteger calls) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name("delete_files").description("delete").inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                ToolPolicyDecision decision = ToolPolicyDecision.highRiskConfirm("high risk", "delete old-module");
+                decision.setPolicyFingerprint(fingerprint.get());
+                decision.setMetadata(java.util.Map.of("manifest", fingerprint.get()));
+                return decision;
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.success("deleted old-module", false, 1L);
             }
         };
     }

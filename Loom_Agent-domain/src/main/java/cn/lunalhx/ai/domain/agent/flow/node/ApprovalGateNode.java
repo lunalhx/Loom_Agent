@@ -85,6 +85,8 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .riskReason(policy.getRiskReason())
                 .operationPreview(policy.getOperationPreview())
                 .diff(diff)
+                .policyFingerprint(policy.getPolicyFingerprint())
+                .metadata(policy.getMetadata())
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
                 .context(context)
@@ -102,6 +104,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .riskReason(policy.getRiskReason())
                 .operationPreview(policy.getOperationPreview())
                 .diff(diff)
+                .metadata(policy.getMetadata())
                 .expiresAt(approval.getExpiresAt())
                 .build()));
     }

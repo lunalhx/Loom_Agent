@@ -56,6 +56,8 @@ public class AgentContext {
     private Long checkpointVersion;
     private boolean unsafeResumeRequired;
     private String pendingApprovalId;
+    private String approvedTool;
+    private String approvedPolicyFingerprint;
     private boolean approvalExpired;
     private String expiredApprovalId;
     private boolean subAgentSpawnAllowed;

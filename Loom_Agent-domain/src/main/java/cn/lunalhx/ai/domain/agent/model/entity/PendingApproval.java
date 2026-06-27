@@ -31,6 +31,8 @@ public class PendingApproval {
     private String riskReason;
     private String operationPreview;
     private ApprovalDiff diff;
+    private String policyFingerprint;
+    private Map<String, Object> metadata;
     private Instant createdAt;
     private Instant expiresAt;
     private AgentContext context;
