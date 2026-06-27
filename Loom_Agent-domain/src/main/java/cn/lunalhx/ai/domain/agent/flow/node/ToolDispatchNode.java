@@ -55,7 +55,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .conversationId(context.getConversationId())
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);
-        context.setUnsafeResumeRequired(policy != null && policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM);
+        context.setUnsafeResumeRequired(policy != null && (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM
+                || policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM));
 
         List<AgentEvent> events = new ArrayList<>();
         events.addAll(hookRegistry.trigger(AgentHookEvent.BEFORE_TOOL, AgentHookContext.builder()

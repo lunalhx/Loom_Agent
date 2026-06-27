@@ -46,6 +46,7 @@ public class AgentSseResponder {
             AgentEventType.SUB_AGENT_FAILED,
             AgentEventType.SUB_AGENT_SUMMARY,
             AgentEventType.APPROVAL_REQUIRED,
+            AgentEventType.HIGH_RISK_APPROVAL_REQUIRED,
             AgentEventType.USER_INPUT_REQUIRED,
             AgentEventType.POLICY_DENIED,
             AgentEventType.ANSWER,

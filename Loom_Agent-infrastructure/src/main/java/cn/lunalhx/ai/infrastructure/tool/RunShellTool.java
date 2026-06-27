@@ -24,7 +24,6 @@ import java.util.Set;
 public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
     private static final Set<String> READ_ONLY_COMMANDS = Set.of("pwd", "ls", "rg");
-    private static final Set<String> HIGH_RISK_GIT_OPS = Set.of("push", "reset", "clean", "rebase", "checkout");
     private final CommandExecutor commandExecutor;
 
     public RunShellTool(AgentRuntimeProperties properties) {
@@ -73,6 +72,9 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         if ("git".equals(executable)) {
             return gitPolicy(tokens, command);
         }
+        if ("rm".equals(executable)) {
+            return ToolPolicyDecision.highRiskDeny("禁止通过 shell 执行 rm，请使用 delete_files 工具", command);
+        }
         if (READ_ONLY_COMMANDS.contains(executable)) {
             return ToolPolicyDecision.readOnly("允许的只读 shell 命令", command);
         }
@@ -107,16 +109,10 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return ToolPolicyDecision.highRiskDeny("git 子命令不能为空", command);
         }
         String operation = tokens.get(1).toLowerCase(Locale.ROOT);
-        if (HIGH_RISK_GIT_OPS.contains(operation)) {
-            return ToolPolicyDecision.highRiskDeny("高危 Git 操作已被拦截：" + operation, command);
+        if ("rm".equals(operation)) {
+            return ToolPolicyDecision.highRiskDeny("禁止通过 shell 执行 git rm，请使用 delete_files 工具", command);
         }
-        if ("status".equals(operation) || "diff".equals(operation) || "log".equals(operation)) {
-            return ToolPolicyDecision.readOnly("允许的只读 Git 命令", command);
-        }
-        if ("add".equals(operation) || "commit".equals(operation)) {
-            return ToolPolicyDecision.writeConfirm("Git 暂存或提交会修改仓库状态，需要人工确认", command);
-        }
-        return ToolPolicyDecision.highRiskDeny("未允许的 Git 子命令：" + operation, command);
+        return GitRiskClassifier.classify(tokens, command);
     }
 
     private boolean isMavenTestCommand(List<String> tokens) {

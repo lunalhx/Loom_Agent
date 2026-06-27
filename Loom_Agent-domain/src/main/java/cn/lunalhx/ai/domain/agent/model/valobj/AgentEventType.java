@@ -16,6 +16,7 @@ public enum AgentEventType {
     THOUGHT("thought"),
     TOOL_CALL("tool_call"),
     APPROVAL_REQUIRED("approval_required"),
+    HIGH_RISK_APPROVAL_REQUIRED("high_risk_approval_required"),
     USER_INPUT_REQUIRED("user_input_required"),
     POLICY_DENIED("policy_denied"),
     OBSERVATION("observation"),

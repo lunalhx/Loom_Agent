@@ -24,7 +24,7 @@ public class AgentRuntimeProperties {
     private Long shellTimeoutMs = 120000L;
     private Integer shellMaxOutputChars = 12000;
     private String highRiskPolicy = "DENY";
-    private List<String> allowedShellCommands = new ArrayList<>(List.of("mvn", "./mvnw", "git", "pwd", "ls", "rg"));
+    private List<String> allowedShellCommands = new ArrayList<>(List.of("mvn", "./mvnw", "git", "rm", "pwd", "ls", "rg"));
     private Boolean subAgentEnabled = true;
     private Integer subAgentMaxChildren = 6;
     private Integer subAgentMaxConcurrency = 4;

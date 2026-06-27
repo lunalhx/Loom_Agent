@@ -54,6 +54,14 @@ public class ApprovalGateNode extends AbstractAgentNode {
         if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
             return deny(context, policy);
         }
+        if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM) {
+            String highRiskPolicy = StringUtils.defaultString(properties.getHighRiskPolicy(), "CONFIRM").toUpperCase();
+            return switch (highRiskPolicy) {
+                case "DENY" -> deny(context, policy);
+                case "ALLOW" -> NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+                default -> requireApproval(context, policy);
+            };
+        }
         return requireApproval(context, policy);
     }
 
@@ -82,7 +90,9 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .context(context)
                 .build();
         approvalStore.save(approval);
-        return NodeResult.terminal(List.of(event(context, AgentEventType.APPROVAL_REQUIRED)
+        boolean highRisk = policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM;
+        AgentEventType eventType = highRisk ? AgentEventType.HIGH_RISK_APPROVAL_REQUIRED : AgentEventType.APPROVAL_REQUIRED;
+        return NodeResult.terminal(List.of(event(context, eventType)
                 .step(context.getStep() + 1)
                 .tool(context.getDecision().getTool())
                 .input(inputSummary)

@@ -4,6 +4,7 @@ public enum ToolPermissionLevel {
 
     READ_ONLY,
     WRITE_CONFIRM,
+    HIGH_RISK_CONFIRM,
     HIGH_RISK_DENY
 
 }

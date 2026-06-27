@@ -168,7 +168,15 @@ public class AgentFileToolTest {
         ObjectNode pushInput = objectMapper.createObjectNode();
         pushInput.put("operation", "push");
         ToolPolicyDecision pushPolicy = tool.policy(call("git_op", pushInput));
-        assertTrue(pushPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
+        assertTrue(pushPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM);
+
+        ObjectNode forcePushMain = objectMapper.createObjectNode();
+        forcePushMain.put("operation", "push");
+        forcePushMain.put("force", true);
+        forcePushMain.put("remote", "origin");
+        forcePushMain.put("refspec", "main");
+        ToolPolicyDecision forcePushPolicy = tool.policy(call("git_op", forcePushMain));
+        assertTrue(forcePushPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
     }
 
     @Test

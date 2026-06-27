@@ -508,8 +508,10 @@ public class AiRuntimeConfig {
             if (agentRuntimeProperties.getShellMaxOutputChars() == null || agentRuntimeProperties.getShellMaxOutputChars() <= 0) {
                 throw new IllegalStateException("AGENT_SHELL_MAX_OUTPUT_CHARS 必须大于 0");
             }
-            if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
-                throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 第一版仅支持 DENY");
+            if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
+                    && !"CONFIRM".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
+                    && !"ALLOW".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
+                throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 仅支持 DENY/CONFIRM/ALLOW");
             }
             requirePositive(agentRuntimeProperties.getSubAgentTimeoutMs(), "AGENT_SUB_AGENT_TIMEOUT_MS");
             if (agentRuntimeProperties.getSubAgentMaxChildren() == null || agentRuntimeProperties.getSubAgentMaxChildren() < 1) {

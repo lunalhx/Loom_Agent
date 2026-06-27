@@ -24,6 +24,10 @@ public class ToolPolicyDecision {
         return of(ToolPermissionLevel.WRITE_CONFIRM, reason, preview);
     }
 
+    public static ToolPolicyDecision highRiskConfirm(String reason, String preview) {
+        return of(ToolPermissionLevel.HIGH_RISK_CONFIRM, reason, preview);
+    }
+
     public static ToolPolicyDecision highRiskDeny(String reason, String preview) {
         return of(ToolPermissionLevel.HIGH_RISK_DENY, reason, preview);
     }

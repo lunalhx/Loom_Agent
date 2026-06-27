@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
+import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 
@@ -95,7 +96,11 @@ public final class AgentResumeCoordinator {
                 && StringUtils.isNotBlank(context.getPendingApprovalId())) {
             PendingApproval approval = approvalStore.find(context.getPendingApprovalId()).orElse(null);
             if (approval != null) {
-                events.add(eventFactory.approvalRequired(context, approval));
+                if (approval.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM) {
+                    events.add(eventFactory.highRiskApprovalRequired(context, approval));
+                } else {
+                    events.add(eventFactory.approvalRequired(context, approval));
+                }
                 return AgentResumePlan.complete(events);
             }
             String expiredId = context.getPendingApprovalId();

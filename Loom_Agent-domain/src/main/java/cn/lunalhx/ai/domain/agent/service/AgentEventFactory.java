@@ -63,6 +63,26 @@ public final class AgentEventFactory {
                 .build();
     }
 
+    public AgentEvent highRiskApprovalRequired(AgentContext context, PendingApproval approval) {
+        return AgentEvent.builder()
+                .type(AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(approval.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .step(context.getStep() + 1)
+                .tool(approval.getTool())
+                .input(approval.getInput())
+                .approvalId(approval.getApprovalId())
+                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
+                .riskReason(approval.getRiskReason())
+                .operationPreview(approval.getOperationPreview())
+                .diff(approval.getDiff())
+                .expiresAt(approval.getExpiresAt())
+                .build();
+    }
+
     public AgentEvent userInputRequired(AgentContext context) {
         return AgentEvent.builder()
                 .type(AgentEventType.USER_INPUT_REQUIRED)

@@ -17,14 +17,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 @Component
 public class GitOpTool extends FileSystemToolSupport implements AgentTool {
 
-    private static final Set<String> READ_ONLY_OPS = Set.of("status", "diff", "log");
-    private static final Set<String> WRITE_OPS = Set.of("add", "commit");
-    private static final Set<String> HIGH_RISK_OPS = Set.of("push", "reset", "clean", "rebase", "checkout");
     private final CommandExecutor commandExecutor;
 
     public GitOpTool(AgentRuntimeProperties properties) {
@@ -42,24 +38,24 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("git_op")
-                .description("执行受限 Git 操作；status/diff/log 自动放行，add/commit 需人工确认，高危操作被拦截")
-                .inputSchema("{\"operation\":\"status|diff|log|add|commit\",\"path\":\"add/diff 可选相对路径\",\"message\":\"commit 必填\",\"limit\":\"log 默认 10\"}")
+                .description("执行受限 Git 操作；status/diff/log 自动放行，add/commit 需普通审批，push/reset/clean/rebase/checkout 需高危审批")
+                .inputSchema("{\"operation\":\"status|diff|log|add|commit|push|reset|clean|rebase|checkout\",\"path\":\"add/diff/checkout 可选相对路径\",\"message\":\"commit 必填\",\"limit\":\"log 默认 10\",\"branch\":\"checkout/reset/rebase 可选\",\"remote\":\"push 可选 remote\",\"refspec\":\"push 可选 refspec\",\"force\":\"push/reset/rebase 可选\",\"dryRun\":\"clean 可选\"}")
                 .build();
     }
 
     @Override
     public ToolPolicyDecision policy(ToolCall call) {
         String operation = operation(call);
-        if (READ_ONLY_OPS.contains(operation)) {
-            return ToolPolicyDecision.readOnly("Git 只读操作自动放行", "git " + operation);
+        List<String> tokens = new ArrayList<>();
+        tokens.add("git");
+        tokens.add(operation);
+        try {
+            List<String> command = buildCommand(call);
+            tokens = command;
+        } catch (Exception e) {
+            // use minimal tokens
         }
-        if (WRITE_OPS.contains(operation)) {
-            return ToolPolicyDecision.writeConfirm("Git 暂存或提交会修改仓库状态，需要人工确认", "git " + operation + previewPath(call));
-        }
-        if (HIGH_RISK_OPS.contains(operation)) {
-            return ToolPolicyDecision.highRiskDeny("高危 Git 操作已被拦截：" + operation, "git " + operation);
-        }
-        return ToolPolicyDecision.highRiskDeny("不支持的 Git 操作：" + operation, "git " + operation);
+        return GitRiskClassifier.classify(tokens, "git " + operation + previewArgs(call));
     }
 
     @Override
@@ -70,14 +66,15 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
             if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
                 return failure("git_op_rejected", policy.getRiskReason(), startedAt);
             }
-            List<String> command = command(call);
-            return commandExecutor.run(command, workspaceRoot(call), properties.getShellTimeoutMs(), properties.getShellMaxOutputChars(), startedAt);
+            List<String> command = buildCommand(call);
+            return commandExecutor.run(command, workspaceRoot(call), properties.getShellTimeoutMs(),
+                    properties.getShellMaxOutputChars(), startedAt);
         } catch (Exception e) {
             return failure("git_op_failed", e.getMessage(), startedAt);
         }
     }
 
-    private List<String> command(ToolCall call) throws Exception {
+    private List<String> buildCommand(ToolCall call) throws Exception {
         String operation = operation(call);
         List<String> command = new ArrayList<>();
         command.add("git");
@@ -110,9 +107,79 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
                 command.add("-m");
                 command.add(message);
             }
+            case "push" -> buildPushCommand(command, call);
+            case "reset" -> buildResetCommand(command, call);
+            case "clean" -> buildCleanCommand(command, call);
+            case "rebase" -> buildRebaseCommand(command, call);
+            case "checkout" -> buildCheckoutCommand(command, call);
             default -> throw new IllegalArgumentException("不支持的 Git 操作：" + operation);
         }
         return command;
+    }
+
+    private void buildPushCommand(List<String> command, ToolCall call) throws Exception {
+        command.add("push");
+        String remote = text(call.getInput(), "remote", null);
+        String refspec = text(call.getInput(), "refspec", null);
+        boolean force = booleanValue(call.getInput(), "force", false);
+        if (force) {
+            command.add("--force-with-lease");
+        }
+        if (StringUtils.isNotBlank(remote)) {
+            command.add(remote);
+        }
+        if (StringUtils.isNotBlank(refspec)) {
+            command.add(refspec);
+        }
+    }
+
+    private void buildResetCommand(List<String> command, ToolCall call) throws Exception {
+        command.add("reset");
+        String branch = text(call.getInput(), "branch", null);
+        boolean force = booleanValue(call.getInput(), "force", false);
+        if (force) {
+            throw new IllegalArgumentException("reset --hard 被永久拦截");
+        }
+        if (StringUtils.isNotBlank(branch)) {
+            command.add(branch);
+        } else {
+            command.add("HEAD");
+        }
+    }
+
+    private void buildCleanCommand(List<String> command, ToolCall call) throws Exception {
+        boolean dryRun = booleanValue(call.getInput(), "dryRun", true);
+        if (dryRun) {
+            command.add("clean");
+            command.add("--dry-run");
+        } else {
+            command.add("clean");
+            command.add("-f");
+        }
+    }
+
+    private void buildRebaseCommand(List<String> command, ToolCall call) throws Exception {
+        command.add("rebase");
+        String branch = text(call.getInput(), "branch", null);
+        if (StringUtils.isNotBlank(branch)) {
+            command.add(branch);
+        }
+    }
+
+    private void buildCheckoutCommand(List<String> command, ToolCall call) throws Exception {
+        command.add("checkout");
+        String branch = text(call.getInput(), "branch", null);
+        if (StringUtils.isNotBlank(branch)) {
+            if (branch.startsWith("-")) {
+                throw new IllegalArgumentException("checkout 不支持标志参数，请使用结构化字段");
+            }
+            command.add(branch);
+        } else {
+            String path = text(call.getInput(), "path", null);
+            if (StringUtils.isNotBlank(path)) {
+                throw new IllegalArgumentException("checkout -- <path> 被永久拦截");
+            }
+        }
     }
 
     private void addPathArg(List<String> command, ToolCall call) throws Exception {
@@ -125,13 +192,27 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
         command.add(relative(call, path));
     }
 
+    private boolean booleanValue(com.fasterxml.jackson.databind.JsonNode input, String field, boolean defaultValue) {
+        if (input == null || input.isMissingNode() || input.path(field).isMissingNode() || input.path(field).isNull()) {
+            return defaultValue;
+        }
+        return input.path(field).asBoolean(defaultValue);
+    }
+
     private String operation(ToolCall call) {
         return text(call.getInput(), "operation", "").toLowerCase(Locale.ROOT);
     }
 
-    private String previewPath(ToolCall call) {
-        String path = text(call.getInput(), "path", "");
-        return StringUtils.isBlank(path) ? "" : " path=" + path;
+    private String previewArgs(ToolCall call) {
+        StringBuilder sb = new StringBuilder();
+        String path = text(call.getInput(), "path", null);
+        String branch = text(call.getInput(), "branch", null);
+        String remote = text(call.getInput(), "remote", null);
+        String refspec = text(call.getInput(), "refspec", null);
+        if (StringUtils.isNotBlank(path)) sb.append(" path=").append(path);
+        if (StringUtils.isNotBlank(branch)) sb.append(" branch=").append(branch);
+        if (StringUtils.isNotBlank(remote)) sb.append(" remote=").append(remote);
+        if (StringUtils.isNotBlank(refspec)) sb.append(" refspec=").append(refspec);
+        return sb.toString();
     }
-
 }
