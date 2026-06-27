@@ -135,6 +135,7 @@ public class AgentResponseMapperTest {
                 .input(Map.of("path", "a.txt"))
                 .permissionLevel(ToolPermissionLevel.WRITE_CONFIRM)
                 .riskReason("risk").operationPreview("preview")
+                .metadata(Map.of("deletePreview", Map.of("fileCount", 1)))
                 .expiresAt(Instant.now())
                 .build();
         AgentApprovalResponse dto = mapper.toApprovalResponse(approval);
@@ -149,6 +150,7 @@ public class AgentResponseMapperTest {
         assertEquals("WRITE_CONFIRM", dto.getPermissionLevel());
         assertEquals("risk", dto.getRiskReason());
         assertEquals("preview", dto.getOperationPreview());
+        assertEquals(Map.of("deletePreview", Map.of("fileCount", 1)), dto.getMetadata());
         assertNotNull(dto.getExpiresAt());
     }
 

@@ -44,7 +44,6 @@ public class ToolDispatchNode extends AbstractAgentNode {
     @Override
     protected NodeResult doApply(AgentContext context) {
         AgentDecision decision = context.getDecision();
-        context.setStep(context.getStep() + 1);
         ToolCall toolCall = ToolCall.builder()
                 .name(decision.getTool())
                 .input(decision.getInput())
@@ -53,8 +52,22 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .runId(context.getRunId())
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
+                .approvedPolicyFingerprint(context.getApprovedPolicyFingerprint())
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);
+        boolean resumedApproval = StringUtils.equals(context.getApprovedTool(), decision.getTool());
+        String currentPolicyFingerprint = policy == null ? null : policy.getPolicyFingerprint();
+        boolean fingerprintedApproval = resumedApproval
+                && (StringUtils.isNotBlank(context.getApprovedPolicyFingerprint())
+                || StringUtils.isNotBlank(currentPolicyFingerprint));
+        if (fingerprintedApproval
+                && !StringUtils.equals(context.getApprovedPolicyFingerprint(), currentPolicyFingerprint)) {
+            clearApprovedPolicy(context);
+            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
+        }
+        clearApprovedPolicy(context);
+
+        context.setStep(context.getStep() + 1);
         context.setUnsafeResumeRequired(policy != null && (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM
                 || policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM));
 
@@ -67,6 +80,10 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .build()));
 
         ToolResult result = toolRegistry.call(toolCall);
+        if (resumedApproval && "approval_stale".equals(result.getErrorCode())) {
+            context.setUnsafeResumeRequired(false);
+            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, events);
+        }
         context.setUnsafeResumeRequired(false);
         result = contextWindowManager.prepareToolResult(context, result);
         if (!contextEnabled() && StringUtils.length(result.getObservation()) > properties.getObservationMaxChars()) {
@@ -104,6 +121,11 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .reason("after_tool:" + decision.getTool())
                 .build()));
         return NodeResult.next(AgentNodeNames.OBSERVATION, events);
+    }
+
+    private void clearApprovedPolicy(AgentContext context) {
+        context.setApprovedTool(null);
+        context.setApprovedPolicyFingerprint(null);
     }
 
     private ToolResult applyTodoWrite(AgentContext context, ToolResult original) {

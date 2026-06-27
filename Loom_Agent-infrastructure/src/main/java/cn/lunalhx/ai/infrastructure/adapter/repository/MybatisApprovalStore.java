@@ -68,6 +68,8 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         po.setRiskReason(approval.getRiskReason());
         po.setOperationPreview(approval.getOperationPreview());
         po.setDiffJson(writeJson(approval.getDiff()));
+        po.setPolicyFingerprint(approval.getPolicyFingerprint());
+        po.setMetadataJson(writeJson(approval.getMetadata()));
         po.setContextJson(writeJson(approval.getContext() == null ? null : AgentContextSnapshot.from(approval.getContext())));
         po.setCreatedAt(toLocalDateTime(approval.getCreatedAt()));
         po.setExpiresAt(toLocalDateTime(approval.getExpiresAt()));
@@ -91,6 +93,9 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
                 .riskReason(po.getRiskReason())
                 .operationPreview(po.getOperationPreview())
                 .diff(readJson(po.getDiffJson(), ApprovalDiff.class))
+                .policyFingerprint(po.getPolicyFingerprint())
+                .metadata(readJson(po.getMetadataJson(), new TypeReference<Map<String, Object>>() {
+                }))
                 .createdAt(toInstant(po.getCreatedAt()))
                 .expiresAt(toInstant(po.getExpiresAt()))
                 .context(snapshot == null ? null : snapshot.restore())

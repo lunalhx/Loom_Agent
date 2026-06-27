@@ -61,9 +61,13 @@ public final class AgentResumeCoordinator {
         events.add(eventFactory.resumeStarted(context));
 
         if (decision == ApprovalDecision.APPROVE) {
+            context.setApprovedTool(approval.getTool());
+            context.setApprovedPolicyFingerprint(approval.getPolicyFingerprint());
             return AgentResumePlan.continueAt(context, AgentNodeNames.TOOL_DISPATCH, events);
         }
 
+        context.setApprovedTool(null);
+        context.setApprovedPolicyFingerprint(null);
         context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure(
                 "approval_rejected",

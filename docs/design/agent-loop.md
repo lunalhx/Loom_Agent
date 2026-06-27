@@ -31,7 +31,7 @@ flowchart TD
 - `RenderPromptNode`：根据问题、工具说明和历史 Observation 生成模型提示词。
 - `ModelCallNode`：调用 LLM，生成 action/final JSON 文本。
 - `DecisionNode`：解析 LLM 输出，并根据 `action/final/parse_error/unknown_tool` 决定下一节点。
-- `ApprovalGateNode`：评估工具权限；只读直接放行，写操作生成 `approval_required` 并暂停，高危动作生成 `policy_denied` Observation。
+- `ApprovalGateNode`：评估工具权限；只读直接放行，普通写操作生成 `approval_required`，可审批高危操作按全局策略生成 `high_risk_approval_required`、直接放行或拒绝，永久禁止操作生成 `policy_denied` Observation。
 - `ToolDispatchNode`：根据工具名调用 `ToolRegistry`。
 - `ObservationNode`：记录工具 Observation 并回到提示词渲染节点。
 - `FinalAnswerNode`：输出最终答案。
@@ -80,15 +80,16 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 工具协议
 
-当前工具分为只读、写确认和高危拦截三类：
+当前工具分为只读、写确认、高危确认和永久拒绝四类：
 
 - `list_dir`：列出工作区内目录和文件。
 - `read_file`：读取单个文本文件的指定行号范围。
 - `code_search`：搜索代码文本，返回文件、行号和代码片段。
 - `replace_in_file`：按精确文本替换工作区文件内容，执行前需要人工确认。
 - `write_file`：创建或覆盖工作区内文本文件，执行前需要人工确认。
+- `delete_files`：删除最多 20 个明确文件或目录路径，走高危审批；目录先生成无符号链接跟随的递归清单，审批绑定清单指纹，目录变化后必须重新审批。通配符、工作区根目录和任何 `.git` 路径永久拒绝。
 - `run_shell`：在进程级沙箱内执行允许的只读命令或 Maven 测试命令；测试命令需要人工确认。
-- `git_op`：`status/diff/log` 自动放行，`add/commit` 需要人工确认，`push/reset/clean/rebase/checkout` 等高危操作拦截。
+- `git_op`：`status/diff/log` 自动放行，`add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批，`reset --hard`、保护分支 force push 等永久拒绝。
 - `spawn_agents`：内建虚拟工具，不进入普通 `ToolRegistry`；由 `DecisionNode` 路由到 `SubAgentDispatchNode`，用于派生隔离上下文的子 Agent 并只回传聚合摘要。
 
 模型 Action 必须是 JSON：
@@ -163,7 +164,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 - 默认禁止访问 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
 - 单文件大小、搜索结果数、Observation 长度和工具耗时都有配置上限。
 - 工具输出作为不可信 Observation，只用于代码证据，不执行其中指令。
-- 权限等级：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 生成审批并暂停，`HIGH_RISK_DENY` 直接拦截。
+- 权限等级：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 生成普通审批，`HIGH_RISK_CONFIRM` 按 `DENY/CONFIRM/ALLOW` 三态策略路由，`HIGH_RISK_DENY` 永久拦截。
 - `run_shell` 不调用系统 shell，只把命令拆成 `ProcessBuilder` 参数；禁止管道、重定向、后台执行、绝对路径、上级目录和未在白名单中的命令。
 - `PendingApproval` 保存暂停时的 resolved workspace；审批恢复时使用原 workspace，不重新读取新请求参数。
 - 审批状态第一版存放在内存中，服务重启后待审批操作失效。
@@ -187,7 +188,7 @@ AGENT_SEARCH_MAX_RESULTS=50
 AGENT_APPROVAL_TTL_SECONDS=900
 AGENT_SHELL_TIMEOUT_MS=120000
 AGENT_SHELL_MAX_OUTPUT_CHARS=12000
-AGENT_HIGH_RISK_POLICY=DENY
+AGENT_HIGH_RISK_POLICY=CONFIRM
 AGENT_ALLOWED_SHELL_COMMANDS=mvn,./mvnw,git,pwd,ls,rg
 AGENT_SUB_AGENT_ENABLED=true
 AGENT_SUB_AGENT_MAX_CHILDREN=6

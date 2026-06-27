@@ -59,6 +59,7 @@ public final class AgentEventFactory {
                 .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
+                .metadata(approval.getMetadata())
                 .expiresAt(approval.getExpiresAt())
                 .build();
     }
@@ -79,6 +80,7 @@ public final class AgentEventFactory {
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
                 .diff(approval.getDiff())
+                .metadata(approval.getMetadata())
                 .expiresAt(approval.getExpiresAt())
                 .build();
     }

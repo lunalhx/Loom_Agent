@@ -122,7 +122,7 @@ SSE 事件：
 
 `POST /api/v1/agent/code/ask/stream`
 
-节点化 ReAct 代码 Agent。只读工具自动执行；文件写入、测试命令、Git 暂存/提交会返回审批事件；高危动作默认拦截。请求字段：
+节点化 ReAct 代码 Agent。只读工具自动执行；文件写入、测试命令、Git 暂存/提交会返回普通审批事件；可审批高危动作默认返回高危审批事件，真正不可审批的危险动作才会硬拦截。请求字段：
 
 - `question`：代码任务；也兼容 `message` 字段，二者至少填一个。
 - `workspace`：可选工作区选择。为空时使用默认 `loom.agent.workspace-root`；相对路径会基于 `loom.agent.allowed-workspace-roots` 解析；绝对路径也必须落在白名单根目录下。
@@ -155,6 +155,7 @@ Agent SSE 事件：
 - `tool_call`：工具名和参数。
 - `context_compacted`：上下文已执行预压缩、reactive compact 或深度摘要，metadata 包含压缩前后 token 估算、目标大小、策略和 transcript artifact ID。
 - `approval_required`：写操作等待人工确认，包含 `approvalId`、`permissionLevel`、`riskReason`、`operationPreview`、`expiresAt`。
+- `high_risk_approval_required`：文件删除、普通 Git push/checkout 等高危但可审批的操作，批准后才会真实执行。
 - `user_input_required`：自动上下文恢复已耗尽，运行进入 `WAITING_USER_INPUT`；可提交更聚焦的指令继续，或终止运行。
 - `policy_denied`：高危动作被拦截，不会执行真实操作。
 - `sub_agent_started`：子 Agent 子任务开始，包含 `subAgentTaskId`、`subAgentRunId`、`subAgentRole`。
@@ -202,8 +203,9 @@ curl -N \
 
 - `replace_in_file`：按精确文本替换文件内容，要求匹配次数符合 `expectedOccurrences`。
 - `write_file`：创建或覆盖工作区内文本文件。
+- `delete_files`：删除最多 20 个明确的工作区文件或目录路径，需要高危审批；目录会展示清单后递归删除，符号链接只删除链接本身，通配符、工作区根目录和任何 `.git` 路径永久拒绝。
 - `run_shell`：进程级沙箱执行允许的只读命令或 Maven 测试命令。
-- `git_op`：支持 `status/diff/log/add/commit`，其中 `add/commit` 需要审批。
+- `git_op`：支持受限 Git 操作；`status/diff/log` 自动放行，`add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批。
 
 ## 健壮性
 
@@ -211,7 +213,7 @@ curl -N \
 - 重试：默认最多 3 次，只在首 token 输出前重试；429、500、503 会重试，400、401、402、422 不重试。
 - 输出校验：空输出会返回 `output_empty`；`responseFormat=JSON_OBJECT` 时会校验完整输出是否为合法 JSON。
 - 异常兜底：鉴权失败、余额不足、限流、服务过载、内容过滤、输出截断和格式错误都会映射为 SSE `error` 事件。
-- Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要 HITL 审批，`HIGH_RISK_DENY` 直接拦截。
+- Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要普通审批，`HIGH_RISK_CONFIRM` 默认需要高危审批，`HIGH_RISK_DENY` 直接拦截。
 - 子 Agent：主 Agent 可通过内建虚拟工具 `spawn_agents` 派生 explorer/reviewer/editor 子 Agent；explorer/reviewer 强制只读并可并发，editor 默认只允许单个串行执行。
 - 上下文恢复：模型上下文超限后依次执行一次 reactive compact、切换更大上下文模型、分块深度摘要；根 Agent 最终进入可恢复的 `WAITING_USER_INPUT`，子 Agent 则以 `CONTEXT_OVERFLOW` 返回主 Agent。
 - Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。

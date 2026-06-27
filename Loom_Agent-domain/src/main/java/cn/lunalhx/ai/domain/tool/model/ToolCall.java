@@ -21,6 +21,7 @@ public class ToolCall {
     private String runId;
     private String rootRunId;
     private String conversationId;
+    private String approvedPolicyFingerprint;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

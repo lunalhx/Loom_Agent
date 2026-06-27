@@ -35,10 +35,10 @@ CREATE TABLE IF NOT EXISTS agent_undo_snapshot (
 CREATE TABLE IF NOT EXISTS agent_workspace_undo_lock (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     lock_id VARCHAR(64) NOT NULL UNIQUE,
-    workspace VARCHAR(1024) NOT NULL UNIQUE,
+    workspace VARCHAR(1024) NOT NULL,
     holder_run_id VARCHAR(64) DEFAULT NULL,
     acquired_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL,
-    KEY idx_workspace (workspace(255)),
+    UNIQUE KEY uk_workspace (workspace(768)),
     KEY idx_expires_at (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

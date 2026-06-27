@@ -84,6 +84,7 @@ public class AgentResponseMapper {
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
                 .diff(toDiffPayload(approval.getDiff()))
+                .metadata(approval.getMetadata())
                 .expiresAt(approval.getExpiresAt() == null ? null : approval.getExpiresAt().toString())
                 .build();
     }
