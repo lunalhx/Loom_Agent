@@ -5,12 +5,14 @@ import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.IncompletePlanStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.MaxStepContinuationStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.PendingApprovalConsistencyStopHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.SubAgentGracefulStopHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.UndoSnapshotAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
@@ -52,15 +54,27 @@ public class AgentFlowFactory {
     private final AgentLoopRuntimeDependencies runtime;
     private final ObjectMapper objectMapper;
     private final SubAgentGracefulStopHook gracefulStopHook;
+    private final UndoSessionCoordinator undoCoordinator;
+    private final UndoSnapshotAgentHook undoHook;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
+        this(modelGateway, state, runtime, null, null);
+    }
+
+    public AgentFlowFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           UndoSessionCoordinator undoCoordinator,
+                           UndoSnapshotAgentHook undoHook) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.objectMapper = state.objectMapper();
         this.gracefulStopHook = new SubAgentGracefulStopHook(new SubAgentPartialSummaryGenerator(objectMapper));
+        this.undoCoordinator = undoCoordinator;
+        this.undoHook = undoHook;
     }
 
     public void setControlInbox(SubAgentControlInbox controlInbox) {
@@ -135,11 +149,15 @@ public class AgentFlowFactory {
     }
 
     private AgentHookRegistry hookRegistry() {
-        return new AgentHookRegistry(List.of(
+        List<AgentHook> hooks = new ArrayList<>(List.of(
                 new MaxStepContinuationStopHook(runtime.properties()),
                 new IncompletePlanStopHook(runtime.properties()),
                 new PendingApprovalConsistencyStopHook(state.approvalStore()),
                 new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper),
                 gracefulStopHook));
+        if (undoHook != null) {
+            hooks.add(undoHook);
+        }
+        return new AgentHookRegistry(hooks);
     }
 }

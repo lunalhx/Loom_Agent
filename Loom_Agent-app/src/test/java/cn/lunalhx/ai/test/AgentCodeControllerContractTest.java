@@ -112,7 +112,7 @@ public class AgentCodeControllerContractTest {
                 agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
-                queryService, sseResponder, limiter != null ? limiter : noopLimiter());
+                queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 

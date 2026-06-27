@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao">
+
+    <resultMap id="AgentWorkspaceUndoLockMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO">
+        <id column="id" property="id"/>
+        <result column="lock_id" property="lockId"/>
+        <result column="workspace" property="workspace"/>
+        <result column="holder_run_id" property="holderRunId"/>
+        <result column="acquired_at" property="acquiredAt"/>
+        <result column="expires_at" property="expiresAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO">
+        INSERT INTO agent_workspace_undo_lock
+        (lock_id, workspace, holder_run_id, acquired_at, expires_at)
+        VALUES
+        (#{lockId}, #{workspace}, #{holderRunId}, #{acquiredAt}, #{expiresAt})
+    </insert>
+
+    <delete id="deleteByWorkspace">
+        DELETE FROM agent_workspace_undo_lock WHERE workspace = #{workspace}
+    </delete>
+
+    <select id="selectByWorkspace" resultMap="AgentWorkspaceUndoLockMap">
+        SELECT * FROM agent_workspace_undo_lock WHERE workspace = #{workspace} LIMIT 1
+    </select>
+
+    <delete id="deleteStaleBefore">
+        DELETE FROM agent_workspace_undo_lock WHERE expires_at &lt; #{threshold}
+    </delete>
+
+</mapper>

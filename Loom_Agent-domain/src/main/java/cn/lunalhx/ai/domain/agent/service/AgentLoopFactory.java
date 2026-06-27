@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.flow.hook.UndoSnapshotAgentHook;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -28,6 +29,7 @@ public class AgentLoopFactory {
     private final AgentFlowFactory flowFactory;
     private final AgentLoopStateDependencies state;
     private final AgentLoopRuntimeDependencies runtime;
+    private final UndoSessionCoordinator undoCoordinator;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -35,7 +37,20 @@ public class AgentLoopFactory {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
+        this.undoCoordinator = null;
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime);
+    }
+
+    public AgentLoopFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           UndoSessionCoordinator undoCoordinator,
+                           UndoSnapshotAgentHook undoHook) {
+        Objects.requireNonNull(modelGateway, "modelGateway must not be null");
+        this.state = Objects.requireNonNull(state, "state must not be null");
+        this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
+        this.undoCoordinator = undoCoordinator;
+        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, undoCoordinator, undoHook);
     }
 
     public void setSubAgentControlInbox(SubAgentControlInbox controlInbox) {
@@ -78,13 +93,13 @@ public class AgentLoopFactory {
     AgentLoopAssembly assembleStandalone(ToolRegistry toolRegistry) {
         AgentFlowDefinition flow = flowFactory.createStandalone(toolRegistry);
         AgentLoopComponents components = buildComponents(flow);
-        return new AgentLoopAssembly(runtime.properties(), flow, components);
+        return new AgentLoopAssembly(runtime.properties(), flow, components, undoCoordinator);
     }
 
     AgentLoopAssembly assembleRoot(ToolRegistry toolRegistry, SubAgentCoordinator coordinator) {
         AgentFlowDefinition flow = flowFactory.createRoot(toolRegistry, coordinator);
         AgentLoopComponents components = buildComponents(flow);
-        return new AgentLoopAssembly(runtime.properties(), flow, components);
+        return new AgentLoopAssembly(runtime.properties(), flow, components, undoCoordinator);
     }
 
     private AgentLoopComponents buildComponents(AgentFlowDefinition flow) {
