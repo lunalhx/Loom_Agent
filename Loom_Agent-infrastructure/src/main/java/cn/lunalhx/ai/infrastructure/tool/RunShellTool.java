@@ -24,7 +24,7 @@ import java.util.Set;
 @Component
 public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
-    private static final Set<String> READ_ONLY_COMMANDS = Set.of("pwd", "ls", "rg");
+    private static final Set<String> PATH_WHITELIST = Set.of("./mvnw", "mvnw");
     private final CommandExecutor commandExecutor;
 
     public RunShellTool(AgentRuntimeProperties properties) {
@@ -42,7 +42,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
-                .description("在工作区进程级沙箱内执行允许的只读命令或测试命令；写入类命令必须人工确认，高危命令会被拦截；不支持 find/python/python3，请使用 find_files 工具")
+                .description("在工作区沙箱内执行已分类命令；只读自动放行，普通写命令需确认，高危命令需高危确认，rm/find/python 等重定向到专用工具")
                 .inputSchema("{\"command\":\"必填命令字符串\",\"cwd\":\"相对工作目录，默认 .\",\"timeoutMs\":\"默认 AGENT_SHELL_TIMEOUT_MS\"}")
                 .build();
     }
@@ -61,32 +61,88 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return ToolPolicyDecision.highRiskDeny("command 不能为空", command);
         }
         String executable = tokens.get(0);
-        if ("rm".equals(executable) || "rmdir".equals(executable)) {
+
+        // Step 1: env prefix interception
+        if ("env".equals(executable)) {
+            String actualCmd = extractEnvCommand(tokens);
+            if (actualCmd != null) {
+                executable = actualCmd;
+                // Re-split: build a new token list for the actual command
+                List<String> newTokens = new ArrayList<>();
+                newTokens.add(executable);
+                for (int i = 1; i < tokens.size(); i++) {
+                    String t = tokens.get(i);
+                    if (!t.contains("=")) {
+                        newTokens.addAll(tokens.subList(i, tokens.size()));
+                        break;
+                    }
+                }
+                tokens = newTokens;
+            } else {
+                return ToolPolicyDecision.readOnly("列出环境变量", command);
+            }
+        }
+
+        // Step 2: shell interpreter deny (including -c form detected via tokens)
+        if (isShellInterpreter(executable)) {
             return ToolPolicyDecision.highRiskDeny(
-                    "禁止通过 shell 执行 " + executable + "，请使用 delete_files 工具",
-                    command);
+                    "禁止通过 shell 解释器执行命令，请直接调用目标命令", command);
         }
-        if ("find".equals(executable) || "python".equals(executable) || "python3".equals(executable)) {
-            return ToolPolicyDecision.highRiskDeny(
-                    "禁止通过 shell 执行 " + executable + "，请使用结构化工具 find_files",
-                    command);
+
+        // Step 3: path-based executable check
+        if (executable.contains("/")) {
+            String basename = executable.substring(executable.lastIndexOf('/') + 1);
+            if (!PATH_WHITELIST.contains(executable) && !PATH_WHITELIST.contains(basename)) {
+                if (isDenied(basename)) {
+                    return denyForCommand(basename, command);
+                }
+                return ToolPolicyDecision.highRiskConfirm(
+                        "路径型可执行文件视为高危操作：" + executable, command);
+            }
         }
-        if (!allowedShellCommands().contains(executable)) {
-            return ToolPolicyDecision.highRiskDeny("命令不在允许列表：" + executable, command);
+
+        // Step 4: deny bucket
+        if (isDenied(executable)) {
+            return denyForCommand(executable, command);
         }
+
+        // Step 5: git
+        if ("git".equals(executable)) {
+            return gitPolicy(tokens, command);
+        }
+
+        // Step 6: mvn / ./mvnw
         if ("mvn".equals(executable) || "./mvnw".equals(executable)) {
             if (isMavenTestCommand(tokens)) {
                 return ToolPolicyDecision.writeConfirm("Maven 测试会写入 target 等构建目录，需要人工确认", command);
             }
-            return ToolPolicyDecision.highRiskDeny("第一版仅允许执行 Maven 测试命令", command);
+            return ToolPolicyDecision.highRiskConfirm("构建会执行插件代码并写入 target，属高危操作", command);
         }
-        if ("git".equals(executable)) {
-            return gitPolicy(tokens, command);
-        }
-        if (READ_ONLY_COMMANDS.contains(executable)) {
+
+        // Step 7: readOnly bucket
+        if (shellCommands().getReadOnly().contains(executable)) {
             return ToolPolicyDecision.readOnly("允许的只读 shell 命令", command);
         }
-        return ToolPolicyDecision.highRiskDeny("未分类 shell 命令默认拦截", command);
+
+        // Step 8: write bucket
+        if (shellCommands().getWrite().contains(executable)) {
+            return ToolPolicyDecision.writeConfirm("写命令需要人工确认", command);
+        }
+
+        // Step 9: highRisk bucket
+        if (shellCommands().getHighRisk().contains(executable)) {
+            return ToolPolicyDecision.highRiskConfirm("高危命令需要高危确认", command);
+        }
+
+        // Step 10: unknown
+        String unknownLevel = shellCommands().getUnknownLevel();
+        if ("HIGH_RISK_DENY".equalsIgnoreCase(unknownLevel)) {
+            return ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable, command);
+        }
+        if ("HIGH_RISK_CONFIRM".equalsIgnoreCase(unknownLevel)) {
+            return ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable, command);
+        }
+        return ToolPolicyDecision.writeConfirm("未分类命令需要人工确认：" + executable, command);
     }
 
     @Override
@@ -134,6 +190,46 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                         || "verify".equals(token)
                         || token.endsWith(":test")
                         || token.startsWith("-Dtest="));
+    }
+
+    private boolean isShellInterpreter(String executable) {
+        return Set.of("sh", "bash", "zsh", "dash", "ksh", "csh", "fish", "ash", "exec", "eval", "source")
+                .contains(executable);
+    }
+
+    /**
+     * If {@code env} is followed by a real command (after skipping VAR=val tokens),
+     * return the actual command name. Otherwise return null (pure env).
+     */
+    private String extractEnvCommand(List<String> tokens) {
+        for (int i = 1; i < tokens.size(); i++) {
+            String t = tokens.get(i);
+            if (!t.contains("=")) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    private boolean isDenied(String executable) {
+        return shellCommands().getDeny().contains(executable);
+    }
+
+    private ToolPolicyDecision denyForCommand(String executable, String command) {
+        if ("rm".equals(executable) || "rmdir".equals(executable)) {
+            return ToolPolicyDecision.highRiskDeny(
+                    "禁止通过 shell 执行 " + executable + "，请使用 delete_files 工具", command);
+        }
+        if ("find".equals(executable) || "python".equals(executable) || "python3".equals(executable)) {
+            return ToolPolicyDecision.highRiskDeny(
+                    "禁止通过 shell 执行 " + executable + "，请使用结构化工具 find_files", command);
+        }
+        return ToolPolicyDecision.highRiskDeny("禁止通过 shell 执行 " + executable, command);
+    }
+
+    private AgentRuntimeProperties.ShellCommandProperties shellCommands() {
+        AgentRuntimeProperties.ShellCommandProperties sc = properties.getShellCommands();
+        return sc != null ? sc : new AgentRuntimeProperties.ShellCommandProperties();
     }
 
     private List<String> splitCommand(String command) {
@@ -199,10 +295,6 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                 throw new IllegalArgumentException("路径被安全策略拦截：" + token);
             }
         }
-    }
-
-    private List<String> allowedShellCommands() {
-        return properties.getAllowedShellCommands() == null ? List.of() : properties.getAllowedShellCommands();
     }
 
 }

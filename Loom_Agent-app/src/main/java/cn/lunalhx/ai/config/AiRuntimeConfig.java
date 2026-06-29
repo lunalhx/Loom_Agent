@@ -641,6 +641,32 @@ public class AiRuntimeConfig {
                     && !"ALLOW".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
                 throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 仅支持 DENY/CONFIRM/ALLOW");
             }
+            String permissionMode = StringUtils.defaultString(agentRuntimeProperties.getPermissionMode(), "SANDBOX").toUpperCase();
+            if (!"SANDBOX".equals(permissionMode)
+                    && !"ACCEPT_EDITS".equals(permissionMode)
+                    && !"BYPASS".equals(permissionMode)) {
+                throw new IllegalStateException("AGENT_PERMISSION_MODE 仅支持 SANDBOX/ACCEPT_EDITS/BYPASS");
+            }
+            AgentRuntimeProperties.ShellCommandProperties sc = agentRuntimeProperties.getShellCommands();
+            if (sc != null) {
+                String unknownLevel = StringUtils.defaultString(sc.getUnknownLevel(), "WRITE_CONFIRM").toUpperCase();
+                if (!"WRITE_CONFIRM".equals(unknownLevel)
+                        && !"HIGH_RISK_CONFIRM".equals(unknownLevel)
+                        && !"HIGH_RISK_DENY".equals(unknownLevel)) {
+                    throw new IllegalStateException("AGENT_SHELL_COMMANDS_UNKNOWN_LEVEL 仅支持 WRITE_CONFIRM/HIGH_RISK_CONFIRM/HIGH_RISK_DENY，禁止 READ_ONLY");
+                }
+            }
+            List<String> allowedShellCommands = agentRuntimeProperties.getAllowedShellCommands();
+            boolean hasOldConfig = allowedShellCommands != null && !allowedShellCommands.isEmpty();
+            boolean hasNewConfig = sc != null
+                    && (isNonDefaultList(sc.getReadOnly())
+                    || isNonDefaultList(sc.getWrite())
+                    || isNonDefaultList(sc.getHighRisk())
+                    || isNonDefaultList(sc.getDeny())
+                    || !"WRITE_CONFIRM".equalsIgnoreCase(StringUtils.defaultString(sc.getUnknownLevel())));
+            if (hasOldConfig && !hasNewConfig) {
+                log.warn("loom.agent.allowed-shell-commands 已废弃，请迁移到 loom.agent.shell-commands.* 分桶配置（readOnly/write/highRisk/deny/unknownLevel）。旧配置不会自动迁移，详见 docs/design/agent-loop.md");
+            }
             requirePositive(agentRuntimeProperties.getSubAgentTimeoutMs(), "AGENT_SUB_AGENT_TIMEOUT_MS");
             if (agentRuntimeProperties.getSubAgentMaxChildren() == null || agentRuntimeProperties.getSubAgentMaxChildren() < 1) {
                 throw new IllegalStateException("AGENT_SUB_AGENT_MAX_CHILDREN 必须大于等于 1");
@@ -789,6 +815,10 @@ public class AiRuntimeConfig {
 
     private static String status(boolean ok) {
         return ok ? "available" : "unavailable";
+    }
+
+    private static boolean isNonDefaultList(List<String> list) {
+        return list != null && !list.isEmpty();
     }
 
 }
