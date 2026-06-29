@@ -38,6 +38,12 @@ public interface TraceRecorder {
                                  Throwable error,
                                  Map<String, Object> metadata);
 
+    void recordSecurityEvent(AgentContext context,
+                             String eventType,
+                             String node,
+                             String status,
+                             Map<String, Object> metadata);
+
     List<AgentTraceEvent> timeline(String runId);
 
     List<AgentTraceEvent> timelineByTraceId(String traceId);

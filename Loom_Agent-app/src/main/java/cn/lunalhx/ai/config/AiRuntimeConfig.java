@@ -65,6 +65,8 @@ import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
 import cn.lunalhx.ai.infrastructure.metrics.MicrometerAgentMetrics;
+import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.commons.lang3.StringUtils;
@@ -425,6 +427,11 @@ public class AiRuntimeConfig {
     }
 
     @Bean
+    public ToolOutputSanitizer toolOutputSanitizer() {
+        return new RegexToolOutputSanitizer();
+    }
+
+    @Bean
     public AgentWorkspaceResolver agentWorkspaceResolver(AgentRuntimeProperties agentRuntimeProperties) {
         return new AgentWorkspaceResolver(agentRuntimeProperties);
     }
@@ -455,9 +462,10 @@ public class AiRuntimeConfig {
                                                                        TraceRecorder traceRecorder,
                                                                        BudgetGuard budgetGuard,
                                                                        AgentMetrics agentMetrics,
-                                                                       ContextWindowManager contextWindowManager) {
+                                                                       ContextWindowManager contextWindowManager,
+                                                                       ToolOutputSanitizer toolOutputSanitizer) {
         return new AgentLoopRuntimeDependencies(agentRuntimeProperties, traceRecorder, budgetGuard,
-                agentMetrics, contextWindowManager);
+                agentMetrics, contextWindowManager, toolOutputSanitizer);
     }
 
     @Bean

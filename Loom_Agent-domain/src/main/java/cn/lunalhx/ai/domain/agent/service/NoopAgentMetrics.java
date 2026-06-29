@@ -12,4 +12,8 @@ public class NoopAgentMetrics implements AgentMetrics {
     public void recordNodeDuration(String node, String status, long durationMs) {
     }
 
+    @Override
+    public void recordPromptInjectionDetected(String toolName, int matchCount) {
+    }
+
 }

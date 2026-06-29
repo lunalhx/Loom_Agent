@@ -30,6 +30,13 @@ public class MicrometerAgentMetrics implements AgentMetrics {
                 .record(Duration.ofMillis(Math.max(0L, durationMs)));
     }
 
+    @Override
+    public void recordPromptInjectionDetected(String toolName, int matchCount) {
+        meterRegistry.counter("loom_agent_prompt_injection_detected_total",
+                        "tool", safe(toolName))
+                .increment(Math.max(1, matchCount));
+    }
+
     private String safe(String value) {
         return value == null || value.isBlank() ? "none" : value;
     }
