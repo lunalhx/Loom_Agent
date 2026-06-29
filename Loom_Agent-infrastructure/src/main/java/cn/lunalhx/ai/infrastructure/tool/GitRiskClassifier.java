@@ -9,7 +9,7 @@ import java.util.Set;
 public final class GitRiskClassifier {
 
     private static final Set<String> READ_ONLY_OPS = Set.of("status", "diff", "log");
-    private static final Set<String> WRITE_OPS = Set.of("add", "commit");
+    private static final Set<String> WRITE_OPS = Set.of("add", "commit", "init");
     private static final Set<String> HIGH_RISK_CONFIRM_OPS = Set.of("push", "reset", "clean", "rebase", "checkout");
     private static final Set<String> PROTECTED_BRANCHES = Set.of("main", "master");
 
@@ -21,6 +21,10 @@ public final class GitRiskClassifier {
             return ToolPolicyDecision.highRiskDeny("git 子命令不能为空", command);
         }
         String operation = tokens.get(1).toLowerCase(Locale.ROOT);
+
+        if ("init".equals(operation) && tokens.size() > 2) {
+            return ToolPolicyDecision.highRiskDeny("git init 仅允许在当前工作区无参数执行", command);
+        }
 
         if (READ_ONLY_OPS.contains(operation)) {
             if ("clean".equals(operation) && isDryRun(tokens)) {

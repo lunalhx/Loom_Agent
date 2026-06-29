@@ -205,7 +205,7 @@ curl -N \
 - `write_file`：创建或覆盖工作区内文本文件。
 - `delete_files`：删除最多 20 个明确的工作区文件或目录路径，需要高危审批；目录会展示清单后递归删除，符号链接只删除链接本身，通配符、工作区根目录和任何 `.git` 路径永久拒绝。
 - `run_shell`：进程级沙箱执行允许的只读命令或 Maven 测试命令。
-- `git_op`：支持受限 Git 操作；`status/diff/log` 自动放行，`add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批。
+- `git_op`：支持受限 Git 操作；`status/diff/log` 自动放行，`init/add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批。
 
 ## 健壮性
 
