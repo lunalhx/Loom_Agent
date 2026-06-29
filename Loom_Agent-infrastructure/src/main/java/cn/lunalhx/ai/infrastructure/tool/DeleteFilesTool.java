@@ -52,7 +52,13 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         return ToolSpec.builder()
                 .name("delete_files")
                 .description("删除工作区内明确指定的文件或目录；目录会在高危审批后递归删除，每次最多 20 个目标，不支持通配符")
-                .inputSchema("{\"paths\":[\"必填，1~20 个工作区相对文件或目录路径\"]}")
+                .inputSchema("{" +
+                        "\"type\":\"object\"," +
+                        "\"properties\":{" +
+                        "\"paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1,\"maxItems\":20,\"description\":\"1~20 个工作区相对文件或目录路径\"}" +
+                        "}," +
+                        "\"required\":[\"paths\"]" +
+                        "}")
                 .build();
     }
 
@@ -270,7 +276,8 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                 rejectGitPath(root, dir);
-                entries.add(new DeletionEntry(dir, relative(root, dir), EntryKind.DIRECTORY, 0L));
+                entries.add(new DeletionEntry(dir, relative(root, dir), EntryKind.DIRECTORY, 0L,
+                        attrs.lastModifiedTime().toMillis(), null));
                 return FileVisitResult.CONTINUE;
             }
 
@@ -278,14 +285,23 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 rejectGitPath(root, file);
                 EntryKind kind;
+                String symlinkTarget = null;
                 if (attrs.isSymbolicLink()) {
                     kind = EntryKind.SYMLINK;
+                    try {
+                        Path target = Files.readSymbolicLink(file);
+                        symlinkTarget = target.toString();
+                    } catch (IOException ignored) {
+                        // symlink target may be unreadable
+                    }
                 } else if (attrs.isRegularFile()) {
                     kind = EntryKind.FILE;
                 } else {
                     throw new DeleteValidationException("policy_denied", "禁止删除特殊文件：" + relative(root, file), false);
                 }
-                entries.add(new DeletionEntry(file, relative(root, file), kind, kind == EntryKind.FILE ? attrs.size() : 0L));
+                entries.add(new DeletionEntry(file, relative(root, file), kind,
+                        kind == EntryKind.FILE ? attrs.size() : 0L,
+                        attrs.lastModifiedTime().toMillis(), symlinkTarget));
                 return FileVisitResult.CONTINUE;
             }
 
@@ -310,6 +326,33 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         }
         if (entryKind(entry.path()) != entry.kind()) {
             throw new DeleteValidationException("approval_stale", "目标类型在审批后发生变化", true);
+        }
+        try {
+            BasicFileAttributes attrs = Files.readAttributes(entry.path(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (entry.kind() == EntryKind.FILE) {
+                if (attrs.size() != entry.size()) {
+                    throw new DeleteValidationException("approval_stale", "文件大小在审批后发生变化: " + entry.relative(), true);
+                }
+                if (attrs.lastModifiedTime().toMillis() != entry.mtime()) {
+                    throw new DeleteValidationException("approval_stale", "文件修改时间在审批后发生变化: " + entry.relative(), true);
+                }
+            }
+            if (entry.kind() == EntryKind.SYMLINK) {
+                String currentTarget;
+                try {
+                    Path target = Files.readSymbolicLink(entry.path());
+                    currentTarget = target.toString();
+                } catch (IOException e) {
+                    currentTarget = null;
+                }
+                if (!java.util.Objects.equals(entry.symlinkTarget(), currentTarget)) {
+                    throw new DeleteValidationException("approval_stale", "符号链接目标在审批后发生变化: " + entry.relative(), true);
+                }
+            }
+        } catch (DeleteValidationException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new DeleteValidationException("not_found", "无法读取文件属性: " + entry.relative(), true);
         }
     }
 
@@ -383,7 +426,9 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
                 .append('\n').append(root);
         targets.forEach(target -> source.append("\ntarget:").append(target));
         entries.forEach(entry -> source.append("\nentry:")
-                .append(entry.kind()).append(':').append(entry.relative()));
+                .append(entry.kind()).append(':').append(entry.relative())
+                .append(":size=").append(entry.size())
+                .append(":mtime=").append(entry.mtime()));
         return DigestUtils.sha256Hex(source.toString());
     }
 
@@ -437,7 +482,7 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         SYMLINK
     }
 
-    private record DeletionEntry(Path path, String relative, EntryKind kind, long size) {
+    private record DeletionEntry(Path path, String relative, EntryKind kind, long size, long mtime, String symlinkTarget) {
     }
 
     private record DeletionManifest(

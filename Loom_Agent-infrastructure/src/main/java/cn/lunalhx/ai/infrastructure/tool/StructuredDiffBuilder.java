@@ -14,12 +14,52 @@ final class StructuredDiffBuilder {
 
     private static final int CONTEXT_RADIUS = 3;
     private static final double INLINE_SIMILARITY_THRESHOLD = 0.5D;
+    static final long MAX_LCS_CELLS = 2_000_000L;
 
     private StructuredDiffBuilder() {
     }
 
+    /**
+     * Build a diff, or return null with a specific error code when the diff is too large.
+     * Callers check {@code ApprovalDiff.getErrorCode()} for "diff_too_large".
+     */
     static ApprovalDiff oldNew(String path, String oldText, String newText) {
-        List<DiffLine> fullLines = lineDiff(splitLines(oldText), splitLines(newText));
+        List<String> oldLines = splitLines(oldText);
+        List<String> newLines = splitLines(newText);
+
+        // Strip common prefix and suffix to narrow the LCS region
+        int prefixLen = commonPrefix(oldLines, newLines);
+        int suffixLen = commonSuffix(oldLines, newLines, prefixLen);
+
+        List<String> oldMid = oldLines.subList(prefixLen, oldLines.size() - suffixLen);
+        List<String> newMid = newLines.subList(prefixLen, newLines.size() - suffixLen);
+
+        long cells = (long) oldMid.size() * (long) newMid.size();
+        if (cells > MAX_LCS_CELLS) {
+            return ApprovalDiff.builder()
+                    .format("OLD_NEW")
+                    .path(path)
+                    .oldText(oldText)
+                    .newText(newText)
+                    .editable(false)
+                    .errorCode("diff_too_large")
+                    .build();
+        }
+
+        List<DiffLine> midDiff = lineDiff(oldMid, newMid, prefixLen);
+        List<DiffLine> fullLines = new ArrayList<>();
+
+        // Emit prefix as context (trimmed by clipContext later if too long)
+        for (int k = 0; k < prefixLen; k++) {
+            fullLines.add(line("context", k + 1, k + 1, oldLines.get(k)));
+        }
+        fullLines.addAll(midDiff);
+        int oldSuffixStart = oldLines.size() - suffixLen;
+        int newSuffixStart = newLines.size() - suffixLen;
+        for (int k = 0; k < suffixLen; k++) {
+            fullLines.add(line("context", oldSuffixStart + k + 1, newSuffixStart + k + 1, oldLines.get(oldSuffixStart + k)));
+        }
+
         DiffStats stats = attachInlineDiff(fullLines);
         List<DiffLine> clippedLines = clipContext(fullLines);
         return ApprovalDiff.builder()
@@ -31,6 +71,25 @@ final class StructuredDiffBuilder {
                 .hunks(List.of(toHunk(clippedLines)))
                 .stats(stats)
                 .build();
+    }
+
+    private static int commonPrefix(List<String> a, List<String> b) {
+        int n = Math.min(a.size(), b.size());
+        for (int i = 0; i < n; i++) {
+            if (!a.get(i).equals(b.get(i))) {
+                return i;
+            }
+        }
+        return n;
+    }
+
+    private static int commonSuffix(List<String> a, List<String> b, int prefixLen) {
+        int n = 0;
+        int maxN = Math.min(a.size(), b.size()) - prefixLen;
+        while (n < maxN && a.get(a.size() - 1 - n).equals(b.get(b.size() - 1 - n))) {
+            n++;
+        }
+        return n;
     }
 
     private static List<String> splitLines(String text) {
@@ -45,10 +104,12 @@ final class StructuredDiffBuilder {
         return Arrays.asList(parts);
     }
 
-    private static List<DiffLine> lineDiff(List<String> oldLines, List<String> newLines) {
-        int[][] lcs = new int[oldLines.size() + 1][newLines.size() + 1];
-        for (int i = oldLines.size() - 1; i >= 0; i--) {
-            for (int j = newLines.size() - 1; j >= 0; j--) {
+    private static List<DiffLine> lineDiff(List<String> oldLines, List<String> newLines, int lineOffset) {
+        int m = oldLines.size();
+        int n = newLines.size();
+        int[][] lcs = new int[m + 1][n + 1];
+        for (int i = m - 1; i >= 0; i--) {
+            for (int j = n - 1; j >= 0; j--) {
                 if (oldLines.get(i).equals(newLines.get(j))) {
                     lcs[i][j] = lcs[i + 1][j + 1] + 1;
                 } else {
@@ -60,25 +121,25 @@ final class StructuredDiffBuilder {
         List<DiffLine> result = new ArrayList<>();
         int i = 0;
         int j = 0;
-        while (i < oldLines.size() && j < newLines.size()) {
+        while (i < m && j < n) {
             if (oldLines.get(i).equals(newLines.get(j))) {
-                result.add(line("context", i + 1, j + 1, oldLines.get(i)));
+                result.add(line("context", lineOffset + i + 1, lineOffset + j + 1, oldLines.get(i)));
                 i++;
                 j++;
             } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-                result.add(line("removed", i + 1, null, oldLines.get(i)));
+                result.add(line("removed", lineOffset + i + 1, null, oldLines.get(i)));
                 i++;
             } else {
-                result.add(line("added", null, j + 1, newLines.get(j)));
+                result.add(line("added", null, lineOffset + j + 1, newLines.get(j)));
                 j++;
             }
         }
-        while (i < oldLines.size()) {
-            result.add(line("removed", i + 1, null, oldLines.get(i)));
+        while (i < m) {
+            result.add(line("removed", lineOffset + i + 1, null, oldLines.get(i)));
             i++;
         }
-        while (j < newLines.size()) {
-            result.add(line("added", null, j + 1, newLines.get(j)));
+        while (j < n) {
+            result.add(line("added", null, lineOffset + j + 1, newLines.get(j)));
             j++;
         }
         return result;

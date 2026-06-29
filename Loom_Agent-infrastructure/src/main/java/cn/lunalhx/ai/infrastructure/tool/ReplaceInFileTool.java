@@ -8,17 +8,23 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 
 @Component
 public class ReplaceInFileTool extends FileSystemToolSupport implements AgentTool {
+
+    private static final String FINGERPRINT_VERSION = "replace-v1";
 
     public ReplaceInFileTool(AgentRuntimeProperties properties) {
         super(properties);
@@ -34,7 +40,16 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
         return ToolSpec.builder()
                 .name("replace_in_file")
                 .description("替换工作区内文本文件的一段内容；写入前必须人工确认")
-                .inputSchema("{\"path\":\"必填相对路径\",\"oldText\":\"必填旧文本\",\"newText\":\"必填新文本\",\"expectedOccurrences\":\"默认 1\"}")
+                .inputSchema("{" +
+                        "\"type\":\"object\"," +
+                        "\"properties\":{" +
+                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径\"}," +
+                        "\"oldText\":{\"type\":\"string\",\"description\":\"要替换的旧文本\"}," +
+                        "\"newText\":{\"type\":\"string\",\"description\":\"替换后的新文本\"}," +
+                        "\"expectedOccurrences\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"期望匹配次数，默认 1\"}" +
+                        "}," +
+                        "\"required\":[\"path\",\"oldText\",\"newText\"]" +
+                        "}")
                 .build();
     }
 
@@ -51,6 +66,9 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
                         + " oldChars=" + StringUtils.length(oldText)
                         + " newChars=" + StringUtils.length(newText));
         decision.setDiff(buildReplaceDiff(call, path, oldText, newText, expectedOccurrences));
+        if (decision.getDiff() != null && decision.getDiff().getErrorCode() == null) {
+            decision.setPolicyFingerprint(buildReplaceFingerprint(call, oldText, newText, expectedOccurrences));
+        }
         return decision;
     }
 
@@ -69,7 +87,28 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
                 return null;
             }
             String replaced = content.replace(oldText, newText);
+            if (exceedsUtf8Limit(replaced)) {
+                return null;
+            }
             return StructuredDiffBuilder.oldNew(relative(call, filePath), content, replaced);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String buildReplaceFingerprint(ToolCall call, String oldText, String newText, int expectedOccurrences) {
+        try {
+            Path filePath = resolvePath(call, "path", null);
+            String canonicalPath = relative(call, filePath);
+            String content = Files.readString(filePath, StandardCharsets.UTF_8);
+            String replaced = content.replace(oldText, newText);
+            return DigestUtils.sha256Hex(
+                    FINGERPRINT_VERSION + "\n" +
+                    "replace_in_file" + "\n" +
+                    canonicalPath + "\n" +
+                    DigestUtils.sha256Hex(content) + "\n" +
+                    DigestUtils.sha256Hex(replaced) + "\n" +
+                    expectedOccurrences);
         } catch (Exception e) {
             return null;
         }
@@ -96,7 +135,22 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
                 return failure("occurrence_mismatch", "匹配次数为 " + occurrences + "，期望 " + expectedOccurrences, startedAt);
             }
 
-            writeAtomically(path, content.replace(oldText, newText));
+            String replaced = content.replace(oldText, newText);
+
+            // UTF-8 byte check on result
+            if (exceedsUtf8Limit(replaced)) {
+                return failure("file_too_large", "替换后文件内容超过大小上限", startedAt);
+            }
+
+            // Approval staleness check
+            if (StringUtils.isNotBlank(call.getApprovedPolicyFingerprint())) {
+                String currentFingerprint = buildReplaceFingerprint(call, oldText, newText, expectedOccurrences);
+                if (currentFingerprint != null && !StringUtils.equals(call.getApprovedPolicyFingerprint(), currentFingerprint)) {
+                    return failure("approval_stale", "文件在审批后发生变化，需要重新预览并审批", startedAt);
+                }
+            }
+
+            writeAtomically(path, replaced);
             return ToolResult.success("updated: " + relative(call, path) + "\nreplacements: " + occurrences, false, elapsed(startedAt));
         } catch (Exception e) {
             return failure("replace_in_file_failed", e.getMessage(), startedAt);
@@ -114,10 +168,30 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
     }
 
     private void writeAtomically(Path path, String content) throws Exception {
+        Set<PosixFilePermission> existingPermissions = null;
+        boolean isPosix = false;
+        try {
+            existingPermissions = Files.getPosixFilePermissions(path);
+            isPosix = true;
+        } catch (UnsupportedOperationException | ClassCastException e) {
+            isPosix = false;
+        }
+
         Path temp = Files.createTempFile(path.getParent(), "agent-replace-", ".tmp");
         try {
             Files.writeString(temp, content, StandardCharsets.UTF_8);
-            Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (UnsupportedOperationException | IOException e) {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (isPosix && existingPermissions != null) {
+                try {
+                    Files.setPosixFilePermissions(path, existingPermissions);
+                } catch (Exception ignored) {
+                    // best-effort permission preservation
+                }
+            }
         } finally {
             Files.deleteIfExists(temp);
         }

@@ -15,16 +15,12 @@ import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 @Component
@@ -33,7 +29,6 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
     private static final int DEFAULT_MAX_DEPTH = 20;
     private static final int MIN_MAX_DEPTH = 1;
     private static final int MAX_MAX_DEPTH = 50;
-    private static final Set<String> SKIP_DIR_NAMES = Set.of(".git", ".idea", "target", "node_modules");
 
     public FindFilesTool(AgentRuntimeProperties properties) {
         super(properties);
@@ -49,7 +44,17 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
         return ToolSpec.builder()
                 .name("find_files")
                 .description("按文件名 Glob 模式递归查找文件，返回相对路径列表；搜索 .git/.idea/target/node_modules 等目录自动跳过")
-                .inputSchema("{\"pattern\":\"必填 Glob 模式，如 *hello*.py 或 src/**/*.java\",\"path\":\"搜索起点，默认 .\",\"maxDepth\":\"1-50，默认 20\",\"limit\":\"最大结果数，默认 50\",\"caseSensitive\":\"默认 false\"}")
+                .inputSchema("{" +
+                        "\"type\":\"object\"," +
+                        "\"properties\":{" +
+                        "\"pattern\":{\"type\":\"string\",\"description\":\"Glob 模式，如 *hello*.py 或 src/**/*.java\"}," +
+                        "\"path\":{\"type\":\"string\",\"description\":\"搜索起点，默认 .\"}," +
+                        "\"maxDepth\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":50,\"description\":\"最大深度，默认 20\"}," +
+                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"最大结果数，默认 50\"}," +
+                        "\"caseSensitive\":{\"type\":\"boolean\",\"description\":\"是否大小写敏感，默认 false\"}" +
+                        "}," +
+                        "\"required\":[\"pattern\"]" +
+                        "}")
                 .build();
     }
 
@@ -68,9 +73,15 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             }
 
             String rawPath = text(call.getInput(), "path", ".");
-            Path searchRoot = resolveSearchRoot(call, rawPath);
-            if (searchRoot == null) {
-                return failure("not_found", "搜索起点不存在：" + rawPath, startedAt);
+            Path searchRoot;
+            try {
+                searchRoot = resolveDirectory(call, "path", rawPath);
+            } catch (IOException e) {
+                String msg = e.getMessage();
+                if (msg != null && (msg.contains("不存在") || msg.contains("越权"))) {
+                    return failure("not_found", msg, startedAt);
+                }
+                throw e;
             }
 
             int maxDepth = Math.max(MIN_MAX_DEPTH, Math.min(MAX_MAX_DEPTH,
@@ -92,11 +103,11 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             Files.walkFileTree(searchRoot, java.util.Set.of(), maxDepth, new FileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (timedOut(call, startedAt)) {
+                    if (timedOut(startedAt)) {
                         timedOut[0] = true;
                         return FileVisitResult.TERMINATE;
                     }
-                    if (shouldSkip(dir)) {
+                    if (isTraversalBlocked(dir)) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     return FileVisitResult.CONTINUE;
@@ -104,7 +115,7 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (timedOut(call, startedAt)) {
+                    if (timedOut(startedAt)) {
                         timedOut[0] = true;
                         return FileVisitResult.TERMINATE;
                     }
@@ -115,6 +126,9 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
                         return FileVisitResult.CONTINUE;
                     }
                     if (!Files.isRegularFile(file)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    if (isSensitiveFileName(file.getFileName().toString())) {
                         return FileVisitResult.CONTINUE;
                     }
                     Path relPath = root.relativize(file.toAbsolutePath().normalize());
@@ -155,18 +169,6 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
         } catch (Exception e) {
             return failure("find_files_failed", e.getMessage(), startedAt);
         }
-    }
-
-    private Path resolveSearchRoot(ToolCall call, String rawPath) throws IOException {
-        Path root = workspaceRoot(call);
-        Path candidate = root.resolve(Path.of(rawPath)).normalize().toAbsolutePath();
-        if (!candidate.startsWith(root)) {
-            return null;
-        }
-        if (!Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
-            return null;
-        }
-        return candidate;
     }
 
     private PathMatcher buildMatcher(Path root, Path searchRoot, String pattern, boolean caseSensitive) {
@@ -272,19 +274,6 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             }
         }
         return regex.toString();
-    }
-
-    private boolean shouldSkip(Path dir) {
-        String name = dir.getFileName().toString();
-        if (SKIP_DIR_NAMES.contains(name)) {
-            return true;
-        }
-        String lower = name.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".key") || lower.endsWith(".pem") || lower.endsWith(".p12");
-    }
-
-    private boolean timedOut(ToolCall call, long startedAt) {
-        return elapsed(startedAt) > properties.getToolTimeoutMs();
     }
 
     private String inputPreview(ToolCall call) {

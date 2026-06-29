@@ -21,5 +21,6 @@ public class ApprovalDiff {
     private Boolean editable;
     private List<DiffHunk> hunks;
     private DiffStats stats;
+    private String errorCode;
 
 }
