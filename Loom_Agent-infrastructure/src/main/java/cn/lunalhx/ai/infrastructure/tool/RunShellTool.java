@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
+import cn.lunalhx.ai.domain.tool.model.ShellOutputLimits;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -105,7 +106,12 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                     ? properties.getShellTimeoutMs()
                     : call.getInput().path("timeoutMs").asLong(properties.getShellTimeoutMs());
             long timeoutMs = Math.min(Math.max(1L, requestedTimeoutMs), properties.getShellTimeoutMs());
-            return commandExecutor.run(tokens, cwd, timeoutMs, properties.getShellMaxOutputChars(), startedAt);
+            return commandExecutor.run(tokens, cwd, timeoutMs,
+                    ShellOutputLimits.builder()
+                            .maxStdoutChars(properties.getShellMaxOutputChars())
+                            .maxStderrChars(properties.getShellMaxStderrChars())
+                            .build(),
+                    startedAt);
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }

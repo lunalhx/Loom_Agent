@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.infrastructure.tool;
 
+import cn.lunalhx.ai.domain.tool.model.ShellOutputLimits;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 
 import java.io.InputStream;
@@ -17,15 +18,13 @@ final class SandboxProcessRunner {
     private SandboxProcessRunner() {
     }
 
-    static ToolResult run(List<String> command, Path cwd, long timeoutMs, int maxOutputChars, long startedAt) {
-        StringBuilder output = new StringBuilder();
-        boolean[] truncated = new boolean[]{false};
+    static ToolResult run(List<String> command, Path cwd, long timeoutMs, ShellOutputLimits limits, long startedAt) {
         Process process = null;
-        Thread reader = null;
+        StreamReader stdoutReader = null;
+        StreamReader stderrReader = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command)
-                    .directory(cwd.toFile())
-                    .redirectErrorStream(true);
+                    .directory(cwd.toFile());
             Map<String, String> originalEnv = Map.copyOf(builder.environment());
             builder.environment().clear();
             ENV_ALLOW_LIST.forEach(key -> {
@@ -35,32 +34,39 @@ final class SandboxProcessRunner {
             });
 
             process = builder.start();
-            InputStream processInput = process.getInputStream();
-            reader = new Thread(() -> readOutput(processInput, output, maxOutputChars, truncated), "agent-tool-process-output");
-            reader.setDaemon(true);
-            reader.start();
+            stdoutReader = new StreamReader(process.getInputStream(), limits.getMaxStdoutChars());
+            stderrReader = new StreamReader(process.getErrorStream(), limits.getMaxStderrChars());
+            Thread stdoutThread = new Thread(stdoutReader, "agent-tool-process-stdout");
+            stdoutThread.setDaemon(true);
+            stdoutThread.start();
+            Thread stderrThread = new Thread(stderrReader, "agent-tool-process-stderr");
+            stderrThread.setDaemon(true);
+            stderrThread.start();
 
             boolean completed = process.waitFor(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                reader.join(1000L);
+                stdoutThread.join(1000L);
+                stderrThread.join(1000L);
                 return ToolResult.builder()
                         .success(false)
                         .errorCode("command_timeout")
                         .message("命令执行超时")
-                        .observation(observation(command, cwd, null, output.toString(), true))
-                        .truncated(true)
+                        .observation(observation(command, cwd, null, stdoutReader, stderrReader))
+                        .truncated(stdoutReader.isTruncated() || stderrReader.isTruncated())
                         .elapsedMs(elapsed(startedAt))
                         .build();
             }
-            reader.join(1000L);
+            stdoutThread.join(1000L);
+            stderrThread.join(1000L);
             int exitCode = process.exitValue();
+            boolean truncated = stdoutReader.isTruncated() || stderrReader.isTruncated();
             return ToolResult.builder()
                     .success(exitCode == 0)
                     .errorCode(exitCode == 0 ? null : "command_failed")
                     .message(exitCode == 0 ? null : "命令退出码：" + exitCode)
-                    .observation(observation(command, cwd, exitCode, output.toString(), truncated[0]))
-                    .truncated(truncated[0])
+                    .observation(observation(command, cwd, exitCode, stdoutReader, stderrReader))
+                    .truncated(truncated)
                     .elapsedMs(elapsed(startedAt))
                     .build();
         } catch (InterruptedException e) {
@@ -74,45 +80,76 @@ final class SandboxProcessRunner {
         }
     }
 
-    private static void readOutput(InputStream inputStream, StringBuilder output, int maxOutputChars, boolean[] truncated) {
-        byte[] buffer = new byte[4096];
-        try (InputStream in = inputStream) {
-            int length;
-            while ((length = in.read(buffer)) >= 0) {
-                if (output.length() < maxOutputChars) {
-                    String chunk = new String(buffer, 0, length, StandardCharsets.UTF_8);
-                    int remaining = maxOutputChars - output.length();
-                    if (chunk.length() > remaining) {
-                        output.append(chunk, 0, remaining);
-                        truncated[0] = true;
-                    } else {
-                        output.append(chunk);
-                    }
-                } else {
-                    truncated[0] = true;
-                }
-            }
-        } catch (Exception ignored) {
-            truncated[0] = true;
-        }
-    }
-
-    private static String observation(List<String> command, Path cwd, Integer exitCode, String output, boolean truncated) {
+    private static String observation(List<String> command, Path cwd, Integer exitCode,
+                                       StreamReader stdoutReader, StreamReader stderrReader) {
         StringBuilder text = new StringBuilder();
         text.append("Command: ").append(String.join(" ", command)).append('\n');
         text.append("Cwd: ").append(cwd).append('\n');
         if (exitCode != null) {
             text.append("ExitCode: ").append(exitCode).append('\n');
         }
-        text.append("Output:\n").append(output == null ? "" : output);
-        if (truncated) {
-            text.append("\n[truncated]");
+        text.append("[stdout]:\n").append(stdoutReader.getOutput());
+        text.append("\n[stderr]:\n").append(stderrReader.getOutput());
+        if (stdoutReader.isTruncated() || stderrReader.isTruncated()) {
+            text.append("\n[truncated");
+            if (stdoutReader.isTruncated()) {
+                text.append(": stdout");
+            }
+            if (stderrReader.isTruncated()) {
+                text.append(stdoutReader.isTruncated() ? ", stderr" : ": stderr");
+            }
+            text.append("]");
         }
         return text.toString();
     }
 
     private static long elapsed(long startedAt) {
         return System.currentTimeMillis() - startedAt;
+    }
+
+    private static final class StreamReader implements Runnable {
+
+        private final InputStream in;
+        private final int maxChars;
+        private final StringBuilder output = new StringBuilder();
+        private boolean truncated;
+
+        StreamReader(InputStream in, int maxChars) {
+            this.in = in;
+            this.maxChars = maxChars;
+        }
+
+        @Override
+        public void run() {
+            byte[] buffer = new byte[4096];
+            try (InputStream input = in) {
+                int length;
+                while ((length = input.read(buffer)) >= 0) {
+                    if (output.length() < maxChars) {
+                        String chunk = new String(buffer, 0, length, StandardCharsets.UTF_8);
+                        int remaining = maxChars - output.length();
+                        if (chunk.length() > remaining) {
+                            output.append(chunk, 0, remaining);
+                            truncated = true;
+                        } else {
+                            output.append(chunk);
+                        }
+                    } else {
+                        truncated = true;
+                    }
+                }
+            } catch (Exception ignored) {
+                truncated = true;
+            }
+        }
+
+        String getOutput() {
+            return output.toString();
+        }
+
+        boolean isTruncated() {
+            return truncated;
+        }
     }
 
 }

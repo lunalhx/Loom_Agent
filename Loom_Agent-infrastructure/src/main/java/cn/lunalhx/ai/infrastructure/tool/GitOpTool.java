@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
+import cn.lunalhx.ai.domain.tool.model.ShellOutputLimits;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -68,7 +69,11 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
             }
             List<String> command = buildCommand(call);
             return commandExecutor.run(command, workspaceRoot(call), properties.getShellTimeoutMs(),
-                    properties.getShellMaxOutputChars(), startedAt);
+                    ShellOutputLimits.builder()
+                            .maxStdoutChars(properties.getShellMaxOutputChars())
+                            .maxStderrChars(properties.getShellMaxStderrChars())
+                            .build(),
+                    startedAt);
         } catch (Exception e) {
             return failure("git_op_failed", e.getMessage(), startedAt);
         }
