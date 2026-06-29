@@ -37,6 +37,9 @@ build/
 ### Mac OS ###
 .DS_Store
 
+### Claude Code ###
+AGENTS.md
+
 ### Local environment ###
 docs/env/.env
 docs/env/*.local
