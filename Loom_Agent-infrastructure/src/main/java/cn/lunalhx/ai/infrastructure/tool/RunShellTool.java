@@ -41,7 +41,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
-                .description("在工作区进程级沙箱内执行允许的只读命令或测试命令；写入类命令必须人工确认，高危命令会被拦截")
+                .description("在工作区进程级沙箱内执行允许的只读命令或测试命令；写入类命令必须人工确认，高危命令会被拦截；不支持 find/python/python3，请使用 find_files 工具")
                 .inputSchema("{\"command\":\"必填命令字符串\",\"cwd\":\"相对工作目录，默认 .\",\"timeoutMs\":\"默认 AGENT_SHELL_TIMEOUT_MS\"}")
                 .build();
     }
@@ -63,6 +63,11 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         if ("rm".equals(executable) || "rmdir".equals(executable)) {
             return ToolPolicyDecision.highRiskDeny(
                     "禁止通过 shell 执行 " + executable + "，请使用 delete_files 工具",
+                    command);
+        }
+        if ("find".equals(executable) || "python".equals(executable) || "python3".equals(executable)) {
+            return ToolPolicyDecision.highRiskDeny(
+                    "禁止通过 shell 执行 " + executable + "，请使用结构化工具 find_files",
                     command);
         }
         if (!allowedShellCommands().contains(executable)) {

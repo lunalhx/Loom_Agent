@@ -48,6 +48,9 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
                 .build());
+        if (policy != null && policy.hasValidationFailure()) {
+            return validationFailure(context, policy);
+        }
         if (policy == null || policy.getPermissionLevel() == null || policy.getPermissionLevel() == ToolPermissionLevel.READ_ONLY) {
             return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
         }
@@ -63,6 +66,39 @@ public class ApprovalGateNode extends AbstractAgentNode {
             };
         }
         return requireApproval(context, policy);
+    }
+
+    private NodeResult validationFailure(AgentContext context, ToolPolicyDecision policy) {
+        context.setStep(context.getStep() + 1);
+        ToolResult result = ToolResult.failure(policy.getValidationErrorCode(), policy.getValidationMessage(), 0L);
+        context.setToolResult(result);
+        context.getDynamicText().appendAssistantAction(context.getStep(), name(), context.getDecision());
+        context.getDynamicText().appendToolResult(
+                context.getStep(),
+                name(),
+                context.getDecision(),
+                "Success: false\nObservation:\n" + result.getObservation());
+        appendStep(context, false);
+
+        List<AgentEvent> events = new ArrayList<>();
+        events.add(event(context, AgentEventType.THOUGHT)
+                .step(context.getStep())
+                .tool(context.getDecision().getTool())
+                .input(context.getDecision().getInputView())
+                .workspace(context.getWorkspaceDisplayName())
+                .build());
+        events.add(event(context, AgentEventType.TOOL_CALL)
+                .step(context.getStep())
+                .tool(context.getDecision().getTool())
+                .input(context.getDecision().getInputView())
+                .workspace(context.getWorkspaceDisplayName())
+                .build());
+        events.add(event(context, AgentEventType.OBSERVATION)
+                .step(context.getStep())
+                .tool(context.getDecision().getTool())
+                .observation(result.getObservation())
+                .build());
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
     }
 
     private NodeResult requireApproval(AgentContext context, ToolPolicyDecision policy) {

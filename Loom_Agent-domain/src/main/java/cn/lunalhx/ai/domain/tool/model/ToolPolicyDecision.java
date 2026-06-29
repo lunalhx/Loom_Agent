@@ -19,6 +19,8 @@ public class ToolPolicyDecision {
     private ApprovalDiff diff;
     private String policyFingerprint;
     private Map<String, Object> metadata;
+    private String validationErrorCode;
+    private String validationMessage;
 
     public static ToolPolicyDecision readOnly(String reason, String preview) {
         return of(ToolPermissionLevel.READ_ONLY, reason, preview);
@@ -34,6 +36,18 @@ public class ToolPolicyDecision {
 
     public static ToolPolicyDecision highRiskDeny(String reason, String preview) {
         return of(ToolPermissionLevel.HIGH_RISK_DENY, reason, preview);
+    }
+
+    public static ToolPolicyDecision validationFailure(String errorCode, String message, String preview) {
+        ToolPolicyDecision decision = new ToolPolicyDecision();
+        decision.setValidationErrorCode(errorCode);
+        decision.setValidationMessage(message);
+        decision.setOperationPreview(preview);
+        return decision;
+    }
+
+    public boolean hasValidationFailure() {
+        return validationErrorCode != null;
     }
 
     private static ToolPolicyDecision of(ToolPermissionLevel level, String reason, String preview) {
