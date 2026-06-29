@@ -633,6 +633,9 @@ public class AiRuntimeConfig {
             if (agentRuntimeProperties.getShellMaxOutputChars() == null || agentRuntimeProperties.getShellMaxOutputChars() <= 0) {
                 throw new IllegalStateException("AGENT_SHELL_MAX_OUTPUT_CHARS 必须大于 0");
             }
+            if (agentRuntimeProperties.getShellMaxStderrChars() == null || agentRuntimeProperties.getShellMaxStderrChars() <= 0) {
+                throw new IllegalStateException("AGENT_SHELL_MAX_STDERR_CHARS 必须大于 0");
+            }
             if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
                     && !"CONFIRM".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
                     && !"ALLOW".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
