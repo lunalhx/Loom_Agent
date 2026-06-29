@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 
 public class MybatisUndoSnapshotRepository implements UndoSnapshotRepository {
@@ -64,8 +65,19 @@ public class MybatisUndoSnapshotRepository implements UndoSnapshotRepository {
     }
 
     @Override
-    public int expireOlderThan(Instant threshold) {
-        return dao.deleteExpiredBefore(toLocalDateTime(threshold));
+    public List<AgentUndoSnapshot> findExpired(Instant now) {
+        return dao.selectExpired(toLocalDateTime(now)).stream()
+                .map(this::toEntity)
+                .toList();
+    }
+
+    @Override
+    public int expireByStatus(String snapshotId, UndoSnapshotStatus from, UndoSnapshotStatus to) {
+        AgentUndoSnapshotPO po = dao.selectBySnapshotId(snapshotId);
+        if (po == null) {
+            return 0;
+        }
+        return dao.expireByStatus(snapshotId, from.name(), to.name(), po.getVersion());
     }
 
     private AgentUndoSnapshotPO toPo(AgentUndoSnapshot entity) {

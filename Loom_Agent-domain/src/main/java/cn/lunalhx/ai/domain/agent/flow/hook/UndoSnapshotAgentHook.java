@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.UndoSnapshotRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.service.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -54,11 +55,29 @@ public class UndoSnapshotAgentHook implements AgentHook {
 
         if (event == AgentHookEvent.AFTER_TOOL) {
             handleAfterTool(context, hookContext);
+        } else if (event == AgentHookEvent.STOP) {
+            handleStop(context);
         } else if (event == AgentHookEvent.AFTER_STOP) {
             coordinator.finalizeSnapshot(context);
         }
 
         return AgentHookResult.proceed();
+    }
+
+    private void handleStop(AgentContext context) {
+        AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
+        if (snapshot == null) {
+            return;
+        }
+
+        if (StringUtils.isNotBlank(context.getPendingApprovalId())) {
+            coordinator.suspendSnapshot(context);
+            return;
+        }
+
+        if (context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+            coordinator.suspendSnapshot(context);
+        }
     }
 
     private void handleAfterTool(AgentContext context, AgentHookContext hookContext) {

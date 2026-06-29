@@ -9,14 +9,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
 
@@ -68,22 +67,101 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
         gitUpdateRef(workspaceRoot, REF_PREFIX + runId + "/" + kind + "-worktree", worktreeOid);
         gitUpdateRef(workspaceRoot, REF_PREFIX + runId + "/" + kind + "-index", realIndexOid);
 
-        Set<String> changedPaths = computeChangedPaths(workspaceRoot, headCommit, worktreeOid, tempIndex);
-        int fileCount = changedPaths.size();
-        long byteCount = estimateByteCount(workspaceRoot, changedPaths);
-
         try {
             Files.deleteIfExists(tempIndex);
         } catch (IOException ignored) {
         }
 
-        return new SnapshotResult(headCommit, branch, worktreeOid, realIndexOid, changedPaths, fileCount, byteCount);
+        return new SnapshotResult(headCommit, branch, worktreeOid, realIndexOid);
+    }
+
+    @Override
+    public SnapshotState inspectCurrentState(Path workspaceRoot) {
+        Path gitDir = workspaceRoot.resolve(".git");
+        if (!Files.isDirectory(gitDir)) {
+            throw new SnapshotException("not_git_repository", "workspace is not a git repository: " + workspaceRoot);
+        }
+
+        String headCommit = gitRevParse(workspaceRoot, "HEAD");
+        if (headCommit == null || headCommit.isBlank()) {
+            throw new SnapshotException("no_commits", "repository has no commits: " + workspaceRoot);
+        }
+
+        String branch = gitRevParse(workspaceRoot, "--abbrev-ref", "HEAD");
+        if ("HEAD".equals(branch)) {
+            branch = null;
+        }
+
+        String indexOid = gitWriteTree(workspaceRoot, null);
+
+        Path tempIndex = createTempIndex(workspaceRoot, headCommit);
+        String worktreeOid;
+        try {
+            worktreeOid = gitWriteTree(workspaceRoot, tempIndex);
+        } finally {
+            try {
+                Files.deleteIfExists(tempIndex);
+            } catch (IOException ignored) {
+            }
+        }
+
+        return new SnapshotState(headCommit, branch, worktreeOid, indexOid);
+    }
+
+    @Override
+    public List<WorkspaceFileChange> compareSnapshots(Path workspaceRoot,
+                                                       String beforeTreeOid, String afterTreeOid) {
+        String diff = runGitCapture(workspaceRoot, config.getCommandTimeoutMs(),
+                "diff", "--name-status", "--no-renames", "-z", beforeTreeOid, afterTreeOid);
+        if (diff == null || diff.isBlank()) {
+            return Collections.emptyList();
+        }
+        return parseNameStatus(diff);
+    }
+
+    private List<WorkspaceFileChange> parseNameStatus(String raw) {
+        List<WorkspaceFileChange> changes = new ArrayList<>();
+        int i = 0;
+        while (i < raw.length()) {
+            char statusChar = raw.charAt(i);
+            WorkspaceFileChangeType type;
+            switch (statusChar) {
+                case 'A': type = WorkspaceFileChangeType.ADDED; break;
+                case 'D': type = WorkspaceFileChangeType.DELETED; break;
+                case 'M': type = WorkspaceFileChangeType.MODIFIED; break;
+                default:
+                    if (statusChar == '\0') { i++; continue; }
+                    type = WorkspaceFileChangeType.MODIFIED;
+                    break;
+            }
+            i++;
+
+            if (i >= raw.length()) break;
+            int tabIdx = raw.indexOf('\t', i);
+            if (tabIdx < 0) break;
+            i = tabIdx + 1;
+
+            int nulIdx = raw.indexOf('\0', i);
+            String path;
+            if (nulIdx < 0) {
+                path = raw.substring(i);
+                i = raw.length();
+            } else {
+                path = raw.substring(i, nulIdx);
+                i = nulIdx + 1;
+            }
+
+            if (!path.isEmpty()) {
+                changes.add(new WorkspaceFileChange(path, type));
+            }
+        }
+        return changes;
     }
 
     @Override
     public void restoreToBeforeSnapshot(Path workspaceRoot, String runId,
                                         String beforeWorktreeOid, String beforeIndexOid,
-                                        Set<String> changedPaths) {
+                                        List<WorkspaceFileChange> changedFiles) {
         Path gitDir = workspaceRoot.resolve(".git");
         if (!Files.isDirectory(gitDir)) {
             throw new SnapshotException("not_git_repository", "workspace is not a git repository");
@@ -96,17 +174,19 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
                 "checkout-index", "-a", "-f");
 
         Set<String> currentTracked = listTrackedFiles(workspaceRoot);
-        for (String path : changedPaths) {
-            if (!currentTracked.contains(path)) {
-                Path filePath = workspaceRoot.resolve(path).normalize();
-                if (!filePath.startsWith(workspaceRoot)) {
-                    continue;
-                }
-                try {
-                    Files.deleteIfExists(filePath);
-                    cleanEmptyParents(workspaceRoot, filePath.getParent());
-                } catch (IOException e) {
-                    log.warn("Failed to delete new file during undo: {} — {}", path, e.getMessage());
+        for (WorkspaceFileChange change : changedFiles) {
+            if (change.changeType() == WorkspaceFileChangeType.ADDED) {
+                if (!currentTracked.contains(change.path())) {
+                    Path filePath = workspaceRoot.resolve(change.path()).normalize();
+                    if (!filePath.startsWith(workspaceRoot)) {
+                        continue;
+                    }
+                    try {
+                        Files.deleteIfExists(filePath);
+                        cleanEmptyParents(workspaceRoot, filePath.getParent());
+                    } catch (IOException e) {
+                        log.warn("Failed to delete new file during undo: {} — {}", change.path(), e.getMessage());
+                    }
                 }
             }
         }
@@ -119,7 +199,10 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
 
             String currentIndexOid = gitWriteTree(workspaceRoot, null);
             if (!beforeIndexOid.equals(currentIndexOid)) {
-                restoreIndexEntries(workspaceRoot, beforeIndexOid, changedPaths);
+                List<String> paths = changedFiles.stream()
+                        .map(WorkspaceFileChange::path)
+                        .toList();
+                restoreIndexEntries(workspaceRoot, beforeIndexOid, new java.util.LinkedHashSet<>(paths));
             }
         } finally {
             if (beforeIndexPath != null) {
@@ -208,20 +291,6 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
                 "update-ref", ref, oid);
     }
 
-    private Set<String> computeChangedPaths(Path workspaceRoot, String headCommit,
-                                            String worktreeOid, Path tempIndex) {
-        String diff = runGitCapture(workspaceRoot, config.getCommandTimeoutMs(),
-                customEnv("GIT_INDEX_FILE", tempIndex.toAbsolutePath().toString()),
-                "diff", "--name-only", headCommit);
-        if (diff == null || diff.isBlank()) {
-            return Collections.emptySet();
-        }
-        return Arrays.stream(diff.split("\n"))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
     private Set<String> listTrackedFiles(Path workspaceRoot) {
         String files = runGitCapture(workspaceRoot, config.getCommandTimeoutMs(),
                 "ls-files");
@@ -231,18 +300,7 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
         return Arrays.stream(files.split("\n"))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private long estimateByteCount(Path workspaceRoot, Set<String> changedPaths) {
-        long total = 0;
-        for (String path : changedPaths) {
-            try {
-                total += Files.size(workspaceRoot.resolve(path));
-            } catch (IOException ignored) {
-            }
-        }
-        return total;
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
     }
 
     private Path writeTreeToTempFile(Path workspaceRoot, String treeOid) {
@@ -259,7 +317,8 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
         }
     }
 
-    private void restoreIndexEntries(Path workspaceRoot, String beforeIndexOid, Set<String> changedPaths) {
+    private void restoreIndexEntries(Path workspaceRoot, String beforeIndexOid,
+                                      java.util.Set<String> changedPaths) {
         for (String path : changedPaths) {
             try {
                 String entry = runGitCapture(workspaceRoot, config.getCommandTimeoutMs(),
@@ -270,13 +329,8 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
                         String mode = parts[0];
                         String oid = parts[2];
                         String name = parts[3];
-                        if ("120000".equals(mode)) {
-                            runGit(workspaceRoot, config.getCommandTimeoutMs(),
-                                    "update-index", "--add", "--cacheinfo", mode, oid, name);
-                        } else {
-                            runGit(workspaceRoot, config.getCommandTimeoutMs(),
-                                    "update-index", "--add", "--cacheinfo", mode, oid, name);
-                        }
+                        runGit(workspaceRoot, config.getCommandTimeoutMs(),
+                                "update-index", "--add", "--cacheinfo", mode, oid, name);
                     }
                 }
             } catch (SnapshotException e) {

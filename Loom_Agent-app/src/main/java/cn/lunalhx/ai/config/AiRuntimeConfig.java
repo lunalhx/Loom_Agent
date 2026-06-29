@@ -576,9 +576,10 @@ public class AiRuntimeConfig {
                                                        WorkspaceUndoLockRepository workspaceUndoLockRepository,
                                                        WorkspaceSnapshotPort workspaceSnapshotPort,
                                                        AgentRunRepository agentRunRepository,
-                                                       AgentWorkspaceResolver workspaceResolver) {
+                                                       AgentWorkspaceResolver workspaceResolver,
+                                                       AgentRuntimeProperties agentRuntimeProperties) {
         return new WorkspaceUndoService(undoSnapshotRepository, workspaceUndoLockRepository,
-                workspaceSnapshotPort, agentRunRepository, workspaceResolver);
+                workspaceSnapshotPort, agentRunRepository, workspaceResolver, agentRuntimeProperties.getUndo());
     }
 
     @Bean

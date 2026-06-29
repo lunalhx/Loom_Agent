@@ -129,6 +129,16 @@ public class DefaultAgentLoopService implements AgentLoopService {
             sink.complete();
             return;
         }
+
+        if (undoCoordinator != null && plan.context() != null) {
+            String resumeError = undoCoordinator.onRunResume(plan.context());
+            if (resumeError != null) {
+                emit(sink, List.of(components.eventFactory().agentError()));
+                sink.complete();
+                return;
+            }
+        }
+
         runLoop(plan.context(), plan.startNode(), sink);
     }
 

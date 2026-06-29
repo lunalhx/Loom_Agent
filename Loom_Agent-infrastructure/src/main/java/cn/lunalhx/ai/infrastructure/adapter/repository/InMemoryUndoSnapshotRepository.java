@@ -8,7 +8,9 @@ import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -97,16 +99,29 @@ public class InMemoryUndoSnapshotRepository implements UndoSnapshotRepository {
     }
 
     @Override
-    public int expireOlderThan(Instant threshold) {
-        int count = 0;
+    public List<AgentUndoSnapshot> findExpired(Instant now) {
+        List<AgentUndoSnapshot> expired = new ArrayList<>();
         for (AgentUndoSnapshot snapshot : snapshots.values()) {
-            if (snapshot.getStatus() == UndoSnapshotStatus.READY
+            UndoSnapshotStatus status = snapshot.getStatus();
+            if ((status == UndoSnapshotStatus.READY
+                    || status == UndoSnapshotStatus.OPEN
+                    || status == UndoSnapshotStatus.SUSPENDED)
                     && snapshot.getExpiresAt() != null
-                    && snapshot.getExpiresAt().isBefore(threshold)) {
-                snapshot.setStatus(UndoSnapshotStatus.EXPIRED);
-                count++;
+                    && snapshot.getExpiresAt().isBefore(now)) {
+                expired.add(snapshot);
             }
         }
-        return count;
+        return expired;
+    }
+
+    @Override
+    public int expireByStatus(String snapshotId, UndoSnapshotStatus from, UndoSnapshotStatus to) {
+        AgentUndoSnapshot snapshot = snapshots.get(snapshotId);
+        if (snapshot == null || snapshot.getStatus() != from) {
+            return 0;
+        }
+        snapshot.setStatus(to);
+        snapshot.setVersion(snapshot.getVersion() + 1);
+        return 1;
     }
 }

@@ -119,4 +119,19 @@
         WHERE status = 'READY' AND expires_at IS NOT NULL AND expires_at &lt; #{threshold}
     </update>
 
+    <select id="selectExpired" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot
+        WHERE status IN ('OPEN', 'SUSPENDED', 'READY')
+          AND expires_at IS NOT NULL
+          AND expires_at &lt; #{now}
+    </select>
+
+    <update id="expireByStatus">
+        UPDATE agent_undo_snapshot
+        SET status = #{next}, version = version + 1
+        WHERE snapshot_id = #{snapshotId}
+          AND status = #{expected}
+          AND version = #{expectedVersion}
+    </update>
+
 </mapper>

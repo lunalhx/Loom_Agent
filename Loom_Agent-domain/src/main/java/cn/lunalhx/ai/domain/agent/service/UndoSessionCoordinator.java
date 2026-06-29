@@ -7,14 +7,19 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.UndoSnapshotStatus;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class UndoSessionCoordinator {
@@ -26,6 +31,7 @@ public class UndoSessionCoordinator {
     private final WorkspaceUndoLockRepository lockRepository;
     private final AgentWorkspaceResolver workspaceResolver;
     private final AgentRuntimeProperties.UndoProperties config;
+    private final ObjectMapper objectMapper;
 
     public UndoSessionCoordinator(WorkspaceSnapshotPort snapshotPort,
                                   UndoSnapshotRepository snapshotRepository,
@@ -37,6 +43,7 @@ public class UndoSessionCoordinator {
         this.lockRepository = lockRepository;
         this.workspaceResolver = workspaceResolver;
         this.config = config;
+        this.objectMapper = new ObjectMapper();
     }
 
     public void onRunStart(AgentContext context) {
@@ -59,7 +66,8 @@ public class UndoSessionCoordinator {
             return;
         }
 
-        Instant lockExpiry = Instant.now().plusSeconds(config.getRetentionHours() * 3600L);
+        long lockTimeoutSec = Math.max(60, config.getCommandTimeoutMs() / 1000 * 3);
+        Instant lockExpiry = Instant.now().plusSeconds(lockTimeoutSec);
         boolean acquired = lockRepository.acquire(workspaceRoot.toString(), context.getRunId(), lockExpiry);
         if (!acquired) {
             throw new WorkspaceUndoBusyException(workspaceRoot.toString());
@@ -79,20 +87,123 @@ public class UndoSessionCoordinator {
                     .branch(result.branch())
                     .beforeWorktreeOid(result.worktreeOid())
                     .beforeIndexOid(result.indexOid())
-                    .changedFileCount(result.fileCount())
-                    .changedByteCount(result.byteCount())
+                    .changedFileCount(0)
+                    .changedByteCount(0L)
                     .version(0L)
                     .createdAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L))
                     .build();
 
             snapshotRepository.save(snapshot);
-            log.info("Undo before-snapshot created: runId={}, workspace={}, files={}",
-                    context.getRunId(), workspaceRoot, result.fileCount());
+            log.info("Undo before-snapshot created: runId={}, workspace={}",
+                    context.getRunId(), workspaceRoot);
 
         } catch (Exception e) {
             lockRepository.release(workspaceRoot.toString(), context.getRunId());
             markRunUnavailable(context, "snapshot_create_failed", "创建快照失败: " + e.getMessage());
             log.error("Failed to create before snapshot for runId={}: {}", context.getRunId(), e.getMessage());
+        }
+    }
+
+    public void suspendSnapshot(AgentContext context) {
+        if (!config.isEnabled()) {
+            return;
+        }
+        if (StringUtils.isNotBlank(context.getParentRunId())) {
+            return;
+        }
+
+        AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
+        if (snapshot == null || snapshot.getStatus() != UndoSnapshotStatus.OPEN) {
+            return;
+        }
+
+        Path workspaceRoot = context.getResolvedWorkspace();
+        if (workspaceRoot == null) {
+            return;
+        }
+
+        try {
+            WorkspaceSnapshotPort.SnapshotResult afterResult =
+                    snapshotPort.createAfterSnapshot(workspaceRoot, context.getRunId());
+
+            List<WorkspaceSnapshotPort.WorkspaceFileChange> changes =
+                    snapshotPort.compareSnapshots(workspaceRoot,
+                            snapshot.getBeforeWorktreeOid(), afterResult.worktreeOid());
+
+            snapshot.setAfterWorktreeOid(afterResult.worktreeOid());
+            snapshot.setAfterIndexOid(afterResult.indexOid());
+            snapshot.setAfterHeadCommit(afterResult.headCommit());
+            snapshot.setChangedPathsJson(toChangedPathsJson(changes));
+            snapshot.setChangedFileCount(changes.size());
+            snapshot.setChangedByteCount(estimateByteCount(changes, workspaceRoot));
+            snapshot.setStatus(UndoSnapshotStatus.SUSPENDED);
+            snapshot.setExpiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L));
+            snapshotRepository.save(snapshot);
+
+            log.info("Undo snapshot SUSPENDED: runId={}, files={}", context.getRunId(), changes.size());
+
+        } catch (Exception e) {
+            log.warn("Failed to suspend snapshot for runId={}: {}", context.getRunId(), e.getMessage());
+        } finally {
+            releaseLock(snapshot);
+        }
+    }
+
+    public String onRunResume(AgentContext context) {
+        if (!config.isEnabled()) {
+            return null;
+        }
+        if (StringUtils.isNotBlank(context.getParentRunId())) {
+            return null;
+        }
+
+        AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
+        if (snapshot == null || snapshot.getStatus() != UndoSnapshotStatus.SUSPENDED) {
+            return null;
+        }
+
+        Path workspaceRoot = context.getResolvedWorkspace();
+        if (workspaceRoot == null) {
+            return null;
+        }
+
+        long lockTimeoutSec = Math.max(60, config.getCommandTimeoutMs() / 1000 * 3);
+        Instant lockExpiry = Instant.now().plusSeconds(lockTimeoutSec);
+        boolean acquired = lockRepository.acquire(workspaceRoot.toString(), context.getRunId(), lockExpiry);
+        if (!acquired) {
+            return "workspace_undo_busy";
+        }
+
+        try {
+            WorkspaceSnapshotPort.SnapshotState currentState =
+                    snapshotPort.inspectCurrentState(workspaceRoot);
+
+            if (!snapshot.getAfterHeadCommit().equals(currentState.headCommit())
+                    || !StringUtils.equals(snapshot.getBranch(), currentState.branch())
+                    || !snapshot.getAfterWorktreeOid().equals(currentState.worktreeOid())
+                    || !snapshot.getAfterIndexOid().equals(currentState.indexOid())) {
+                snapshot.setStatus(UndoSnapshotStatus.UNAVAILABLE);
+                snapshot.setUnavailabilityReason("workspace_changed_while_suspended");
+                snapshot.setFinalizedAt(Instant.now());
+                snapshotRepository.save(snapshot);
+                releaseLock(snapshot);
+                log.info("Undo snapshot UNAVAILABLE (workspace changed while suspended): runId={}",
+                        context.getRunId());
+                return null;
+            }
+
+            snapshot.setStatus(UndoSnapshotStatus.OPEN);
+            snapshot.setExpiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L));
+            snapshotRepository.save(snapshot);
+
+            log.info("Undo snapshot resumed: runId={}", context.getRunId());
+            return null;
+
+        } catch (Exception e) {
+            releaseLock(snapshot);
+            log.error("Failed to resume snapshot for runId={}: {}", context.getRunId(), e.getMessage());
+            return null;
         }
     }
 
@@ -105,7 +216,12 @@ public class UndoSessionCoordinator {
         }
 
         AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
-        if (snapshot == null || snapshot.getStatus() != UndoSnapshotStatus.OPEN) {
+        if (snapshot == null) {
+            return;
+        }
+
+        UndoSnapshotStatus currentStatus = snapshot.getStatus();
+        if (currentStatus != UndoSnapshotStatus.OPEN && currentStatus != UndoSnapshotStatus.SUSPENDED) {
             return;
         }
 
@@ -127,27 +243,37 @@ public class UndoSessionCoordinator {
                 snapshot.setStatus(UndoSnapshotStatus.UNAVAILABLE);
                 snapshot.setUnavailabilityReason("HEAD or branch changed during run");
                 snapshot.setFinalizedAt(Instant.now());
+                snapshot.setExpiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L));
                 snapshotRepository.save(snapshot);
                 log.info("Undo snapshot UNAVAILABLE (HEAD/branch changed): runId={}", context.getRunId());
                 releaseLock(snapshot);
                 return;
             }
 
-            if (afterResult.fileCount() == 0) {
+            List<WorkspaceSnapshotPort.WorkspaceFileChange> changes =
+                    snapshotPort.compareSnapshots(workspaceRoot,
+                            snapshot.getBeforeWorktreeOid(), afterResult.worktreeOid());
+
+            if (changes.isEmpty()) {
                 snapshot.setStatus(UndoSnapshotStatus.NO_CHANGES);
                 snapshot.setFinalizedAt(Instant.now());
                 snapshotRepository.save(snapshot);
                 log.info("Undo snapshot NO_CHANGES: runId={}", context.getRunId());
                 releaseLock(snapshot);
+                snapshotPort.deleteSnapshotRefs(workspaceRoot, context.getRunId());
                 return;
             }
 
-            if (afterResult.fileCount() > config.getMaxChangedFiles()
-                    || afterResult.byteCount() > config.getMaxChangedBytes()) {
+            int fileCount = changes.size();
+            long byteCount = estimateByteCount(changes, workspaceRoot);
+
+            if (fileCount > config.getMaxChangedFiles()
+                    || byteCount > config.getMaxChangedBytes()) {
                 snapshot.setStatus(UndoSnapshotStatus.UNAVAILABLE);
-                snapshot.setUnavailabilityReason("snapshot_too_large: files=" + afterResult.fileCount()
-                        + ", bytes=" + afterResult.byteCount());
+                snapshot.setUnavailabilityReason("snapshot_too_large: files=" + fileCount
+                        + ", bytes=" + byteCount);
                 snapshot.setFinalizedAt(Instant.now());
+                snapshot.setExpiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L));
                 snapshotRepository.save(snapshot);
                 log.info("Undo snapshot UNAVAILABLE (too large): runId={}", context.getRunId());
                 releaseLock(snapshot);
@@ -157,16 +283,16 @@ public class UndoSessionCoordinator {
             snapshot.setAfterHeadCommit(afterResult.headCommit());
             snapshot.setAfterWorktreeOid(afterResult.worktreeOid());
             snapshot.setAfterIndexOid(afterResult.indexOid());
-            snapshot.setChangedPathsJson(toJson(afterResult.changedPaths()));
-            snapshot.setChangedFileCount(afterResult.fileCount());
-            snapshot.setChangedByteCount(afterResult.byteCount());
+            snapshot.setChangedPathsJson(toChangedPathsJson(changes));
+            snapshot.setChangedFileCount(fileCount);
+            snapshot.setChangedByteCount(byteCount);
             snapshot.setStatus(UndoSnapshotStatus.READY);
             snapshot.setFinalizedAt(Instant.now());
             snapshot.setExpiresAt(Instant.now().plusSeconds(config.getRetentionHours() * 3600L));
             snapshotRepository.save(snapshot);
 
             log.info("Undo snapshot READY: runId={}, files={}, bytes={}",
-                    context.getRunId(), afterResult.fileCount(), afterResult.byteCount());
+                    context.getRunId(), fileCount, byteCount);
 
         } catch (Exception e) {
             snapshot.setStatus(UndoSnapshotStatus.UNAVAILABLE);
@@ -212,23 +338,35 @@ public class UndoSessionCoordinator {
         }
     }
 
-    private String toJson(Set<String> paths) {
-        if (paths == null || paths.isEmpty()) {
+    private String toChangedPathsJson(List<WorkspaceSnapshotPort.WorkspaceFileChange> changes) {
+        if (changes == null || changes.isEmpty()) {
             return "[]";
         }
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
-        for (String p : paths) {
-            if (!first) sb.append(",");
-            sb.append("\"").append(escapeJson(p)).append("\"");
-            first = false;
+        List<Map<String, String>> list = new ArrayList<>();
+        for (var c : changes) {
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("path", c.path());
+            entry.put("changeType", c.changeType().name());
+            list.add(entry);
         }
-        sb.append("]");
-        return sb.toString();
+        try {
+            return objectMapper.writeValueAsString(list);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize changed paths to JSON", e);
+            return "[]";
+        }
     }
 
-    private String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    private long estimateByteCount(List<WorkspaceSnapshotPort.WorkspaceFileChange> changes,
+                                    Path workspaceRoot) {
+        long total = 0;
+        for (var change : changes) {
+            try {
+                total += java.nio.file.Files.size(workspaceRoot.resolve(change.path()));
+            } catch (java.io.IOException ignored) {
+            }
+        }
+        return total;
     }
 
     public static class WorkspaceUndoBusyException extends RuntimeException {

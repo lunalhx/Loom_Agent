@@ -31,10 +31,10 @@ public class AgentUndoHttpService {
         WorkspaceUndoService.UndoStatusResult result = workspaceUndoService.queryStatus(runId);
 
         List<UndoStatusResponse.ChangedFileEntry> changedFiles = new ArrayList<>();
-        for (String path : result.changedFiles()) {
+        for (WorkspaceUndoService.ChangedFileEntry entry : result.changedFiles()) {
             changedFiles.add(UndoStatusResponse.ChangedFileEntry.builder()
-                    .path(path)
-                    .changeType("MODIFIED")
+                    .path(entry.path())
+                    .changeType(entry.changeType())
                     .build());
         }
 

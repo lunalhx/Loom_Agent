@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
 import cn.lunalhx.ai.domain.agent.model.valobj.UndoSnapshotStatus;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface UndoSnapshotRepository {
@@ -20,5 +21,7 @@ public interface UndoSnapshotRepository {
 
     boolean updateStatus(String snapshotId, UndoSnapshotStatus expected, UndoSnapshotStatus next);
 
-    int expireOlderThan(Instant threshold);
+    List<AgentUndoSnapshot> findExpired(Instant now);
+
+    int expireByStatus(String snapshotId, UndoSnapshotStatus from, UndoSnapshotStatus to);
 }

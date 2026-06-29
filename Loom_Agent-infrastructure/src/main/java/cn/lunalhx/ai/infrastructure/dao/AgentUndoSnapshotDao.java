@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface AgentUndoSnapshotDao {
@@ -26,5 +27,10 @@ public interface AgentUndoSnapshotDao {
                      @Param("next") String next,
                      @Param("expectedVersion") Long expectedVersion);
 
-    int deleteExpiredBefore(LocalDateTime threshold);
+    List<AgentUndoSnapshotPO> selectExpired(@Param("now") LocalDateTime now);
+
+    int expireByStatus(@Param("snapshotId") String snapshotId,
+                       @Param("expected") String expected,
+                       @Param("next") String next,
+                       @Param("expectedVersion") Long expectedVersion);
 }

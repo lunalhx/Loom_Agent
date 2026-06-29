@@ -7,7 +7,11 @@ import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceUndoLockRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.UndoSnapshotStatus;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,11 +19,12 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 public class WorkspaceUndoService {
 
@@ -30,17 +35,22 @@ public class WorkspaceUndoService {
     private final WorkspaceSnapshotPort snapshotPort;
     private final AgentRunRepository runRepository;
     private final AgentWorkspaceResolver workspaceResolver;
+    private final AgentRuntimeProperties.UndoProperties config;
+    private final ObjectMapper objectMapper;
 
     public WorkspaceUndoService(UndoSnapshotRepository snapshotRepository,
                                 WorkspaceUndoLockRepository lockRepository,
                                 WorkspaceSnapshotPort snapshotPort,
                                 AgentRunRepository runRepository,
-                                AgentWorkspaceResolver workspaceResolver) {
+                                AgentWorkspaceResolver workspaceResolver,
+                                AgentRuntimeProperties.UndoProperties config) {
         this.snapshotRepository = snapshotRepository;
         this.lockRepository = lockRepository;
         this.snapshotPort = snapshotPort;
         this.runRepository = runRepository;
         this.workspaceResolver = workspaceResolver;
+        this.config = config;
+        this.objectMapper = new ObjectMapper();
     }
 
     public UndoStatusResult queryStatus(String runId) {
@@ -112,40 +122,82 @@ public class WorkspaceUndoService {
                     "快照状态已被其他请求修改，请重试");
         }
 
-        Set<String> changedPaths = parseChangedPaths(snapshot.getChangedPathsJson());
+        List<WorkspaceSnapshotPort.WorkspaceFileChange> changedFiles = parseChangedPaths(snapshot.getChangedPathsJson());
 
         try {
             snapshotPort.restoreToBeforeSnapshot(workspacePath, runId,
-                    snapshot.getBeforeWorktreeOid(), snapshot.getBeforeIndexOid(), changedPaths);
+                    snapshot.getBeforeWorktreeOid(), snapshot.getBeforeIndexOid(), changedFiles);
 
             AgentUndoSnapshot updated = snapshotRepository.findByRunId(runId).orElse(snapshot);
             updated.setStatus(UndoSnapshotStatus.UNDONE);
             updated.setUndoneAt(Instant.now());
             snapshotRepository.save(updated);
 
-            log.info("Undo completed successfully: runId={}, workspace={}, restoredFiles={}",
-                    runId, snapshot.getWorkspace(), changedPaths.size());
+            snapshotPort.deleteSnapshotRefs(workspacePath, runId);
 
-            return UndoExecuteResult.success(runId, changedPaths.size());
+            log.info("Undo completed successfully: runId={}, workspace={}, restoredFiles={}",
+                    runId, snapshot.getWorkspace(), changedFiles.size());
+
+            return UndoExecuteResult.success(runId, changedFiles.size());
 
         } catch (Exception e) {
             log.error("Undo failed for runId={}: {}", runId, e.getMessage(), e);
-            return attemptRollback(snapshot, workspacePath, changedPaths, e);
+            return attemptRollback(snapshot, workspacePath, changedFiles, e);
+        } finally {
+            lockRepository.release(snapshot.getWorkspace(), snapshot.getRunId());
         }
     }
 
     private boolean verifyPreconditions(AgentUndoSnapshot snapshot, Path workspacePath) {
-        return true;
+        long lockTimeoutSec = Math.max(60, config.getCommandTimeoutMs() / 1000 * 3);
+        Instant lockExpiry = Instant.now().plusSeconds(lockTimeoutSec);
+        boolean acquired = lockRepository.acquire(snapshot.getWorkspace(), snapshot.getRunId(), lockExpiry);
+        if (!acquired) {
+            log.warn("Cannot acquire undo lock for verification: runId={}", snapshot.getRunId());
+            return false;
+        }
+
+        try {
+            WorkspaceSnapshotPort.SnapshotState currentState =
+                    snapshotPort.inspectCurrentState(workspacePath);
+
+            if (!snapshot.getAfterHeadCommit().equals(currentState.headCommit())) {
+                log.warn("HEAD changed after run: runId={}, expected={}, actual={}",
+                        snapshot.getRunId(), snapshot.getAfterHeadCommit(), currentState.headCommit());
+                return false;
+            }
+            if (!StringUtils.equals(snapshot.getBranch(), currentState.branch())) {
+                log.warn("Branch changed after run: runId={}, expected={}, actual={}",
+                        snapshot.getRunId(), snapshot.getBranch(), currentState.branch());
+                return false;
+            }
+            if (!snapshot.getAfterWorktreeOid().equals(currentState.worktreeOid())) {
+                log.warn("Worktree changed after run: runId={}, expected={}, actual={}",
+                        snapshot.getRunId(), snapshot.getAfterWorktreeOid(), currentState.worktreeOid());
+                return false;
+            }
+            if (!snapshot.getAfterIndexOid().equals(currentState.indexOid())) {
+                log.warn("Index changed after run: runId={}, expected={}, actual={}",
+                        snapshot.getRunId(), snapshot.getAfterIndexOid(), currentState.indexOid());
+                return false;
+            }
+
+            return true;
+        } catch (Exception e) {
+            log.warn("Precondition verification failed for runId={}: {}", snapshot.getRunId(), e.getMessage());
+            return false;
+        }
     }
 
     private UndoExecuteResult attemptRollback(AgentUndoSnapshot snapshot, Path workspacePath,
-                                               Set<String> changedPaths, Exception originalError) {
+                                               List<WorkspaceSnapshotPort.WorkspaceFileChange> changedFiles,
+                                               Exception originalError) {
         try {
             snapshotPort.restoreToBeforeSnapshot(workspacePath, snapshot.getRunId(),
-                    snapshot.getAfterWorktreeOid(), snapshot.getAfterIndexOid(), changedPaths);
+                    snapshot.getAfterWorktreeOid(), snapshot.getAfterIndexOid(), changedFiles);
 
-            snapshot.setStatus(UndoSnapshotStatus.READY);
-            snapshotRepository.save(snapshot);
+            snapshotRepository.updateStatus(snapshot.getSnapshotId(),
+                    UndoSnapshotStatus.UNDOING, UndoSnapshotStatus.READY);
 
             return UndoExecuteResult.failure(snapshot.getRunId(), "undo_failed_rolled_back",
                     "撤销失败，已回滚到撤销前状态: " + originalError.getMessage());
@@ -166,43 +218,77 @@ public class WorkspaceUndoService {
 
     private UndoStatusResult buildStatusResult(AgentUndoSnapshot snapshot) {
         boolean canUndo = snapshot.getStatus() == UndoSnapshotStatus.READY;
-        Set<String> changedPaths = parseChangedPaths(snapshot.getChangedPathsJson());
+        List<WorkspaceSnapshotPort.WorkspaceFileChange> changes = parseChangedPaths(snapshot.getChangedPathsJson());
+
+        List<ChangedFileEntry> files = new ArrayList<>();
+        for (var change : changes) {
+            files.add(new ChangedFileEntry(change.path(), change.changeType().name()));
+        }
 
         return new UndoStatusResult(
                 snapshot.getRunId(),
                 snapshot.getStatus().name(),
                 canUndo,
                 snapshot.getVersion() != null ? snapshot.getVersion() : 0,
-                changedPaths,
+                files,
                 snapshot.getChangedFileCount() != null ? snapshot.getChangedFileCount() : 0,
                 snapshot.getUnavailabilityReason(),
                 snapshot.getExpiresAt() != null ? snapshot.getExpiresAt().toString() : null
         );
     }
 
-    private Set<String> parseChangedPaths(String json) {
+    private List<WorkspaceSnapshotPort.WorkspaceFileChange> parseChangedPaths(String json) {
         if (json == null || json.isBlank() || "[]".equals(json.trim())) {
-            return Collections.emptySet();
+            return Collections.emptyList();
         }
-        Set<String> paths = new LinkedHashSet<>();
+        try {
+            List<Map<String, String>> raw = objectMapper.readValue(json,
+                    new TypeReference<List<Map<String, String>>>() {});
+            List<WorkspaceSnapshotPort.WorkspaceFileChange> result = new ArrayList<>();
+            for (Map<String, String> entry : raw) {
+                String path = entry.get("path");
+                String typeStr = entry.get("changeType");
+                if (path == null || path.isBlank()) {
+                    continue;
+                }
+                WorkspaceSnapshotPort.WorkspaceFileChangeType changeType =
+                        WorkspaceSnapshotPort.WorkspaceFileChangeType.MODIFIED;
+                if (typeStr != null) {
+                    try {
+                        changeType = WorkspaceSnapshotPort.WorkspaceFileChangeType.valueOf(typeStr);
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+                result.add(new WorkspaceSnapshotPort.WorkspaceFileChange(path, changeType));
+            }
+            return result;
+        } catch (JsonProcessingException e) {
+            return parseLegacyStringArray(json);
+        }
+    }
+
+    private List<WorkspaceSnapshotPort.WorkspaceFileChange> parseLegacyStringArray(String json) {
         String content = json.trim();
-        if (content.startsWith("[") && content.endsWith("]")) {
-            content = content.substring(1, content.length() - 1);
-            if (content.isBlank()) {
-                return paths;
+        if (!content.startsWith("[") || !content.endsWith("]")) {
+            return Collections.emptyList();
+        }
+        content = content.substring(1, content.length() - 1);
+        if (content.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<WorkspaceSnapshotPort.WorkspaceFileChange> result = new ArrayList<>();
+        for (String part : content.split(",")) {
+            String path = part.trim();
+            if (path.startsWith("\"") && path.endsWith("\"")) {
+                path = path.substring(1, path.length() - 1);
+                path = path.replace("\\\"", "\"").replace("\\\\", "\\");
             }
-            for (String part : content.split(",")) {
-                String path = part.trim();
-                if (path.startsWith("\"") && path.endsWith("\"")) {
-                    path = path.substring(1, path.length() - 1);
-                    path = path.replace("\\\"", "\"").replace("\\\\", "\\");
-                }
-                if (!path.isBlank()) {
-                    paths.add(path);
-                }
+            if (!path.isBlank()) {
+                result.add(new WorkspaceSnapshotPort.WorkspaceFileChange(
+                        path, WorkspaceSnapshotPort.WorkspaceFileChangeType.MODIFIED));
             }
         }
-        return paths;
+        return result;
     }
 
     private boolean isTerminal(AgentRunStatus status) {
@@ -211,17 +297,19 @@ public class WorkspaceUndoService {
                 || status == AgentRunStatus.BUDGET_EXCEEDED;
     }
 
+    public record ChangedFileEntry(String path, String changeType) {}
+
     public record UndoStatusResult(String runId, String status, boolean canUndo,
-                                    long snapshotVersion, Set<String> changedFiles,
+                                    long snapshotVersion, List<ChangedFileEntry> changedFiles,
                                     int changedFileCount, String reasonCode, String expiresAt) {
         public static UndoStatusResult notFound(String runId) {
             return new UndoStatusResult(runId, "NOT_FOUND", false, 0,
-                    Collections.emptySet(), 0, "run_not_found", null);
+                    Collections.emptyList(), 0, "run_not_found", null);
         }
 
         public static UndoStatusResult notAvailable(String runId, String code, String reason) {
             return new UndoStatusResult(runId, "UNAVAILABLE", false, 0,
-                    Collections.emptySet(), 0, code + ": " + reason, null);
+                    Collections.emptyList(), 0, code + ": " + reason, null);
         }
     }
 
