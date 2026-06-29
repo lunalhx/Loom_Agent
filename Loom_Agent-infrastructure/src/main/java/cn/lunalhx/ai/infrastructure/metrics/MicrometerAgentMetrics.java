@@ -37,6 +37,33 @@ public class MicrometerAgentMetrics implements AgentMetrics {
                 .increment(Math.max(1, matchCount));
     }
 
+    @Override
+    public void recordMcpServerInit(String server, String transport, String status) {
+        meterRegistry.counter("loom_mcp_server_initialization_total",
+                        "server", safe(server),
+                        "transport", safe(transport),
+                        "status", safe(status))
+                .increment();
+    }
+
+    @Override
+    public void recordMcpToolCall(String server, String tool, String status) {
+        meterRegistry.counter("loom_mcp_tool_calls_total",
+                        "server", safe(server),
+                        "tool", safe(tool),
+                        "status", safe(status))
+                .increment();
+    }
+
+    @Override
+    public void recordMcpToolDuration(String server, String tool, String status, long durationMs) {
+        meterRegistry.timer("loom_mcp_tool_duration_seconds",
+                        "server", safe(server),
+                        "tool", safe(tool),
+                        "status", safe(status))
+                .record(Duration.ofMillis(Math.max(0L, durationMs)));
+    }
+
     private String safe(String value) {
         return value == null || value.isBlank() ? "none" : value;
     }

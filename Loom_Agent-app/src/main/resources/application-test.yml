@@ -38,6 +38,8 @@ spring:
       timeout: ${REDIS_TIMEOUT_MS:3000}ms
 
 loom:
+  mcp:
+    enabled: false
   ai:
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:10000}
     first-token-timeout-ms: ${AI_FIRST_TOKEN_TIMEOUT_MS:30000}
