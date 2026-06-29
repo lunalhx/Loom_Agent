@@ -1,3 +1,6 @@
+-- Loom Agent 完整数据库结构。
+-- 新服务器只需要执行本文件；migrations/ 仅用于已有旧库的增量升级。
+
 CREATE DATABASE IF NOT EXISTS loom_agent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE loom_agent;
 
@@ -168,3 +171,49 @@ CREATE TABLE IF NOT EXISTS agent_pending_approval (
     KEY idx_run_id (run_id),
     KEY idx_expires_at (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 待审批表';
+
+CREATE TABLE IF NOT EXISTS agent_undo_snapshot (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    snapshot_id VARCHAR(64) NOT NULL COMMENT '撤销快照 ID',
+    run_id VARCHAR(64) NOT NULL COMMENT 'Agent run ID',
+    conversation_id VARCHAR(64) DEFAULT NULL COMMENT '会话 ID',
+    workspace VARCHAR(1024) DEFAULT NULL COMMENT '工作区绝对路径',
+    status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/READY/NO_CHANGES/UNAVAILABLE/UNDONE/EXPIRED',
+    before_head VARCHAR(64) DEFAULT NULL COMMENT '执行前 HEAD',
+    after_head VARCHAR(64) DEFAULT NULL COMMENT '执行后 HEAD',
+    branch VARCHAR(256) DEFAULT NULL COMMENT '执行前分支',
+    before_worktree_oid VARCHAR(64) DEFAULT NULL COMMENT '执行前工作区 tree OID',
+    before_index_oid VARCHAR(64) DEFAULT NULL COMMENT '执行前暂存区 tree OID',
+    after_worktree_oid VARCHAR(64) DEFAULT NULL COMMENT '执行后工作区 tree OID',
+    after_index_oid VARCHAR(64) DEFAULT NULL COMMENT '执行后暂存区 tree OID',
+    changed_paths_json MEDIUMTEXT DEFAULT NULL COMMENT '变更路径 JSON',
+    changed_file_count INT DEFAULT 0 COMMENT '变更文件数',
+    changed_byte_count BIGINT DEFAULT 0 COMMENT '变更字节数',
+    unavailability_reason VARCHAR(512) DEFAULT NULL COMMENT '不可撤销原因',
+    error_info TEXT DEFAULT NULL COMMENT '错误详情',
+    version BIGINT NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    finalized_at DATETIME DEFAULT NULL COMMENT '快照完成时间',
+    undone_at DATETIME DEFAULT NULL COMMENT '撤销时间',
+    expires_at DATETIME DEFAULT NULL COMMENT '过期时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_snapshot_id (snapshot_id),
+    UNIQUE KEY uk_run_id (run_id),
+    KEY idx_workspace (workspace(255)),
+    KEY idx_conversation_id (conversation_id),
+    KEY idx_status (status),
+    KEY idx_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 单次运行撤销快照表';
+
+CREATE TABLE IF NOT EXISTS agent_workspace_undo_lock (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    lock_id VARCHAR(64) NOT NULL COMMENT '锁 ID',
+    workspace VARCHAR(1024) NOT NULL COMMENT '工作区绝对路径',
+    holder_run_id VARCHAR(64) DEFAULT NULL COMMENT '持锁 run ID',
+    acquired_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '获取时间',
+    expires_at DATETIME NOT NULL COMMENT '过期时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_lock_id (lock_id),
+    UNIQUE KEY uk_workspace (workspace(768)),
+    KEY idx_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作区撤销互斥锁表';

@@ -1,4 +1,4 @@
--- Git Ghost Snapshot Per-Run Undo: persistence tables
+-- Historical migration: Git Ghost Snapshot Per-Run Undo persistence tables.
 -- Run this migration against the loom-agent database.
 
 CREATE TABLE IF NOT EXISTS agent_undo_snapshot (
