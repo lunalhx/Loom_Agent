@@ -156,6 +156,27 @@ public class InMemoryTraceRecorder implements TraceRecorder {
     }
 
     @Override
+    public void recordSecurityEvent(AgentContext context,
+                                    String eventType,
+                                    String node,
+                                    String status,
+                                    Map<String, Object> metadata) {
+        if (context == null) {
+            return;
+        }
+        append(context, AgentTraceEvent.builder()
+                .spanId(context.getCurrentSpanId())
+                .parentSpanId(context.getParentSpanId())
+                .eventType(eventType)
+                .node(node)
+                .status(StringUtils.defaultIfBlank(status, "warning"))
+                .metadata(metadata)
+                .replayable(false)
+                .sensitiveRedacted(true)
+                .build());
+    }
+
+    @Override
     public List<AgentTraceEvent> timeline(String runId) {
         if (StringUtils.isBlank(runId)) {
             return List.of();

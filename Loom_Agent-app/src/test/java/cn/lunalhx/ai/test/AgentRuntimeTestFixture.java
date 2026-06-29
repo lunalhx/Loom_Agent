@@ -28,7 +28,9 @@ import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
@@ -65,6 +67,7 @@ public final class AgentRuntimeTestFixture {
     private ContextBlobStore contextBlobStore;
     private DeepContextSummaryService deepContextSummaryService;
     private ContextWindowManager contextWindowManager;
+    private ToolOutputSanitizer toolOutputSanitizer;
     private Executor executor;
     private SubAgentCoordinator subAgentCoordinator;
     private boolean subAgentEnabled = false;
@@ -161,6 +164,11 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
+    public AgentRuntimeTestFixture toolOutputSanitizer(ToolOutputSanitizer toolOutputSanitizer) {
+        this.toolOutputSanitizer = toolOutputSanitizer;
+        return this;
+    }
+
     public AgentRuntimeTestFixture contextEnabled() {
         this.contextEnabled = true;
         return this;
@@ -216,6 +224,10 @@ public final class AgentRuntimeTestFixture {
         return agentMetrics != null ? agentMetrics : new NoopAgentMetrics();
     }
 
+    private ToolOutputSanitizer effectiveToolOutputSanitizer() {
+        return toolOutputSanitizer != null ? toolOutputSanitizer : new RegexToolOutputSanitizer();
+    }
+
     private Executor effectiveExecutor() {
         return executor != null ? executor : Runnable::run;
     }
@@ -245,7 +257,7 @@ public final class AgentRuntimeTestFixture {
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
-                effectiveAgentMetrics(), cwm);
+                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
         return new AgentLoopFactory(modelGateway, state, runtime);
     }
 

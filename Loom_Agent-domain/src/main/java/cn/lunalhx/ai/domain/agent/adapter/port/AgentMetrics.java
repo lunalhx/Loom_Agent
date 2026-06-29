@@ -6,4 +6,6 @@ public interface AgentMetrics {
 
     void recordNodeDuration(String node, String status, long durationMs);
 
+    void recordPromptInjectionDetected(String toolName, int matchCount);
+
 }

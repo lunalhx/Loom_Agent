@@ -116,7 +116,7 @@ public class AgentFlowFactory {
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry(), contextWindowManager),
-                new ObservationNode(),
+                new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder, runtime.agentMetrics()),
                 new ReplanGuardNode(new ProgressGuard(properties)),
                 new ReplanNode(modelGateway, properties, objectMapper, traceRecorder, budgetGuard),
                 new FinalAnswerNode(),
