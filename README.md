@@ -216,7 +216,16 @@ curl -N \
 - Agent 工具权限：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 需要普通审批，`HIGH_RISK_CONFIRM` 默认需要高危审批，`HIGH_RISK_DENY` 直接拦截。
 - 子 Agent：主 Agent 可通过内建虚拟工具 `spawn_agents` 派生 explorer/reviewer/editor 子 Agent；explorer/reviewer 强制只读并可并发，editor 默认只允许单个串行执行。
 - 上下文恢复：模型上下文超限后依次执行一次 reactive compact、切换更大上下文模型、分块深度摘要；根 Agent 最终进入可恢复的 `WAITING_USER_INPUT`，子 Agent 则以 `CONTEXT_OVERFLOW` 返回主 Agent。
-- Agent 沙箱：所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
+- Agent 沙箱：
+  - 所有文件、命令和 Git 操作都限制在请求解析后的 workspace 下；shell 不使用系统 shell 展开，禁止管道、重定向、后台执行和危险命令。
+  - 路径安全：所有已存在路径强制 `toRealPath()` 解析，祖先符号链接指向工作区外部一律拒绝；遍历时统一跳过 `.git`、`.idea`、`target`、`node_modules`。
+  - 敏感文件保护：`.env`、`.env.*`（除 `.env.example/.sample/.template`）、`*.key`、`*.pem`、`*.p12`、`id_rsa`、`id_ed25519` 禁止读取、搜索、创建和覆盖；`delete_files` 允许删除但标记 `SECRET_LIKE` 并需高危确认。
+  - UTF-8 字节限制：`fileMaxBytes` 以 UTF-8 编码后的真实字节数为准；`write_file` 和 `replace_in_file` 在审批预览和执行阶段均校验。
+  - 自动创建父目录：`write_file create` 自动创建多级父目录，创建后重新校验真实路径防止并发符号链接逃逸。
+  - 原子写入：写入使用 `ATOMIC_MOVE` + `REPLACE_EXISTING`，保留 POSIX 文件原权限；临时文件始终在 `finally` 清理。
+  - 审批指纹：`write_file`、`replace_in_file` 和 `delete_files` 审批时生成内容指纹（SHA-256）；执行前重新计算，不一致返回 `approval_stale`。
+  - Diff 上限：结构化 Diff 先剥离公共前缀/后缀，仅对变化区域计算 LCS；变化区域超过 2,000,000 个 LCS 单元时返回 `diff_too_large`。
+  - 分页读取：`read_file` 使用 `BufferedReader` 顺序读取，输出尾部追加 `shownLines`、`totalLines`、`nextStartLine` 元数据。
 - 多工作区：`loom.agent.workspace-root` 是默认工作区；`loom.agent.allowed-workspace-roots` 是可选择工作区的白名单。为空时默认只允许 `workspace-root`。
 
 ## 状态持久化

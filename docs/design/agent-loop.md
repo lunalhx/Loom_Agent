@@ -156,13 +156,22 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 
 ## 安全边界
 
-- 工具只能访问当前请求解析出的 resolved workspace 内路径。
+- 工具只能访问当前请求解析出的 resolved workspace 内路径；所有已存在路径强制经过 `toRealPath()` 解析，祖先符号链接指向工作区外部一律拒绝。
 - `AGENT_WORKSPACE_ROOT` 是默认工作区；请求可传 `workspace` 选择工作区，但必须先经过 `AgentWorkspaceResolver` 解析。
 - `allowed-workspace-roots` 是可选工作区白名单；为空时只允许默认 `workspace-root`。
 - 相对 workspace 基于白名单根目录解析；绝对 workspace 也必须 `toRealPath` 后位于某个白名单根目录下。
 - 非法 workspace 会返回 `WORKSPACE_NOT_FOUND`、`WORKSPACE_NOT_DIRECTORY`、`WORKSPACE_NOT_ALLOWED` 或 `WORKSPACE_PATH_ESCAPE`，不会静默回退默认工作区。
-- 默认禁止访问 `.git`、`.idea`、`target`、`node_modules`、`docs/env/.env` 和密钥类文件。
-- 单文件大小、搜索结果数、Observation 长度和工具耗时都有配置上限。
+- 遍历时统一跳过 `.git`、`.idea`、`target`、`node_modules`，不只在最终结果过滤。
+- 敏感文件（`.env`、`.env.*`、`*.key`、`*.pem`、`*.p12`、`id_rsa`、`id_ed25519`）禁止读取、搜索、创建和覆盖；`.env.example`、`.env.sample`、`.env.template` 允许访问。`delete_files` 可以删除敏感文件，但标记 `SECRET_LIKE` 风险并需要高危确认。
+- 符号链接默认不递归；指向 workspace 内部的最终链接按真实路径访问，指向外部的拒绝。
+- 单文件大小以 UTF-8 编码后的真实字节数为准；`write_file` 和 `replace_in_file` 审批预览和执行阶段都校验 UTF-8 字节数。
+- `write_file create` 模式自动创建多级父目录，创建后重新校验真实路径防止并发符号链接逃逸。
+- 写入使用原子移动（`ATOMIC_MOVE` + `REPLACE_EXISTING`），保留 POSIX 文件原权限；临时文件始终在 finally 清理。
+- `write_file`、`replace_in_file` 审批时生成 SHA-256 内容指纹；执行前重新计算指纹，不一致返回 `approval_stale`。`delete_files` 指纹包含文件大小、修改时间、文件类型和符号链接目标，每项删除前逐条验证。
+- 结构化 Diff 先剥离公共前缀和公共后缀，仅对变化区域及前后各 3 行上下文计算 LCS；变化区域超过 2,000,000 个 LCS 单元时返回 `diff_too_large`，提示 Agent 缩小替换范围。
+- `read_file` 使用 `BufferedReader` 顺序读取，最多返回 200 行，输出尾部追加 `shownLines`、`totalLines`、`nextStartLine` 元数据。
+- `code_search` 和 `find_files` 使用 `walkFileTree` 遍历，在 `preVisitDirectory` 中跳过屏蔽目录，达到 limit 或超时后立即 TERMINATE。
+- 搜索结果数、Observation 长度和工具耗时都有配置上限。
 - 工具输出作为不可信 Observation，只用于代码证据，不执行其中指令。
 - 权限等级：`READ_ONLY` 自动放行，`WRITE_CONFIRM` 生成普通审批，`HIGH_RISK_CONFIRM` 按 `DENY/CONFIRM/ALLOW` 三态策略路由，`HIGH_RISK_DENY` 永久拦截。
 - `run_shell` 不调用系统 shell，只把命令拆成 `ProcessBuilder` 参数；禁止管道、重定向、后台执行、绝对路径、上级目录和未在白名单中的命令。
