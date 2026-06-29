@@ -100,7 +100,14 @@ loom:
     shell-max-output-chars: ${AGENT_SHELL_MAX_OUTPUT_CHARS:12000}
     shell-max-stderr-chars: ${AGENT_SHELL_MAX_STDERR_CHARS:4000}
     high-risk-policy: ${AGENT_HIGH_RISK_POLICY:CONFIRM}
+    permission-mode: ${AGENT_PERMISSION_MODE:SANDBOX}
     allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
+    shell-commands:
+      read-only: ${AGENT_SHELL_READ_ONLY:pwd,ls,cat,head,tail,wc,grep,sort,uniq,which,file,du,df,echo,rg}
+      write: ${AGENT_SHELL_WRITE:mkdir,cp,mv,touch,chmod,date,printf}
+      high-risk: ${AGENT_SHELL_HIGH_RISK:curl,wget,npm,yarn,pip,pip3,docker,ssh,scp,rsync,chown,kill,systemctl,sudo,sed,awk,tar,zip,unzip}
+      deny: ${AGENT_SHELL_DENY:rm,rmdir,find,python,python3,sh,bash,zsh,dash,ksh,csh,fish,ash,exec,eval,source}
+      unknown-level: ${AGENT_SHELL_UNKNOWN_LEVEL:WRITE_CONFIRM}
     sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
     sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}
     sub-agent-max-concurrency: ${AGENT_SUB_AGENT_MAX_CONCURRENCY:4}

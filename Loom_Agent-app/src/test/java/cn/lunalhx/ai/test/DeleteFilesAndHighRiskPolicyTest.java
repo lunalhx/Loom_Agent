@@ -357,6 +357,111 @@ public class DeleteFilesAndHighRiskPolicyTest {
         assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
+    // ==================== New shell registry tests ====================
+
+    @Test
+    public void runShellMkdirShouldRequireWriteConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "mkdir foo");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellCpShouldRequireWriteConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "cp a b");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellCurlShouldRequireHighRiskConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "curl http://example.com");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellShDashCShouldBeDenied() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "sh -c echo x");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellEnvWithCommandShouldBeHighRiskConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "env rm -rf target");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals("env followed by a real command should be HIGH_RISK_CONFIRM, not READ_ONLY",
+                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellPureEnvShouldBeReadOnly() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "env");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellAbsoluteRmShouldBeDeniedByBasename() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "/bin/rm x");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals("basename normalization should hit deny bucket",
+                ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellPathUnknownScriptShouldBeHighRiskConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "./unknown.sh");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals("path-based unknown should be HIGH_RISK_CONFIRM",
+                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellMvnNonTestShouldBeHighRiskConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "mvn compile");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals("mvn non-test should now be HIGH_RISK_CONFIRM instead of DENY",
+                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellLsShouldBeReadOnly() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "ls -la");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellCatShouldBeReadOnly() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "cat file.txt");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+    }
+
     // ==================== Git tiered classification tests ====================
 
     @Test

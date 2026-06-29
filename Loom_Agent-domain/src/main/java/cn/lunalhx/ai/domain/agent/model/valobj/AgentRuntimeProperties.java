@@ -25,7 +25,9 @@ public class AgentRuntimeProperties {
     private Integer shellMaxOutputChars = 12000;
     private Integer shellMaxStderrChars = 4000;
     private String highRiskPolicy = "CONFIRM";
+    private String permissionMode = "SANDBOX";
     private List<String> allowedShellCommands = new ArrayList<>(List.of("mvn", "./mvnw", "git", "rm", "pwd", "ls", "rg"));
+    private ShellCommandProperties shellCommands = new ShellCommandProperties();
     private Boolean subAgentEnabled = true;
     private Integer subAgentMaxChildren = 6;
     private Integer subAgentMaxConcurrency = 4;
@@ -124,6 +126,23 @@ public class AgentRuntimeProperties {
         private long maxChangedBytes = 104_857_600L;
         private long commandTimeoutMs = 30_000L;
         private long cleanupIntervalMs = 3_600_000L;
+
+    }
+
+    @Data
+    public static class ShellCommandProperties {
+
+        private List<String> readOnly = new ArrayList<>(List.of(
+                "pwd", "ls", "cat", "head", "tail", "wc", "grep", "sort", "uniq", "which", "file", "du", "df", "echo", "rg"));
+        private List<String> write = new ArrayList<>(List.of(
+                "mkdir", "cp", "mv", "touch", "chmod", "date", "printf"));
+        private List<String> highRisk = new ArrayList<>(List.of(
+                "curl", "wget", "npm", "yarn", "pip", "pip3", "docker", "ssh", "scp", "rsync", "chown", "kill",
+                "systemctl", "sudo", "sed", "awk", "tar", "zip", "unzip"));
+        private List<String> deny = new ArrayList<>(List.of(
+                "rm", "rmdir", "find", "python", "python3",
+                "sh", "bash", "zsh", "dash", "ksh", "csh", "fish", "ash", "exec", "eval", "source"));
+        private String unknownLevel = "WRITE_CONFIRM";
 
     }
 

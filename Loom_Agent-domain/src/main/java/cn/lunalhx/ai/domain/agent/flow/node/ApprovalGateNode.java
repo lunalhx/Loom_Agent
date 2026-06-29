@@ -57,6 +57,15 @@ public class ApprovalGateNode extends AbstractAgentNode {
         if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
             return deny(context, policy);
         }
+        String mode = StringUtils.defaultString(properties.getPermissionMode(), "SANDBOX").toUpperCase();
+        if ("BYPASS".equals(mode)) {
+            return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+        }
+        if ("ACCEPT_EDITS".equals(mode)) {
+            if (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM) {
+                return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+            }
+        }
         if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM) {
             String highRiskPolicy = StringUtils.defaultString(properties.getHighRiskPolicy(), "CONFIRM").toUpperCase();
             return switch (highRiskPolicy) {
