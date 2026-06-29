@@ -216,12 +216,7 @@ public class UndoSessionCoordinator {
         }
 
         AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
-        if (snapshot == null) {
-            return;
-        }
-
-        UndoSnapshotStatus currentStatus = snapshot.getStatus();
-        if (currentStatus != UndoSnapshotStatus.OPEN && currentStatus != UndoSnapshotStatus.SUSPENDED) {
+        if (snapshot == null || snapshot.getStatus() != UndoSnapshotStatus.OPEN) {
             return;
         }
 

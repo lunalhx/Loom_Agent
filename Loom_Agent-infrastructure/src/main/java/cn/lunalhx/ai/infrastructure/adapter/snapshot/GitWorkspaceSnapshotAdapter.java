@@ -119,41 +119,24 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
         return parseNameStatus(diff);
     }
 
-    private List<WorkspaceFileChange> parseNameStatus(String raw) {
+    static List<WorkspaceFileChange> parseNameStatus(String raw) {
         List<WorkspaceFileChange> changes = new ArrayList<>();
-        int i = 0;
-        while (i < raw.length()) {
-            char statusChar = raw.charAt(i);
+        String[] fields = raw.split("\0", -1);
+        for (int i = 0; i + 1 < fields.length; i += 2) {
+            String status = fields[i];
+            String path = fields[i + 1];
+            if (status.isEmpty() || path.isEmpty()) {
+                continue;
+            }
+
             WorkspaceFileChangeType type;
-            switch (statusChar) {
+            switch (status.charAt(0)) {
                 case 'A': type = WorkspaceFileChangeType.ADDED; break;
                 case 'D': type = WorkspaceFileChangeType.DELETED; break;
                 case 'M': type = WorkspaceFileChangeType.MODIFIED; break;
-                default:
-                    if (statusChar == '\0') { i++; continue; }
-                    type = WorkspaceFileChangeType.MODIFIED;
-                    break;
+                default: type = WorkspaceFileChangeType.MODIFIED; break;
             }
-            i++;
-
-            if (i >= raw.length()) break;
-            int tabIdx = raw.indexOf('\t', i);
-            if (tabIdx < 0) break;
-            i = tabIdx + 1;
-
-            int nulIdx = raw.indexOf('\0', i);
-            String path;
-            if (nulIdx < 0) {
-                path = raw.substring(i);
-                i = raw.length();
-            } else {
-                path = raw.substring(i, nulIdx);
-                i = nulIdx + 1;
-            }
-
-            if (!path.isEmpty()) {
-                changes.add(new WorkspaceFileChange(path, type));
-            }
+            changes.add(new WorkspaceFileChange(path, type));
         }
         return changes;
     }
