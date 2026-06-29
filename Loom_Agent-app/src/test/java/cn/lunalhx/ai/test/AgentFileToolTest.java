@@ -180,6 +180,18 @@ public class AgentFileToolTest {
     }
 
     @Test
+    public void gitOpInitShouldInitializeCurrentWorkspace() throws Exception {
+        Path workspace = Files.createDirectories(temporaryFolder.getRoot().toPath().resolve("new-repository"));
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("operation", "init");
+
+        ToolResult result = new GitOpTool(properties(workspace)).call(call("git_op", input, workspace));
+
+        assertTrue(result.getObservation(), result.isSuccess());
+        assertTrue(Files.isDirectory(workspace.resolve(".git")));
+    }
+
+    @Test
     public void readFileShouldRejectPathEscapingWorkspace() throws Exception {
         Path workspace = Files.createDirectories(temporaryFolder.getRoot().toPath().resolve("workspace"));
         Files.writeString(temporaryFolder.getRoot().toPath().resolve("outside.txt"), "secret", StandardCharsets.UTF_8);

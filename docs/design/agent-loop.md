@@ -89,7 +89,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 - `write_file`：创建或覆盖工作区内文本文件，执行前需要人工确认。
 - `delete_files`：删除最多 20 个明确文件或目录路径，走高危审批；目录先生成无符号链接跟随的递归清单，审批绑定清单指纹，目录变化后必须重新审批。通配符、工作区根目录和任何 `.git` 路径永久拒绝。
 - `run_shell`：在进程级沙箱内执行允许的只读命令或 Maven 测试命令；测试命令需要人工确认。
-- `git_op`：`status/diff/log` 自动放行，`add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批，`reset --hard`、保护分支 force push 等永久拒绝。
+- `git_op`：`status/diff/log` 自动放行，`init/add/commit` 普通审批，普通 `push/reset/clean/rebase/checkout` 高危审批，`reset --hard`、保护分支 force push 等永久拒绝。
 - `spawn_agents`：内建虚拟工具，不进入普通 `ToolRegistry`；由 `DecisionNode` 路由到 `SubAgentDispatchNode`，用于派生隔离上下文的子 Agent 并只回传聚合摘要。
 
 模型 Action 必须是 JSON：

@@ -39,8 +39,8 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("git_op")
-                .description("执行受限 Git 操作；status/diff/log 自动放行，add/commit 需普通审批，push/reset/clean/rebase/checkout 需高危审批")
-                .inputSchema("{\"operation\":\"status|diff|log|add|commit|push|reset|clean|rebase|checkout\",\"path\":\"add/diff/checkout 可选相对路径\",\"message\":\"commit 必填\",\"limit\":\"log 默认 10\",\"branch\":\"checkout/reset/rebase 可选\",\"remote\":\"push 可选 remote\",\"refspec\":\"push 可选 refspec\",\"force\":\"push/reset/rebase 可选\",\"dryRun\":\"clean 可选\"}")
+                .description("执行受限 Git 操作；status/diff/log 自动放行，init/add/commit 需普通审批，push/reset/clean/rebase/checkout 需高危审批")
+                .inputSchema("{\"operation\":\"status|diff|log|init|add|commit|push|reset|clean|rebase|checkout\",\"path\":\"add/diff/checkout 可选相对路径\",\"message\":\"commit 必填\",\"limit\":\"log 默认 10\",\"branch\":\"checkout/reset/rebase 可选\",\"remote\":\"push 可选 remote\",\"refspec\":\"push 可选 refspec\",\"force\":\"push/reset/rebase 可选\",\"dryRun\":\"clean 可选\"}")
                 .build();
     }
 
@@ -99,6 +99,7 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
                 command.add("-n");
                 command.add(String.valueOf(limit));
             }
+            case "init" -> command.add("init");
             case "add" -> {
                 command.add("add");
                 addPathArg(command, call);

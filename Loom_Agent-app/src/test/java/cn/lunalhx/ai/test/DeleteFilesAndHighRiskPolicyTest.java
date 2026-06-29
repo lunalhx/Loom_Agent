@@ -339,6 +339,24 @@ public class DeleteFilesAndHighRiskPolicyTest {
         assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
+    @Test
+    public void runShellGitInitShouldRequireWriteConfirm() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "git init");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
+    }
+
+    @Test
+    public void runShellGitInitWithArgumentsShouldBeDenied() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "git init nested");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+    }
+
     // ==================== Git tiered classification tests ====================
 
     @Test
@@ -450,7 +468,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
     @Test
     public void gitWriteOpsShouldRequireWriteConfirm() throws Exception {
         GitOpTool tool = new GitOpTool(properties());
-        for (String op : new String[]{"add", "commit"}) {
+        for (String op : new String[]{"init", "add", "commit"}) {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("operation", op);
             if ("commit".equals(op)) {
