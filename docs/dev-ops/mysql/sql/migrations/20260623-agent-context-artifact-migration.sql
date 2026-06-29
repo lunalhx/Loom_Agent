@@ -1,3 +1,4 @@
+-- Historical migration for an existing database.
 CREATE TABLE IF NOT EXISTS agent_context_artifact (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
     artifact_id VARCHAR(64) NOT NULL COMMENT 'Artifact ID',

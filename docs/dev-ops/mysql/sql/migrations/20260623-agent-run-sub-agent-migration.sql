@@ -1,3 +1,4 @@
+-- Historical migration for an existing database.
 ALTER TABLE agent_run
     ADD COLUMN parent_run_id VARCHAR(64) DEFAULT NULL COMMENT '父 Agent run ID' AFTER run_id,
     ADD COLUMN root_run_id VARCHAR(64) DEFAULT NULL COMMENT '根 Agent run ID' AFTER parent_run_id,

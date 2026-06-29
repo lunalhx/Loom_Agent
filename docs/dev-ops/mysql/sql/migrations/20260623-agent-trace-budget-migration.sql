@@ -1,3 +1,4 @@
+-- Historical migration for an existing database.
 ALTER TABLE agent_run
     ADD COLUMN blocked_reason VARCHAR(1024) DEFAULT NULL COMMENT '预算或策略阻断原因' AFTER summary_json,
     ADD COLUMN used_tokens BIGINT NOT NULL DEFAULT 0 COMMENT 'root run 累计模型 token' AFTER blocked_reason,
