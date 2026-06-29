@@ -971,6 +971,117 @@ public class AgentLoopContractTest {
         assertEquals("子 Agent maxSegments 应为 min(5,2)", 2, created.getMaxSegments());
     }
 
+    // ===== find_files 与 delete_files 校验失败契约 =====
+
+    @Test
+    public void findFilesShouldBeIncludedInToolSpecs() {
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"final\",\"answer\":\"ok\",\"evidence\":[]}"))
+                .tools(List.of(fakeTool("find_files", "F hello.py")));
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("findfiles-contract")
+                        .requestId("req")
+                        .conversationId("conv")
+                        .question("查找文件")
+                        .build())
+                .collectList().block(TIMEOUT);
+
+        assertNotNull(events);
+        assertFalse(events.isEmpty());
+    }
+
+    @Test
+    public void deleteValidationFailureShouldNotEmitPolicyDenied() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool deleteTool = new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name("delete_files").description("delete").inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.validationFailure("not_found", "路径不存在：missing.txt",
+                        call.getInput() == null ? "" : call.getInput().toString());
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.failure("not_found", "路径不存在：missing.txt", 1L);
+            }
+        };
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"删除\",\"tool\":\"delete_files\",\"input\":{\"paths\":[\"missing.txt\"]}}",
+                        "{\"type\":\"final\",\"answer\":\"文件不存在\",\"evidence\":[]}"))
+                .tools(List.of(deleteTool));
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("delete-vf-contract")
+                        .requestId("req")
+                        .conversationId("conv")
+                        .question("删除一个不存在的文件")
+                        .build())
+                .collectList().block(TIMEOUT);
+
+        assertNotNull(events);
+        long policyDeniedCount = events.stream()
+                .filter(e -> e.getType() == AgentEventType.POLICY_DENIED)
+                .count();
+        assertEquals("校验失败不应生成 POLICY_DENIED", 0, policyDeniedCount);
+        assertTrue("校验失败应不触发 write 工具调用", calls.get() == 0);
+    }
+
+    @Test
+    public void deleteSecurityViolationShouldStillEmitPolicyDenied() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentTool deleteTool = new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name("delete_files").description("delete").inputSchema("{}").build();
+            }
+
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.highRiskDeny("禁止删除工作区根目录", call.getInput() == null ? "" : call.getInput().toString());
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                calls.incrementAndGet();
+                return ToolResult.failure("policy_denied", "禁止删除工作区根目录", 1L);
+            }
+        };
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"删除根目录\",\"tool\":\"delete_files\",\"input\":{\"paths\":[\".\"]}}",
+                        "{\"type\":\"final\",\"answer\":\"禁止\",\"evidence\":[]}"))
+                .tools(List.of(deleteTool));
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("delete-deny-contract")
+                        .requestId("req")
+                        .conversationId("conv")
+                        .question("删除根目录")
+                        .build())
+                .collectList().block(TIMEOUT);
+
+        assertNotNull(events);
+        long policyDeniedCount = events.stream()
+                .filter(e -> e.getType() == AgentEventType.POLICY_DENIED)
+                .count();
+        assertEquals("安全违规应生成 POLICY_DENIED", 1, policyDeniedCount);
+        assertTrue("安全违规应不触发 write 工具调用", calls.get() == 0);
+    }
+
     // ===== 辅助 =====
 
     private AgentContext waitingUserInputContext(String runId) {

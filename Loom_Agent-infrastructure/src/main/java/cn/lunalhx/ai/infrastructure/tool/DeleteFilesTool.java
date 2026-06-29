@@ -67,6 +67,9 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
             decision.setMetadata(Map.of("deletePreview", manifest.metadata()));
             return decision;
         } catch (DeleteValidationException e) {
+            if (e.isValidationFailure()) {
+                return ToolPolicyDecision.validationFailure(e.getErrorCode(), e.getMessage(), inputPreview(call));
+            }
             return ToolPolicyDecision.highRiskDeny(e.getMessage(), inputPreview(call));
         } catch (Exception e) {
             return ToolPolicyDecision.highRiskDeny("路径校验失败：" + e.getMessage(), inputPreview(call));
@@ -111,7 +114,7 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
                     false,
                     elapsed(startedAt));
         } catch (DeleteValidationException e) {
-            return failure("delete_files_rejected", e.getMessage(), startedAt);
+            return failure(e.getErrorCode(), e.getMessage(), startedAt);
         } catch (Exception e) {
             return failure("delete_files_failed", e.getMessage(), startedAt);
         }
@@ -178,25 +181,25 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
     private List<String> extractPaths(ToolCall call) {
         JsonNode input = call.getInput();
         if (input == null || !input.has("paths") || input.get("paths").isNull()) {
-            throw new DeleteValidationException("paths 必填");
+            throw new DeleteValidationException("invalid_path", "paths 必填", true);
         }
         JsonNode pathsNode = input.get("paths");
         if (!pathsNode.isArray()) {
-            throw new DeleteValidationException("paths 必须是数组");
+            throw new DeleteValidationException("invalid_path", "paths 必须是数组", true);
         }
 
         List<String> rawPaths = new ArrayList<>();
         for (JsonNode node : pathsNode) {
             if (!node.isTextual() || node.asText().isBlank()) {
-                throw new DeleteValidationException("paths 中的路径必须是非空字符串");
+                throw new DeleteValidationException("invalid_path", "paths 中的路径必须是非空字符串", true);
             }
             rawPaths.add(node.asText().trim());
         }
         if (rawPaths.isEmpty()) {
-            throw new DeleteValidationException("paths 不能为空数组");
+            throw new DeleteValidationException("invalid_path", "paths 不能为空数组", true);
         }
         if (rawPaths.size() > MAX_TARGETS) {
-            throw new DeleteValidationException("一次最多删除 " + MAX_TARGETS + " 个目标，收到 " + rawPaths.size() + " 个");
+            throw new DeleteValidationException("invalid_path", "一次最多删除 " + MAX_TARGETS + " 个目标，收到 " + rawPaths.size() + " 个", true);
         }
         return rawPaths;
     }
@@ -207,17 +210,17 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
             Path raw = parseRelativePath(rawPath);
             Path candidate = root.resolve(raw).normalize().toAbsolutePath();
             if (!candidate.startsWith(root)) {
-                throw new DeleteValidationException("路径越权：" + rawPath);
+                throw new DeleteValidationException("policy_denied", "路径越权：" + rawPath, false);
             }
             if (candidate.equals(root)) {
-                throw new DeleteValidationException("禁止删除工作区根目录");
+                throw new DeleteValidationException("policy_denied", "禁止删除工作区根目录", false);
             }
             if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
-                throw new DeleteValidationException("路径不存在：" + rawPath);
+                throw new DeleteValidationException("not_found", "路径不存在：" + rawPath, true);
             }
             Path parent = candidate.getParent();
             if (parent == null || !parent.toRealPath().startsWith(root)) {
-                throw new DeleteValidationException("路径通过符号链接逃逸工作区：" + rawPath);
+                throw new DeleteValidationException("policy_denied", "路径通过符号链接逃逸工作区：" + rawPath, false);
             }
             rejectGitPath(root, candidate);
             entryKind(candidate);
@@ -240,23 +243,23 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
 
     private Path parseRelativePath(String rawPath) {
         if (containsWildcard(rawPath)) {
-            throw new DeleteValidationException("禁止使用通配符：" + rawPath);
+            throw new DeleteValidationException("policy_denied", "禁止使用通配符：" + rawPath, false);
         }
         if (rawPath.matches("^[A-Za-z]:[\\\\/].*")) {
-            throw new DeleteValidationException("禁止绝对路径：" + rawPath);
+            throw new DeleteValidationException("policy_denied", "禁止绝对路径：" + rawPath, false);
         }
         final Path raw;
         try {
             raw = Path.of(rawPath);
         } catch (Exception e) {
-            throw new DeleteValidationException("路径解析失败：" + rawPath);
+            throw new DeleteValidationException("invalid_path", "路径解析失败：" + rawPath, true);
         }
         if (raw.isAbsolute()) {
-            throw new DeleteValidationException("禁止绝对路径：" + rawPath);
+            throw new DeleteValidationException("policy_denied", "禁止绝对路径：" + rawPath, false);
         }
         for (Path segment : raw) {
             if ("..".equals(segment.toString())) {
-                throw new DeleteValidationException("禁止上级目录：" + rawPath);
+                throw new DeleteValidationException("policy_denied", "禁止上级目录：" + rawPath, false);
             }
         }
         return raw;
@@ -280,7 +283,7 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
                 } else if (attrs.isRegularFile()) {
                     kind = EntryKind.FILE;
                 } else {
-                    throw new DeleteValidationException("禁止删除特殊文件：" + relative(root, file));
+                    throw new DeleteValidationException("policy_denied", "禁止删除特殊文件：" + relative(root, file), false);
                 }
                 entries.add(new DeletionEntry(file, relative(root, file), kind, kind == EntryKind.FILE ? attrs.size() : 0L));
                 return FileVisitResult.CONTINUE;
@@ -303,10 +306,10 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
 
     private void validateEntryStillSafe(DeletionEntry entry) {
         if (!Files.exists(entry.path(), LinkOption.NOFOLLOW_LINKS)) {
-            throw new DeleteValidationException("目标在执行前已不存在");
+            throw new DeleteValidationException("not_found", "目标在执行前已不存在", true);
         }
         if (entryKind(entry.path()) != entry.kind()) {
-            throw new DeleteValidationException("目标类型在审批后发生变化");
+            throw new DeleteValidationException("approval_stale", "目标类型在审批后发生变化", true);
         }
     }
 
@@ -320,14 +323,14 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
             return EntryKind.DIRECTORY;
         }
-        throw new DeleteValidationException("禁止删除特殊文件：" + path.getFileName());
+        throw new DeleteValidationException("policy_denied", "禁止删除特殊文件：" + path.getFileName(), false);
     }
 
     private void rejectGitPath(Path root, Path path) {
         Path relative = root.relativize(path.toAbsolutePath().normalize());
         for (Path segment : relative) {
             if (".git".equalsIgnoreCase(segment.toString())) {
-                throw new DeleteValidationException("禁止删除 .git：" + relative(root, path));
+                throw new DeleteValidationException("policy_denied", "禁止删除 .git：" + relative(root, path), false);
             }
         }
     }
@@ -450,8 +453,21 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
     }
 
     private static class DeleteValidationException extends RuntimeException {
-        DeleteValidationException(String message) {
+        private final String errorCode;
+        private final boolean validationFailure;
+
+        DeleteValidationException(String errorCode, String message, boolean validationFailure) {
             super(message);
+            this.errorCode = errorCode;
+            this.validationFailure = validationFailure;
+        }
+
+        String getErrorCode() {
+            return errorCode;
+        }
+
+        boolean isValidationFailure() {
+            return validationFailure;
         }
     }
 }

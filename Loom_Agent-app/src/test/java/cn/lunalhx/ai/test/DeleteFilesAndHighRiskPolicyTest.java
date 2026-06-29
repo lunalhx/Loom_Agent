@@ -178,14 +178,15 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void deleteMissingFileShouldBeRejected() throws Exception {
+    public void deleteMissingFileShouldBeValidationFailure() throws Exception {
         ToolPolicyDecision policy = tool().policy(call(deleteInput("nonexistent.txt")));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("不存在"));
+        assertTrue(policy.hasValidationFailure());
+        assertEquals("not_found", policy.getValidationErrorCode());
+        assertTrue(policy.getValidationMessage().contains("不存在"));
     }
 
     @Test
-    public void deleteMoreThan20FilesShouldBeRejected() throws Exception {
+    public void deleteMoreThan20FilesShouldBeValidationFailure() throws Exception {
         String[] paths = IntStream.rangeClosed(1, 21)
                 .mapToObj(i -> "file" + i + ".txt")
                 .toArray(String[]::new);
@@ -194,8 +195,9 @@ public class DeleteFilesAndHighRiskPolicyTest {
         }
 
         ToolPolicyDecision policy = tool().policy(call(deleteInput(paths)));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("20"));
+        assertTrue(policy.hasValidationFailure());
+        assertEquals("invalid_path", policy.getValidationErrorCode());
+        assertTrue(policy.getValidationMessage().contains("20"));
     }
 
     @Test
@@ -204,7 +206,8 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ArrayNode arr = input.putArray("paths");
         // empty array
         ToolPolicyDecision policy = tool().policy(call("delete_files", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.hasValidationFailure());
+        assertEquals("invalid_path", policy.getValidationErrorCode());
     }
 
     @Test
@@ -267,6 +270,36 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     // ==================== RunShell rm tests ====================
+
+    @Test
+    public void runShellFindShouldBeDenied() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "find . -name '*.java'");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.getRiskReason().contains("find_files"));
+    }
+
+    @Test
+    public void runShellPythonShouldBeDenied() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "python3 script.py");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.getRiskReason().contains("find_files"));
+    }
+
+    @Test
+    public void runShellPython3ShouldBeDenied() throws Exception {
+        RunShellTool tool = new RunShellTool(properties());
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "python script.py");
+        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.getRiskReason().contains("find_files"));
+    }
 
     @Test
     public void runShellRmFileShouldBeDenied() throws Exception {
@@ -562,11 +595,12 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void deletePathsFieldMissingShouldBeRejected() throws Exception {
+    public void deletePathsFieldMissingShouldBeValidationFailure() throws Exception {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("other", "value");
         ToolPolicyDecision policy = tool().policy(call("delete_files", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertTrue(policy.hasValidationFailure());
+        assertEquals("invalid_path", policy.getValidationErrorCode());
     }
 
     // ==================== helpers ====================
