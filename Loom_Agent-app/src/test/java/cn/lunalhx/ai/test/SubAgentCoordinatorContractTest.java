@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -400,6 +401,33 @@ public class SubAgentCoordinatorContractTest {
         // editor 非只读角色：写工具保留
         ToolPolicyDecision editorPolicy = factory.create(AgentRole.EDITOR).policy(call);
         assertFalse(editorPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
+    }
+
+    @Test
+    public void readOnlyRoleShouldObtainMcpToolsWithoutBypassingPermissionPolicy() {
+        AtomicInteger writeCalls = new AtomicInteger();
+        RoleToolRegistryFactory factory = new RoleToolRegistryFactory(List.of(
+                fakeTool("mcp__exa__web_search", "search result"),
+                fakeWriteTool("mcp__browser__click", "clicked", writeCalls)));
+        ToolRegistry registry = factory.create(AgentRole.EXPLORER);
+
+        ToolCall readCall = ToolCall.builder()
+                .name("mcp__exa__web_search")
+                .input(new ObjectMapper().createObjectNode().put("query", "Loom"))
+                .workspaceRoot(Path.of(".").toAbsolutePath().normalize())
+                .build();
+        ToolCall writeCall = ToolCall.builder()
+                .name("mcp__browser__click")
+                .input(new ObjectMapper().createObjectNode().put("selector", "#submit"))
+                .workspaceRoot(Path.of(".").toAbsolutePath().normalize())
+                .build();
+
+        assertTrue(registry.contains("mcp__exa__web_search"));
+        assertEquals("search result", registry.call(readCall).getObservation());
+        assertTrue(registry.contains("mcp__browser__click"));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, registry.policy(writeCall).getPermissionLevel());
+        assertTrue(registry.call(writeCall).getObservation().contains("sub_agent_read_only_violation"));
+        assertEquals(0, writeCalls.get());
     }
 
     // ===== 优雅停止恢复 (Phase 1 §4 补充) =====

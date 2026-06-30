@@ -14,6 +14,7 @@ import java.util.Set;
 
 public class RoleToolRegistryFactory {
 
+    private static final String MCP_TOOL_NAME_PREFIX = "mcp__";
     private static final Set<String> READ_ONLY_TOOL_NAMES = Set.of(
             "list_dir", "read_file", "code_search", "run_shell", "git_op", "todo_write", ContextRecallTool.NAME, "find_files");
 
@@ -35,7 +36,7 @@ public class RoleToolRegistryFactory {
 
     private boolean isAllowed(AgentRole role, String toolName) {
         if (isReadOnlyRole(role)) {
-            return READ_ONLY_TOOL_NAMES.contains(toolName);
+            return READ_ONLY_TOOL_NAMES.contains(toolName) || toolName.startsWith(MCP_TOOL_NAME_PREFIX);
         }
         return !SubAgentToolSpecs.SPAWN_AGENTS.equals(toolName);
     }
