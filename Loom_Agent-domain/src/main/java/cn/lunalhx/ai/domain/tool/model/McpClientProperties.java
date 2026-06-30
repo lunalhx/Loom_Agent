@@ -18,7 +18,10 @@ public class McpClientProperties {
     private long requestTimeoutMs = 60000;
     private int maxToolsPerServer = 64;
     private int maxDescriptionChars = 1000;
-    private int maxSchemaChars = 16000;
+    private int maxSchemaChars = 3000;
+    private int maxPropertyDescriptionChars = 160;
+    private int maxProperties = 32;
+    private int maxEnumValues = 12;
     private int maxResultChars = 100000;
     private List<String> stdioEnvAllowlist = List.of("PATH", "HOME", "TMPDIR", "LANG");
     private Map<String, ServerConfig> servers = new HashMap<>();

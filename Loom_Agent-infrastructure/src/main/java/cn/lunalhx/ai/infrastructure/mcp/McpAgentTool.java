@@ -32,7 +32,7 @@ public class McpAgentTool implements AgentTool {
     private final ToolPermissionLevel permissionLevel;
     private final McpSchema.Tool remoteToolDef;
     private final int maxDescriptionChars;
-    private final int maxSchemaChars;
+    private final McpInputSchemaSimplifier schemaSimplifier;
     private final AgentMetrics metrics;
 
     public McpAgentTool(String serverAlias,
@@ -44,7 +44,7 @@ public class McpAgentTool implements AgentTool {
                         McpSchema.Tool remoteToolDef,
                         ToolPermissionLevel permissionLevel,
                         int maxDescriptionChars,
-                        int maxSchemaChars,
+                        McpInputSchemaSimplifier schemaSimplifier,
                         AgentMetrics metrics) {
         this.serverAlias = serverAlias;
         this.remoteToolName = remoteToolName;
@@ -55,7 +55,7 @@ public class McpAgentTool implements AgentTool {
         this.remoteToolDef = remoteToolDef;
         this.permissionLevel = permissionLevel;
         this.maxDescriptionChars = maxDescriptionChars;
-        this.maxSchemaChars = maxSchemaChars;
+        this.schemaSimplifier = schemaSimplifier;
         this.metrics = metrics;
     }
 
@@ -161,21 +161,7 @@ public class McpAgentTool implements AgentTool {
     }
 
     private String buildInputSchema() {
-        McpSchema.JsonSchema schema = remoteToolDef.inputSchema();
-        if (schema == null) {
-            return "{\"type\":\"object\"}";
-        }
-        try {
-            String serialized = jsonMapper.writeValueAsString(schema);
-            if (serialized.length() > maxSchemaChars) {
-                log.warn("MCP tool {} schema truncated from {} to {} chars", localName, serialized.length(), maxSchemaChars);
-                serialized = serialized.substring(0, maxSchemaChars);
-            }
-            return serialized;
-        } catch (Exception e) {
-            log.warn("Failed to serialize schema for {}: {}", localName, e.getMessage());
-            return "{\"type\":\"object\"}";
-        }
+        return schemaSimplifier.simplify(remoteToolDef.inputSchema());
     }
 
     private String computeFingerprint(ToolCall call) {

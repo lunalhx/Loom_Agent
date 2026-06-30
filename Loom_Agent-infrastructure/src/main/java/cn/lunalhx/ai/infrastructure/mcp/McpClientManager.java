@@ -122,6 +122,12 @@ public class McpClientManager {
                                                 McpSyncClient client,
                                                 List<McpSchema.Tool> discovered) {
         McpResultMapper resultMapper = new McpResultMapper(properties.getMaxResultChars());
+        McpInputSchemaSimplifier simplifier = new McpInputSchemaSimplifier(
+                jsonMapper,
+                properties.getMaxPropertyDescriptionChars(),
+                properties.getMaxProperties(),
+                properties.getMaxEnumValues(),
+                properties.getMaxSchemaChars());
         int maxTools = properties.getMaxToolsPerServer();
 
         List<McpSchema.Tool> filtered = filterTools(serverAlias, config, discovered);
@@ -137,7 +143,7 @@ public class McpClientManager {
             McpAgentTool agentTool = new McpAgentTool(
                     serverAlias, tool.name(), localName, client,
                     resultMapper, jsonMapper, tool, permission,
-                    properties.getMaxDescriptionChars(), properties.getMaxSchemaChars(),
+                    properties.getMaxDescriptionChars(), simplifier,
                     metrics
             );
             agentTools.add(agentTool);
