@@ -21,27 +21,14 @@ public class SubAgentCoordinator {
                                AgentLoopFactory agentLoopFactory,
                                AgentRuntimeProperties properties,
                                ObjectMapper objectMapper,
-                               Executor executor) {
-        this(toolRegistryFactory, agentLoopFactory, properties, objectMapper, executor, null);
-    }
-
-    public SubAgentCoordinator(RoleToolRegistryFactory toolRegistryFactory,
-                               AgentLoopFactory agentLoopFactory,
-                               AgentRuntimeProperties properties,
-                               ObjectMapper objectMapper,
                                Executor executor,
                                SubAgentControlInbox controlInbox) {
         SubAgentResultFactory resultFactory = new SubAgentResultFactory();
         ChildAgentServiceFactory serviceFactory = new AgentLoopFactoryChildServiceFactory(agentLoopFactory);
         this.planner = new SubAgentDispatchPlanner(properties, new SubAgentDecisionParser());
-        if (controlInbox != null) {
-            this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties, controlInbox);
-        } else {
-            this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties);
-        }
+        this.scheduler = new SubAgentExecutionScheduler(executor, resultFactory, properties, controlInbox);
         this.aggregator = new SubAgentResultAggregator(properties, objectMapper);
         this.runner = new ChildAgentRunner(toolRegistryFactory, serviceFactory, properties, resultFactory, objectMapper);
-        agentLoopFactory.setSubAgentControlInbox(scheduler.inbox());
     }
 
     public SubAgentDispatchResult dispatch(AgentContext parent) {

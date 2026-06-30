@@ -1,17 +1,26 @@
-package cn.lunalhx.ai.domain.agent.flow.hook;
+package cn.lunalhx.ai.runtime.hook;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookAction;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
+@Component
+@Order(300)
 public class PendingApprovalConsistencyStopHook implements AgentHook {
 
     private final ApprovalStore approvalStore;

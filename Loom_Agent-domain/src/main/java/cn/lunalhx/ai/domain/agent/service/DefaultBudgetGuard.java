@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import com.google.common.cache.CacheBuilder;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
@@ -116,14 +117,20 @@ public class DefaultBudgetGuard implements BudgetGuard {
         final long finalTotalTokens = totalTokens;
         final BigDecimal costAmount = cost != null ? cost.getTotalCost() : null;
         BudgetState updated = states.compute(rootRunId, (key, existing) -> {
-            BudgetState base = existing != null ? existing : new BudgetState();
+            BudgetState base = existing != null ? existing : BudgetState.EMPTY;
             return base.plus(promptTokens, completionTokens, finalTotalTokens, costAmount);
         });
-        context.setUsedPromptTokens(updated.usedPromptTokens);
-        context.setUsedCompletionTokens(updated.usedCompletionTokens);
-        context.setUsedTokens(updated.usedTokens);
-        context.setEstimatedCost(updated.estimatedCost);
+        context.setBudgetState(updated);
         return cost;
+    }
+
+    @Override
+    public BudgetState currentState(AgentContext context) {
+        if (context == null) {
+            return BudgetState.EMPTY;
+        }
+        BudgetState state = states.get(rootRunId(context));
+        return state != null ? state : BudgetState.EMPTY;
     }
 
     private long currentUsedTokens(AgentContext context) {
@@ -132,12 +139,13 @@ public class DefaultBudgetGuard implements BudgetGuard {
         }
         BudgetState state = states.get(rootRunId(context));
         if (state != null) {
-            context.setUsedPromptTokens(Math.max(context.getUsedPromptTokens(), state.usedPromptTokens));
-            context.setUsedCompletionTokens(Math.max(context.getUsedCompletionTokens(), state.usedCompletionTokens));
-            context.setUsedTokens(Math.max(context.getUsedTokens(), state.usedTokens));
-            if (state.estimatedCost.compareTo(context.getEstimatedCost()) > 0) {
-                context.setEstimatedCost(state.estimatedCost);
-            }
+            BudgetState current = context.getBudgetState();
+            long mergedPrompt = Math.max(current.usedPromptTokens(), state.usedPromptTokens());
+            long mergedCompletion = Math.max(current.usedCompletionTokens(), state.usedCompletionTokens());
+            long mergedTokens = Math.max(current.usedTokens(), state.usedTokens());
+            BigDecimal mergedCost = state.estimatedCost().compareTo(current.estimatedCost()) > 0
+                    ? state.estimatedCost() : current.estimatedCost();
+            context.setBudgetState(new BudgetState(mergedPrompt, mergedCompletion, mergedTokens, mergedCost));
         }
         return context.getUsedTokens();
     }
@@ -200,32 +208,6 @@ public class DefaultBudgetGuard implements BudgetGuard {
 
     private long positive(Integer value, long fallback) {
         return value == null || value <= 0 ? fallback : value;
-    }
-
-    private static class BudgetState {
-        final long usedPromptTokens;
-        final long usedCompletionTokens;
-        final long usedTokens;
-        final BigDecimal estimatedCost;
-
-        BudgetState() {
-            this(0L, 0L, 0L, BigDecimal.ZERO);
-        }
-
-        BudgetState(long usedPromptTokens, long usedCompletionTokens, long usedTokens, BigDecimal estimatedCost) {
-            this.usedPromptTokens = usedPromptTokens;
-            this.usedCompletionTokens = usedCompletionTokens;
-            this.usedTokens = usedTokens;
-            this.estimatedCost = estimatedCost;
-        }
-
-        BudgetState plus(long promptTokens, long completionTokens, long totalTokens, BigDecimal cost) {
-            return new BudgetState(
-                    usedPromptTokens + promptTokens,
-                    usedCompletionTokens + completionTokens,
-                    usedTokens + totalTokens,
-                    cost != null ? estimatedCost.add(cost) : estimatedCost);
-        }
     }
 
 }

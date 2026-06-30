@@ -138,6 +138,60 @@ public class ArchitectureRegressionTest {
                     .and().resideOutsideOfPackage("cn.lunalhx.ai.infrastructure..")
                     .should().notBePublic();
 
+    // ---- Rule 9: AiRuntimeConfig 不得声明 @Bean ----
+
+    @ArchTest
+    public static final ArchRule ai_runtime_config_must_not_declare_bean_methods =
+            classes().that().haveFullyQualifiedName("cn.lunalhx.ai.config.AiRuntimeConfig")
+                    .should(notHaveBeanAnnotatedMethods());
+
+    // ---- Rule 10: 五个子 AutoConfig 不得相互依赖具体配置类 ----
+
+    @ArchTest
+    public static final ArchRule sub_auto_configs_must_not_depend_on_each_other =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai.config..")
+                    .and().haveSimpleNameEndingWith("AutoConfig")
+                    .should().dependOnClassesThat()
+                    .haveNameMatching("cn\\.lunalhx\\.ai\\.config\\.\\w+AutoConfig");
+
+    // ---- Rule 11: domain 不得依赖 org.springframework、app 配置包或 app Hook 实现包 ----
+
+    @ArchTest
+    public static final ArchRule domain_must_not_depend_on_spring_or_app_concerns =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai.domain..")
+                    .should().dependOnClassesThat()
+                    .resideInAnyPackage("org.springframework..")
+                    .orShould().dependOnClassesThat()
+                    .resideInAnyPackage("cn.lunalhx.ai.config..")
+                    .orShould().dependOnClassesThat()
+                    .resideInAnyPackage("cn.lunalhx.ai.runtime.hook..");
+
+    // ---- Rule 12: 所有具体 AgentHook 必须位于 app 运行时 Hook 包 ----
+
+    @ArchTest
+    public static final ArchRule all_agent_hook_impls_must_reside_in_runtime_hook_package =
+            classes().that().areAssignableTo(cn.lunalhx.ai.domain.agent.flow.hook.AgentHook.class)
+                    .should().resideInAnyPackage(
+                            "cn.lunalhx.ai.runtime.hook..",
+                            "cn.lunalhx.ai.domain.agent.flow.hook");
+
+    // ---- Rule 13: 所有具体 AgentHook 必须标注 @Component ----
+
+    @ArchTest
+    public static final ArchRule all_agent_hook_impls_must_be_annotated_with_component =
+            classes().that().areAssignableTo(cn.lunalhx.ai.domain.agent.flow.hook.AgentHook.class)
+                    .and().resideOutsideOfPackage("cn.lunalhx.ai.domain.agent.flow.hook")
+                    .should().beAnnotatedWith(org.springframework.stereotype.Component.class);
+
+    // ---- Rule 14: AgentFlowFactory 不得依赖任何具体 Hook 实现 ----
+
+    @ArchTest
+    public static final ArchRule agent_flow_factory_must_not_depend_on_concrete_hooks =
+            noClasses().that().haveFullyQualifiedName(
+                            cn.lunalhx.ai.domain.agent.service.AgentFlowFactory.class.getName())
+                    .should().dependOnClassesThat()
+                    .resideInAnyPackage("cn.lunalhx.ai.runtime.hook..");
+
     // ---- 自定义 condition 实现 ----
 
     private static ArchCondition<JavaClass> onlyHaveNonPublicConstructors() {
@@ -226,6 +280,21 @@ public class ArchitectureRegressionTest {
                             && method.getModifiers().contains(java.lang.reflect.Modifier.STATIC)) {
                         events.add(SimpleConditionEvent.violated(method,
                                 method.getFullName() + " is a public static noop() factory"));
+                    }
+                }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> notHaveBeanAnnotatedMethods() {
+        return new ArchCondition<>("not have methods annotated with @Bean") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                for (JavaMethod method : javaClass.getMethods()) {
+                    if (method.isAnnotatedWith("org.springframework.context.annotation.Bean")) {
+                        events.add(SimpleConditionEvent.violated(method,
+                                method.getFullName() + " is annotated with @Bean — "
+                                        + "AiRuntimeConfig must only use @Import"));
                     }
                 }
             }

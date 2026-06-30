@@ -5,9 +5,8 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
-import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
-import cn.lunalhx.ai.domain.agent.flow.hook.UndoSnapshotAgentHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -23,6 +22,7 @@ import java.util.concurrent.Executor;
  * 内部持有 {@link AgentFlowFactory} 创建节点图。
  *
  * <p>不提供含糊的 {@code create(..., nullableCoordinator)} 方法：语义由方法名区分。
+ * Hook 通过 {@link AgentHookRegistry} 注入，不再直接依赖具体 Hook 类型。
  */
 public class AgentLoopFactory {
 
@@ -34,27 +34,19 @@ public class AgentLoopFactory {
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        Objects.requireNonNull(modelGateway, "modelGateway must not be null");
-        this.state = Objects.requireNonNull(state, "state must not be null");
-        this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
-        this.undoCoordinator = null;
-        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null);
     }
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime,
-                           UndoSessionCoordinator undoCoordinator,
-                           UndoSnapshotAgentHook undoHook) {
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator) {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
-        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, undoCoordinator, undoHook);
-    }
-
-    public void setSubAgentControlInbox(SubAgentControlInbox controlInbox) {
-        flowFactory.setControlInbox(controlInbox);
+        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator);
     }
 
     /**

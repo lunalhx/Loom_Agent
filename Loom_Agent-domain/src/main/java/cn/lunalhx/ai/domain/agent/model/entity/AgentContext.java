@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -16,6 +17,19 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Per-run Agent state, owned by exactly one Agent Loop.
+ *
+ * <p>Concurrency contract:
+ * <ul>
+ *   <li>A single context instance MUST only be mutated serially by one Agent Loop.</li>
+ *   <li>Parent and child Agents MUST NOT share the same context instance.</li>
+ *   <li>Cross-Agent shared budget is managed exclusively by {@code BudgetGuard}.</li>
+ *   <li>Async consumers and persistence logic MUST only use immutable events or snapshots.</li>
+ *   <li>Progress, checkpoint, and node state fields are thread-confined and carry no
+ *       concurrent-write safety guarantees.</li>
+ * </ul>
+ */
 @Data
 public class AgentContext {
 
@@ -65,10 +79,8 @@ public class AgentContext {
     private String currentSpanId;
     private String parentSpanId;
     private long traceSequenceNo;
-    private long usedPromptTokens;
-    private long usedCompletionTokens;
-    private long usedTokens;
-    private BigDecimal estimatedCost = BigDecimal.ZERO;
+    @JsonIgnore
+    private volatile BudgetState budgetState = BudgetState.EMPTY;
     private String budgetBlockedReason;
     private int reactiveCompactAttempts;
     private String currentModel;
@@ -91,6 +103,46 @@ public class AgentContext {
     public long nextTraceSequenceNo() {
         traceSequenceNo++;
         return traceSequenceNo;
+    }
+
+    // ---- budget delegate getters (kept for JSON/checkpoint compat) ----
+
+    public long getUsedPromptTokens() {
+        return budgetState.usedPromptTokens();
+    }
+
+    public long getUsedCompletionTokens() {
+        return budgetState.usedCompletionTokens();
+    }
+
+    public long getUsedTokens() {
+        return budgetState.usedTokens();
+    }
+
+    public BigDecimal getEstimatedCost() {
+        return budgetState.estimatedCost();
+    }
+
+    // ---- budget delegate setters ----
+
+    public void setUsedPromptTokens(long v) {
+        budgetState = new BudgetState(v, budgetState.usedCompletionTokens(),
+                budgetState.usedTokens(), budgetState.estimatedCost());
+    }
+
+    public void setUsedCompletionTokens(long v) {
+        budgetState = new BudgetState(budgetState.usedPromptTokens(), v,
+                budgetState.usedTokens(), budgetState.estimatedCost());
+    }
+
+    public void setUsedTokens(long v) {
+        budgetState = new BudgetState(budgetState.usedPromptTokens(),
+                budgetState.usedCompletionTokens(), v, budgetState.estimatedCost());
+    }
+
+    public void setEstimatedCost(BigDecimal v) {
+        budgetState = new BudgetState(budgetState.usedPromptTokens(),
+                budgetState.usedCompletionTokens(), budgetState.usedTokens(), v);
     }
 
 }

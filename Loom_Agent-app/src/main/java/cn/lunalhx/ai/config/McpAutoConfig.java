@@ -13,10 +13,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-@Configuration
-public class McpRuntimeConfig {
+@Configuration(proxyBeanMethods = false)
+public class McpAutoConfig {
 
-    private static final Logger log = LoggerFactory.getLogger(McpRuntimeConfig.class);
+    private static final Logger log = LoggerFactory.getLogger(McpAutoConfig.class);
 
     @Bean
     @ConfigurationProperties(prefix = "loom.mcp")

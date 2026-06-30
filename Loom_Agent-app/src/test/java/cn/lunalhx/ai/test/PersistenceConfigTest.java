@@ -1,6 +1,6 @@
 package cn.lunalhx.ai.test;
 
-import cn.lunalhx.ai.config.AiRuntimeConfig;
+import cn.lunalhx.ai.config.PersistenceAutoConfig;
 import cn.lunalhx.ai.config.PersistenceProperties;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
@@ -35,7 +35,7 @@ import static org.junit.Assert.*;
 
 public class PersistenceConfigTest {
 
-    private final AiRuntimeConfig config = new AiRuntimeConfig();
+    private final PersistenceAutoConfig config = new PersistenceAutoConfig();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgentRuntimeProperties runtimeProperties = new AgentRuntimeProperties();
     private final MemoryStoreProperties memProps = new MemoryStoreProperties();

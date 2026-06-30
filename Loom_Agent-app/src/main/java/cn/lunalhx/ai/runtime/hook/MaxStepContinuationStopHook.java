@@ -1,15 +1,24 @@
-package cn.lunalhx.ai.domain.agent.flow.hook;
+package cn.lunalhx.ai.runtime.hook;
 
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookAction;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
+@Component
+@Order(100)
 public class MaxStepContinuationStopHook implements AgentHook {
 
     private final AgentRuntimeProperties properties;

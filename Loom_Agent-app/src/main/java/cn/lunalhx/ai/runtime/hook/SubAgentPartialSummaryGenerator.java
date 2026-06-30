@@ -1,7 +1,8 @@
-package cn.lunalhx.ai.domain.agent.service;
+package cn.lunalhx.ai.runtime.hook;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -9,11 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Component
 public class SubAgentPartialSummaryGenerator {
 
     private final ObjectMapper objectMapper;
 
-    SubAgentPartialSummaryGenerator(ObjectMapper objectMapper) {
+    public SubAgentPartialSummaryGenerator(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

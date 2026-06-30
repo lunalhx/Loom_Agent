@@ -1,18 +1,10 @@
 package cn.lunalhx.ai.domain.agent.service;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
-import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
-import cn.lunalhx.ai.domain.agent.flow.hook.CheckpointAgentHook;
-import cn.lunalhx.ai.domain.agent.flow.hook.IncompletePlanStopHook;
-import cn.lunalhx.ai.domain.agent.flow.hook.MaxStepContinuationStopHook;
-import cn.lunalhx.ai.domain.agent.flow.hook.PendingApprovalConsistencyStopHook;
-import cn.lunalhx.ai.domain.agent.flow.hook.SubAgentGracefulStopHook;
-import cn.lunalhx.ai.domain.agent.flow.hook.UndoSnapshotAgentHook;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
@@ -30,7 +22,6 @@ import cn.lunalhx.ai.domain.agent.flow.node.UserInputGateNode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
-import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -46,6 +37,7 @@ import java.util.Objects;
  * 从 {@link DefaultAgentLoopService} 构造器中移出。
  *
  * <p>Factory 内部不创建 InMemory、Noop 或其他默认依赖，所有依赖必须显式传入。
+ * Hook 通过 {@link AgentHookRegistry} 注入，不再直接依赖具体 Hook 实现。
  */
 public class AgentFlowFactory {
 
@@ -53,32 +45,26 @@ public class AgentFlowFactory {
     private final AgentLoopStateDependencies state;
     private final AgentLoopRuntimeDependencies runtime;
     private final ObjectMapper objectMapper;
-    private final SubAgentGracefulStopHook gracefulStopHook;
+    private final AgentHookRegistry hookRegistry;
     private final UndoSessionCoordinator undoCoordinator;
-    private final UndoSnapshotAgentHook undoHook;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, null, null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime,
-                           UndoSessionCoordinator undoCoordinator,
-                           UndoSnapshotAgentHook undoHook) {
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.objectMapper = state.objectMapper();
-        this.gracefulStopHook = new SubAgentGracefulStopHook(new SubAgentPartialSummaryGenerator(objectMapper));
+        this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
         this.undoCoordinator = undoCoordinator;
-        this.undoHook = undoHook;
-    }
-
-    public void setControlInbox(SubAgentControlInbox controlInbox) {
-        this.gracefulStopHook.setInbox(controlInbox);
     }
 
     /**
@@ -115,7 +101,7 @@ public class AgentFlowFactory {
                 new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard, contextWindowManager),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
-                new ToolDispatchNode(toolRegistry, properties, hookRegistry(), contextWindowManager),
+                new ToolDispatchNode(toolRegistry, properties, hookRegistry, contextWindowManager),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder, runtime.agentMetrics()),
                 new ReplanGuardNode(new ProgressGuard(properties)),
                 new ReplanNode(modelGateway, properties, objectMapper, traceRecorder, budgetGuard),
@@ -133,7 +119,6 @@ public class AgentFlowFactory {
             }
             nodes.put(node.name(), node);
         }
-        // 校验必须包含 START 和 FAIL
         if (!nodes.containsKey(AgentNodeNames.START)) {
             throw new IllegalStateException("Agent 节点图必须包含 START 节点");
         }
@@ -143,21 +128,8 @@ public class AgentFlowFactory {
 
         return new AgentFlowDefinition(
                 nodes,
-                hookRegistry(),
+                hookRegistry,
                 toolRegistry.specs(),
                 subAgentAvailable);
-    }
-
-    private AgentHookRegistry hookRegistry() {
-        List<AgentHook> hooks = new ArrayList<>(List.of(
-                new MaxStepContinuationStopHook(runtime.properties()),
-                new IncompletePlanStopHook(runtime.properties()),
-                new PendingApprovalConsistencyStopHook(state.approvalStore()),
-                new CheckpointAgentHook(state.runRepository(), state.checkpointRepository(), objectMapper),
-                gracefulStopHook));
-        if (undoHook != null) {
-            hooks.add(undoHook);
-        }
-        return new AgentHookRegistry(hooks);
     }
 }

@@ -1,7 +1,11 @@
-package cn.lunalhx.ai.domain.agent.flow.hook;
+package cn.lunalhx.ai.runtime.hook;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
@@ -10,12 +14,17 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
 
+@Component
+@Order(400)
 public class CheckpointAgentHook implements AgentHook {
 
     private final AgentRunRepository runRepository;
@@ -51,7 +60,8 @@ public class CheckpointAgentHook implements AgentHook {
                 .reason(StringUtils.defaultIfBlank(hookContext.getReason(), event.name()))
                 .build());
         context.setCheckpointVersion(checkpoint.getVersion());
-        saveRun(context, currentNode);
+        BudgetState budget = context.getBudgetState();
+        saveRun(context, currentNode, budget);
         return AgentHookResult.proceed(List.of(AgentEvent.builder()
                 .type(AgentEventType.CHECKPOINT_SAVED)
                 .runId(context.getRunId())
@@ -72,7 +82,7 @@ public class CheckpointAgentHook implements AgentHook {
                 || event == AgentHookEvent.AFTER_STOP;
     }
 
-    private void saveRun(AgentContext context, String currentNode) {
+    private void saveRun(AgentContext context, String currentNode, BudgetState budget) {
         AgentRunStatus status = AgentRunStatus.RUNNING;
         if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
             status = AgentRunStatus.BUDGET_EXCEEDED;
@@ -105,8 +115,8 @@ public class CheckpointAgentHook implements AgentHook {
                 .summaryJson(context.getAgentRole() == null ? null : context.getFinalAnswer())
                 .blockedReason(StringUtils.defaultIfBlank(
                         context.getBudgetBlockedReason(), context.getContextBlockedReason()))
-                .usedTokens(context.getUsedTokens())
-                .estimatedCost(context.getEstimatedCost())
+                .usedTokens(budget.usedTokens())
+                .estimatedCost(budget.estimatedCost())
                 .updatedAt(Instant.now())
                 .build());
     }

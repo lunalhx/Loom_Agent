@@ -21,7 +21,16 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepositor
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
+import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
+import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
+import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
+import cn.lunalhx.ai.runtime.hook.CheckpointAgentHook;
+import cn.lunalhx.ai.runtime.hook.IncompletePlanStopHook;
+import cn.lunalhx.ai.runtime.hook.MaxStepContinuationStopHook;
+import cn.lunalhx.ai.runtime.hook.PendingApprovalConsistencyStopHook;
+import cn.lunalhx.ai.runtime.hook.SubAgentGracefulStopHook;
+import cn.lunalhx.ai.runtime.hook.SubAgentPartialSummaryGenerator;
 import cn.lunalhx.ai.domain.agent.service.NoopAgentMetrics;
 import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
@@ -249,31 +258,68 @@ public final class AgentRuntimeTestFixture {
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
                                                      ContextWindowManager cwm) {
+        ApprovalStore effectiveApprovalStore = effectiveApprovalStore();
+        AgentRunRepository effectiveRunRepo = effectiveRunRepository();
+        AgentCheckpointRepository effectiveChkptRepo = effectiveCheckpointRepository();
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(
-                effectiveApprovalStore(),
+                effectiveApprovalStore,
                 effectiveWorkspaceResolver(props),
-                effectiveRunRepository(),
-                effectiveCheckpointRepository(),
+                effectiveRunRepo,
+                effectiveChkptRepo,
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
                 effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
-        return new AgentLoopFactory(modelGateway, state, runtime);
+        return new AgentLoopFactory(modelGateway, state, runtime,
+                standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo), null);
     }
 
-    // ---- 构建入口 ----
+    private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
+                                                     ContextWindowManager cwm,
+                                                     SubAgentControlInbox inbox) {
+        ApprovalStore effectiveApprovalStore = effectiveApprovalStore();
+        AgentRunRepository effectiveRunRepo = effectiveRunRepository();
+        AgentCheckpointRepository effectiveChkptRepo = effectiveCheckpointRepository();
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
+                effectiveApprovalStore,
+                effectiveWorkspaceResolver(props),
+                effectiveRunRepo,
+                effectiveChkptRepo,
+                objectMapper);
+        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
+                props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
+                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
+        return new AgentLoopFactory(modelGateway, state, runtime,
+                standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo), null);
+    }
+
+    private AgentHookRegistry standardHookRegistry(AgentRuntimeProperties props,
+                                                    SubAgentControlInbox inbox,
+                                                    ApprovalStore approvalStore,
+                                                    AgentRunRepository runRepo,
+                                                    AgentCheckpointRepository checkpointRepo) {
+        SubAgentPartialSummaryGenerator summaryGenerator = new SubAgentPartialSummaryGenerator(objectMapper);
+        return new AgentHookRegistry(List.of(
+                new MaxStepContinuationStopHook(props),
+                new IncompletePlanStopHook(props),
+                new PendingApprovalConsistencyStopHook(approvalStore),
+                new CheckpointAgentHook(runRepo, checkpointRepo, objectMapper),
+                new SubAgentGracefulStopHook(inbox, summaryGenerator)));
+    }
 
     public DefaultAgentLoopService buildAgentLoop() {
         AgentRuntimeProperties props = props();
         Executor exec = effectiveExecutor();
         ContextWindowManager cwm = resolveContextWindowManager(props);
-        AgentLoopFactory factory = createAgentLoopFactory(props, cwm);
         ToolRegistry registry = new ToolRegistry(tools);
 
         if (subAgentEnabled) {
-            SubAgentCoordinator coordinator = resolveSubAgentCoordinator(props, cwm, exec, factory);
+            InMemorySubAgentControlInbox inbox = new InMemorySubAgentControlInbox();
+            AgentLoopFactory factory = createAgentLoopFactory(props, cwm, inbox);
+            SubAgentCoordinator coordinator = resolveSubAgentCoordinator(props, cwm, exec, factory, inbox);
             return factory.createRoot(registry, exec, coordinator);
         }
+        AgentLoopFactory factory = createAgentLoopFactory(props, cwm);
         return factory.createStandalone(registry, exec);
     }
 
@@ -281,7 +327,8 @@ public final class AgentRuntimeTestFixture {
         AgentRuntimeProperties props = props();
         Executor exec = effectiveExecutor();
         ContextWindowManager cwm = resolveContextWindowManager(props);
-        AgentLoopFactory factory = createAgentLoopFactory(props, cwm);
+        InMemorySubAgentControlInbox inbox = new InMemorySubAgentControlInbox();
+        AgentLoopFactory factory = createAgentLoopFactory(props, cwm, inbox);
 
         if (subAgentCoordinator != null) {
             return subAgentCoordinator;
@@ -291,13 +338,15 @@ public final class AgentRuntimeTestFixture {
                 factory,
                 props,
                 objectMapper,
-                exec);
+                exec,
+                inbox);
     }
 
     private SubAgentCoordinator resolveSubAgentCoordinator(AgentRuntimeProperties props,
                                                             ContextWindowManager cwm,
                                                             Executor exec,
-                                                            AgentLoopFactory factory) {
+                                                            AgentLoopFactory factory,
+                                                            SubAgentControlInbox inbox) {
         if (subAgentCoordinator != null) {
             return subAgentCoordinator;
         }
@@ -306,7 +355,8 @@ public final class AgentRuntimeTestFixture {
                 factory,
                 props,
                 objectMapper,
-                exec);
+                exec,
+                inbox);
     }
 
     public ContextWindowManager buildContextWindowManager() {
