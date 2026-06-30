@@ -43,6 +43,7 @@ public class AgentRuntimeProperties {
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
     private StepBudgetProperties stepBudget = new StepBudgetProperties();
     private UndoProperties undo = new UndoProperties();
+    private SkillProperties skills = new SkillProperties();
 
     @Data
     public static class BudgetProperties {
@@ -143,6 +144,19 @@ public class AgentRuntimeProperties {
                 "rm", "rmdir", "find", "python", "python3",
                 "sh", "bash", "zsh", "dash", "ksh", "csh", "fish", "ash", "exec", "eval", "source"));
         private String unknownLevel = "WRITE_CONFIRM";
+
+    }
+
+    @Data
+    public static class SkillProperties {
+
+        private Boolean enabled = true;
+        private String userDir = null;
+        private String projectDir = ".agents/skills";
+        private Integer catalogMaxChars = 8000;
+        private Integer maxResourceFiles = 256;
+        private Long maxResourceBytes = 10_485_760L;
+        private Long maxSnapshotBytes = 52_428_800L;
 
     }
 

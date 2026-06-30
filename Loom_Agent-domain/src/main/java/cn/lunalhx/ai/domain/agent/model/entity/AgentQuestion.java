@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -28,5 +30,6 @@ public class AgentQuestion {
     private Boolean includeTrace;
     private Boolean subAgentSpawnAllowed;
     private String traceId;
+    private List<String> skills;
 
 }

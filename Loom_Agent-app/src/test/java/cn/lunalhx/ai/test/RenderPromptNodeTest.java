@@ -32,7 +32,7 @@ public class RenderPromptNodeTest {
         ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
         ContextBlobStore blobStore = new InMemoryContextBlobStore();
         ContextWindowManager cwm = new ContextWindowManager(properties, artifactRepository, blobStore);
-        return new RenderPromptNode(cwm);
+        return new RenderPromptNode(cwm, null);
     }
 
     private AgentContext basicContext() {

@@ -1,7 +1,10 @@
 package cn.lunalhx.ai.domain.agent.service;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
@@ -16,6 +19,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.PlannerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanGuardNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
+import cn.lunalhx.ai.domain.agent.flow.node.SkillBootstrapNode;
 import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
 import cn.lunalhx.ai.domain.agent.flow.node.SubAgentDispatchNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
@@ -48,11 +52,14 @@ public class AgentFlowFactory {
     private final ObjectMapper objectMapper;
     private final AgentHookRegistry hookRegistry;
     private final UndoSessionCoordinator undoCoordinator;
+    private final SkillRepository skillRepository;
+    private final ContextArtifactRepository contextArtifactRepository;
+    private final ContextBlobStore contextBlobStore;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -60,12 +67,26 @@ public class AgentFlowFactory {
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null);
+    }
+
+    public AgentFlowFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator,
+                           SkillRepository skillRepository,
+                           ContextArtifactRepository contextArtifactRepository,
+                           ContextBlobStore contextBlobStore) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.objectMapper = state.objectMapper();
         this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
         this.undoCoordinator = undoCoordinator;
+        this.skillRepository = skillRepository;
+        this.contextArtifactRepository = contextArtifactRepository;
+        this.contextBlobStore = contextBlobStore;
     }
 
     /**
@@ -96,9 +117,11 @@ public class AgentFlowFactory {
         ContextWindowManager contextWindowManager = runtime.contextWindowManager();
 
         List<AgentNode> nodeList = new ArrayList<>(List.of(
+                new SkillBootstrapNode(skillRepository, state.approvalStore(),
+                        contextArtifactRepository, contextBlobStore, properties),
                 new StartNode(),
                 new PlannerNode(),
-                new RenderPromptNode(contextWindowManager),
+                new RenderPromptNode(contextWindowManager, skillRepository),
                 new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard, contextWindowManager),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new InstructionGateNode(),

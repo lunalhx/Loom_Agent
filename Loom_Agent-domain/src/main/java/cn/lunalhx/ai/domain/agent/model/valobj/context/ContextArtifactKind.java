@@ -4,6 +4,7 @@ public enum ContextArtifactKind {
 
     TOOL_RESULT,
     CONTEXT_ENTRY,
-    TRANSCRIPT
+    TRANSCRIPT,
+    SKILL_SNAPSHOT
 
 }

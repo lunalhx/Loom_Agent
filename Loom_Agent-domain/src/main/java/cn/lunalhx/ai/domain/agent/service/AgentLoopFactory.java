@@ -5,7 +5,10 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -34,7 +37,7 @@ public class AgentLoopFactory {
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null);
     }
 
     public AgentLoopFactory(ModelGateway modelGateway,
@@ -42,11 +45,23 @@ public class AgentLoopFactory {
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null);
+    }
+
+    public AgentLoopFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator,
+                           SkillRepository skillRepository,
+                           ContextArtifactRepository contextArtifactRepository,
+                           ContextBlobStore contextBlobStore) {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
-        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator);
+        this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
+                skillRepository, contextArtifactRepository, contextBlobStore);
     }
 
     /**

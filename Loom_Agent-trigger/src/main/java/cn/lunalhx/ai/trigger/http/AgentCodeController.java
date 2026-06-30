@@ -7,12 +7,21 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
+import cn.lunalhx.ai.api.dto.SkillQueryRequest;
+import cn.lunalhx.ai.api.dto.SkillQueryResponse;
 import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
 import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
 import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillCatalog;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillSource;
+import cn.lunalhx.ai.domain.agent.model.valobj.SkillTrustState;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
@@ -30,6 +39,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -44,6 +55,8 @@ public class AgentCodeController {
     private final AgentSseResponder sseResponder;
     private final StreamRequestLimiter streamRequestLimiter;
     private final AgentUndoHttpService undoHttpService;
+    private final SkillRepository skillRepository;
+    private final AgentWorkspaceResolver workspaceResolver;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
@@ -163,5 +176,32 @@ public class AgentCodeController {
     public Response<UndoExecuteResponse> undoExecute(@PathVariable String runId,
                                                        @RequestBody UndoExecuteRequest request) {
         return undoHttpService.execute(runId, request);
+    }
+
+    @PostMapping("/skills/query")
+    public Response<List<SkillQueryResponse>> querySkills(@RequestBody(required = false) SkillQueryRequest request) {
+        String workspace = request == null ? null : request.getWorkspace();
+        AgentWorkspace resolved = workspaceResolver.resolve(workspace);
+        SkillCatalog catalog = skillRepository.discover(resolved.getRoot());
+
+        List<SkillQueryResponse> items = new ArrayList<>();
+        for (SkillDescriptor skill : catalog.skills()) {
+            SkillTrustState trustState = skill.source() == SkillSource.USER
+                    ? SkillTrustState.TRUSTED
+                    : SkillTrustState.APPROVAL_REQUIRED;
+            items.add(SkillQueryResponse.builder()
+                    .name(skill.name())
+                    .description(skill.description())
+                    .source(skill.source().name().toLowerCase())
+                    .compatibility(skill.compatibility())
+                    .trustState(trustState.name().toLowerCase())
+                    .diagnostics(catalog.diagnostics())
+                    .build());
+        }
+        return Response.<List<SkillQueryResponse>>builder()
+                .code("0")
+                .info("ok")
+                .data(items)
+                .build();
     }
 }

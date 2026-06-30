@@ -1,16 +1,20 @@
 package cn.lunalhx.ai.domain.agent.flow.node;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -19,10 +23,12 @@ import java.util.Objects;
 public class RenderPromptNode extends AbstractAgentNode {
 
     private final ContextWindowManager contextWindowManager;
+    private final SkillRepository skillRepository;
 
-    public RenderPromptNode(ContextWindowManager contextWindowManager) {
+    public RenderPromptNode(ContextWindowManager contextWindowManager, SkillRepository skillRepository) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
+        this.skillRepository = skillRepository;
     }
 
     @Override
@@ -68,6 +74,30 @@ public class RenderPromptNode extends AbstractAgentNode {
         prompt.append("旧 Observation 可能已压缩成 context_artifact 引用；需要完整细节时先调用 context_recall，不要凭摘要臆测。\n");
         prompt.append("写文件、运行测试、Git 暂存/提交可能需要人工确认；如果操作被拒绝或高危拦截，请改用更安全的下一步，不要重复同一个被拦截动作。\n");
         prompt.append("删除文件前如果文件名不确定，必须先调用 find_files 获取准确路径，不要猜测文件名。\n\n");
+
+        // Active skills section
+        List<SkillActivation> activatedSkills = context.getActivatedSkills();
+        if (activatedSkills != null && !activatedSkills.isEmpty()) {
+            prompt.append("<active_skills>\n");
+            for (SkillActivation activation : activatedSkills) {
+                prompt.append("[skill:").append(activation.name()).append("]\n");
+                if (skillRepository != null) {
+                    String content = readSkillContentCached(context, activation);
+                    if (StringUtils.isNotBlank(content)) {
+                        prompt.append(content).append('\n');
+                    }
+                }
+                prompt.append("[/skill:").append(activation.name()).append("]\n");
+            }
+            prompt.append("</active_skills>\n\n");
+        }
+
+        // Available skills catalog
+        if (context.getSkillCatalogText() != null && !context.getSkillCatalogText().isEmpty()) {
+            prompt.append("<available_skills>\n");
+            prompt.append(context.getSkillCatalogText());
+            prompt.append("</available_skills>\n\n");
+        }
 
         if (context.getMemoryContext() != null && !context.getMemoryContext().isEmpty()) {
             prompt.append("<memory_context>\n");
@@ -125,6 +155,15 @@ public class RenderPromptNode extends AbstractAgentNode {
         key.append("instrHash=").append(context.getInstructionsHash()).append('|');
         key.append("memIds=").append(context.getSelectedMemoryIds()).append('|');
         key.append("memVer=").append(context.getSelectedMemoryVersion()).append('|');
+        key.append("skillCatalogText=").append(context.getSkillCatalogText()).append('|');
+        key.append("activatedSkills=");
+        List<SkillActivation> activated = context.getActivatedSkills();
+        if (activated != null) {
+            for (SkillActivation a : activated) {
+                key.append(a.name()).append(':').append(a.manifestSha256()).append(';');
+            }
+        }
+        key.append('|');
         key.append("toolSpecs=");
         for (ToolSpec spec : context.getToolSpecs()) {
             key.append(spec.getName()).append(':')
@@ -132,6 +171,20 @@ public class RenderPromptNode extends AbstractAgentNode {
                     .append(spec.getInputSchema()).append(';');
         }
         return key.toString();
+    }
+
+    private String readSkillContentCached(AgentContext context, SkillActivation activation) {
+        if (skillRepository == null || activation.snapshotArtifactId() == null) {
+            return "";
+        }
+        if (context.getAvailableSkillCatalog() != null) {
+            for (SkillDescriptor sd : context.getAvailableSkillCatalog().skills()) {
+                if (sd.name().equals(activation.name())) {
+                    return skillRepository.readSkillContent(sd);
+                }
+            }
+        }
+        return "";
     }
 
     private AgentEvent compactEvent(AgentContext context, ContextCompactResult result) {

@@ -13,6 +13,7 @@ public enum AgentEventType {
     SUB_AGENT_COMPLETED("sub_agent_completed"),
     SUB_AGENT_FAILED("sub_agent_failed"),
     SUB_AGENT_SUMMARY("sub_agent_summary"),
+    SKILL_ACTIVATED("skill_activated"),
     THOUGHT("thought"),
     TOOL_CALL("tool_call"),
     APPROVAL_REQUIRED("approval_required"),

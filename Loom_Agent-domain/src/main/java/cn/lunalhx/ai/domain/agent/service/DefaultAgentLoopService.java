@@ -57,7 +57,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
             try {
                 components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
-                runLoop(context, AgentNodeNames.START, sink);
+                runLoop(context, AgentNodeNames.SKILL_BOOTSTRAP, sink);
             } catch (Exception e) {
                 if (undoCoordinator != null) {
                     undoCoordinator.onRunFailed(context);

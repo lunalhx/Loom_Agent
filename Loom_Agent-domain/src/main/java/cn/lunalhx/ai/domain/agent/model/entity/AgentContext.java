@@ -108,6 +108,10 @@ public class AgentContext {
     private String lastFailureFingerprint;
     private int sameFailureRepeats;
     private int noProgressRounds;
+    private List<String> requestedSkills;
+    private SkillCatalog availableSkillCatalog;
+    private List<SkillActivation> activatedSkills;
+    private String skillCatalogText;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;

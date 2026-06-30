@@ -6,7 +6,9 @@ import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.infrastructure.mcp.McpClientManager;
+import cn.lunalhx.ai.infrastructure.skill.SkillTools;
 import cn.lunalhx.ai.infrastructure.tool.MemorySaveTool;
 import cn.lunalhx.ai.infrastructure.tool.MemorySearchTool;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
@@ -65,5 +67,20 @@ public class ToolAutoConfig {
     @ConditionalOnBean(AgentMemoryRepository.class)
     public MemorySearchTool memorySearchTool(AgentMemoryRepository memoryRepository) {
         return new MemorySearchTool(memoryRepository);
+    }
+
+    @Bean
+    public SkillTools.ActivateSkillTool activateSkillTool(SkillRepository skillRepository) {
+        return new SkillTools.ActivateSkillTool(skillRepository);
+    }
+
+    @Bean
+    public SkillTools.ReadSkillResourceTool readSkillResourceTool(SkillRepository skillRepository) {
+        return new SkillTools.ReadSkillResourceTool(skillRepository);
+    }
+
+    @Bean
+    public SkillTools.CopySkillResourceTool copySkillResourceTool(SkillRepository skillRepository) {
+        return new SkillTools.CopySkillResourceTool(skillRepository);
     }
 }

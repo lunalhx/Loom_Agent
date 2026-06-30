@@ -19,6 +19,7 @@ class ContextTokenEstimator {
         int chars = StringUtils.length(context.getQuestion())
                 + StringUtils.length(context.getDynamicText() == null ? "" : context.getDynamicText().render())
                 + (context.getPlan() == null ? 0 : StringUtils.length(context.getPlan().render()))
+                + StringUtils.length(context.getSkillCatalogText())
                 + context.getToolSpecs().stream().mapToInt(spec -> StringUtils.length(spec.getName())
                 + StringUtils.length(spec.getDescription()) + StringUtils.length(spec.getInputSchema())).sum();
         int charsPerToken = positive(properties.getBudget().getEstimatedCharsPerToken(), 4);

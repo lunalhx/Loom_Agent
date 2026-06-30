@@ -63,6 +63,10 @@ public final class AgentResumeCoordinator {
         if (decision == ApprovalDecision.APPROVE) {
             context.setApprovedTool(approval.getTool());
             context.setApprovedPolicyFingerprint(approval.getPolicyFingerprint());
+            // Skill activation approvals route to skill_bootstrap to complete activation
+            if (approval.getMetadata() != null && approval.getMetadata().containsKey("__skill_name")) {
+                return AgentResumePlan.continueAt(context, AgentNodeNames.SKILL_BOOTSTRAP, events);
+            }
             return AgentResumePlan.continueAt(context, AgentNodeNames.TOOL_DISPATCH, events);
         }
 

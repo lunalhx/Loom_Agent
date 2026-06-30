@@ -94,6 +94,9 @@ public class AgentContextSnapshot {
     private String lastFailureFingerprint;
     private Integer sameFailureRepeats;
     private Integer noProgressRounds;
+    private List<String> requestedSkills;
+    private SkillCatalog availableSkillCatalog;
+    private List<SkillActivation> activatedSkills;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -163,6 +166,9 @@ public class AgentContextSnapshot {
                 .lastFailureFingerprint(context.getLastFailureFingerprint())
                 .sameFailureRepeats(context.getSameFailureRepeats())
                 .noProgressRounds(context.getNoProgressRounds())
+                .requestedSkills(context.getRequestedSkills() == null ? null : new ArrayList<>(context.getRequestedSkills()))
+                .availableSkillCatalog(context.getAvailableSkillCatalog())
+                .activatedSkills(context.getActivatedSkills() == null ? null : new ArrayList<>(context.getActivatedSkills()))
                 .build();
     }
 
@@ -247,6 +253,9 @@ public class AgentContextSnapshot {
         context.setLastFailureFingerprint(lastFailureFingerprint);
         context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
         context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
+        context.setRequestedSkills(requestedSkills == null ? null : new ArrayList<>(requestedSkills));
+        context.setAvailableSkillCatalog(availableSkillCatalog);
+        context.setActivatedSkills(activatedSkills == null ? null : new ArrayList<>(activatedSkills));
         return context;
     }
 

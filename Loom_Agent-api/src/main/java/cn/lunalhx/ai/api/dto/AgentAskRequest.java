@@ -9,6 +9,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -36,5 +38,8 @@ public class AgentAskRequest {
     private Integer maxSegments;
 
     private Boolean includeTrace;
+
+    @Size(max = 20, message = "skills 最多 20 个")
+    private List<@Size(max = 64, message = "skill name 最长 64 个字符") String> skills;
 
 }

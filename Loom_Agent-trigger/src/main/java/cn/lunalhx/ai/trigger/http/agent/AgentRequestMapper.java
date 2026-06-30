@@ -74,6 +74,7 @@ public class AgentRequestMapper {
                 .maxSteps(request.getMaxSteps())
                 .maxSegments(request.getMaxSegments())
                 .includeTrace(request.getIncludeTrace())
+                .skills(request.getSkills())
                 .build();
         return Result.success(question);
     }

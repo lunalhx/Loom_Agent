@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentResult;
 import cn.lunalhx.ai.domain.agent.model.entity.SubAgentTask;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
@@ -15,6 +16,7 @@ import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -127,6 +129,7 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
                 .maxSteps(task.getMaxSteps() == null ? parent.getMaxSteps() : task.getMaxSteps())
                 .includeTrace(false)
                 .subAgentSpawnAllowed(false)
+                .skills(inheritSkills(parent))
                 .build();
     }
 
@@ -168,5 +171,20 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
 
     private long positive(Long value, long fallback) {
         return value == null || value <= 0 ? fallback : value;
+    }
+
+    private List<String> inheritSkills(AgentContext parent) {
+        List<String> skills = new ArrayList<>();
+        if (parent.getRequestedSkills() != null) {
+            skills.addAll(parent.getRequestedSkills());
+        }
+        if (parent.getActivatedSkills() != null) {
+            for (SkillActivation a : parent.getActivatedSkills()) {
+                if (!skills.contains(a.name())) {
+                    skills.add(a.name());
+                }
+            }
+        }
+        return skills.isEmpty() ? null : skills;
     }
 }

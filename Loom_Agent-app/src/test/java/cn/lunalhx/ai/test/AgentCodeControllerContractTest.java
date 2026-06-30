@@ -21,6 +21,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.trigger.http.AgentCodeController;
@@ -111,8 +112,10 @@ public class AgentCodeControllerContractTest {
         AgentHttpQueryService queryService = new AgentHttpQueryService(approvalStore,
                 agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
+        AgentWorkspaceResolver workspaceResolver = new AgentWorkspaceResolver(properties);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
-                queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null);
+                queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null,
+                null, workspaceResolver);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 

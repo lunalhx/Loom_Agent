@@ -39,6 +39,7 @@ public final class AgentContextFactory {
             context.setConversationId(UUID.randomUUID().toString());
         }
         context.getDynamicText().appendUserTask(context.getQuestion());
+        context.setRequestedSkills(question.getSkills());
         return context;
     }
 
@@ -84,6 +85,7 @@ public final class AgentContextFactory {
             context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
         }
         context.getDynamicText().appendUserTask(context.getQuestion());
+        context.setRequestedSkills(question.getSkills());
         return context;
     }
 

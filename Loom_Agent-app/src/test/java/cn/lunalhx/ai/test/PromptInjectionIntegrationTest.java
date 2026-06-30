@@ -252,7 +252,7 @@ public class PromptInjectionIntegrationTest {
         properties.getContext().setEnabled(false);
         ContextWindowManager cwm = new ContextWindowManager(properties,
                 new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm);
+        RenderPromptNode node = new RenderPromptNode(cwm, null);
 
         AgentContext context = basicContext();
         context.getDynamicText().appendUserTask("test");
@@ -277,7 +277,7 @@ public class PromptInjectionIntegrationTest {
         properties.getContext().setEnabled(false);
         ContextWindowManager cwm = new ContextWindowManager(properties,
                 new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm);
+        RenderPromptNode node = new RenderPromptNode(cwm, null);
 
         AgentContext context = basicContext();
         context.getDynamicText().appendUserTask("test");

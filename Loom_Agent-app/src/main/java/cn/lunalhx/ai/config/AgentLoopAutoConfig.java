@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.adapter.port.UndoSnapshotRepository;
@@ -38,6 +39,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
+import cn.lunalhx.ai.infrastructure.skill.FileSystemSkillRepository;
 import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -183,12 +185,28 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
+    public SkillRepository skillRepository(AgentRuntimeProperties agentRuntimeProperties) {
+        AgentRuntimeProperties.SkillProperties skillProps = agentRuntimeProperties.getSkills();
+        java.nio.file.Path userDir = null;
+        if (skillProps != null && skillProps.getUserDir() != null) {
+            userDir = java.nio.file.Path.of(skillProps.getUserDir());
+        }
+        String projectDir = skillProps != null && skillProps.getProjectDir() != null
+                ? skillProps.getProjectDir() : ".agents/skills";
+        return new FileSystemSkillRepository(userDir, projectDir);
+    }
+
+    @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
                                              AgentHookRegistry hookRegistry,
-                                             UndoSessionCoordinator undoSessionCoordinator) {
-        return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator);
+                                             UndoSessionCoordinator undoSessionCoordinator,
+                                             SkillRepository skillRepository,
+                                             ContextArtifactRepository contextArtifactRepository,
+                                             ContextBlobStore contextBlobStore) {
+        return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator,
+                skillRepository, contextArtifactRepository, contextBlobStore);
     }
 
     @Bean
