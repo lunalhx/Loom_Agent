@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentMemoryRevisionDao">
+
+    <resultMap id="AgentMemoryRevisionMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryRevisionPO">
+        <id column="id" property="id"/>
+        <result column="memory_id" property="memoryId"/>
+        <result column="version" property="version"/>
+        <result column="snapshot_json" property="snapshotJson"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="source_run_id" property="sourceRunId"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryRevisionPO">
+        INSERT INTO agent_memory_revision
+        (memory_id, version, snapshot_json, source_type, source_run_id)
+        VALUES
+        (#{memoryId}, #{version}, #{snapshotJson}, #{sourceType}, #{sourceRunId})
+    </insert>
+
+    <select id="selectByMemoryId" resultMap="AgentMemoryRevisionMap">
+        SELECT * FROM agent_memory_revision
+        WHERE memory_id = #{memoryId}
+        ORDER BY version DESC
+    </select>
+
+</mapper>

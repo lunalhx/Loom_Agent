@@ -233,6 +233,7 @@ public class ApprovalGateNodeTest {
                     case WRITE_CONFIRM -> ToolPolicyDecision.writeConfirm("test write", TOOL_NAME);
                     case HIGH_RISK_CONFIRM -> ToolPolicyDecision.highRiskConfirm("test high risk", TOOL_NAME);
                     case HIGH_RISK_DENY -> ToolPolicyDecision.highRiskDeny("test deny", TOOL_NAME);
+                    case PERSISTENT_STATE_WRITE -> ToolPolicyDecision.writeConfirm("test persistent state", TOOL_NAME);
                 };
             }
 

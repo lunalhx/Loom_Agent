@@ -56,6 +56,15 @@ public class AgentContext {
     private String currentPrompt;
     @JsonIgnore
     private transient String promptRenderCacheKey;
+    private String currentSystemPrompt;
+    private String currentUserPrompt;
+    private String memoryContext;
+    @JsonIgnore
+    private transient String instructionsHash;
+    @JsonIgnore
+    private transient List<String> selectedMemoryIds;
+    @JsonIgnore
+    private transient long selectedMemoryVersion;
     private String modelOutput;
     private AgentDecision decision;
     private ToolResult toolResult;

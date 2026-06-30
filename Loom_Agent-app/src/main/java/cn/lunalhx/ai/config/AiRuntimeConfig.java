@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Import;
         AgentLoopAutoConfig.class,
         ToolAutoConfig.class,
         PersistenceAutoConfig.class,
+        MemoryAutoConfig.class,
         MetricsAutoConfig.class,
         McpAutoConfig.class
 })

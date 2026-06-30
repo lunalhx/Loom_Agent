@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
+import cn.lunalhx.ai.domain.agent.flow.node.InstructionGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PlannerNode;
@@ -100,6 +101,7 @@ public class AgentFlowFactory {
                 new RenderPromptNode(contextWindowManager),
                 new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard, contextWindowManager),
                 new DecisionNode(objectMapper, toolRegistry, properties),
+                new InstructionGateNode(),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry, contextWindowManager),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder, runtime.agentMetrics()),

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao">
+
+    <resultMap id="AgentMemoryGenerationJobMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryGenerationJobPO">
+        <id column="job_id" property="jobId"/>
+        <result column="source_run_id" property="sourceRunId"/>
+        <result column="workspace_key" property="workspaceKey"/>
+        <result column="conversation_summary_json" property="conversationSummaryJson"/>
+        <result column="status" property="status"/>
+        <result column="not_before" property="notBefore"/>
+        <result column="locked_by" property="lockedBy"/>
+        <result column="lock_expires_at" property="lockExpiresAt"/>
+        <result column="retry_count" property="retryCount"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insertOrIgnore" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryGenerationJobPO">
+        INSERT OR IGNORE INTO agent_memory_generation_job
+        (job_id, source_run_id, workspace_key, conversation_summary_json, status, not_before)
+        VALUES
+        (#{jobId}, #{sourceRunId}, #{workspaceKey}, #{conversationSummaryJson}, #{status}, #{notBefore})
+    </insert>
+
+    <select id="selectNextPending" resultMap="AgentMemoryGenerationJobMap">
+        SELECT * FROM agent_memory_generation_job
+        WHERE status = 'PENDING'
+          AND not_before &lt;= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ORDER BY not_before ASC
+        LIMIT 1
+    </select>
+
+    <update id="claimJob">
+        UPDATE agent_memory_generation_job
+        SET status = 'RUNNING',
+            locked_by = #{lockedBy},
+            lock_expires_at = #{lockExpiresAt},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="updateStatus">
+        UPDATE agent_memory_generation_job
+        SET status = #{status},
+            error_message = #{errorMessage},
+            retry_count = #{retryCount},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+    </update>
+
+    <update id="recoverStaleJobs">
+        UPDATE agent_memory_generation_job
+        SET status = 'PENDING',
+            locked_by = NULL,
+            lock_expires_at = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE status = 'RUNNING'
+          AND lock_expires_at &lt;= #{staleThreshold}
+    </update>
+
+    <select id="selectBySourceRunId" resultMap="AgentMemoryGenerationJobMap">
+        SELECT * FROM agent_memory_generation_job
+        WHERE source_run_id = #{sourceRunId}
+        LIMIT 1
+    </select>
+
+</mapper>

@@ -68,6 +68,13 @@ public class RenderPromptNode extends AbstractAgentNode {
         prompt.append("旧 Observation 可能已压缩成 context_artifact 引用；需要完整细节时先调用 context_recall，不要凭摘要臆测。\n");
         prompt.append("写文件、运行测试、Git 暂存/提交可能需要人工确认；如果操作被拒绝或高危拦截，请改用更安全的下一步，不要重复同一个被拦截动作。\n");
         prompt.append("删除文件前如果文件名不确定，必须先调用 find_files 获取准确路径，不要猜测文件名。\n\n");
+
+        if (context.getMemoryContext() != null && !context.getMemoryContext().isEmpty()) {
+            prompt.append("<memory_context>\n");
+            prompt.append(context.getMemoryContext());
+            prompt.append("\n</memory_context>\n\n");
+        }
+
         prompt.append("用户问题：").append(context.getQuestion()).append("\n\n");
         if (context.getMaxSegments() > 1) {
             prompt.append("执行预算：第 ").append(context.getSegmentIndex() + 1).append("/")
@@ -115,6 +122,9 @@ public class RenderPromptNode extends AbstractAgentNode {
                 .append(":v").append(context.getPlan() == null ? 0 : context.getPlan().getVersion()).append('|');
         key.append("dynamicText@").append(System.identityHashCode(context.getDynamicText()))
                 .append(":v").append(context.getDynamicText().getVersion()).append('|');
+        key.append("instrHash=").append(context.getInstructionsHash()).append('|');
+        key.append("memIds=").append(context.getSelectedMemoryIds()).append('|');
+        key.append("memVer=").append(context.getSelectedMemoryVersion()).append('|');
         key.append("toolSpecs=");
         for (ToolSpec spec : context.getToolSpecs()) {
             key.append(spec.getName()).append(':')

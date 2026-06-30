@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentMemoryDao">
+
+    <resultMap id="AgentMemoryMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryPO">
+        <id column="memory_id" property="memoryId"/>
+        <result column="workspace_key" property="workspaceKey"/>
+        <result column="workspace_path" property="workspacePath"/>
+        <result column="type" property="type"/>
+        <result column="title" property="title"/>
+        <result column="summary" property="summary"/>
+        <result column="body" property="body"/>
+        <result column="status" property="status"/>
+        <result column="pinned" property="pinned"/>
+        <result column="importance" property="importance"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="source_run_id" property="sourceRunId"/>
+        <result column="content_hash" property="contentHash"/>
+        <result column="version" property="version"/>
+        <result column="usage_count" property="usageCount"/>
+        <result column="last_used_at" property="lastUsedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryPO">
+        INSERT INTO agent_memory
+        (memory_id, workspace_key, workspace_path, type, title, summary, body, status, pinned, importance,
+         source_type, source_run_id, content_hash, version, usage_count, last_used_at)
+        VALUES
+        (#{memoryId}, #{workspaceKey}, #{workspacePath}, #{type}, #{title}, #{summary}, #{body}, #{status},
+         #{pinned}, #{importance}, #{sourceType}, #{sourceRunId}, #{contentHash}, #{version}, #{usageCount}, #{lastUsedAt})
+    </insert>
+
+    <update id="update" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryPO">
+        UPDATE agent_memory SET
+        type = #{type},
+        title = #{title},
+        summary = #{summary},
+        body = #{body},
+        status = #{status},
+        pinned = #{pinned},
+        importance = #{importance},
+        source_type = #{sourceType},
+        content_hash = #{contentHash},
+        version = #{version},
+        usage_count = #{usageCount},
+        last_used_at = #{lastUsedAt},
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE memory_id = #{memoryId}
+          AND version = #{version} - 1
+    </update>
+
+    <select id="selectById" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory WHERE memory_id = #{memoryId} LIMIT 1
+    </select>
+
+    <select id="selectActive" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+        ORDER BY pinned DESC, last_used_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectPinned" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+          AND pinned = 1
+        ORDER BY last_used_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchByKeywords" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+          AND (title LIKE '%' || #{searchTerm} || '%'
+               OR summary LIKE '%' || #{searchTerm} || '%'
+               OR body LIKE '%' || #{searchTerm} || '%')
+        ORDER BY pinned DESC, last_used_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <update id="updateUsage">
+        UPDATE agent_memory
+        SET usage_count = usage_count + 1,
+            last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            version = #{newVersion}
+        WHERE memory_id = #{memoryId}
+    </update>
+
+    <select id="countActive" resultType="int">
+        SELECT COUNT(*) FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+    </select>
+
+    <update id="updateStatus">
+        UPDATE agent_memory
+        SET status = #{status},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE memory_id = #{memoryId}
+          AND version = #{expectedVersion}
+    </update>
+
+</mapper>
