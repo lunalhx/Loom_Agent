@@ -55,8 +55,15 @@ public class DefaultAgentLoopService implements AgentLoopService {
             if (undoCoordinator != null) {
                 undoCoordinator.onRunStart(context);
             }
-            components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
-            runLoop(context, AgentNodeNames.START, sink);
+            try {
+                components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
+                runLoop(context, AgentNodeNames.START, sink);
+            } catch (Exception e) {
+                if (undoCoordinator != null) {
+                    undoCoordinator.onRunFailed(context);
+                }
+                throw e;
+            }
         });
     }
 
@@ -139,7 +146,14 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
         }
 
-        runLoop(plan.context(), plan.startNode(), sink);
+        try {
+            runLoop(plan.context(), plan.startNode(), sink);
+        } catch (Exception e) {
+            if (undoCoordinator != null) {
+                undoCoordinator.onRunFailed(plan.context());
+            }
+            throw e;
+        }
     }
 
     private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {

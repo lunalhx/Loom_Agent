@@ -49,6 +49,13 @@ public final class AgentContextFactory {
 
         AgentContext context = new AgentContext();
         context.setRunId(runId);
+        context.setParentRunId(question.getParentRunId());
+        // 续聊沿用同一会话的根 run，优先从历史快照恢复，避免 rootRunId 为 null 导致
+        // ContextArtifact 持久化时违反 agent_context_artifact.root_run_id 非空约束。
+        String rootRunId = previous != null && StringUtils.isNotBlank(previous.getRootRunId())
+                ? previous.getRootRunId()
+                : StringUtils.defaultIfBlank(question.getRootRunId(), runId);
+        context.setRootRunId(rootRunId);
         context.setRequestId(requestId);
         context.setConversationId(question.getConversationId());
         context.setAgentRole(question.getAgentRole());
@@ -69,7 +76,7 @@ public final class AgentContextFactory {
             specs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
         context.setToolSpecs(specs);
-        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRunId()));
+        context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         initStepBudget(context, question);
 

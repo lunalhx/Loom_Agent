@@ -396,13 +396,13 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void runShellEnvWithCommandShouldBeHighRiskConfirm() throws Exception {
+    public void runShellEnvWithCommandShouldBeDenied() throws Exception {
         RunShellTool tool = new RunShellTool(properties());
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "env rm -rf target");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals("env followed by a real command should be HIGH_RISK_CONFIRM, not READ_ONLY",
-                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertEquals("env must not bypass the deny policy of the wrapped command",
+                ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
     @Test

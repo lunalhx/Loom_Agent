@@ -48,6 +48,55 @@ spring:
       timeout: ${REDIS_TIMEOUT_MS:3000}ms
 
 loom:
+  mcp:
+    enabled: ${MCP_ENABLED:false}
+    request-timeout-ms: ${MCP_REQUEST_TIMEOUT_MS:60000}
+    max-tools-per-server: ${MCP_MAX_TOOLS_PER_SERVER:64}
+    servers:
+      exa:
+        enabled: ${EXA_MCP_ENABLED:true}
+        required: false
+        transport: STREAMABLE_HTTP
+        base-url: https://mcp.exa.ai
+        endpoint: /mcp
+        enabled-tools:
+          - web_search_exa
+          - web_fetch_exa
+        default-permission: READ_ONLY
+      playwright:
+        enabled: ${PLAYWRIGHT_MCP_ENABLED:true}
+        required: false
+        transport: ${PLAYWRIGHT_MCP_TRANSPORT:STDIO}
+        command: ${PLAYWRIGHT_MCP_COMMAND:npx}
+        base-url: ${PLAYWRIGHT_MCP_BASE_URL:}
+        endpoint: /mcp
+        args:
+          - -y
+          - "@playwright/mcp@latest"
+          - --headless
+          - --browser
+          - chrome
+          - --isolated
+        env:
+          PATH: ${PLAYWRIGHT_MCP_PATH:${PATH:}}
+        enabled-tools:
+          - browser_navigate
+          - browser_snapshot
+          - browser_click
+          - browser_type
+          - browser_fill_form
+          - browser_wait_for
+          - browser_console_messages
+          - browser_network_requests
+          - browser_network_request
+          - browser_take_screenshot
+          - browser_close
+        default-permission: WRITE_CONFIRM
+        tool-permissions:
+          browser_snapshot: READ_ONLY
+          browser_console_messages: READ_ONLY
+          browser_network_requests: READ_ONLY
+          browser_network_request: READ_ONLY
   ai:
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:10000}
     first-token-timeout-ms: ${AI_FIRST_TOKEN_TIMEOUT_MS:30000}

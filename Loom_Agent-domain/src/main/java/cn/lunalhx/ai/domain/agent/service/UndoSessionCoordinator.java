@@ -309,6 +309,29 @@ public class UndoSessionCoordinator {
         });
     }
 
+    /**
+     * Agent loop 在到达终止事件前异常退出时调用：释放工作区 undo 锁并将快照标记为不可用，
+     * 避免崩溃残留的锁阻塞同工作区的后续 run（workspace_undo_busy）。
+     */
+    public void onRunFailed(AgentContext context) {
+        if (!config.isEnabled()) {
+            return;
+        }
+        if (context == null || StringUtils.isBlank(context.getRunId())) {
+            return;
+        }
+        if (StringUtils.isNotBlank(context.getParentRunId())) {
+            return;
+        }
+        markUnavailable(context.getRunId(), "run_failed", "Agent loop failed before terminal event");
+        AgentUndoSnapshot snapshot = snapshotRepository.findByRunId(context.getRunId()).orElse(null);
+        if (snapshot != null) {
+            releaseLock(snapshot);
+        } else if (context.getResolvedWorkspace() != null) {
+            lockRepository.release(context.getResolvedWorkspace().toString(), context.getRunId());
+        }
+    }
+
     private void markRunUnavailable(AgentContext context, String reason, String detail) {
         AgentUndoSnapshot snapshot = AgentUndoSnapshot.builder()
                 .snapshotId("undo-" + UUID.randomUUID())

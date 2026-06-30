@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -44,8 +45,10 @@ public class ApprovalGateNodeTest {
             NodeResult result = node.apply(basicContext(TOOL_NAME));
 
             assertNotNull(result);
-            assertTrue("HIGH_RISK_DENY should be terminal in mode=" + mode,
-                    result.isTerminal());
+            assertEquals("HIGH_RISK_DENY should replan without executing in mode=" + mode,
+                    AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+            assertTrue("HIGH_RISK_DENY should emit POLICY_DENIED in mode=" + mode,
+                    result.getEvents().stream().anyMatch(e -> e.getType() == AgentEventType.POLICY_DENIED));
         }
     }
 
@@ -125,10 +128,10 @@ public class ApprovalGateNodeTest {
         NodeResult result = node.apply(basicContext(TOOL_NAME));
 
         assertNotNull(result);
-        assertTrue("HIGH_RISK_CONFIRM in SANDBOX with DENY policy should be terminal",
-                result.isTerminal());
+        assertEquals("HIGH_RISK_CONFIRM in SANDBOX with DENY policy should replan",
+                AgentNodeNames.REPLAN_GUARD, result.getNextNode());
         assertTrue("should contain POLICY_DENIED events",
-                result.getEvents().stream().anyMatch(e -> "POLICY_DENIED".equals(e.getType())));
+                result.getEvents().stream().anyMatch(e -> e.getType() == AgentEventType.POLICY_DENIED));
     }
 
     @Test
