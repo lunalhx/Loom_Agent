@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentRunCheckpointPO {
@@ -15,6 +15,6 @@ public class AgentRunCheckpointPO {
     private String planJson;
     private String lastToolExecutionJson;
     private String reason;
-    private LocalDateTime createTime;
+    private Instant createTime;
 
 }

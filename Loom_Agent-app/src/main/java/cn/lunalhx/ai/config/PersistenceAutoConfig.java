@@ -37,17 +37,12 @@ import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Configuration(proxyBeanMethods = false)
 public class PersistenceAutoConfig {
@@ -76,21 +71,13 @@ public class PersistenceAutoConfig {
                 log.info("AgentRunRepository: InMemory (mode=memory)");
                 yield new InMemoryAgentRunRepository(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentRunDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentRunDao, but MyBatis DAO is not available");
                 }
-                log.info("AgentRunRepository: MyBatis (mode=mysql)");
+                log.info("AgentRunRepository: MyBatis (mode=sqlite)");
                 yield new MybatisAgentRunRepository(dao);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("AgentRunRepository: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisAgentRunRepository(dao);
-                }
-                log.info("AgentRunRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryAgentRunRepository(memoryStoreProperties);
             }
         };
     }
@@ -106,21 +93,13 @@ public class PersistenceAutoConfig {
                 log.info("AgentCheckpointRepository: InMemory (mode=memory)");
                 yield new InMemoryAgentCheckpointRepository(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentRunCheckpointDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentRunCheckpointDao, but MyBatis DAO is not available");
                 }
-                log.info("AgentCheckpointRepository: MyBatis (mode=mysql)");
+                log.info("AgentCheckpointRepository: MyBatis (mode=sqlite)");
                 yield new MybatisAgentCheckpointRepository(dao, objectMapper);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("AgentCheckpointRepository: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisAgentCheckpointRepository(dao, objectMapper);
-                }
-                log.info("AgentCheckpointRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryAgentCheckpointRepository(memoryStoreProperties);
             }
         };
     }
@@ -136,21 +115,13 @@ public class PersistenceAutoConfig {
                 log.info("ApprovalStore: InMemory (mode=memory)");
                 yield new InMemoryApprovalStore(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentPendingApprovalDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentPendingApprovalDao, but MyBatis DAO is not available");
                 }
-                log.info("ApprovalStore: MyBatis (mode=mysql)");
+                log.info("ApprovalStore: MyBatis (mode=sqlite)");
                 yield new MybatisApprovalStore(dao, objectMapper);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("ApprovalStore: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisApprovalStore(dao, objectMapper);
-                }
-                log.info("ApprovalStore: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryApprovalStore(memoryStoreProperties);
             }
         };
     }
@@ -166,21 +137,13 @@ public class PersistenceAutoConfig {
                 log.info("TraceRecorder: InMemory (mode=memory)");
                 yield new InMemoryTraceRecorder(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentTraceEventDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentTraceEventDao, but MyBatis DAO is not available");
                 }
-                log.info("TraceRecorder: MyBatis (mode=mysql)");
+                log.info("TraceRecorder: MyBatis (mode=sqlite)");
                 yield new MybatisTraceRecorder(dao, objectMapper);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("TraceRecorder: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisTraceRecorder(dao, objectMapper);
-                }
-                log.info("TraceRecorder: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryTraceRecorder(memoryStoreProperties);
             }
         };
     }
@@ -195,21 +158,13 @@ public class PersistenceAutoConfig {
                 log.info("ContextArtifactRepository: InMemory (mode=memory)");
                 yield new InMemoryContextArtifactRepository(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentContextArtifactDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentContextArtifactDao, but MyBatis DAO is not available");
                 }
-                log.info("ContextArtifactRepository: MyBatis (mode=mysql)");
+                log.info("ContextArtifactRepository: MyBatis (mode=sqlite)");
                 yield new MybatisContextArtifactRepository(dao);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("ContextArtifactRepository: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisContextArtifactRepository(dao);
-                }
-                log.info("ContextArtifactRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryContextArtifactRepository(memoryStoreProperties);
             }
         };
     }
@@ -217,85 +172,15 @@ public class PersistenceAutoConfig {
     @Bean
     public ContextBlobStore contextBlobStore(PersistenceProperties persistence,
                                               AgentRuntimeProperties agentRuntimeProperties,
-                                              ObjectProvider<AgentContextArtifactDao> artifactDaoProvider,
                                               MemoryStoreProperties memoryStoreProperties) {
         return switch (persistence.getMode()) {
             case MEMORY -> {
                 log.info("ContextBlobStore: InMemory (mode=memory)");
                 yield new InMemoryContextBlobStore(memoryStoreProperties);
             }
-            case MYSQL -> {
-                log.info("ContextBlobStore: LocalFile (mode=mysql)");
+            case SQLITE -> {
+                log.info("ContextBlobStore: LocalFile (mode=sqlite)");
                 yield new LocalFileContextBlobStore(agentRuntimeProperties.getContext().getStorageRoot());
-            }
-            case AUTO -> {
-                AgentContextArtifactDao dao = artifactDaoProvider.getIfAvailable();
-                if (dao != null) {
-                    log.info("ContextBlobStore: LocalFile (mode=auto, DAO available)");
-                    yield new LocalFileContextBlobStore(agentRuntimeProperties.getContext().getStorageRoot());
-                }
-                log.info("ContextBlobStore: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryContextBlobStore(memoryStoreProperties);
-            }
-        };
-    }
-
-    @Bean
-    public InitializingBean persistenceValidator(PersistenceProperties persistence,
-                                                  ObjectProvider<AgentRunDao> runDaoProvider,
-                                                  ObjectProvider<AgentRunCheckpointDao> checkpointDaoProvider,
-                                                  ObjectProvider<AgentPendingApprovalDao> approvalDaoProvider,
-                                                  ObjectProvider<AgentTraceEventDao> traceDaoProvider,
-                                                  ObjectProvider<AgentContextArtifactDao> artifactDaoProvider,
-                                                  AgentRuntimeProperties agentRuntimeProperties) {
-        return () -> {
-            boolean runOk = runDaoProvider.getIfAvailable() != null;
-            boolean checkpointOk = checkpointDaoProvider.getIfAvailable() != null;
-            boolean approvalOk = approvalDaoProvider.getIfAvailable() != null;
-            boolean traceOk = traceDaoProvider.getIfAvailable() != null;
-            boolean artifactOk = artifactDaoProvider.getIfAvailable() != null;
-            boolean allDaosOk = runOk && checkpointOk && approvalOk && traceOk && artifactOk;
-
-            log.info("Persistence mode={}, required={}", persistence.getMode(), persistence.getRequired());
-            log.info("DAOs — AgentRunDao={}, AgentRunCheckpointDao={}, AgentPendingApprovalDao={}, AgentTraceEventDao={}, AgentContextArtifactDao={}",
-                    status(runOk), status(checkpointOk), status(approvalOk), status(traceOk), status(artifactOk));
-
-            if (persistence.isExplicitMysql()) {
-                if (!allDaosOk) {
-                    List<String> missing = new ArrayList<>();
-                    if (!runOk) missing.add("AgentRunDao");
-                    if (!checkpointOk) missing.add("AgentRunCheckpointDao");
-                    if (!approvalOk) missing.add("AgentPendingApprovalDao");
-                    if (!traceOk) missing.add("AgentTraceEventDao");
-                    if (!artifactOk) missing.add("AgentContextArtifactDao");
-                    throw new IllegalStateException(
-                            "persistence mode=mysql requires all MyBatis DAOs, missing: " + String.join(", ", missing));
-                }
-                String storageRoot = agentRuntimeProperties.getContext().getStorageRoot();
-                if (StringUtils.isBlank(storageRoot)) {
-                    throw new IllegalStateException(
-                            "persistence mode=mysql requires AGENT_CONTEXT_STORAGE_ROOT to be configured");
-                }
-                log.info("ContextBlobStore storage root: {}", storageRoot);
-            }
-
-            if (persistence.isAuto() && !allDaosOk) {
-                if (Boolean.TRUE.equals(persistence.getRequired())) {
-                    List<String> missing = new ArrayList<>();
-                    if (!runOk) missing.add("AgentRunDao");
-                    if (!checkpointOk) missing.add("AgentRunCheckpointDao");
-                    if (!approvalOk) missing.add("AgentPendingApprovalDao");
-                    if (!traceOk) missing.add("AgentTraceEventDao");
-                    if (!artifactOk) missing.add("AgentContextArtifactDao");
-                    throw new IllegalStateException(
-                            "persistence mode=auto with required=true cannot fall back to memory, missing DAOs: "
-                                    + String.join(", ", missing));
-                }
-                log.warn("Some MyBatis DAOs unavailable — falling back to InMemory implementations (mode=auto, required=false)");
-            }
-
-            if (persistence.isExplicitMemory()) {
-                log.info("Persistence mode=memory — all agent state stored in memory only");
             }
         };
     }
@@ -316,21 +201,13 @@ public class PersistenceAutoConfig {
                 log.info("UndoSnapshotRepository: InMemory (mode=memory)");
                 yield new InMemoryUndoSnapshotRepository(memoryStoreProperties);
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentUndoSnapshotDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentUndoSnapshotDao, but MyBatis DAO is not available");
                 }
-                log.info("UndoSnapshotRepository: MyBatis (mode=mysql)");
+                log.info("UndoSnapshotRepository: MyBatis (mode=sqlite)");
                 yield new MybatisUndoSnapshotRepository(dao, objectMapper);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("UndoSnapshotRepository: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisUndoSnapshotRepository(dao, objectMapper);
-                }
-                log.info("UndoSnapshotRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryUndoSnapshotRepository(memoryStoreProperties);
             }
         };
     }
@@ -345,21 +222,13 @@ public class PersistenceAutoConfig {
                 log.info("WorkspaceUndoLockRepository: InMemory (mode=memory)");
                 yield new InMemoryWorkspaceUndoLockRepository();
             }
-            case MYSQL -> {
+            case SQLITE -> {
                 if (dao == null) {
                     throw new IllegalStateException(
-                            "persistence mode=mysql requires AgentWorkspaceUndoLockDao, but MyBatis DAO is not available");
+                            "persistence mode=sqlite requires AgentWorkspaceUndoLockDao, but MyBatis DAO is not available");
                 }
-                log.info("WorkspaceUndoLockRepository: MyBatis (mode=mysql)");
+                log.info("WorkspaceUndoLockRepository: MyBatis (mode=sqlite)");
                 yield new MybatisWorkspaceUndoLockRepository(dao);
-            }
-            case AUTO -> {
-                if (dao != null) {
-                    log.info("WorkspaceUndoLockRepository: MyBatis (mode=auto, DAO available)");
-                    yield new MybatisWorkspaceUndoLockRepository(dao);
-                }
-                log.info("WorkspaceUndoLockRepository: InMemory (mode=auto, DAO unavailable)");
-                yield new InMemoryWorkspaceUndoLockRepository();
             }
         };
     }
@@ -373,7 +242,4 @@ public class PersistenceAutoConfig {
                 workspaceSnapshotPort, agentRuntimeProperties.getUndo());
     }
 
-    private static String status(boolean ok) {
-        return ok ? "available" : "unavailable";
-    }
 }

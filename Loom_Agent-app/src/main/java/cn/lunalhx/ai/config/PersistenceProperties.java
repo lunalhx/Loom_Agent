@@ -5,12 +5,13 @@ import lombok.Data;
 @Data
 public class PersistenceProperties {
 
-    private Mode mode = Mode.AUTO;
-    private Boolean required = false;
+    private Mode mode = Mode.SQLITE;
+    private String dataDir = System.getProperty("user.home") + "/.loom-agent";
+    private int busyTimeoutMs = 5000;
+    private int maxPoolSize = 4;
 
     public enum Mode {
-        AUTO,
-        MYSQL,
+        SQLITE,
         MEMORY
     }
 
@@ -18,11 +19,7 @@ public class PersistenceProperties {
         return mode == Mode.MEMORY;
     }
 
-    public boolean isExplicitMysql() {
-        return mode == Mode.MYSQL;
-    }
-
-    public boolean isAuto() {
-        return mode == Mode.AUTO;
+    public boolean isSqlite() {
+        return mode == Mode.SQLITE;
     }
 }

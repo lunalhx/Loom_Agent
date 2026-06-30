@@ -41,7 +41,7 @@
     <select id="searchByRootRunId" resultMap="AgentContextArtifactMap">
         SELECT * FROM agent_context_artifact
         WHERE root_run_id = #{rootRunId}
-          AND (artifact_id LIKE CONCAT('%', #{query}, '%') OR preview LIKE CONCAT('%', #{query}, '%'))
+          AND (artifact_id LIKE '%' || #{query} || '%' OR preview LIKE '%' || #{query} || '%')
         ORDER BY create_time ASC, id ASC
         LIMIT #{limit}
     </select>

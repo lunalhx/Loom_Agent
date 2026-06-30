@@ -8,9 +8,7 @@ import java.util.List;
 @Mapper
 public interface AgentTraceEventDao {
 
-    int insert(AgentTraceEventPO event);
-
-    Long selectMaxSequenceNo(String runId);
+    Long insertNext(AgentTraceEventPO event);
 
     List<AgentTraceEventPO> selectByRunId(String runId);
 

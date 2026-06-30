@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentPendingApprovalPO {
@@ -23,10 +23,10 @@ public class AgentPendingApprovalPO {
     private String policyFingerprint;
     private String metadataJson;
     private String contextJson;
-    private LocalDateTime createdAt;
-    private LocalDateTime expiresAt;
+    private Instant createdAt;
+    private Instant expiresAt;
     private Integer consumed;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
+    private Instant createTime;
+    private Instant updateTime;
 
 }

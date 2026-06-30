@@ -3,7 +3,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 import lombok.Data;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentRunPO {
@@ -28,7 +28,7 @@ public class AgentRunPO {
     private String blockedReason;
     private Long usedTokens;
     private BigDecimal estimatedCost;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
+    private Instant createTime;
+    private Instant updateTime;
 
 }

@@ -12,8 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
 
@@ -71,8 +69,8 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         po.setPolicyFingerprint(approval.getPolicyFingerprint());
         po.setMetadataJson(writeJson(approval.getMetadata()));
         po.setContextJson(writeJson(approval.getContext() == null ? null : AgentContextSnapshot.from(approval.getContext())));
-        po.setCreatedAt(toLocalDateTime(approval.getCreatedAt()));
-        po.setExpiresAt(toLocalDateTime(approval.getExpiresAt()));
+        po.setCreatedAt(approval.getCreatedAt());
+        po.setExpiresAt(approval.getExpiresAt());
         po.setConsumed(0);
         return po;
     }
@@ -96,8 +94,8 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
                 .policyFingerprint(po.getPolicyFingerprint())
                 .metadata(readJson(po.getMetadataJson(), new TypeReference<Map<String, Object>>() {
                 }))
-                .createdAt(toInstant(po.getCreatedAt()))
-                .expiresAt(toInstant(po.getExpiresAt()))
+                .createdAt(po.getCreatedAt())
+                .expiresAt(po.getExpiresAt())
                 .context(snapshot == null ? null : snapshot.restore())
                 .build();
     }
@@ -124,14 +122,6 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         } catch (Exception e) {
             throw new IllegalStateException("反序列化审批输入失败", e);
         }
-    }
-
-    private LocalDateTime toLocalDateTime(Instant instant) {
-        return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 
 }

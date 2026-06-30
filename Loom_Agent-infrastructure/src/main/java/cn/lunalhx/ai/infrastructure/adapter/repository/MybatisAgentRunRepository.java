@@ -9,8 +9,6 @@ import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -90,13 +88,9 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .blockedReason(po.getBlockedReason())
                 .usedTokens(po.getUsedTokens())
                 .estimatedCost(po.getEstimatedCost())
-                .createdAt(toInstant(po.getCreateTime()))
-                .updatedAt(toInstant(po.getUpdateTime()))
+                .createdAt(po.getCreateTime())
+                .updatedAt(po.getUpdateTime())
                 .build();
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 
 }

@@ -3,16 +3,17 @@ package cn.lunalhx.ai.infrastructure.dao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO;
 import org.apache.ibatis.annotations.Mapper;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Mapper
 public interface AgentWorkspaceUndoLockDao {
 
-    int insert(AgentWorkspaceUndoLockPO po);
+    int tryAcquire(AgentWorkspaceUndoLockPO po);
 
-    int deleteByWorkspace(String workspace);
+    int deleteOwned(@org.apache.ibatis.annotations.Param("workspace") String workspace,
+                    @org.apache.ibatis.annotations.Param("runId") String runId);
 
     AgentWorkspaceUndoLockPO selectByWorkspace(String workspace);
 
-    int deleteStaleBefore(LocalDateTime threshold);
+    int deleteStaleBefore(Instant threshold);
 }

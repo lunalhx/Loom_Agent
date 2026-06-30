@@ -37,14 +37,11 @@ public class PersistenceConfigTest {
 
     private final PersistenceAutoConfig config = new PersistenceAutoConfig();
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final AgentRuntimeProperties runtimeProperties = new AgentRuntimeProperties();
     private final MemoryStoreProperties memProps = new MemoryStoreProperties();
 
-    // ---- mode=auto, DAOs available ----
-
     @Test
-    public void autoModeWithDaosReturnsMybatisBeans() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
+    public void sqliteModeWithDaosReturnsMybatisBeans() {
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.SQLITE);
 
         AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
         AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
@@ -59,30 +56,9 @@ public class PersistenceConfigTest {
         assertTrue("ContextArtifactRepository should be MyBatis", artifactRepo instanceof MybatisContextArtifactRepository);
     }
 
-    // ---- mode=auto, no DAOs ----
-
-    @Test
-    public void autoModeWithoutDaosReturnsInMemoryBeans() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
-
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, emptyProvider(), memProps);
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper, memProps);
-        ApprovalStore approvalStore = config.approvalStore(persistence, emptyProvider(), objectMapper, memProps);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, emptyProvider(), objectMapper, memProps);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, emptyProvider(), memProps);
-
-        assertTrue(runRepo instanceof InMemoryAgentRunRepository);
-        assertTrue(checkpointRepo instanceof InMemoryAgentCheckpointRepository);
-        assertTrue(approvalStore instanceof InMemoryApprovalStore);
-        assertTrue(traceRecorder instanceof InMemoryTraceRecorder);
-        assertTrue(artifactRepo instanceof InMemoryContextArtifactRepository);
-    }
-
-    // ---- mode=memory, even with DAOs ----
-
     @Test
     public void memoryModeForcesInMemoryEvenWithDaos() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY, false);
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY);
 
         AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
         AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
@@ -97,30 +73,9 @@ public class PersistenceConfigTest {
         assertTrue(artifactRepo instanceof InMemoryContextArtifactRepository);
     }
 
-    // ---- mode=mysql, all DAOs present ----
-
     @Test
-    public void mysqlModeWithAllDaosReturnsMybatisBeans() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
-
-        AgentRunRepository runRepo = config.agentRunRepository(persistence, provider(new MockAgentRunDao()), memProps);
-        AgentCheckpointRepository checkpointRepo = config.agentCheckpointRepository(persistence, provider(new MockAgentRunCheckpointDao()), objectMapper, memProps);
-        ApprovalStore approvalStore = config.approvalStore(persistence, provider(new MockAgentPendingApprovalDao()), objectMapper, memProps);
-        TraceRecorder traceRecorder = config.traceRecorder(persistence, provider(new MockAgentTraceEventDao()), objectMapper, memProps);
-        ContextArtifactRepository artifactRepo = config.contextArtifactRepository(persistence, provider(new MockAgentContextArtifactDao()), memProps);
-
-        assertTrue(runRepo instanceof MybatisAgentRunRepository);
-        assertTrue(checkpointRepo instanceof MybatisAgentCheckpointRepository);
-        assertTrue(approvalStore instanceof MybatisApprovalStore);
-        assertTrue(traceRecorder instanceof MybatisTraceRecorder);
-        assertTrue(artifactRepo instanceof MybatisContextArtifactRepository);
-    }
-
-    // ---- mode=mysql, missing DAO throws ----
-
-    @Test
-    public void mysqlModeMissingDaoThrows() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
+    public void sqliteModeMissingDaoThrows() {
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.SQLITE);
 
         try {
             config.agentRunRepository(persistence, emptyProvider(), memProps);
@@ -131,8 +86,8 @@ public class PersistenceConfigTest {
     }
 
     @Test
-    public void mysqlModeMissingCheckpointDaoThrows() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
+    public void sqliteModeMissingCheckpointDaoThrows() {
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.SQLITE);
 
         try {
             config.agentCheckpointRepository(persistence, emptyProvider(), objectMapper, memProps);
@@ -142,146 +97,28 @@ public class PersistenceConfigTest {
         }
     }
 
-    // ---- ContextBlobStore: mode=mysql uses LocalFile ----
-
     @Test
-    public void mysqlModeContextBlobStoreUsesLocalFile() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
+    public void sqliteModeContextBlobStoreUsesLocalFile() {
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.SQLITE);
         AgentRuntimeProperties props = new AgentRuntimeProperties();
         props.getContext().setStorageRoot("/tmp/test-artifacts");
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider(), memProps);
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, memProps);
         assertTrue(blobStore instanceof LocalFileContextBlobStore);
     }
-
-    // ---- ContextBlobStore: mode=memory uses InMemory ----
 
     @Test
     public void memoryModeContextBlobStoreUsesInMemory() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY, false);
+        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MEMORY);
         AgentRuntimeProperties props = new AgentRuntimeProperties();
 
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()), memProps);
+        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, memProps);
         assertTrue(blobStore instanceof InMemoryContextBlobStore);
     }
 
-    // ---- ContextBlobStore: mode=auto with DAO uses LocalFile ----
-
-    @Test
-    public void autoModeContextBlobStoreWithDaoUsesLocalFile() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-        props.getContext().setStorageRoot("/tmp/test-artifacts");
-
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, provider(new MockAgentContextArtifactDao()), memProps);
-        assertTrue(blobStore instanceof LocalFileContextBlobStore);
-    }
-
-    // ---- ContextBlobStore: mode=auto without DAO uses InMemory ----
-
-    @Test
-    public void autoModeContextBlobStoreWithoutDaoUsesInMemory() {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-
-        ContextBlobStore blobStore = config.contextBlobStore(persistence, props, emptyProvider(), memProps);
-        assertTrue(blobStore instanceof InMemoryContextBlobStore);
-    }
-
-    // ---- Validator: mode=mysql requires all DAOs ----
-
-    @Test
-    public void validatorMysqlAllDaosPresentDoesNotThrow() throws Exception {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-        props.getContext().setStorageRoot("/tmp/test");
-
-        config.persistenceValidator(persistence,
-                provider(new MockAgentRunDao()),
-                provider(new MockAgentRunCheckpointDao()),
-                provider(new MockAgentPendingApprovalDao()),
-                provider(new MockAgentTraceEventDao()),
-                provider(new MockAgentContextArtifactDao()),
-                props).afterPropertiesSet();
-    }
-
-    @Test
-    public void validatorMysqlMissingDaosThrows() throws Exception {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-        props.getContext().setStorageRoot("/tmp/test");
-
-        try {
-            config.persistenceValidator(persistence,
-                    emptyProvider(),
-                    provider(new MockAgentRunCheckpointDao()),
-                    provider(new MockAgentPendingApprovalDao()),
-                    provider(new MockAgentTraceEventDao()),
-                    provider(new MockAgentContextArtifactDao()),
-                    props).afterPropertiesSet();
-            fail("Should have thrown");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("AgentRunDao"));
-        }
-    }
-
-    // ---- Validator: mode=auto required=true without DAOs throws ----
-
-    @Test
-    public void validatorAutoRequiredWithoutDaosThrows() throws Exception {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, true);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-
-        try {
-            config.persistenceValidator(persistence,
-                    emptyProvider(), emptyProvider(), emptyProvider(),
-                    emptyProvider(), emptyProvider(), props).afterPropertiesSet();
-            fail("Should have thrown");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("required=true"));
-        }
-    }
-
-    // ---- Validator: mode=auto required=false without DAOs is ok ----
-
-    @Test
-    public void validatorAutoNotRequiredWithoutDaosDoesNotThrow() throws Exception {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.AUTO, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-
-        config.persistenceValidator(persistence,
-                emptyProvider(), emptyProvider(), emptyProvider(),
-                emptyProvider(), emptyProvider(), props).afterPropertiesSet();
-    }
-
-    // ---- Validator: mode=mysql requires storage root ----
-
-    @Test
-    public void validatorMysqlMissingStorageRootThrows() throws Exception {
-        PersistenceProperties persistence = persistence(PersistenceProperties.Mode.MYSQL, false);
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
-        props.getContext().setStorageRoot(null);
-
-        try {
-            config.persistenceValidator(persistence,
-                    provider(new MockAgentRunDao()),
-                    provider(new MockAgentRunCheckpointDao()),
-                    provider(new MockAgentPendingApprovalDao()),
-                    provider(new MockAgentTraceEventDao()),
-                    provider(new MockAgentContextArtifactDao()),
-                    props).afterPropertiesSet();
-            fail("Should have thrown");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("AGENT_CONTEXT_STORAGE_ROOT"));
-        }
-    }
-
-    // ---- helpers ----
-
-    private static PersistenceProperties persistence(PersistenceProperties.Mode mode, boolean required) {
+    private static PersistenceProperties persistence(PersistenceProperties.Mode mode) {
         PersistenceProperties p = new PersistenceProperties();
         p.setMode(mode);
-        p.setRequired(required);
         return p;
     }
 
@@ -342,8 +179,7 @@ public class PersistenceConfigTest {
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO selectLatestRootByConversationId(String conversationId) { return null; }
     }
     private static class MockAgentRunCheckpointDao implements AgentRunCheckpointDao {
-        @Override public Long selectMaxVersion(String runId) { return 0L; }
-        @Override public int insert(cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO checkpoint) { return 1; }
+        @Override public Long insertNext(cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO checkpoint) { return 1L; }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO selectLatest(String runId) { return null; }
     }
     private static class MockAgentPendingApprovalDao implements AgentPendingApprovalDao {
@@ -352,8 +188,7 @@ public class PersistenceConfigTest {
         @Override public int markConsumed(String approvalId) { return 1; }
     }
     private static class MockAgentTraceEventDao implements AgentTraceEventDao {
-        @Override public int insert(cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO event) { return 1; }
-        @Override public Long selectMaxSequenceNo(String runId) { return 0L; }
+        @Override public Long insertNext(cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO event) { return 1L; }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO> selectByRunId(String runId) { return java.util.List.of(); }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO> selectByTraceId(String traceId) { return java.util.List.of(); }
     }

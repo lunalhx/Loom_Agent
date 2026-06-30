@@ -4,7 +4,7 @@ import cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Mapper
@@ -27,7 +27,7 @@ public interface AgentUndoSnapshotDao {
                      @Param("next") String next,
                      @Param("expectedVersion") Long expectedVersion);
 
-    List<AgentUndoSnapshotPO> selectExpired(@Param("now") LocalDateTime now);
+    List<AgentUndoSnapshotPO> selectExpired(@Param("now") Instant now);
 
     int expireByStatus(@Param("snapshotId") String snapshotId,
                        @Param("expected") String expected,

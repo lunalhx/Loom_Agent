@@ -13,8 +13,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Map;
 import java.util.UUID;
 import java.util.List;
@@ -194,16 +192,14 @@ public class MybatisTraceRecorder implements TraceRecorder {
         if (StringUtils.isBlank(runId)) {
             return;
         }
-        Long maxSequenceNo = dao.selectMaxSequenceNo(runId);
-        long sequenceNo = maxSequenceNo == null ? 1L : maxSequenceNo + 1L;
         event.setTraceId(StringUtils.defaultIfBlank(context.getTraceId(), StringUtils.defaultIfBlank(context.getRootRunId(), runId)));
         event.setRootRunId(StringUtils.defaultIfBlank(context.getRootRunId(), runId));
         event.setRunId(runId);
         event.setParentRunId(context.getParentRunId());
-        event.setSequenceNo(sequenceNo);
         event.setCreatedAt(Instant.now());
+        long sequenceNo = dao.insertNext(toPo(event));
+        event.setSequenceNo(sequenceNo);
         context.setTraceSequenceNo(sequenceNo);
-        dao.insert(toPo(event));
     }
 
     private AgentTraceEventPO toPo(AgentTraceEvent event) {
@@ -252,7 +248,7 @@ public class MybatisTraceRecorder implements TraceRecorder {
                 .metadata(fromMapJson(po.getMetadataJson()))
                 .replayable(po.getReplayable())
                 .sensitiveRedacted(po.getSensitiveRedacted())
-                .createdAt(toInstant(po.getCreateTime()))
+                .createdAt(po.getCreateTime())
                 .build();
     }
 
@@ -284,10 +280,6 @@ public class MybatisTraceRecorder implements TraceRecorder {
         } catch (Exception e) {
             return Map.of();
         }
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 
     private String errorCode(Throwable error) {

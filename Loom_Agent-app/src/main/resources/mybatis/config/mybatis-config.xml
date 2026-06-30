@@ -3,7 +3,8 @@
         PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-config.dtd">
 <configuration>
-    <!-- 暂时未使用 文档：https://mybatis.org/mybatis-3/zh/configuration.html#typeAliases -->
-    <typeAliases>
-    </typeAliases>
+    <typeHandlers>
+        <typeHandler javaType="java.time.Instant"
+                     handler="cn.lunalhx.ai.infrastructure.dao.typehandler.InstantTypeHandler"/>
+    </typeHandlers>
 </configuration>

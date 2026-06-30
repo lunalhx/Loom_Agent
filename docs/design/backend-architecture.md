@@ -9,7 +9,7 @@ v1 实现 Agent 的稳定基础链路：HTTP 请求进入后端，后端调用 D
 - API 层定义对外 DTO，不依赖 Spring MVC 或业务实现。
 - Trigger 层只做 HTTP/SSE 适配、参数校验、事件发送和非流式异常兜底。
 - Domain 层定义模型调用端口 `ModelGateway`，实现 `ChatStreamService` 的重试、超时、逐字切分、finish reason 处理和输出校验。
-- Infrastructure 层实现 DeepSeek `/chat/completions` SSE 解析，并提供 MyBatis/Redis 基础设施。
+- Infrastructure 层实现 DeepSeek `/chat/completions` SSE 解析，并通过 MyBatis 访问本地 SQLite。
 - App 层装配 `ModelRuntimeProperties`、`ChatStreamService`、启动类和运行配置。
 
 ## 数据流

@@ -34,26 +34,26 @@
         VALUES
         (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{agentRole}, #{runKind}, #{depth}, #{childOrdinal},
          #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson}, #{blockedReason}, #{usedTokens}, #{estimatedCost})
-        ON DUPLICATE KEY UPDATE
-        parent_run_id = VALUES(parent_run_id),
-        root_run_id = VALUES(root_run_id),
-        request_id = VALUES(request_id),
-        conversation_id = VALUES(conversation_id),
-        agent_role = VALUES(agent_role),
-        run_kind = VALUES(run_kind),
-        depth = VALUES(depth),
-        child_ordinal = VALUES(child_ordinal),
-        question = VALUES(question),
-        workspace = VALUES(workspace),
-        status = VALUES(status),
-        current_node = VALUES(current_node),
-        step = VALUES(step),
-        checkpoint_version = VALUES(checkpoint_version),
-        summary_json = VALUES(summary_json),
-        blocked_reason = VALUES(blocked_reason),
-        used_tokens = VALUES(used_tokens),
-        estimated_cost = VALUES(estimated_cost),
-        update_time = CURRENT_TIMESTAMP
+        ON CONFLICT(run_id) DO UPDATE SET
+        parent_run_id = excluded.parent_run_id,
+        root_run_id = excluded.root_run_id,
+        request_id = excluded.request_id,
+        conversation_id = excluded.conversation_id,
+        agent_role = excluded.agent_role,
+        run_kind = excluded.run_kind,
+        depth = excluded.depth,
+        child_ordinal = excluded.child_ordinal,
+        question = excluded.question,
+        workspace = excluded.workspace,
+        status = excluded.status,
+        current_node = excluded.current_node,
+        step = excluded.step,
+        checkpoint_version = excluded.checkpoint_version,
+        summary_json = excluded.summary_json,
+        blocked_reason = excluded.blocked_reason,
+        used_tokens = excluded.used_tokens,
+        estimated_cost = excluded.estimated_cost,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     </insert>
 
     <select id="selectByRunId" resultMap="AgentRunMap">

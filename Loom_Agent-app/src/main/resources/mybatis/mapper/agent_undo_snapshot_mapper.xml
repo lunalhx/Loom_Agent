@@ -60,27 +60,27 @@
          #{changedPathsJson}, #{changedFileCount}, #{changedByteCount},
          #{unavailabilityReason}, #{errorInfo}, #{version},
          #{createdAt}, #{finalizedAt}, #{undoneAt}, #{expiresAt})
-        ON DUPLICATE KEY UPDATE
-        run_id = VALUES(run_id),
-        conversation_id = VALUES(conversation_id),
-        workspace = VALUES(workspace),
-        status = VALUES(status),
-        before_head = VALUES(before_head),
-        after_head = VALUES(after_head),
-        branch = VALUES(branch),
-        before_worktree_oid = VALUES(before_worktree_oid),
-        before_index_oid = VALUES(before_index_oid),
-        after_worktree_oid = VALUES(after_worktree_oid),
-        after_index_oid = VALUES(after_index_oid),
-        changed_paths_json = VALUES(changed_paths_json),
-        changed_file_count = VALUES(changed_file_count),
-        changed_byte_count = VALUES(changed_byte_count),
-        unavailability_reason = VALUES(unavailability_reason),
-        error_info = VALUES(error_info),
-        version = VALUES(version),
-        finalized_at = VALUES(finalized_at),
-        undone_at = VALUES(undone_at),
-        expires_at = VALUES(expires_at)
+        ON CONFLICT(snapshot_id) DO UPDATE SET
+        run_id = excluded.run_id,
+        conversation_id = excluded.conversation_id,
+        workspace = excluded.workspace,
+        status = excluded.status,
+        before_head = excluded.before_head,
+        after_head = excluded.after_head,
+        branch = excluded.branch,
+        before_worktree_oid = excluded.before_worktree_oid,
+        before_index_oid = excluded.before_index_oid,
+        after_worktree_oid = excluded.after_worktree_oid,
+        after_index_oid = excluded.after_index_oid,
+        changed_paths_json = excluded.changed_paths_json,
+        changed_file_count = excluded.changed_file_count,
+        changed_byte_count = excluded.changed_byte_count,
+        unavailability_reason = excluded.unavailability_reason,
+        error_info = excluded.error_info,
+        version = excluded.version,
+        finalized_at = excluded.finalized_at,
+        undone_at = excluded.undone_at,
+        expires_at = excluded.expires_at
     </insert>
 
     <select id="selectBySnapshotId" resultMap="AgentUndoSnapshotMap">

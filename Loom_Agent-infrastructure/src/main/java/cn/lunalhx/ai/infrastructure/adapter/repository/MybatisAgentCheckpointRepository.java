@@ -9,8 +9,6 @@ import cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Optional;
 
 public class MybatisAgentCheckpointRepository implements AgentCheckpointRepository {
@@ -25,9 +23,7 @@ public class MybatisAgentCheckpointRepository implements AgentCheckpointReposito
 
     @Override
     public AgentCheckpoint save(AgentCheckpoint checkpoint) {
-        Long maxVersion = checkpointDao.selectMaxVersion(checkpoint.getRunId());
-        checkpoint.setVersion((maxVersion == null ? 0L : maxVersion) + 1L);
-        checkpointDao.insert(toPo(checkpoint));
+        checkpoint.setVersion(checkpointDao.insertNext(toPo(checkpoint)));
         return checkpoint;
     }
 
@@ -57,7 +53,7 @@ public class MybatisAgentCheckpointRepository implements AgentCheckpointReposito
                 .plan(readJson(po.getPlanJson(), AgentPlan.class))
                 .lastToolExecutionJson(po.getLastToolExecutionJson())
                 .reason(po.getReason())
-                .createdAt(toInstant(po.getCreateTime()))
+                .createdAt(po.getCreateTime())
                 .build();
     }
 
@@ -75,10 +71,6 @@ public class MybatisAgentCheckpointRepository implements AgentCheckpointReposito
         } catch (Exception e) {
             throw new IllegalStateException("反序列化 Agent checkpoint 失败", e);
         }
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 
 }

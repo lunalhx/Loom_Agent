@@ -13,6 +13,8 @@ docker rm ${CONTAINER_NAME}
 # 启动容器
 docker run --name ${CONTAINER_NAME} \
 -p ${PORT}:${PORT} \
+-e LOOM_DATA_DIR=/app/data \
+-v loom-agent-data:/app/data \
 -d ${IMAGE_NAME}
 
 echo "容器部署成功 ${CONTAINER_NAME}"

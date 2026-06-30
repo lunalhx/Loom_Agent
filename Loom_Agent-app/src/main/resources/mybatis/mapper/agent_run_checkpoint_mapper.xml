@@ -14,16 +14,16 @@
         <result column="create_time" property="createTime"/>
     </resultMap>
 
-    <select id="selectMaxVersion" resultType="java.lang.Long">
-        SELECT MAX(version) FROM agent_run_checkpoint WHERE run_id = #{runId}
-    </select>
-
-    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO" useGeneratedKeys="true" keyProperty="id">
+    <select id="insertNext" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO"
+            resultType="java.lang.Long" affectData="true" flushCache="true">
         INSERT INTO agent_run_checkpoint
         (run_id, version, current_node, context_json, plan_json, last_tool_execution_json, reason)
-        VALUES
-        (#{runId}, #{version}, #{currentNode}, #{contextJson}, #{planJson}, #{lastToolExecutionJson}, #{reason})
-    </insert>
+        SELECT #{runId}, COALESCE(MAX(version), 0) + 1, #{currentNode}, #{contextJson},
+               #{planJson}, #{lastToolExecutionJson}, #{reason}
+        FROM agent_run_checkpoint
+        WHERE run_id = #{runId}
+        RETURNING version
+    </select>
 
     <select id="selectLatest" resultMap="AgentRunCheckpointMap">
         SELECT * FROM agent_run_checkpoint

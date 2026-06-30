@@ -11,15 +11,23 @@
         <result column="expires_at" property="expiresAt"/>
     </resultMap>
 
-    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO">
+    <insert id="tryAcquire" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO">
         INSERT INTO agent_workspace_undo_lock
         (lock_id, workspace, holder_run_id, acquired_at, expires_at)
         VALUES
         (#{lockId}, #{workspace}, #{holderRunId}, #{acquiredAt}, #{expiresAt})
+        ON CONFLICT(workspace) DO UPDATE SET
+        lock_id = excluded.lock_id,
+        holder_run_id = excluded.holder_run_id,
+        acquired_at = excluded.acquired_at,
+        expires_at = excluded.expires_at
+        WHERE agent_workspace_undo_lock.expires_at &lt;= excluded.acquired_at
     </insert>
 
-    <delete id="deleteByWorkspace">
-        DELETE FROM agent_workspace_undo_lock WHERE workspace = #{workspace}
+    <delete id="deleteOwned">
+        DELETE FROM agent_workspace_undo_lock
+        WHERE workspace = #{workspace}
+          AND (#{runId} IS NULL OR holder_run_id = #{runId})
     </delete>
 
     <select id="selectByWorkspace" resultMap="AgentWorkspaceUndoLockMap">

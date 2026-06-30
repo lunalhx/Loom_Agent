@@ -6,8 +6,6 @@ import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentWorkspaceUndoLockPO;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,34 +19,19 @@ public class MybatisWorkspaceUndoLockRepository implements WorkspaceUndoLockRepo
 
     @Override
     public boolean acquire(String workspace, String runId, Instant expiresAt) {
-        AgentWorkspaceUndoLockPO existing = dao.selectByWorkspace(workspace);
-        if (existing != null && existing.getExpiresAt().isAfter(LocalDateTime.now())) {
-            return false;
-        }
-        if (existing != null) {
-            dao.deleteByWorkspace(workspace);
-        }
         AgentWorkspaceUndoLockPO po = new AgentWorkspaceUndoLockPO();
         po.setLockId(UUID.randomUUID().toString());
         po.setWorkspace(workspace);
         po.setHolderRunId(runId);
-        po.setAcquiredAt(LocalDateTime.now());
-        po.setExpiresAt(toLocalDateTime(expiresAt));
-        dao.insert(po);
-        return true;
+        po.setAcquiredAt(Instant.now());
+        po.setExpiresAt(expiresAt);
+        return dao.tryAcquire(po) > 0;
     }
 
     @Override
     public boolean release(String workspace, String runId) {
-        AgentWorkspaceUndoLockPO existing = dao.selectByWorkspace(workspace);
-        if (existing == null) {
-            return true;
-        }
-        if (runId != null && !runId.equals(existing.getHolderRunId())) {
-            return false;
-        }
-        dao.deleteByWorkspace(workspace);
-        return true;
+        int deleted = dao.deleteOwned(workspace, runId);
+        return deleted > 0 || dao.selectByWorkspace(workspace) == null;
     }
 
     @Override
@@ -58,7 +41,7 @@ public class MybatisWorkspaceUndoLockRepository implements WorkspaceUndoLockRepo
 
     @Override
     public int deleteStaleBefore(Instant threshold) {
-        return dao.deleteStaleBefore(toLocalDateTime(threshold));
+        return dao.deleteStaleBefore(threshold);
     }
 
     private WorkspaceUndoLock toEntity(AgentWorkspaceUndoLockPO po) {
@@ -66,16 +49,8 @@ public class MybatisWorkspaceUndoLockRepository implements WorkspaceUndoLockRepo
                 .lockId(po.getLockId())
                 .workspace(po.getWorkspace())
                 .holderRunId(po.getHolderRunId())
-                .acquiredAt(toInstant(po.getAcquiredAt()))
-                .expiresAt(toInstant(po.getExpiresAt()))
+                .acquiredAt(po.getAcquiredAt())
+                .expiresAt(po.getExpiresAt())
                 .build();
-    }
-
-    private LocalDateTime toLocalDateTime(Instant instant) {
-        return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 }

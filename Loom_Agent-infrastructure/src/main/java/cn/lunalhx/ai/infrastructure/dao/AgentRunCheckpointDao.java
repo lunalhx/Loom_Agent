@@ -6,9 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 @Mapper
 public interface AgentRunCheckpointDao {
 
-    Long selectMaxVersion(String runId);
-
-    int insert(AgentRunCheckpointPO checkpoint);
+    Long insertNext(AgentRunCheckpointPO checkpoint);
 
     AgentRunCheckpointPO selectLatest(String runId);
 

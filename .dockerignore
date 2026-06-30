@@ -6,6 +6,10 @@ target
 data
 **/data
 *.log
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 docs/env/.env
 docs/env/*.local
 .DS_Store

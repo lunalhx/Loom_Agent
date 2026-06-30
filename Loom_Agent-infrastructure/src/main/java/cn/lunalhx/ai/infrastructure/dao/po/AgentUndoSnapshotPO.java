@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentUndoSnapshotPO {
@@ -26,8 +26,8 @@ public class AgentUndoSnapshotPO {
     private String unavailabilityReason;
     private String errorInfo;
     private Long version;
-    private LocalDateTime createdAt;
-    private LocalDateTime finalizedAt;
-    private LocalDateTime undoneAt;
-    private LocalDateTime expiresAt;
+    private Instant createdAt;
+    private Instant finalizedAt;
+    private Instant undoneAt;
+    private Instant expiresAt;
 }

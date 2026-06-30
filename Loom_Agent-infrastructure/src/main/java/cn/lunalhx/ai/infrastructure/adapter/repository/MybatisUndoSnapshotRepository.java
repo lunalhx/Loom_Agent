@@ -11,8 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -66,7 +64,7 @@ public class MybatisUndoSnapshotRepository implements UndoSnapshotRepository {
 
     @Override
     public List<AgentUndoSnapshot> findExpired(Instant now) {
-        return dao.selectExpired(toLocalDateTime(now)).stream()
+        return dao.selectExpired(now).stream()
                 .map(this::toEntity)
                 .toList();
     }
@@ -100,10 +98,10 @@ public class MybatisUndoSnapshotRepository implements UndoSnapshotRepository {
         po.setUnavailabilityReason(entity.getUnavailabilityReason());
         po.setErrorInfo(entity.getErrorInfo());
         po.setVersion(entity.getVersion());
-        po.setCreatedAt(toLocalDateTime(entity.getCreatedAt()));
-        po.setFinalizedAt(toLocalDateTime(entity.getFinalizedAt()));
-        po.setUndoneAt(toLocalDateTime(entity.getUndoneAt()));
-        po.setExpiresAt(toLocalDateTime(entity.getExpiresAt()));
+        po.setCreatedAt(entity.getCreatedAt());
+        po.setFinalizedAt(entity.getFinalizedAt());
+        po.setUndoneAt(entity.getUndoneAt());
+        po.setExpiresAt(entity.getExpiresAt());
         return po;
     }
 
@@ -127,18 +125,10 @@ public class MybatisUndoSnapshotRepository implements UndoSnapshotRepository {
                 .unavailabilityReason(po.getUnavailabilityReason())
                 .errorInfo(po.getErrorInfo())
                 .version(po.getVersion())
-                .createdAt(toInstant(po.getCreatedAt()))
-                .finalizedAt(toInstant(po.getFinalizedAt()))
-                .undoneAt(toInstant(po.getUndoneAt()))
-                .expiresAt(toInstant(po.getExpiresAt()))
+                .createdAt(po.getCreatedAt())
+                .finalizedAt(po.getFinalizedAt())
+                .undoneAt(po.getUndoneAt())
+                .expiresAt(po.getExpiresAt())
                 .build();
-    }
-
-    private LocalDateTime toLocalDateTime(Instant instant) {
-        return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 }

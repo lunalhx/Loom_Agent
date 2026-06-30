@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentContextArtifactPO {
@@ -18,6 +18,6 @@ public class AgentContextArtifactPO {
     private String sha256;
     private Integer originalChars;
     private Integer retainedChars;
-    private LocalDateTime createTime;
+    private Instant createTime;
 
 }

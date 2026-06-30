@@ -7,8 +7,6 @@ import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,7 +52,7 @@ public class MybatisContextArtifactRepository implements ContextArtifactReposito
         po.setSha256(artifact.getSha256());
         po.setOriginalChars(artifact.getOriginalChars());
         po.setRetainedChars(artifact.getRetainedChars());
-        po.setCreateTime(toLocalDateTime(artifact.getCreatedAt()));
+        po.setCreateTime(artifact.getCreatedAt());
         return po;
     }
 
@@ -70,16 +68,8 @@ public class MybatisContextArtifactRepository implements ContextArtifactReposito
                 .sha256(po.getSha256())
                 .originalChars(po.getOriginalChars())
                 .retainedChars(po.getRetainedChars())
-                .createdAt(toInstant(po.getCreateTime()))
+                .createdAt(po.getCreateTime())
                 .build();
-    }
-
-    private LocalDateTime toLocalDateTime(Instant instant) {
-        return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-    }
-
-    private Instant toInstant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
     }
 
 }

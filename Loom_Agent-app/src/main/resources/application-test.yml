@@ -24,18 +24,6 @@ spring:
         model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
         temperature: ${DEEPSEEK_TEMPERATURE:0.7}
         max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
-  datasource:
-    username: ${MYSQL_USER:root}
-    password: ${MYSQL_ROOT_PASSWORD:123456}
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:13306}/${MYSQL_DATABASE:loom_agent}?useUnicode=true&characterEncoding=utf8&autoReconnect=true&zeroDateTimeBehavior=convertToNull&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    driver-class-name: com.mysql.cj.jdbc.Driver
-  data:
-    redis:
-      host: ${REDIS_HOST:127.0.0.1}
-      port: ${REDIS_PORT:16379}
-      password: ${REDIS_PASSWORD:}
-      database: ${REDIS_DATABASE:0}
-      timeout: ${REDIS_TIMEOUT_MS:3000}ms
 
 loom:
   mcp:
@@ -118,7 +106,7 @@ loom:
     sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
     context:
       enabled: ${AGENT_CONTEXT_ENABLED:true}
-      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${java.io.tmpdir}/loom-agent/context-artifacts}
+      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${LOOM_DATA_DIR:${java.io.tmpdir}/loom-agent-test}/context-artifacts}
       persist-tool-result-chars: ${AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS:12000}
       tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
       keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
@@ -133,8 +121,7 @@ loom:
       deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
       deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
     persistence:
-      mode: ${AGENT_PERSISTENCE_MODE:auto}
-      required: ${AGENT_PERSISTENCE_REQUIRED:false}
+      mode: ${AGENT_PERSISTENCE_MODE:memory}
     memory-store:
       ttl-seconds: ${AGENT_MEMORY_STORE_TTL_SECONDS:3600}
       max-runs: ${AGENT_MEMORY_STORE_MAX_RUNS:1000}

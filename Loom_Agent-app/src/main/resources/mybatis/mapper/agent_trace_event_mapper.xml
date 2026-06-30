@@ -26,19 +26,19 @@
         <result column="create_time" property="createTime"/>
     </resultMap>
 
-    <insert id="insert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO" useGeneratedKeys="true" keyProperty="id">
+    <select id="insertNext" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO"
+            resultType="java.lang.Long" affectData="true" flushCache="true">
         INSERT INTO agent_trace_event
         (trace_id, root_run_id, run_id, parent_run_id, span_id, parent_span_id, sequence_no,
          event_type, node, status, duration_ms, summary, error_code, error_message,
          token_usage_json, cost_json, metadata_json, replayable, sensitive_redacted)
-        VALUES
-        (#{traceId}, #{rootRunId}, #{runId}, #{parentRunId}, #{spanId}, #{parentSpanId}, #{sequenceNo},
-         #{eventType}, #{node}, #{status}, #{durationMs}, #{summary}, #{errorCode}, #{errorMessage},
-         #{tokenUsageJson}, #{costJson}, #{metadataJson}, #{replayable}, #{sensitiveRedacted})
-    </insert>
-
-    <select id="selectMaxSequenceNo" resultType="java.lang.Long">
-        SELECT MAX(sequence_no) FROM agent_trace_event WHERE run_id = #{runId}
+        SELECT #{traceId}, #{rootRunId}, #{runId}, #{parentRunId}, #{spanId}, #{parentSpanId},
+               COALESCE(MAX(sequence_no), 0) + 1,
+               #{eventType}, #{node}, #{status}, #{durationMs}, #{summary}, #{errorCode}, #{errorMessage},
+               #{tokenUsageJson}, #{costJson}, #{metadataJson}, #{replayable}, #{sensitiveRedacted}
+        FROM agent_trace_event
+        WHERE run_id = #{runId}
+        RETURNING sequence_no
     </select>
 
     <select id="selectByRunId" resultMap="AgentTraceEventMap">

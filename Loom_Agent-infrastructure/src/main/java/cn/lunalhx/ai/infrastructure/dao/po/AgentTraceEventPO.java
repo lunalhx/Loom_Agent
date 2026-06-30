@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentTraceEventPO {
@@ -27,6 +27,6 @@ public class AgentTraceEventPO {
     private String metadataJson;
     private Boolean replayable;
     private Boolean sensitiveRedacted;
-    private LocalDateTime createTime;
+    private Instant createTime;
 
 }

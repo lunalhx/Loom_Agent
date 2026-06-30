@@ -48,3 +48,7 @@ docs/env/*.local
 Loom_Agent-app/data/
 data/
 *.log
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

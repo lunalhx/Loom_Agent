@@ -2,7 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao.po;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Data
 public class AgentWorkspaceUndoLockPO {
@@ -11,6 +11,6 @@ public class AgentWorkspaceUndoLockPO {
     private String lockId;
     private String workspace;
     private String holderRunId;
-    private LocalDateTime acquiredAt;
-    private LocalDateTime expiresAt;
+    private Instant acquiredAt;
+    private Instant expiresAt;
 }
