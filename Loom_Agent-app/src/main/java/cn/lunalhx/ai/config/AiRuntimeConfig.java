@@ -64,6 +64,7 @@ import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
+import cn.lunalhx.ai.infrastructure.mcp.McpClientManager;
 import cn.lunalhx.ai.infrastructure.metrics.MicrometerAgentMetrics;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
@@ -124,13 +125,25 @@ public class AiRuntimeConfig {
     }
 
     @Bean
-    public ToolRegistry toolRegistry(List<AgentTool> tools) {
-        return new ToolRegistry(tools);
+    public ToolRegistry toolRegistry(List<AgentTool> tools,
+                                     ObjectProvider<McpClientManager> mcpClientManagerProvider) {
+        List<AgentTool> allTools = new ArrayList<>(tools);
+        McpClientManager mcpManager = mcpClientManagerProvider.getIfAvailable();
+        if (mcpManager != null) {
+            allTools.addAll(mcpManager.tools());
+        }
+        return new ToolRegistry(allTools);
     }
 
     @Bean
-    public RoleToolRegistryFactory roleToolRegistryFactory(List<AgentTool> tools) {
-        return new RoleToolRegistryFactory(tools);
+    public RoleToolRegistryFactory roleToolRegistryFactory(List<AgentTool> tools,
+                                                            ObjectProvider<McpClientManager> mcpClientManagerProvider) {
+        List<AgentTool> allTools = new ArrayList<>(tools);
+        McpClientManager mcpManager = mcpClientManagerProvider.getIfAvailable();
+        if (mcpManager != null) {
+            allTools.addAll(mcpManager.tools());
+        }
+        return new RoleToolRegistryFactory(allTools);
     }
 
     @Bean
