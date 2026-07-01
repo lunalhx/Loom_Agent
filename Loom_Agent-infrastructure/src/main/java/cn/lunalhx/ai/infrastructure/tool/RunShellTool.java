@@ -14,7 +14,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
@@ -35,14 +34,6 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     private final BackgroundProcessManager backgroundProcessManager;
     private final BackgroundShellTaskRepository taskRepository;
 
-    public RunShellTool(AgentRuntimeProperties properties) {
-        super(properties);
-        this.commandExecutor = new LocalCommandExecutor();
-        this.backgroundProcessManager = null;
-        this.taskRepository = null;
-    }
-
-    @Autowired
     public RunShellTool(AgentRuntimeProperties properties, WorkspacePort workspacePort,
                         CommandExecutor commandExecutor, BackgroundProcessManager backgroundProcessManager,
                         BackgroundShellTaskRepository taskRepository) {

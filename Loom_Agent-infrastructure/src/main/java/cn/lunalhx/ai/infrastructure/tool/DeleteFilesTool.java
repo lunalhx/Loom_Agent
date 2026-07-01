@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -38,11 +37,6 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
     private static final long LARGE_DELETE_BYTES = 10L * 1024 * 1024;
     private static final String FINGERPRINT_VERSION = "delete-manifest-v1";
 
-    public DeleteFilesTool(AgentRuntimeProperties properties) {
-        super(properties);
-    }
-
-    @Autowired
     public DeleteFilesTool(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
         super(properties, workspacePort);
     }

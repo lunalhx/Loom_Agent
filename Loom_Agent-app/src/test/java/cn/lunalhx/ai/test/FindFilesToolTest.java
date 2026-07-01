@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.infrastructure.tool.FindFilesTool;
+import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.Rule;
@@ -242,7 +243,7 @@ public class FindFilesToolTest {
     }
 
     private FindFilesTool tool() {
-        return new FindFilesTool(properties());
+        return new FindFilesTool(properties(), new LocalWorkspacePort());
     }
 
     private ObjectNode findInput(String pattern) {

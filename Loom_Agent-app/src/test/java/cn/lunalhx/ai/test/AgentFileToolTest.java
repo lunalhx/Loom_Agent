@@ -1,19 +1,27 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryBackgroundShellTaskRepository;
+import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
 import cn.lunalhx.ai.infrastructure.tool.GitOpTool;
 import cn.lunalhx.ai.infrastructure.tool.ListDirectoryTool;
+import cn.lunalhx.ai.infrastructure.tool.LocalCommandExecutor;
+import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import cn.lunalhx.ai.infrastructure.tool.ReadFileTool;
 import cn.lunalhx.ai.infrastructure.tool.ReplaceInFileTool;
 import cn.lunalhx.ai.infrastructure.tool.RunShellTool;
 import cn.lunalhx.ai.infrastructure.tool.WriteFileTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -25,6 +33,7 @@ import java.nio.file.Path;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 public class AgentFileToolTest {
 
@@ -32,6 +41,25 @@ public class AgentFileToolTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private LocalWorkspacePort workspacePort;
+    private BackgroundProcessManager processManager;
+    private LocalCommandExecutor commandExecutor;
+    private InMemoryBackgroundShellTaskRepository taskRepository;
+
+    @Before
+    public void setUp() throws Exception {
+        workspacePort = new LocalWorkspacePort();
+        taskRepository = new InMemoryBackgroundShellTaskRepository();
+        Path logDir = temporaryFolder.newFolder("bg-logs").toPath();
+        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2);
+        commandExecutor = new LocalCommandExecutor(processManager);
+    }
+
+    @After
+    public void tearDown() {
+        processManager.shutdown();
+    }
 
     @Test
     public void listDirShouldHideBlockedDirectories() throws Exception {
@@ -43,7 +71,7 @@ public class AgentFileToolTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("path", ".");
         input.put("maxDepth", 3);
-        ToolResult result = new ListDirectoryTool(properties()).call(call("list_dir", input));
+        ToolResult result = new ListDirectoryTool(properties(), workspacePort).call(call("list_dir", input));
 
         assertTrue(result.isSuccess());
         assertTrue(result.getObservation().contains("src"));
@@ -57,7 +85,7 @@ public class AgentFileToolTest {
 
         ObjectNode input = objectMapper.createObjectNode();
         input.put("path", "docs/env/.env");
-        ToolResult result = new ReadFileTool(properties()).call(call("read_file", input));
+        ToolResult result = new ReadFileTool(properties(), workspacePort).call(call("read_file", input));
 
         assertFalse(result.isSuccess());
         assertTrue(result.getObservation().contains("read_file_failed"));
@@ -72,7 +100,7 @@ public class AgentFileToolTest {
         input.put("oldText", "int n = 1");
         input.put("newText", "int n = 2");
         input.put("expectedOccurrences", 1);
-        ReplaceInFileTool tool = new ReplaceInFileTool(properties());
+        ReplaceInFileTool tool = new ReplaceInFileTool(properties(), workspacePort);
 
         ToolPolicyDecision policy = tool.policy(call("replace_in_file", input));
         assertTrue(policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM);
@@ -100,7 +128,7 @@ public class AgentFileToolTest {
         input.put("newText", "\"hello,loom!\"");
         input.put("expectedOccurrences", 1);
 
-        ToolPolicyDecision policy = new ReplaceInFileTool(properties()).policy(call("replace_in_file", input));
+        ToolPolicyDecision policy = new ReplaceInFileTool(properties(), workspacePort).policy(call("replace_in_file", input));
         ApprovalDiff diff = policy.getDiff();
 
         assertTrue(diff != null);
@@ -119,7 +147,8 @@ public class AgentFileToolTest {
 
     @Test
     public void runShellShouldClassifyMavenTestAndDangerousCommand() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = new RunShellTool(properties(), workspacePort,
+                mock(CommandExecutor.class), mock(BackgroundProcessManager.class), mock(BackgroundShellTaskRepository.class));
 
         ObjectNode mavenInput = objectMapper.createObjectNode();
         mavenInput.put("command", "mvn -pl Loom_Agent-app -am test");
@@ -134,7 +163,8 @@ public class AgentFileToolTest {
 
     @Test
     public void runShellShouldPreserveInterruptFlagAndReturnInterruptedError() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = new RunShellTool(properties(), workspacePort,
+                commandExecutor, processManager, taskRepository);
 
         Thread.currentThread().interrupt();
         try {
@@ -152,7 +182,7 @@ public class AgentFileToolTest {
 
     @Test
     public void gitOpShouldClassifyReadWriteAndHighRiskOperations() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = new GitOpTool(properties(), workspacePort, mock(CommandExecutor.class));
 
         ObjectNode statusInput = objectMapper.createObjectNode();
         statusInput.put("operation", "status");
@@ -185,7 +215,8 @@ public class AgentFileToolTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "init");
 
-        ToolResult result = new GitOpTool(properties(workspace)).call(call("git_op", input, workspace));
+        ToolResult result = new GitOpTool(properties(workspace), workspacePort, commandExecutor)
+                .call(call("git_op", input, workspace));
 
         assertTrue(result.getObservation(), result.isSuccess());
         assertTrue(Files.isDirectory(workspace.resolve(".git")));
@@ -198,7 +229,7 @@ public class AgentFileToolTest {
 
         ObjectNode input = objectMapper.createObjectNode();
         input.put("path", "../outside.txt");
-        ToolResult result = new ReadFileTool(properties(workspace)).call(call("read_file", input, workspace));
+        ToolResult result = new ReadFileTool(properties(workspace), workspacePort).call(call("read_file", input, workspace));
 
         assertFalse(result.isSuccess());
         assertTrue(result.getObservation().contains("路径越权"));
@@ -212,7 +243,7 @@ public class AgentFileToolTest {
         input.put("path", "../escape.txt");
         input.put("content", "nope");
         input.put("mode", "create");
-        ToolResult result = new WriteFileTool(properties(workspace)).call(call("write_file", input, workspace));
+        ToolResult result = new WriteFileTool(properties(workspace), workspacePort).call(call("write_file", input, workspace));
 
         assertFalse(result.isSuccess());
         assertFalse(Files.exists(temporaryFolder.getRoot().toPath().resolve("escape.txt")));
@@ -226,7 +257,9 @@ public class AgentFileToolTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "pwd");
         input.put("cwd", "..");
-        ToolResult result = new RunShellTool(properties(workspace)).call(call("run_shell", input, workspace));
+        ToolResult result = new RunShellTool(properties(workspace), workspacePort,
+                commandExecutor, processManager, taskRepository)
+                .call(call("run_shell", input, workspace));
 
         assertFalse(result.isSuccess());
         assertTrue(result.getObservation().contains("路径越权"));
@@ -240,7 +273,8 @@ public class AgentFileToolTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "diff");
         input.put("path", "../outside.txt");
-        ToolResult result = new GitOpTool(properties(workspace)).call(call("git_op", input, workspace));
+        ToolResult result = new GitOpTool(properties(workspace), workspacePort, commandExecutor)
+                .call(call("git_op", input, workspace));
 
         assertFalse(result.isSuccess());
         assertTrue(result.getObservation().contains("路径越权"));

@@ -13,10 +13,6 @@ public class LocalCommandExecutor implements CommandExecutor {
 
     private final BackgroundProcessManager processManager;
 
-    public LocalCommandExecutor() {
-        this.processManager = null;
-    }
-
     public LocalCommandExecutor(BackgroundProcessManager processManager) {
         this.processManager = processManager;
     }

@@ -23,10 +23,6 @@ abstract class FileSystemToolSupport {
     protected final AgentRuntimeProperties properties;
     private final WorkspacePort workspacePort;
 
-    protected FileSystemToolSupport(AgentRuntimeProperties properties) {
-        this(properties, new LocalWorkspacePort());
-    }
-
     protected FileSystemToolSupport(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
         this.properties = properties;
         this.workspacePort = workspacePort;

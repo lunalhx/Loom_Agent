@@ -1,12 +1,16 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
 import cn.lunalhx.ai.infrastructure.tool.DeleteFilesTool;
 import cn.lunalhx.ai.infrastructure.tool.GitOpTool;
+import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import cn.lunalhx.ai.infrastructure.tool.RunShellTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -24,6 +28,7 @@ import java.util.stream.IntStream;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 public class DeleteFilesAndHighRiskPolicyTest {
 
@@ -31,6 +36,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final LocalWorkspacePort workspacePort = new LocalWorkspacePort();
 
     // ==================== DeleteFilesTool tests ====================
 
@@ -90,9 +96,8 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
         AgentRuntimeProperties props = properties();
         props.setHighRiskPolicy("DENY");
-        DeleteFilesTool tool = new DeleteFilesTool(props);
+        DeleteFilesTool tool = new DeleteFilesTool(props, workspacePort);
         ToolPolicyDecision policy = tool.policy(call(deleteInput("deny.txt")));
-        // Policy returns HIGH_RISK_CONFIRM; DENY is enforced at ApprovalGateNode level
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
     }
 
@@ -103,8 +108,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
         AgentRuntimeProperties props = properties();
         props.setHighRiskPolicy("ALLOW");
-        DeleteFilesTool tool = new DeleteFilesTool(props);
-        // Tool policy always returns HIGH_RISK_CONFIRM; ALLOW is enforced at ApprovalGateNode
+        DeleteFilesTool tool = new DeleteFilesTool(props, workspacePort);
         ToolPolicyDecision policy = tool.policy(call(deleteInput("allow.txt")));
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
     }
@@ -204,7 +208,6 @@ public class DeleteFilesAndHighRiskPolicyTest {
     public void deletePathsMustNotBeEmpty() throws Exception {
         ObjectNode input = objectMapper.createObjectNode();
         ArrayNode arr = input.putArray("paths");
-        // empty array
         ToolPolicyDecision policy = tool().policy(call("delete_files", input));
         assertTrue(policy.hasValidationFailure());
         assertEquals("invalid_path", policy.getValidationErrorCode());
@@ -226,9 +229,6 @@ public class DeleteFilesAndHighRiskPolicyTest {
         Path exists = temporaryFolder.getRoot().toPath().resolve("exists.txt");
         Files.writeString(exists, "real", StandardCharsets.UTF_8);
 
-        // Need to bypass preflight to test partial deletion
-        // Actually the preflight will catch the missing file before any deletion
-        // So we test that preflight prevents partial execution
         ToolResult result = tool().call(call(deleteInput("exists.txt", "gone.txt")));
         assertFalse(result.isSuccess());
         assertTrue(result.getObservation().contains("不存在"));
@@ -273,7 +273,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellFindShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "find . -name '*.java'");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -283,7 +283,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellPythonShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "python3 script.py");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -293,7 +293,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellPython3ShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "python script.py");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -303,7 +303,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellRmFileShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "rm file.txt");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -313,7 +313,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellRmRfShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "rm -rf .");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -322,7 +322,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellRmdirShouldBeDeniedAndPointToDeleteTool() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "rmdir old-module");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -332,7 +332,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellGitRmShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "git rm file.txt");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -341,7 +341,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellGitInitShouldRequireWriteConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "git init");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -350,7 +350,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellGitInitWithArgumentsShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "git init nested");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -361,7 +361,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellMkdirShouldRequireWriteConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "mkdir foo");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -370,7 +370,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellCpShouldRequireWriteConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "cp a b");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -379,7 +379,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellCurlShouldRequireHighRiskConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "curl http://example.com");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -388,7 +388,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellShDashCShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "sh -c echo x");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -397,7 +397,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellEnvWithCommandShouldBeDenied() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "env rm -rf target");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -407,7 +407,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellPureEnvShouldBeReadOnly() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "env");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -416,7 +416,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellAbsoluteRmShouldBeDeniedByBasename() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "/bin/rm x");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -426,7 +426,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellPathUnknownScriptShouldBeHighRiskConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "./unknown.sh");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -436,7 +436,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellMvnNonTestShouldBeHighRiskConfirm() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "mvn compile");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -446,7 +446,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellLsShouldBeReadOnly() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "ls -la");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -455,7 +455,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void runShellCatShouldBeReadOnly() throws Exception {
-        RunShellTool tool = new RunShellTool(properties());
+        RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "cat file.txt");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
@@ -466,7 +466,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitPushShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "push");
         ToolPolicyDecision policy = tool.policy(call("git_op", input));
@@ -475,7 +475,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitForcePushToMainShouldBeAlwaysDenied() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "push");
         input.put("force", true);
@@ -487,7 +487,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitPushToFeatureBranchShouldRequireApproval() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "push");
         input.put("remote", "origin");
@@ -498,7 +498,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitResetShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "reset");
         ToolPolicyDecision policy = tool.policy(call("git_op", input));
@@ -507,18 +507,17 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitResetHardShouldBeRejectedInCall() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
-        // reset --hard is detected via the tokens "git reset --hard"
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "reset");
-        input.put("force", true); // buildResetCommand rejects force=true
+        input.put("force", true);
         ToolResult result = tool.call(call("git_op", input));
         assertFalse(result.isSuccess());
     }
 
     @Test
     public void gitCleanShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "clean");
         input.put("dryRun", true);
@@ -528,7 +527,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitRebaseShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "rebase");
         input.put("branch", "main");
@@ -538,7 +537,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitCheckoutShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "checkout");
         input.put("branch", "feature");
@@ -548,19 +547,17 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitCheckoutFlagBBranchShouldBeAcceptedByPolicy() throws Exception {
-        // -b (lowercase) creates a new branch — this is HIGH_RISK_CONFIRM, not denied
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("operation", "checkout");
         input.put("branch", "-b");
-        // buildCheckoutCommand rejects it as a branch name, but policy passes
         ToolPolicyDecision policy = tool.policy(call("git_op", input));
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
     }
 
     @Test
     public void gitReadOnlyOpsShouldBeReadOnly() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         for (String op : new String[]{"status", "diff", "log"}) {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("operation", op);
@@ -572,7 +569,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     @Test
     public void gitWriteOpsShouldRequireWriteConfirm() throws Exception {
-        GitOpTool tool = new GitOpTool(properties());
+        GitOpTool tool = gitOpTool();
         for (String op : new String[]{"init", "add", "commit"}) {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("operation", op);
@@ -592,38 +589,36 @@ public class DeleteFilesAndHighRiskPolicyTest {
         Path file = temporaryFolder.getRoot().toPath().resolve("policy-test.txt");
         Files.writeString(file, "test", StandardCharsets.UTF_8);
 
-        // DENY policy — tool still returns HIGH_RISK_CONFIRM (enforced at gate)
         AgentRuntimeProperties denyProps = properties();
         denyProps.setHighRiskPolicy("DENY");
-        DeleteFilesTool denyTool = new DeleteFilesTool(denyProps);
+        DeleteFilesTool denyTool = new DeleteFilesTool(denyProps, workspacePort);
         ToolPolicyDecision denyResult = denyTool.policy(call(deleteInput("policy-test.txt")));
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, denyResult.getPermissionLevel());
 
-        // ALLOW policy — tool still returns HIGH_RISK_CONFIRM (enforced at gate)
         AgentRuntimeProperties allowProps = properties();
         allowProps.setHighRiskPolicy("ALLOW");
-        DeleteFilesTool allowTool = new DeleteFilesTool(allowProps);
+        DeleteFilesTool allowTool = new DeleteFilesTool(allowProps, workspacePort);
         ToolPolicyDecision allowResult = allowTool.policy(call(deleteInput("policy-test.txt")));
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, allowResult.getPermissionLevel());
 
-        // CONFIRM policy — tool returns HIGH_RISK_CONFIRM
         AgentRuntimeProperties confirmProps = properties();
         confirmProps.setHighRiskPolicy("CONFIRM");
-        DeleteFilesTool confirmTool = new DeleteFilesTool(confirmProps);
+        DeleteFilesTool confirmTool = new DeleteFilesTool(confirmProps, workspacePort);
         ToolPolicyDecision confirmResult = confirmTool.policy(call(deleteInput("policy-test.txt")));
         assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, confirmResult.getPermissionLevel());
     }
 
     @Test
     public void highRiskDenyOperationsAlwaysStayDenied() throws Exception {
-        // HIGH_RISK_DENY operations can never be allowed, regardless of policy setting
         for (String policy : new String[]{"DENY", "CONFIRM", "ALLOW"}) {
             AgentRuntimeProperties props = properties();
             props.setHighRiskPolicy(policy);
 
             ObjectNode input = objectMapper.createObjectNode();
             input.put("command", "rm -rf /");
-            RunShellTool tool = new RunShellTool(props);
+            RunShellTool tool = new RunShellTool(props, workspacePort,
+                    mock(CommandExecutor.class), mock(BackgroundProcessManager.class),
+                    mock(BackgroundShellTaskRepository.class));
             ToolPolicyDecision decision = tool.policy(call("run_shell", input));
             assertEquals("rm should always be HIGH_RISK_DENY with policy=" + policy,
                     ToolPermissionLevel.HIGH_RISK_DENY, decision.getPermissionLevel());
@@ -633,7 +628,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
     @Test
     public void largeFileShouldBeDeletable() throws Exception {
         Path largeFile = temporaryFolder.getRoot().toPath().resolve("large.bin");
-        byte[] data = new byte[300_000]; // > fileMaxBytes (200000)
+        byte[] data = new byte[300_000];
         Files.write(largeFile, data);
 
         DeleteFilesTool tool = tool();
@@ -729,7 +724,17 @@ public class DeleteFilesAndHighRiskPolicyTest {
     // ==================== helpers ====================
 
     private DeleteFilesTool tool() {
-        return new DeleteFilesTool(properties());
+        return new DeleteFilesTool(properties(), workspacePort);
+    }
+
+    private RunShellTool runShellTool() {
+        return new RunShellTool(properties(), workspacePort,
+                mock(CommandExecutor.class), mock(BackgroundProcessManager.class),
+                mock(BackgroundShellTaskRepository.class));
+    }
+
+    private GitOpTool gitOpTool() {
+        return new GitOpTool(properties(), workspacePort, mock(CommandExecutor.class));
     }
 
     private ObjectNode deleteInput(String... paths) {

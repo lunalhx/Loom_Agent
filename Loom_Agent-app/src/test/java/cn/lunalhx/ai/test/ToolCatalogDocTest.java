@@ -3,7 +3,6 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.ContextRecallTool;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
@@ -52,6 +51,33 @@ public class ToolCatalogDocTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private CodeSearchTool codeSearchTool;
+
+    @Autowired
+    private DeleteFilesTool deleteFilesTool;
+
+    @Autowired
+    private FindFilesTool findFilesTool;
+
+    @Autowired
+    private GitOpTool gitOpTool;
+
+    @Autowired
+    private ListDirectoryTool listDirectoryTool;
+
+    @Autowired
+    private ReadFileTool readFileTool;
+
+    @Autowired
+    private ReplaceInFileTool replaceInFileTool;
+
+    @Autowired
+    private RunShellTool runShellTool;
+
+    @Autowired
+    private WriteFileTool writeFileTool;
+
     @MockBean
     private AgentMemoryRepository agentMemoryRepository;
 
@@ -94,18 +120,16 @@ public class ToolCatalogDocTest {
     }
 
     private List<ToolSpec> collectStaticSpecs() {
-        AgentRuntimeProperties props = new AgentRuntimeProperties();
         List<ToolSpec> specs = new ArrayList<>();
-        // Built-in tools (FileSystemToolSupport subclasses)
-        specs.add(new CodeSearchTool(props).spec());
-        specs.add(new DeleteFilesTool(props).spec());
-        specs.add(new FindFilesTool(props).spec());
-        specs.add(new GitOpTool(props).spec());
-        specs.add(new ListDirectoryTool(props).spec());
-        specs.add(new ReadFileTool(props).spec());
-        specs.add(new ReplaceInFileTool(props).spec());
-        specs.add(new RunShellTool(props).spec());
-        specs.add(new WriteFileTool(props).spec());
+        specs.add(codeSearchTool.spec());
+        specs.add(deleteFilesTool.spec());
+        specs.add(findFilesTool.spec());
+        specs.add(gitOpTool.spec());
+        specs.add(listDirectoryTool.spec());
+        specs.add(readFileTool.spec());
+        specs.add(replaceInFileTool.spec());
+        specs.add(runShellTool.spec());
+        specs.add(writeFileTool.spec());
         // Standalone tools
         specs.add(new TodoWriteTool().spec());
         specs.add(new ContextRecallTool(contextArtifactRepository, contextBlobStore).spec());

@@ -7,7 +7,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -30,11 +29,6 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
     private static final int MIN_MAX_DEPTH = 1;
     private static final int MAX_MAX_DEPTH = 50;
 
-    public FindFilesTool(AgentRuntimeProperties properties) {
-        super(properties);
-    }
-
-    @Autowired
     public FindFilesTool(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
         super(properties, workspacePort);
     }
