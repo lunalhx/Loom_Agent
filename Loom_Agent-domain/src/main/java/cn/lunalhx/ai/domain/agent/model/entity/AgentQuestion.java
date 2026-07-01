@@ -31,5 +31,6 @@ public class AgentQuestion {
     private Boolean subAgentSpawnAllowed;
     private String traceId;
     private List<String> skills;
+    private String model;
 
 }

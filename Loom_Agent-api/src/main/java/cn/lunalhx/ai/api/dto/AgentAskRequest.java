@@ -42,4 +42,7 @@ public class AgentAskRequest {
     @Size(max = 20, message = "skills 最多 20 个")
     private List<@Size(max = 64, message = "skill name 最长 64 个字符") String> skills;
 
+    @Pattern(regexp = "deepseek-v4-flash|deepseek-v4-pro", message = "model 只支持 deepseek-v4-flash 或 deepseek-v4-pro")
+    private String model;
+
 }

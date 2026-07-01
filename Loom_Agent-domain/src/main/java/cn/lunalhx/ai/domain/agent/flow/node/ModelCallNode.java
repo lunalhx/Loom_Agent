@@ -70,7 +70,9 @@ public class ModelCallNode extends AbstractAgentNode {
         long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
         int requestedMaxTokens = 0;
         boolean escalated = false;
-        String requestedModel = context.getRecoveryModelOverride();
+        String requestedModel = StringUtils.defaultIfBlank(
+                context.getRecoveryModelOverride(),
+                context.getCurrentModel());
         String currentPrompt = context.getCurrentPrompt();
         boolean reminderTriggered = isTodoUpdateReminderTriggered(context);
         try {
