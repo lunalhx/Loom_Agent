@@ -12,7 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
-import cn.lunalhx.ai.domain.agent.service.AgentEventFactory;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentEventFactory;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import org.junit.Test;

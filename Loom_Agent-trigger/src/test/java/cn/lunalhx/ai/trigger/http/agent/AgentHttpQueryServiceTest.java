@@ -11,7 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
-import cn.lunalhx.ai.domain.agent.service.ReplayService;
+import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import org.junit.Before;
 import org.junit.Test;

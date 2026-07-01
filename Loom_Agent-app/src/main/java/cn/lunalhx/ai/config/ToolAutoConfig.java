@@ -1,7 +1,7 @@
 package cn.lunalhx.ai.config;
 
-import cn.lunalhx.ai.domain.agent.service.ContextRecallTool;
-import cn.lunalhx.ai.domain.agent.service.RoleToolRegistryFactory;
+import cn.lunalhx.ai.domain.agent.service.context.ContextRecallTool;
+import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;

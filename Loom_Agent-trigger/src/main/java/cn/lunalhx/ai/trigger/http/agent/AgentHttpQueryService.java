@@ -10,7 +10,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
-import cn.lunalhx.ai.domain.agent.service.ReplayService;
+import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

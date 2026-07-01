@@ -14,7 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
-import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -25,7 +25,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
-import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
 import org.apache.commons.lang3.StringUtils;
 
 import java.net.http.HttpTimeoutException;

@@ -3,9 +3,9 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
-import cn.lunalhx.ai.domain.agent.service.ContextWindowManager;
-import cn.lunalhx.ai.domain.agent.service.DefaultAgentLoopService;
-import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
+import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -188,9 +188,15 @@ public class ArchitectureRegressionTest {
     @ArchTest
     public static final ArchRule agent_flow_factory_must_not_depend_on_concrete_hooks =
             noClasses().that().haveFullyQualifiedName(
-                            cn.lunalhx.ai.domain.agent.service.AgentFlowFactory.class.getName())
+                            cn.lunalhx.ai.domain.agent.service.execution.AgentFlowFactory.class.getName())
                     .should().dependOnClassesThat()
                     .resideInAnyPackage("cn.lunalhx.ai.runtime.hook..");
+
+    // ---- Rule 15: 禁止类直接落入 service 根包（必须位于职责子包） ----
+
+    @ArchTest
+    public static final ArchRule no_classes_in_root_service_package =
+            noClasses().should().resideInAnyPackage("cn.lunalhx.ai.domain.agent.service");
 
     // ---- 自定义 condition 实现 ----
 

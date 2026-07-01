@@ -21,7 +21,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
-import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
