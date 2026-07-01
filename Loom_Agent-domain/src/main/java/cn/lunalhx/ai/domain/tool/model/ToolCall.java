@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.nio.file.Path;
+import java.util.List;
 
 @Data
 @Builder
@@ -22,6 +23,7 @@ public class ToolCall {
     private String rootRunId;
     private String conversationId;
     private String approvedPolicyFingerprint;
+    private List<String> activeSkillNames;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

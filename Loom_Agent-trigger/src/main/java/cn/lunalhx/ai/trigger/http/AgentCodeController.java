@@ -21,6 +21,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.SkillSource;
 import cn.lunalhx.ai.domain.agent.model.valobj.SkillTrustState;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
@@ -57,6 +58,7 @@ public class AgentCodeController {
     private final AgentUndoHttpService undoHttpService;
     private final SkillRepository skillRepository;
     private final AgentWorkspaceResolver workspaceResolver;
+    private final AgentRuntimeProperties agentRuntimeProperties;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
@@ -180,6 +182,15 @@ public class AgentCodeController {
 
     @PostMapping("/skills/query")
     public Response<List<SkillQueryResponse>> querySkills(@RequestBody(required = false) SkillQueryRequest request) {
+        AgentRuntimeProperties.SkillProperties skillProps = agentRuntimeProperties.getSkills();
+        if (skillProps != null && Boolean.FALSE.equals(skillProps.getEnabled())) {
+            return Response.<List<SkillQueryResponse>>builder()
+                    .code("0000")
+                    .info("ok")
+                    .data(List.of())
+                    .build();
+        }
+
         String workspace = request == null ? null : request.getWorkspace();
         AgentWorkspace resolved = workspaceResolver.resolve(workspace);
         SkillCatalog catalog = skillRepository.discover(resolved.getRoot());
@@ -199,7 +210,7 @@ public class AgentCodeController {
                     .build());
         }
         return Response.<List<SkillQueryResponse>>builder()
-                .code("0")
+                .code("0000")
                 .info("ok")
                 .data(items)
                 .build();

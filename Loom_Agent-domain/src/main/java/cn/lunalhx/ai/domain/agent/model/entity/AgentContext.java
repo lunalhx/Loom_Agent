@@ -112,6 +112,8 @@ public class AgentContext {
     private SkillCatalog availableSkillCatalog;
     private List<SkillActivation> activatedSkills;
     private String skillCatalogText;
+    private List<String> approvedSkillNames;
+    private List<String> rejectedSkillNames;
 
     public long nextTraceSequenceNo() {
         traceSequenceNo++;

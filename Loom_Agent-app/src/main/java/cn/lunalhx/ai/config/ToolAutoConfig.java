@@ -70,11 +70,6 @@ public class ToolAutoConfig {
     }
 
     @Bean
-    public SkillTools.ActivateSkillTool activateSkillTool(SkillRepository skillRepository) {
-        return new SkillTools.ActivateSkillTool(skillRepository);
-    }
-
-    @Bean
     public SkillTools.ReadSkillResourceTool readSkillResourceTool(SkillRepository skillRepository) {
         return new SkillTools.ReadSkillResourceTool(skillRepository);
     }

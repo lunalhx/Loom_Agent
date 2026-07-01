@@ -22,6 +22,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class ToolDispatchNode extends AbstractAgentNode {
 
@@ -53,6 +54,10 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
                 .approvedPolicyFingerprint(context.getApprovedPolicyFingerprint())
+                .activeSkillNames(context.getActivatedSkills() == null ? List.of()
+                        : context.getActivatedSkills().stream()
+                                .map(cn.lunalhx.ai.domain.agent.model.entity.SkillActivation::name)
+                                .collect(Collectors.toList()))
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);
         boolean resumedApproval = StringUtils.equals(context.getApprovedTool(), decision.getTool());

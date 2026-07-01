@@ -30,13 +30,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public class SkillBootstrapNode extends AbstractAgentNode {
 
     private static final Logger log = LoggerFactory.getLogger(SkillBootstrapNode.class);
 
     private static final int CATALOG_MAX_CHARS = 8000;
-    private static final String APPROVAL_META_SKILL_KEY = "__skill_name";
+    private static final String APPROVAL_META_KIND = "skill_activation";
+    private static final Pattern SKILL_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$");
 
     private final SkillRepository skillRepository;
     private final ApprovalStore approvalStore;
@@ -59,7 +61,8 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
     @Override
     protected NodeResult doApply(AgentContext context) {
-        if (skillRepository == null) {
+        // 1. Check if skill feature is enabled
+        if (skillRepository == null || !isSkillEnabled()) {
             return NodeResult.next(AgentNodeNames.START, List.of());
         }
 
@@ -68,78 +71,173 @@ public class SkillBootstrapNode extends AbstractAgentNode {
             return NodeResult.next(AgentNodeNames.START, List.of());
         }
 
-        // 1. Discover catalog (cached per run)
+        // 2. Discover catalog (cached per run)
         if (context.getAvailableSkillCatalog() == null) {
             SkillCatalog catalog = skillRepository.discover(workspaceRoot);
             context.setAvailableSkillCatalog(catalog);
             context.setSkillCatalogText(catalog.renderCatalogText(CATALOG_MAX_CHARS));
         }
 
-        // 2. Initialize activatedSkills if null
+        // 3. Initialize activation state
         if (context.getActivatedSkills() == null) {
             context.setActivatedSkills(new ArrayList<>());
         }
+        if (context.getApprovedSkillNames() == null) {
+            context.setApprovedSkillNames(new ArrayList<>());
+        }
+        if (context.getRejectedSkillNames() == null) {
+            context.setRejectedSkillNames(new ArrayList<>());
+        }
 
-        // 3. Auto-activate all user-level skills
         SkillCatalog catalog = context.getAvailableSkillCatalog();
-        if (catalog != null) {
-            for (SkillDescriptor skill : catalog.skills()) {
-                if (skill.source() == SkillSource.USER && !isActivated(context, skill.name())) {
-                    activateSkill(context, skill, workspaceRoot);
-                }
-            }
+        if (catalog == null) {
+            return NodeResult.next(AgentNodeNames.START, List.of());
         }
 
-        // 4. Process explicit skill requests ($skill-name in question or requestedSkills)
+        // 4. Resolve target skills based on requestedSkills semantics
+        // null = not provided by client → activate all user skills (backward compat)
+        // empty = explicitly no skills
+        // non-empty = only activate those named
         List<String> requested = context.getRequestedSkills();
-        if (requested != null) {
-            for (String skillName : requested) {
-                if (isActivated(context, skillName)) {
-                    continue;
+        List<String> targetNames;
+        List<AgentEvent> activationEvents = new ArrayList<>();
+        if (requested == null) {
+            // Old client: auto-activate all user-level skills
+            targetNames = new ArrayList<>();
+            for (SkillDescriptor skill : catalog.skills()) {
+                if (skill.source() == SkillSource.USER) {
+                    targetNames.add(skill.name());
                 }
-                SkillDescriptor descriptor = skillRepository.resolve(skillName, workspaceRoot);
-                if (descriptor == null) {
-                    log.warn("Requested skill not found: {}", skillName);
-                    continue;
-                }
-                if (descriptor.source() == SkillSource.USER) {
-                    activateSkill(context, descriptor, workspaceRoot);
-                } else if (isSubAgent(context)) {
-                    // Sub-agents inherit project skills without needing re-approval
-                    activateSkill(context, descriptor, workspaceRoot);
-                } else {
-                    // Project skill — needs approval
-                    return createApproval(context, descriptor, workspaceRoot);
-                }
+            }
+        } else {
+            targetNames = new ArrayList<>(requested);
+        }
+
+        // 5. Validate skill names
+        for (String name : targetNames) {
+            if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
+                return NodeResult.terminal(List.of(skillErrorEvent(context, "invalid_skill_name",
+                        "非法的 Skill 名称: " + name)));
             }
         }
 
-        return NodeResult.next(AgentNodeNames.START, List.of());
+        // Deduplicate keeping order
+        List<String> uniqueNames = targetNames.stream().distinct().toList();
+
+        // Check existence
+        for (String name : uniqueNames) {
+            if (skillRepository.resolve(name, workspaceRoot) == null) {
+                return NodeResult.terminal(List.of(skillErrorEvent(context, "skill_not_found",
+                        "Skill 不存在: " + name)));
+            }
+        }
+
+        // 6. Immediately activate user-level skills (no approval needed)
+        List<SkillDescriptor> projectSkills = new ArrayList<>();
+        for (String name : uniqueNames) {
+            if (isActivated(context, name)) {
+                continue;
+            }
+            SkillDescriptor descriptor = skillRepository.resolve(name, workspaceRoot);
+            if (descriptor == null) {
+                continue;
+            }
+            if (descriptor.source() == SkillSource.USER || isSubAgent(context)) {
+                // Sub-agents inherit all skills without re-approval
+                activationEvents.add(activateSkill(context, descriptor, workspaceRoot));
+            } else {
+                projectSkills.add(descriptor);
+            }
+        }
+
+        // 7. Handle project skills
+        if (projectSkills.isEmpty()) {
+            return NodeResult.next(AgentNodeNames.START, activationEvents);
+        }
+
+        // Filter out already approved or rejected
+        List<SkillDescriptor> pendingProjectSkills = new ArrayList<>();
+        for (SkillDescriptor sd : projectSkills) {
+            if (context.getApprovedSkillNames().contains(sd.name())) {
+                // Already approved via batch — activate now
+                activationEvents.add(activateSkill(context, sd, workspaceRoot));
+            } else if (!context.getRejectedSkillNames().contains(sd.name())) {
+                pendingProjectSkills.add(sd);
+            }
+        }
+
+        if (pendingProjectSkills.isEmpty()) {
+            return NodeResult.next(AgentNodeNames.START, activationEvents);
+        }
+
+        // 8. Create single batch approval for all pending project skills
+        // Include activation events so skill_activated events are sent for
+        // any user/sub-agent skills that were activated inline
+        NodeResult approvalResult = createBatchApproval(context, pendingProjectSkills, workspaceRoot);
+        List<AgentEvent> allEvents = new ArrayList<>(activationEvents);
+        allEvents.addAll(approvalResult.getEvents());
+        return NodeResult.terminal(allEvents);
     }
 
     /**
-     * Called during resume after project skill approval is granted.
+     * Called during resume after batch project skill approval is granted.
      */
     public NodeResult completeActivation(AgentContext context) {
-        if (skillRepository == null) {
+        if (skillRepository == null || !isSkillEnabled()) {
             return NodeResult.next(AgentNodeNames.START, List.of());
         }
         Path workspaceRoot = context.getResolvedWorkspace();
-        if (context.getRequestedSkills() != null) {
-            for (String skillName : context.getRequestedSkills()) {
-                if (isActivated(context, skillName)) {
-                    continue;
-                }
-                SkillDescriptor descriptor = skillRepository.resolve(skillName, workspaceRoot);
-                if (descriptor != null) {
-                    activateSkill(context, descriptor, workspaceRoot);
+        if (workspaceRoot == null) {
+            return NodeResult.next(AgentNodeNames.START, List.of());
+        }
+
+        List<String> approved = context.getApprovedSkillNames();
+        if (approved == null || approved.isEmpty()) {
+            return NodeResult.next(AgentNodeNames.START, List.of());
+        }
+
+        SkillCatalog catalog = context.getAvailableSkillCatalog();
+        List<AgentEvent> events = new ArrayList<>();
+
+        for (String name : approved) {
+            if (isActivated(context, name)) {
+                continue;
+            }
+            SkillDescriptor descriptor = skillRepository.resolve(name, workspaceRoot);
+            if (descriptor == null) {
+                log.warn("Approved skill not found during completeActivation: {}", name);
+                continue;
+            }
+            // Re-verify manifest hash (stale check)
+            String currentHash = descriptor.manifestSha256();
+            if (catalog != null) {
+                for (SkillDescriptor sd : catalog.skills()) {
+                    if (sd.name().equals(name) && !sd.manifestSha256().equals(currentHash)) {
+                        // Skill changed since approval — return stale error
+                        return NodeResult.terminal(List.of(skillErrorEvent(context, "approval_stale",
+                                "Skill " + name + " 内容在审批后已变化，请刷新技能列表后重新选择")));
+                    }
                 }
             }
+            AgentEvent evt = activateSkill(context, descriptor, workspaceRoot);
+            if (evt != null) {
+                events.add(evt);
+            }
         }
-        return NodeResult.next(AgentNodeNames.START, List.of());
+
+        // Clear approval state after activating
+        context.setApprovedSkillNames(null);
+        context.setPendingApprovalId(null);
+
+        return NodeResult.next(AgentNodeNames.START, events);
     }
 
-    private void activateSkill(AgentContext context, SkillDescriptor descriptor, Path workspaceRoot) {
+    private AgentEvent activateSkill(AgentContext context, SkillDescriptor descriptor, Path workspaceRoot) {
+        // Dedup protection: same skill activates at most once per run
+        if (isActivated(context, descriptor.name())) {
+            return null;
+        }
+
         String content = skillRepository.readSkillContent(descriptor);
         String snapshotArtifactId = persistSnapshot(context, descriptor, content);
 
@@ -155,6 +253,18 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
         log.info("Skill activated: name={} source={} artifactId={}",
                 descriptor.name(), descriptor.source(), snapshotArtifactId);
+
+        return AgentEvent.builder()
+                .type(AgentEventType.SKILL_ACTIVATED)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .tool("activate_skill")
+                .metadata(Map.of(
+                        "name", descriptor.name(),
+                        "source", descriptor.source().name().toLowerCase(),
+                        "manifestSha256", descriptor.manifestSha256()))
+                .build();
     }
 
     private String persistSnapshot(AgentContext context, SkillDescriptor descriptor, String content) {
@@ -177,13 +287,34 @@ public class SkillBootstrapNode extends AbstractAgentNode {
         return artifactId;
     }
 
-    private NodeResult createApproval(AgentContext context, SkillDescriptor descriptor, Path workspaceRoot) {
+    private NodeResult createBatchApproval(AgentContext context, List<SkillDescriptor> skills, Path workspaceRoot) {
         Instant now = Instant.now();
         String approvalId = UUID.randomUUID().toString();
         context.setPendingApprovalId(approvalId);
 
+        List<String> skillNames = skills.stream().map(SkillDescriptor::name).toList();
+        List<Map<String, String>> skillMeta = skills.stream()
+                .map(sd -> {
+                    Map<String, String> m = new LinkedHashMap<>();
+                    m.put("name", sd.name());
+                    m.put("description", StringUtils.defaultString(sd.description()));
+                    m.put("source", sd.source().name().toLowerCase());
+                    m.put("manifestSha256", sd.manifestSha256());
+                    return m;
+                })
+                .toList();
+
         Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put(APPROVAL_META_SKILL_KEY, descriptor.name());
+        metadata.put("kind", APPROVAL_META_KIND);
+        metadata.put("skills", skillMeta);
+
+        String riskReason = skills.size() == 1
+                ? "项目级 Skill 需要确认后激活: " + skillNames.get(0)
+                : skills.size() + " 个项目级 Skill 需要确认后激活";
+
+        String operationPreview = skills.size() == 1
+                ? "skill=" + skillNames.get(0) + " source=project"
+                : "skills=" + String.join(",", skillNames) + " source=project";
 
         PendingApproval approval = PendingApproval.builder()
                 .approvalId(approvalId)
@@ -194,11 +325,10 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 .workspace(context.getWorkspace())
                 .workspaceDisplayName(context.getWorkspaceDisplayName())
                 .tool("activate_skill")
-                .input(Map.of("skill", descriptor.name()))
+                .input(Map.of("skills", skillNames))
                 .permissionLevel(cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel.HIGH_RISK_CONFIRM)
-                .riskReason("项目级 Skill 需要确认后激活: " + descriptor.name())
-                .operationPreview("skill=" + descriptor.name()
-                        + " source=project description=" + StringUtils.abbreviate(descriptor.description(), 200))
+                .riskReason(riskReason)
+                .operationPreview(operationPreview)
                 .metadata(metadata)
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
@@ -206,8 +336,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 .build();
         approvalStore.save(approval);
 
-        List<AgentEvent> events = new ArrayList<>();
-        events.add(AgentEvent.builder()
+        AgentEvent event = AgentEvent.builder()
                 .type(AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
                 .runId(context.getRunId())
                 .requestId(context.getRequestId())
@@ -215,15 +344,27 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 .workspace(context.getWorkspaceDisplayName())
                 .step(context.getStep() + 1)
                 .tool("activate_skill")
-                .input(Map.of("skill", descriptor.name()))
+                .input(Map.of("skills", skillNames))
                 .approvalId(approvalId)
                 .permissionLevel("HIGH_RISK_CONFIRM")
-                .riskReason("项目级 Skill 需要确认后激活: " + descriptor.name())
-                .operationPreview("skill=" + descriptor.name() + " source=project")
+                .riskReason(riskReason)
+                .operationPreview(operationPreview)
                 .expiresAt(approval.getExpiresAt())
-                .build());
+                .metadata(metadata)
+                .build();
 
-        return NodeResult.terminal(events);
+        return NodeResult.terminal(List.of(event));
+    }
+
+    private AgentEvent skillErrorEvent(AgentContext context, String code, String message) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .code(code)
+                .message(message)
+                .build();
     }
 
     private boolean isActivated(AgentContext context, String skillName) {
@@ -236,6 +377,11 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
     private boolean isSubAgent(AgentContext context) {
         return context.getAgentRole() != null || context.getAgentDepth() > 0;
+    }
+
+    private boolean isSkillEnabled() {
+        AgentRuntimeProperties.SkillProperties skillProps = properties.getSkills();
+        return skillProps == null || !Boolean.FALSE.equals(skillProps.getEnabled());
     }
 
     // --- skill content retrieval for prompt rendering ---

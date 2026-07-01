@@ -21,6 +21,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public final class AgentResumeCoordinator {
 
@@ -64,14 +65,32 @@ public final class AgentResumeCoordinator {
             context.setApprovedTool(approval.getTool());
             context.setApprovedPolicyFingerprint(approval.getPolicyFingerprint());
             // Skill activation approvals route to skill_bootstrap to complete activation
-            if (approval.getMetadata() != null && approval.getMetadata().containsKey("__skill_name")) {
+            if (isSkillActivation(approval)) {
+                List<String> skillNames = extractSkillNames(approval);
+                context.setApprovedSkillNames(skillNames);
                 return AgentResumePlan.continueAt(context, AgentNodeNames.SKILL_BOOTSTRAP, events);
             }
             return AgentResumePlan.continueAt(context, AgentNodeNames.TOOL_DISPATCH, events);
         }
 
+        // REJECT
         context.setApprovedTool(null);
         context.setApprovedPolicyFingerprint(null);
+
+        if (isSkillActivation(approval)) {
+            // Remove rejected project skills from requested list, log reason, continue from START
+            List<String> rejectedNames = extractSkillNames(approval);
+            context.setRejectedSkillNames(rejectedNames);
+            if (context.getRequestedSkills() != null) {
+                List<String> filtered = new ArrayList<>(context.getRequestedSkills());
+                filtered.removeAll(rejectedNames);
+                context.setRequestedSkills(filtered);
+            }
+            context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.SKILL_BOOTSTRAP, context.getDecision());
+            context.setStep(context.getStep() + 1);
+            return AgentResumePlan.continueAt(context, AgentNodeNames.START, events);
+        }
+
         context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure(
                 "approval_rejected",
@@ -191,5 +210,29 @@ public final class AgentResumeCoordinator {
         return status == AgentRunStatus.COMPLETED
                 || status == AgentRunStatus.FAILED
                 || status == AgentRunStatus.BUDGET_EXCEEDED;
+    }
+
+    private boolean isSkillActivation(PendingApproval approval) {
+        if (approval.getMetadata() == null) {
+            return false;
+        }
+        return "skill_activation".equals(approval.getMetadata().get("kind"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractSkillNames(PendingApproval approval) {
+        List<String> names = new ArrayList<>();
+        if (approval.getMetadata() == null) {
+            return names;
+        }
+        Object skillsObj = approval.getMetadata().get("skills");
+        if (skillsObj instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m && m.get("name") instanceof String name) {
+                    names.add(name);
+                }
+            }
+        }
+        return names;
     }
 }

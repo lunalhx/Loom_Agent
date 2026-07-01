@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.domain.agent.flow.node;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
@@ -8,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
+import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
@@ -24,11 +27,18 @@ public class RenderPromptNode extends AbstractAgentNode {
 
     private final ContextWindowManager contextWindowManager;
     private final SkillRepository skillRepository;
+    private final ContextArtifactRepository artifactRepository;
+    private final ContextBlobStore blobStore;
 
-    public RenderPromptNode(ContextWindowManager contextWindowManager, SkillRepository skillRepository) {
+    public RenderPromptNode(ContextWindowManager contextWindowManager,
+                            SkillRepository skillRepository,
+                            ContextArtifactRepository artifactRepository,
+                            ContextBlobStore blobStore) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         this.skillRepository = skillRepository;
+        this.artifactRepository = artifactRepository;
+        this.blobStore = blobStore;
     }
 
     @Override
@@ -174,10 +184,19 @@ public class RenderPromptNode extends AbstractAgentNode {
     }
 
     private String readSkillContentCached(AgentContext context, SkillActivation activation) {
-        if (skillRepository == null || activation.snapshotArtifactId() == null) {
+        if (activation.snapshotArtifactId() == null) {
             return "";
         }
-        if (context.getAvailableSkillCatalog() != null) {
+        if (artifactRepository != null && blobStore != null) {
+            ContextArtifact artifact = artifactRepository
+                    .findByArtifactIdAndRootRunId(activation.snapshotArtifactId(), context.getRootRunId())
+                    .orElse(null);
+            if (artifact != null) {
+                return blobStore.read(artifact.getStorageUri());
+            }
+        }
+        // Fallback to disk read for backward compatibility
+        if (skillRepository != null && context.getAvailableSkillCatalog() != null) {
             for (SkillDescriptor sd : context.getAvailableSkillCatalog().skills()) {
                 if (sd.name().equals(activation.name())) {
                     return skillRepository.readSkillContent(sd);

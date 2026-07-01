@@ -26,6 +26,13 @@ public final class SkillTools {
     private static final Set<String> ALLOWED_TEXT_EXTENSIONS = Set.of(
             ".md", ".txt", ".json", ".yaml", ".yml", ".xml", ".py", ".js", ".ts", ".sh", ".java", ".properties", ".css", ".html");
 
+    private static boolean isSkillActive(ToolCall call, String skillName) {
+        if (call == null || call.getActiveSkillNames() == null) {
+            return false;
+        }
+        return call.getActiveSkillNames().contains(skillName);
+    }
+
     private static Path resolveWorkspaceRoot(ToolCall call) {
         if (call != null && call.getWorkspaceRoot() != null) {
             return call.getWorkspaceRoot();
@@ -132,6 +139,12 @@ public final class SkillTools {
                 return ToolResult.failure("read_skill_resource_missing_path", "path 不能为空", elapsed(startedAt));
             }
 
+            // Check skill is activated
+            if (!isSkillActive(call, skillName)) {
+                return ToolResult.failure("skill_not_active",
+                        "Skill '" + skillName + "' 未激活，不能读取资源", elapsed(startedAt));
+            }
+
             // Validate file extension for text
             String lowerPath = path.toLowerCase();
             boolean allowedExtension = ALLOWED_TEXT_EXTENSIONS.stream().anyMatch(lowerPath::endsWith);
@@ -199,6 +212,12 @@ public final class SkillTools {
             if (StringUtils.isBlank(skillName) || StringUtils.isBlank(path) || StringUtils.isBlank(destination)) {
                 return ToolResult.failure("copy_skill_resource_missing_params",
                         "skill, path, destination 均为必填", elapsed(startedAt));
+            }
+
+            // Check skill is activated
+            if (!isSkillActive(call, skillName)) {
+                return ToolResult.failure("skill_not_active",
+                        "Skill '" + skillName + "' 未激活，不能复制资源", elapsed(startedAt));
             }
 
             Path workspaceRoot = resolveWorkspaceRoot(call);

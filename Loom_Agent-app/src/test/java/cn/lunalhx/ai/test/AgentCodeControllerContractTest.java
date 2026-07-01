@@ -115,7 +115,7 @@ public class AgentCodeControllerContractTest {
         AgentWorkspaceResolver workspaceResolver = new AgentWorkspaceResolver(properties);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
                 queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null,
-                null, workspaceResolver);
+                null, workspaceResolver, properties);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 

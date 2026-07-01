@@ -97,6 +97,8 @@ public class AgentContextSnapshot {
     private List<String> requestedSkills;
     private SkillCatalog availableSkillCatalog;
     private List<SkillActivation> activatedSkills;
+    private List<String> approvedSkillNames;
+    private List<String> rejectedSkillNames;
 
     public static AgentContextSnapshot from(AgentContext context) {
         return AgentContextSnapshot.builder()
@@ -169,6 +171,8 @@ public class AgentContextSnapshot {
                 .requestedSkills(context.getRequestedSkills() == null ? null : new ArrayList<>(context.getRequestedSkills()))
                 .availableSkillCatalog(context.getAvailableSkillCatalog())
                 .activatedSkills(context.getActivatedSkills() == null ? null : new ArrayList<>(context.getActivatedSkills()))
+                .approvedSkillNames(context.getApprovedSkillNames() == null ? null : new ArrayList<>(context.getApprovedSkillNames()))
+                .rejectedSkillNames(context.getRejectedSkillNames() == null ? null : new ArrayList<>(context.getRejectedSkillNames()))
                 .build();
     }
 
@@ -256,6 +260,8 @@ public class AgentContextSnapshot {
         context.setRequestedSkills(requestedSkills == null ? null : new ArrayList<>(requestedSkills));
         context.setAvailableSkillCatalog(availableSkillCatalog);
         context.setActivatedSkills(activatedSkills == null ? null : new ArrayList<>(activatedSkills));
+        context.setApprovedSkillNames(approvedSkillNames == null ? null : new ArrayList<>(approvedSkillNames));
+        context.setRejectedSkillNames(rejectedSkillNames == null ? null : new ArrayList<>(rejectedSkillNames));
         return context;
     }
 
