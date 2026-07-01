@@ -82,4 +82,29 @@
         DELETE FROM agent_run WHERE conversation_id = #{conversationId}
     </delete>
 
+    <resultMap id="ConversationSummaryMap" type="cn.lunalhx.ai.infrastructure.dao.po.ConversationSummaryPO">
+        <result column="conversation_id" property="conversationId"/>
+        <result column="title" property="title"/>
+        <result column="run_count" property="runCount"/>
+        <result column="workspace" property="workspace"/>
+    </resultMap>
+
+    <select id="selectConversationSummaries" resultMap="ConversationSummaryMap">
+        SELECT
+            ar.conversation_id,
+            (SELECT question FROM agent_run
+             WHERE conversation_id = ar.conversation_id AND run_kind = 'ROOT'
+             ORDER BY create_time ASC LIMIT 1) as title,
+            COUNT(*) as run_count,
+            (SELECT workspace FROM agent_run
+             WHERE conversation_id = ar.conversation_id
+             ORDER BY update_time DESC LIMIT 1) as workspace
+        FROM agent_run ar
+        WHERE ar.conversation_id NOT IN (
+            SELECT conversation_id FROM agent_conversation_deletion WHERE status = 'COMPLETED'
+        )
+        GROUP BY ar.conversation_id
+        ORDER BY MAX(ar.update_time) DESC
+    </select>
+
 </mapper>

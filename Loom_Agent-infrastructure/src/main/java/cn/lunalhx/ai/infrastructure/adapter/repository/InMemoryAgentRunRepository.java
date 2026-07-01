@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationSummary;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
 import com.google.common.cache.CacheBuilder;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 import java.util.concurrent.TimeUnit;
 
 public class InMemoryAgentRunRepository implements AgentRunRepository {
@@ -80,6 +82,31 @@ public class InMemoryAgentRunRepository implements AgentRunRepository {
         return runs.values().stream()
                 .filter(run -> conversationId.equals(run.getConversationId()))
                 .sorted(Comparator.comparing(run -> run.getCreatedAt() != null ? run.getCreatedAt() : Instant.now()))
+                .toList();
+    }
+
+    @Override
+    public List<ConversationSummary> listConversationSummaries() {
+        return runs.values().stream()
+                .collect(Collectors.groupingBy(AgentRun::getConversationId))
+                .entrySet().stream()
+                .map(entry -> {
+                    List<AgentRun> convRuns = entry.getValue();
+                    AgentRun firstRoot = convRuns.stream()
+                            .filter(r -> r.getRunKind() == AgentRunKind.ROOT)
+                            .min(Comparator.comparing(r -> r.getCreatedAt() != null ? r.getCreatedAt() : Instant.now()))
+                            .orElse(convRuns.get(0));
+                    AgentRun latest = convRuns.stream()
+                            .max(Comparator.comparing(r -> r.getUpdatedAt() != null ? r.getUpdatedAt() : r.getCreatedAt() != null ? r.getCreatedAt() : Instant.now()))
+                            .orElse(convRuns.get(0));
+                    return ConversationSummary.builder()
+                            .conversationId(entry.getKey())
+                            .title(firstRoot.getQuestion())
+                            .runCount(convRuns.size())
+                            .workspace(latest.getWorkspace())
+                            .build();
+                })
+                .sorted(Comparator.comparing(ConversationSummary::getConversationId).reversed())
                 .toList();
     }
 
