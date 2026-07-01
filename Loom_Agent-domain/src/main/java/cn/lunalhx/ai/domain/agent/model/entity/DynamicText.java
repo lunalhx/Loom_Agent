@@ -30,13 +30,14 @@ public class DynamicText {
         if (decision == null) {
             return;
         }
+        String reason = decision.getReason();
         append(step,
                 DynamicTextRole.ASSISTANT_ACTION,
                 sourceNode,
                 "Assistant Action",
                 decision.getTool(),
                 String.valueOf(decision.getInputView()),
-                "Thought: " + StringUtils.defaultString(decision.getThought()));
+                "Reason: " + StringUtils.defaultString(reason));
     }
 
     public void appendToolResult(int step, String sourceNode, AgentDecision decision, String content) {

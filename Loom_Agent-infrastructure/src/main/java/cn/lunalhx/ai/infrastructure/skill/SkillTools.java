@@ -62,7 +62,7 @@ public final class SkillTools {
             return ToolSpec.builder()
                     .name("activate_skill")
                     .description("Activate a skill by name. Activated skills provide specialized instructions and resources to the agent. Use to load project-specific or user-level skills.")
-                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Name of the skill to activate\"}},\"required\":[\"name\"]}")
+                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Name of the skill to activate\"}},\"required\":[\"name\"],\"additionalProperties\":false}")
                     .build();
         }
 
@@ -119,7 +119,7 @@ public final class SkillTools {
             return ToolSpec.builder()
                     .name("read_skill_resource")
                     .description("Read a text resource from an activated skill's snapshot. Use to access skill-provided scripts, templates, or reference files.")
-                    .inputSchema("{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\",\"description\":\"Skill name\"},\"path\":{\"type\":\"string\",\"description\":\"Relative path to the resource within the skill directory\"},\"offset\":{\"type\":\"integer\",\"description\":\"Character offset to start reading from\",\"default\":0},\"maxChars\":{\"type\":\"integer\",\"description\":\"Maximum characters to read\",\"default\":8000}},\"required\":[\"skill\",\"path\"]}")
+                    .inputSchema("{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Skill name\"},\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Relative path to the resource within the skill directory\"},\"offset\":{\"type\":\"integer\",\"minimum\":0,\"default\":0,\"description\":\"Character offset to start reading from\"},\"maxChars\":{\"type\":\"integer\",\"minimum\":1,\"default\":8000,\"description\":\"Maximum characters to read\"}},\"required\":[\"skill\",\"path\"],\"additionalProperties\":false}")
                     .build();
         }
 
@@ -196,7 +196,7 @@ public final class SkillTools {
             return ToolSpec.builder()
                     .name("copy_skill_resource")
                     .description("Copy a binary or text resource from an activated skill's snapshot to the workspace. Scripts must be copied before execution.")
-                    .inputSchema("{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\",\"description\":\"Skill name\"},\"path\":{\"type\":\"string\",\"description\":\"Relative path to the resource within the skill directory\"},\"destination\":{\"type\":\"string\",\"description\":\"Destination path relative to workspace root\"},\"overwrite\":{\"type\":\"boolean\",\"description\":\"Whether to overwrite existing file\",\"default\":false}},\"required\":[\"skill\",\"path\",\"destination\"]}")
+                    .inputSchema("{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Skill name\"},\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Relative path to the resource within the skill directory\"},\"destination\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Destination path relative to workspace root\"},\"overwrite\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Whether to overwrite existing file\"}},\"required\":[\"skill\",\"path\",\"destination\"],\"additionalProperties\":false}")
                     .build();
         }
 
@@ -285,7 +285,7 @@ public final class SkillTools {
             return ToolSpec.builder()
                     .name("create_skill")
                     .description("Create a new project-level skill. The skill is written to .agents/skills/<name>/SKILL.md in the workspace. After creation the skill becomes available in the catalog for the current and future runs. Only project skills can be created; user skills must be created manually.")
-                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Skill name, must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$\"},\"description\":{\"type\":\"string\",\"description\":\"Short one-line description of the skill\"},\"content\":{\"type\":\"string\",\"description\":\"Full SKILL.md body content (after frontmatter). The system will wrap it with correct YAML frontmatter automatically.\"}},\"required\":[\"name\",\"description\",\"content\"]}")
+                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Skill name, must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$\"},\"description\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Short one-line description of the skill\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Full SKILL.md body content (after frontmatter). The system will wrap it with correct YAML frontmatter automatically.\"}},\"required\":[\"name\",\"description\",\"content\"],\"additionalProperties\":false}")
                     .build();
         }
 

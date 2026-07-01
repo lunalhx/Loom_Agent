@@ -42,8 +42,8 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
-                .description("在工作区沙箱内执行已分类命令；只读自动放行，普通写命令需确认，高危命令需高危确认，rm/find/python 等重定向到专用工具")
-                .inputSchema("{\"command\":\"必填命令字符串\",\"cwd\":\"相对工作目录，默认 .\",\"timeoutMs\":\"默认 AGENT_SHELL_TIMEOUT_MS\"}")
+                .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认")
+                .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"minLength\":1,\"description\":\"要执行的 shell 命令\"},\"cwd\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对工作目录\"},\"timeoutMs\":{\"type\":\"integer\",\"minimum\":1,\"default\":30000,\"description\":\"超时毫秒，受系统配置上限限制\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
                 .build();
     }
 

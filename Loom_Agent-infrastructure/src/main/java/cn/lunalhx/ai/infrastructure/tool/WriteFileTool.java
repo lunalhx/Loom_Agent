@@ -39,15 +39,16 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("write_file")
-                .description("创建或覆盖工作区内文本文件；写入前必须人工确认")
+                .description("创建新文件或整体覆盖工作区内文本文件。何时使用：创建新文件或完整重写文件内容时。何时不要使用：局部修改请用 replace_in_file。权限：写入前必须人工确认，mode 默认为 create（文件已存在时失败）")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径\"}," +
+                        "\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"相对路径\"}," +
                         "\"content\":{\"type\":\"string\",\"description\":\"文件内容\"}," +
-                        "\"mode\":{\"type\":\"string\",\"enum\":[\"create\",\"overwrite\"],\"description\":\"create 或 overwrite\"}" +
+                        "\"mode\":{\"type\":\"string\",\"enum\":[\"create\",\"overwrite\"],\"default\":\"create\",\"description\":\"create 或 overwrite\"}" +
                         "}," +
-                        "\"required\":[\"path\",\"content\"]" +
+                        "\"required\":[\"path\",\"content\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

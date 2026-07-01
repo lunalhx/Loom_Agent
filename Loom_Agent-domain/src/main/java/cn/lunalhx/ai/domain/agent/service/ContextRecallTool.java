@@ -31,8 +31,20 @@ public class ContextRecallTool implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name(NAME)
-                .description("Recall compressed context artifacts for the current root run only. Supports list/search/get.")
-                .inputSchema("{\"type\":\"object\",\"properties\":{\"action\":{\"enum\":[\"list\",\"search\",\"get\"]},\"artifactId\":{\"type\":\"string\"},\"query\":{\"type\":\"string\"},\"offset\":{\"type\":\"integer\"},\"maxChars\":{\"type\":\"integer\"},\"limit\":{\"type\":\"integer\"}},\"required\":[\"action\"]}")
+                .description("读取被压缩或外置的当前运行的上下文 artifact。只读取 Agent 上下文历史，不读取工作区文件。何时使用：需要回顾被压缩的旧 Observation 或子 Agent 摘要时。何时不要使用：读取工作区文件请用 read_file，搜索代码请用 code_search。支持 list/search/get 三种操作。权限：只读自动放行")
+                .inputSchema("{" +
+                        "\"type\":\"object\"," +
+                        "\"properties\":{" +
+                        "\"action\":{\"type\":\"string\",\"enum\":[\"list\",\"search\",\"get\"]}," +
+                        "\"artifactId\":{\"type\":\"string\",\"description\":\"get 操作的 artifact ID\"}," +
+                        "\"query\":{\"type\":\"string\",\"description\":\"search 操作的关键词\"}," +
+                        "\"offset\":{\"type\":\"integer\",\"minimum\":0,\"default\":0,\"description\":\"get 操作的字符偏移\"}," +
+                        "\"maxChars\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20000,\"default\":8000,\"description\":\"get 操作的最大返回字符数\"}," +
+                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"default\":20,\"description\":\"list/search 的最大结果数\"}" +
+                        "}," +
+                        "\"required\":[\"action\"]," +
+                        "\"additionalProperties\":false" +
+                        "}")
                 .build();
     }
 

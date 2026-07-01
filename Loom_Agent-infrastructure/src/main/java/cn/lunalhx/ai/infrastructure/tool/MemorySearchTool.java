@@ -35,7 +35,8 @@ public class MemorySearchTool implements AgentTool {
                         "\"query\":{\"type\":\"string\",\"description\":\"搜索关键词\"}," +
                         "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":" + MAX_RESULTS + ",\"default\":10}" +
                         "}," +
-                        "\"required\":[\"query\"]" +
+                        "\"required\":[\"query\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

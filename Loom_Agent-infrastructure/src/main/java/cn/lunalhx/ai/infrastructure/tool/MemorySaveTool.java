@@ -45,7 +45,8 @@ public class MemorySaveTool implements AgentTool {
                         "\"body\":{\"type\":\"string\",\"maxLength\":" + MAX_BODY_LENGTH + "}," +
                         "\"importance\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100}" +
                         "}," +
-                        "\"required\":[\"type\",\"title\",\"body\"]" +
+                        "\"required\":[\"type\",\"title\",\"body\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

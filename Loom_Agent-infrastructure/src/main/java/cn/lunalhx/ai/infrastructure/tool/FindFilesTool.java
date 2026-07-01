@@ -43,17 +43,18 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("find_files")
-                .description("按文件名 Glob 模式递归查找文件，返回相对路径列表；搜索 .git/.idea/target/node_modules 等目录自动跳过")
+                .description("按文件名 Glob 模式递归查找文件，返回相对路径列表。只匹配文件名/路径，不搜索文件内容。何时使用：已知文件名模式需要定位文件时。何时不要使用：搜索文件内容请用 code_search，浏览已知目录结构请用 list_dir。限制：自动跳过 .git/.idea/target/node_modules 等目录")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"pattern\":{\"type\":\"string\",\"description\":\"Glob 模式，如 *hello*.py 或 src/**/*.java\"}," +
-                        "\"path\":{\"type\":\"string\",\"description\":\"搜索起点，默认 .\"}," +
-                        "\"maxDepth\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":50,\"description\":\"最大深度，默认 20\"}," +
-                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"最大结果数，默认 50\"}," +
-                        "\"caseSensitive\":{\"type\":\"boolean\",\"description\":\"是否大小写敏感，默认 false\"}" +
+                        "\"pattern\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Glob 模式，如 *hello*.py 或 src/**/*.java\"}," +
+                        "\"path\":{\"type\":\"string\",\"default\":\".\",\"description\":\"搜索起点\"}," +
+                        "\"maxDepth\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":50,\"default\":20,\"description\":\"最大深度\"}," +
+                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"default\":50,\"description\":\"最大结果数\"}," +
+                        "\"caseSensitive\":{\"type\":\"boolean\",\"default\":false,\"description\":\"是否大小写敏感\"}" +
                         "}," +
-                        "\"required\":[\"pattern\"]" +
+                        "\"required\":[\"pattern\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

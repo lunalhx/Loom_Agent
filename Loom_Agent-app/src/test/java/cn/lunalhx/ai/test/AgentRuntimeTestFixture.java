@@ -39,6 +39,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -311,7 +312,7 @@ public final class AgentRuntimeTestFixture {
         AgentRuntimeProperties props = props();
         Executor exec = effectiveExecutor();
         ContextWindowManager cwm = resolveContextWindowManager(props);
-        ToolRegistry registry = new ToolRegistry(tools);
+        ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(objectMapper));
 
         if (subAgentEnabled) {
             InMemorySubAgentControlInbox inbox = new InMemorySubAgentControlInbox();
@@ -334,7 +335,7 @@ public final class AgentRuntimeTestFixture {
             return subAgentCoordinator;
         }
         return new SubAgentCoordinator(
-                new RoleToolRegistryFactory(tools),
+                new RoleToolRegistryFactory(tools, new ToolSchemaValidator(objectMapper)),
                 factory,
                 props,
                 objectMapper,
@@ -351,7 +352,7 @@ public final class AgentRuntimeTestFixture {
             return subAgentCoordinator;
         }
         return new SubAgentCoordinator(
-                new RoleToolRegistryFactory(tools),
+                new RoleToolRegistryFactory(tools, new ToolSchemaValidator(objectMapper)),
                 factory,
                 props,
                 objectMapper,

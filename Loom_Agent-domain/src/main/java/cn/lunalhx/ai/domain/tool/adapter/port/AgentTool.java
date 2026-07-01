@@ -9,6 +9,10 @@ public interface AgentTool {
 
     ToolSpec spec();
 
+    default String validationSchema() {
+        return spec().getInputSchema();
+    }
+
     default ToolPolicyDecision policy(ToolCall call) {
         return ToolPolicyDecision.readOnly("只读工具自动放行", spec().getName() + " " + call.getInput());
     }

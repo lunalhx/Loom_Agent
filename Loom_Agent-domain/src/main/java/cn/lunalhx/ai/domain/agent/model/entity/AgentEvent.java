@@ -33,6 +33,7 @@ public class AgentEvent {
     private String node;
     private List<String> nodeInputs;
     private String thought;
+    private String reason;
     private String tool;
     private Map<String, Object> input;
     private String approvalId;

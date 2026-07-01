@@ -35,14 +35,14 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("list_dir")
-                .description("列出工作区内的目录和文件，只返回只读观察结果")
+                .description("列出已知工作区目录内的文件和子目录结构。何时使用：浏览已知路径的目录内容时。何时不要使用：名称未知需要递归按模式匹配时请用 find_files，搜索文件内容请用 code_search。限制：最大深度 3 层。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径，默认 .\"}," +
-                        "\"maxDepth\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"description\":\"最大深度，默认 1\"}" +
+                        "\"path\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对路径\"}," +
+                        "\"maxDepth\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":1,\"description\":\"最大深度\"}" +
                         "}," +
-                        "\"required\":[]" +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

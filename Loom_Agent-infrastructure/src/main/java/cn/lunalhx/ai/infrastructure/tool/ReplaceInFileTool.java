@@ -39,16 +39,17 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("replace_in_file")
-                .description("替换工作区内文本文件的一段内容；写入前必须人工确认")
+                .description("精确替换工作区内文本文件的一段内容。何时使用：局部修改已知文件时。何时不要使用：创建新文件或整体重写请用 write_file。oldText 必须精确匹配（含空白），expectedOccurrences 指定期望匹配次数。权限：写入前必须人工确认")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径\"}," +
-                        "\"oldText\":{\"type\":\"string\",\"description\":\"要替换的旧文本\"}," +
+                        "\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"相对路径\"}," +
+                        "\"oldText\":{\"type\":\"string\",\"minLength\":1,\"description\":\"要替换的旧文本\"}," +
                         "\"newText\":{\"type\":\"string\",\"description\":\"替换后的新文本\"}," +
-                        "\"expectedOccurrences\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"期望匹配次数，默认 1\"}" +
+                        "\"expectedOccurrences\":{\"type\":\"integer\",\"minimum\":1,\"default\":1,\"description\":\"期望匹配次数\"}" +
                         "}," +
-                        "\"required\":[\"path\",\"oldText\",\"newText\"]" +
+                        "\"required\":[\"path\",\"oldText\",\"newText\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

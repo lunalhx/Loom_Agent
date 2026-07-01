@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -16,11 +17,20 @@ import java.util.Map;
 public class AgentDecision {
 
     private String type;
+    @Deprecated
     private String thought;
+    private String reason;
     private String tool;
     private JsonNode input;
     private Map<String, Object> inputView;
     private String answer;
     private List<Map<String, Object>> evidence;
+
+    public String getReason() {
+        if (StringUtils.isNotBlank(reason)) {
+            return reason;
+        }
+        return thought;
+    }
 
 }

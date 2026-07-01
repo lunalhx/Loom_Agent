@@ -51,6 +51,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.tool.TodoWriteTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -654,7 +655,8 @@ public class DefaultAgentLoopServiceTest {
         AtomicInteger calls = new AtomicInteger();
         RoleToolRegistryFactory factory = new RoleToolRegistryFactory(List.of(
                 fakeWriteTool("run_shell", "should not write", calls),
-                fakeTool("code_search", "ok")));
+                fakeTool("code_search", "ok")),
+                new ToolSchemaValidator(new ObjectMapper()));
 
         ToolRegistry registry = factory.create(AgentRole.EXPLORER);
         ToolCall call = ToolCall.builder()

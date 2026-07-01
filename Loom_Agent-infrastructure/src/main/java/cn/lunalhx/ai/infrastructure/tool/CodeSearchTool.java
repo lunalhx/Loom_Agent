@@ -36,15 +36,16 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("code_search")
-                .description("在工作区内搜索代码文本，返回匹配文件、行号和代码片段")
+                .description("在工作区内执行不区分大小写的文本子串搜索，返回匹配文件、行号和代码片段。不是语义搜索，不是正则搜索。何时使用：需要根据代码内容定位文件时。何时不要使用：按文件名查找请用 find_files，读取已知路径文件请用 read_file。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"query\":{\"type\":\"string\",\"description\":\"搜索词\"}," +
-                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径，默认 .\"}," +
-                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"最大结果数，默认 20\"}" +
+                        "\"query\":{\"type\":\"string\",\"minLength\":1,\"description\":\"搜索词，不区分大小写的文本子串搜索\"}," +
+                        "\"path\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对路径\"}," +
+                        "\"limit\":{\"type\":\"integer\",\"minimum\":1,\"default\":20,\"description\":\"最大结果数\"}" +
                         "}," +
-                        "\"required\":[\"query\"]" +
+                        "\"required\":[\"query\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

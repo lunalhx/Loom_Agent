@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -215,7 +216,7 @@ public class ApprovalGateNodeTest {
     // ==================== helpers ====================
 
     private ApprovalGateNode gateNode(AgentTool tool, AgentRuntimeProperties props) {
-        ToolRegistry registry = new ToolRegistry(List.of(tool));
+        ToolRegistry registry = new ToolRegistry(List.of(tool), new ToolSchemaValidator(new ObjectMapper()));
         return new ApprovalGateNode(registry, new InMemoryApprovalStore(), props);
     }
 
@@ -223,7 +224,9 @@ public class ApprovalGateNodeTest {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
-                return ToolSpec.builder().name(TOOL_NAME).description("test").build();
+                return ToolSpec.builder().name(TOOL_NAME).description("test")
+                        .inputSchema("{\"type\":\"object\",\"properties\":{\"p\":{\"type\":\"string\"}},\"additionalProperties\":false}")
+                        .build();
             }
 
             @Override

@@ -55,9 +55,10 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1,\"maxItems\":20,\"description\":\"1~20 个工作区相对文件或目录路径\"}" +
+                        "\"paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":1},\"minItems\":1,\"maxItems\":20,\"description\":\"1~20 个工作区相对文件或目录路径\"}" +
                         "}," +
-                        "\"required\":[\"paths\"]" +
+                        "\"required\":[\"paths\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

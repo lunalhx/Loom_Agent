@@ -33,15 +33,16 @@ public class ReadFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("read_file")
-                .description("读取工作区内单个文本文件的指定行号范围")
+                .description("读取工作区内已知路径的单个文本文件，返回指定行号范围的内容。何时使用：已确知文件路径需要查看内容时。何时不要使用：路径未知请先用 find_files 定位，搜索内容请用 code_search。限制：最多返回 200 行。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
-                        "\"path\":{\"type\":\"string\",\"description\":\"相对路径\"}," +
-                        "\"startLine\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"起始行号，默认 1\"}," +
-                        "\"endLine\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"结束行号，默认 startLine+119，最多 200 行\"}" +
+                        "\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"相对路径\"}," +
+                        "\"startLine\":{\"type\":\"integer\",\"minimum\":1,\"default\":1,\"description\":\"起始行号\"}," +
+                        "\"endLine\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"结束行号，最多 200 行\"}" +
                         "}," +
-                        "\"required\":[\"path\"]" +
+                        "\"required\":[\"path\"]," +
+                        "\"additionalProperties\":false" +
                         "}")
                 .build();
     }

@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 
 import java.util.List;
 import java.util.Set;
@@ -18,11 +19,12 @@ public class RoleToolRegistryFactory {
     private static final Set<String> READ_ONLY_TOOL_NAMES = Set.of(
             "list_dir", "read_file", "code_search", "run_shell", "git_op", "todo_write", ContextRecallTool.NAME, "find_files");
 
-
     private final List<AgentTool> tools;
+    private final ToolSchemaValidator schemaValidator;
 
-    public RoleToolRegistryFactory(List<AgentTool> tools) {
+    public RoleToolRegistryFactory(List<AgentTool> tools, ToolSchemaValidator schemaValidator) {
         this.tools = tools;
+        this.schemaValidator = schemaValidator;
     }
 
     public ToolRegistry create(AgentRole role) {
@@ -31,7 +33,7 @@ public class RoleToolRegistryFactory {
                 .filter(tool -> isAllowed(normalizedRole, tool.spec().getName()))
                 .map(tool -> isReadOnlyRole(normalizedRole) ? new ReadOnlyAgentTool(tool) : tool)
                 .toList();
-        return new ToolRegistry(selected);
+        return new ToolRegistry(selected, schemaValidator);
     }
 
     private boolean isAllowed(AgentRole role, String toolName) {

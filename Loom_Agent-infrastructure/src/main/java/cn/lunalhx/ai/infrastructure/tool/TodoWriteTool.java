@@ -17,7 +17,7 @@ public class TodoWriteTool implements AgentTool {
         return ToolSpec.builder()
                 .name("todo_write")
                 .description("更新当前 Agent 计划和子任务状态，不修改工作区文件")
-                .inputSchema("{\"todos\":[{\"id\":\"可选任务ID\",\"content\":\"任务内容\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\"}]}")
+                .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"可选任务ID\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"}},\"required\":[\"content\",\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
                 .build();
     }
 

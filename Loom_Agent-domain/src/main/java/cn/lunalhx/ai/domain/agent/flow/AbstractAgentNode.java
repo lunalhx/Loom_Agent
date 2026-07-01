@@ -58,7 +58,7 @@ public abstract class AbstractAgentNode implements AgentNode {
         ToolResult result = context.getToolResult();
         context.getHistory().add(AgentStep.builder()
                 .step(Math.max(1, context.getStep()))
-                .thought(decision == null ? null : decision.getThought())
+                .thought(decision == null ? null : decision.getReason())
                 .tool(decision == null ? "model_parse" : decision.getTool())
                 .input(decision == null ? context.getModelOutput() : String.valueOf(decision.getInputView()))
                 .observation(result == null ? null : result.getObservation())

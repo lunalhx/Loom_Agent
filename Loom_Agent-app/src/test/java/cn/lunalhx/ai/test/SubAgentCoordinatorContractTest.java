@@ -20,6 +20,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -385,7 +386,8 @@ public class SubAgentCoordinatorContractTest {
         AtomicInteger calls = new AtomicInteger();
         RoleToolRegistryFactory factory = new RoleToolRegistryFactory(List.of(
                 fakeWriteTool("run_shell", "should not write", calls),
-                fakeTool("code_search", "ok")));
+                fakeTool("code_search", "ok")),
+                new ToolSchemaValidator(new ObjectMapper()));
         // explorer 为只读角色：run_shell 被包装为只读，调用被拒
         ToolCall call = ToolCall.builder()
                 .name("run_shell")
@@ -408,7 +410,8 @@ public class SubAgentCoordinatorContractTest {
         AtomicInteger writeCalls = new AtomicInteger();
         RoleToolRegistryFactory factory = new RoleToolRegistryFactory(List.of(
                 fakeTool("mcp__exa__web_search", "search result"),
-                fakeWriteTool("mcp__browser__click", "clicked", writeCalls)));
+                fakeWriteTool("mcp__browser__click", "clicked", writeCalls)),
+                new ToolSchemaValidator(new ObjectMapper()));
         ToolRegistry registry = factory.create(AgentRole.EXPLORER);
 
         ToolCall readCall = ToolCall.builder()
