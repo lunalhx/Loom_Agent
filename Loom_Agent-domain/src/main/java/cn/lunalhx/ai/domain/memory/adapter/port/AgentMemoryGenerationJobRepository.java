@@ -1,9 +1,9 @@
 package cn.lunalhx.ai.domain.memory.adapter.port;
 
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemoryGenerationJob;
-import cn.lunalhx.ai.domain.memory.model.valobj.MemoryGenerationJobStatus;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 public interface AgentMemoryGenerationJobRepository {
@@ -12,9 +12,15 @@ public interface AgentMemoryGenerationJobRepository {
 
     Optional<AgentMemoryGenerationJob> claimNextPending(String workerId, Duration leaseDuration);
 
-    boolean updateStatus(String jobId, MemoryGenerationJobStatus status, String errorMsg, int retryCount);
+    boolean transitionToSucceeded(String jobId, String lockedBy);
 
-    int recoverStaleJobs(Duration staleThreshold);
+    boolean transitionToSkipped(String jobId, String lockedBy);
+
+    boolean transitionToRetry(String jobId, int retryCount, Instant notBefore, String errorMsg);
+
+    boolean transitionToFailed(String jobId, int retryCount, String errorMsg);
+
+    int recoverStaleJobs(Duration staleThreshold, int maxRetries);
 
     Optional<AgentMemoryGenerationJob> findBySourceRunId(String sourceRunId);
 }

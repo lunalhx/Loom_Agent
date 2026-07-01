@@ -118,7 +118,7 @@ public class AgentCodeControllerContractTest {
         when(deletionService.isConversationDeleted(any())).thenReturn(false);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
                 queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null,
-                null, workspaceResolver, properties, deletionService);
+                null, workspaceResolver, properties, deletionService, agentRunRepository);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 

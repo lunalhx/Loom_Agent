@@ -85,6 +85,20 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
         return dao.updateStatus(memoryId, status.name(), expectedVersion) > 0;
     }
 
+    @Override
+    public List<AgentMemory> findByContentHash(String workspaceKey, String contentHash) {
+        return dao.selectByContentHash(workspaceKey, contentHash).stream()
+                .map(this::toEntity)
+                .toList();
+    }
+
+    @Override
+    public List<AgentMemory> findBySourceRunId(String sourceRunId) {
+        return dao.selectBySourceRunId(sourceRunId).stream()
+                .map(this::toEntity)
+                .toList();
+    }
+
     private AgentMemoryPO toPo(AgentMemory m) {
         AgentMemoryPO po = new AgentMemoryPO();
         po.setMemoryId(m.getMemoryId());

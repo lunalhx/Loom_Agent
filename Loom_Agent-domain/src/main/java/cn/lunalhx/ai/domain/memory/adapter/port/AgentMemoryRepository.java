@@ -23,4 +23,8 @@ public interface AgentMemoryRepository {
     int countActive(String workspaceKey);
 
     boolean updateStatus(String memoryId, MemoryStatus status, long expectedVersion);
+
+    List<AgentMemory> findByContentHash(String workspaceKey, String contentHash);
+
+    List<AgentMemory> findBySourceRunId(String sourceRunId);
 }

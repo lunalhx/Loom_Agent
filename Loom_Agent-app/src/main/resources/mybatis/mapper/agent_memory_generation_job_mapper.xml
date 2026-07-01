@@ -42,20 +42,58 @@
           AND status = 'PENDING'
     </update>
 
-    <update id="updateStatus">
+    <update id="transitionToTerminal">
         UPDATE agent_memory_generation_job
         SET status = #{status},
-            error_message = #{errorMessage},
+            locked_by = NULL,
+            lock_expires_at = NULL,
+            error_message = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+          AND status = 'RUNNING'
+          AND locked_by = #{lockedBy}
+    </update>
+
+    <update id="transitionToRetry">
+        UPDATE agent_memory_generation_job
+        SET status = 'PENDING',
             retry_count = #{retryCount},
+            not_before = #{notBefore},
+            error_message = #{errorMessage},
+            locked_by = NULL,
+            lock_expires_at = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+    </update>
+
+    <update id="transitionToFailed">
+        UPDATE agent_memory_generation_job
+        SET status = 'FAILED',
+            retry_count = #{retryCount},
+            error_message = #{errorMessage},
+            locked_by = NULL,
+            lock_expires_at = NULL,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE job_id = #{jobId}
     </update>
 
     <update id="recoverStaleJobs">
         UPDATE agent_memory_generation_job
-        SET status = 'PENDING',
+        SET status = CASE
+                WHEN retry_count &gt;= #{maxRetries} THEN 'FAILED'
+                ELSE 'PENDING'
+            END,
+            retry_count = retry_count + 1,
             locked_by = NULL,
             lock_expires_at = NULL,
+            error_message = CASE
+                WHEN retry_count &gt;= #{maxRetries} THEN 'Exceeded max retries after stale recovery'
+                ELSE 'Stale job recovered'
+            END,
+            not_before = CASE
+                WHEN retry_count &gt;= #{maxRetries} THEN not_before
+                ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            END,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE status = 'RUNNING'
           AND lock_expires_at &lt;= #{staleThreshold}

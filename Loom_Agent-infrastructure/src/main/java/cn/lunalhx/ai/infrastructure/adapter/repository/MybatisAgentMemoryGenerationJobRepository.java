@@ -46,14 +46,29 @@ public class MybatisAgentMemoryGenerationJobRepository implements AgentMemoryGen
     }
 
     @Override
-    public boolean updateStatus(String jobId, MemoryGenerationJobStatus status, String errorMsg, int retryCount) {
-        return dao.updateStatus(jobId, status.name(), errorMsg, retryCount) > 0;
+    public boolean transitionToSucceeded(String jobId, String lockedBy) {
+        return dao.transitionToTerminal(jobId, "SUCCEEDED", lockedBy) > 0;
     }
 
     @Override
-    public int recoverStaleJobs(Duration staleThreshold) {
+    public boolean transitionToSkipped(String jobId, String lockedBy) {
+        return dao.transitionToTerminal(jobId, "SKIPPED", lockedBy) > 0;
+    }
+
+    @Override
+    public boolean transitionToRetry(String jobId, int retryCount, Instant notBefore, String errorMsg) {
+        return dao.transitionToRetry(jobId, retryCount, notBefore.toString(), errorMsg) > 0;
+    }
+
+    @Override
+    public boolean transitionToFailed(String jobId, int retryCount, String errorMsg) {
+        return dao.transitionToFailed(jobId, retryCount, errorMsg) > 0;
+    }
+
+    @Override
+    public int recoverStaleJobs(Duration staleThreshold, int maxRetries) {
         String threshold = Instant.now().minus(staleThreshold).toString();
-        return dao.recoverStaleJobs(threshold);
+        return dao.recoverStaleJobs(threshold, maxRetries);
     }
 
     @Override
