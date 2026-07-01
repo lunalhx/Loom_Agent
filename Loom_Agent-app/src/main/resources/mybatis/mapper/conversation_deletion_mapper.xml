@@ -18,7 +18,10 @@
         INSERT INTO agent_conversation_deletion
         (conversation_id, status, requested_at, updated_at, completed_at, retry_count, last_error)
         VALUES
-        (#{conversationId}, #{status}, #{requestedAt}, #{updatedAt}, #{completedAt}, #{retryCount}, #{lastError})
+        (#{conversationId}, #{status},
+         COALESCE(#{requestedAt}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         COALESCE(#{updatedAt}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         #{completedAt}, #{retryCount}, #{lastError})
         ON CONFLICT(conversation_id) DO UPDATE SET
         status = excluded.status,
         updated_at = excluded.updated_at,
@@ -52,6 +55,17 @@
         SET status = #{status},
             retry_count = #{retryCount},
             last_error = #{lastError},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE conversation_id = #{conversationId}
+    </update>
+
+    <update id="updateStatusAndReleaseLock">
+        UPDATE agent_conversation_deletion
+        SET status = #{status},
+            retry_count = #{retryCount},
+            last_error = #{lastError},
+            locked_by = NULL,
+            lock_expires_at = NULL,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE conversation_id = #{conversationId}
     </update>

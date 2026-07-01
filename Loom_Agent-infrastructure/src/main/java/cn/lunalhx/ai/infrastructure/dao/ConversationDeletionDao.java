@@ -24,6 +24,11 @@ public interface ConversationDeletionDao {
                      @Param("retryCount") int retryCount,
                      @Param("lastError") String lastError);
 
+    int updateStatusAndReleaseLock(@Param("conversationId") String conversationId,
+                                   @Param("status") String status,
+                                   @Param("retryCount") int retryCount,
+                                   @Param("lastError") String lastError);
+
     int markCompleted(@Param("conversationId") String conversationId);
 
     int resetForRetry(@Param("conversationId") String conversationId);

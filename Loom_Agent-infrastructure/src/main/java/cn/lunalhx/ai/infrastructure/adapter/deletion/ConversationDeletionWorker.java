@@ -121,17 +121,24 @@ public class ConversationDeletionWorker implements Runnable {
     private void processRequested(String conversationId) {
         List<AgentRun> runs = runRepository.findByConversationId(conversationId);
         agentLoopService.cancelConversation(conversationId);
-        deletionRepository.updateStatus(conversationId, "WAITING_FOR_RUNS", 0, null);
-        log.info("Deletion REQUESTED -> WAITING_FOR_RUNS for conversation {}", conversationId);
+        // Preserve current retryCount instead of resetting to 0, and release lock
+        ConversationDeletion current = deletionRepository.find(conversationId).orElse(null);
+        int retryCount = current != null ? current.getRetryCount() : 0;
+        deletionRepository.updateStatusAndReleaseLock(conversationId, "WAITING_FOR_RUNS", retryCount, null);
+        log.info("Deletion REQUESTED -> WAITING_FOR_RUNS for conversation {} (retryCount={})", conversationId, retryCount);
     }
 
     private void processWaitingForRuns(String conversationId) {
         if (agentLoopService.hasActiveRuns(conversationId)) {
             agentLoopService.cancelConversation(conversationId);
+            // Release lock so next iteration can re-claim without 60s wait
+            deletionRepository.releaseLock(conversationId);
             return;
         }
-        deletionRepository.updateStatus(conversationId, "PURGING", 0, null);
-        log.info("Deletion WAITING_FOR_RUNS -> PURGING for conversation {}", conversationId);
+        ConversationDeletion current = deletionRepository.find(conversationId).orElse(null);
+        int retryCount = current != null ? current.getRetryCount() : 0;
+        deletionRepository.updateStatusAndReleaseLock(conversationId, "PURGING", retryCount, null);
+        log.info("Deletion WAITING_FOR_RUNS -> PURGING for conversation {} (retryCount={})", conversationId, retryCount);
         processPurging(conversationId);
     }
 
@@ -193,11 +200,13 @@ public class ConversationDeletionWorker implements Runnable {
 
         if (newRetryCount >= MAX_RETRIES) {
             deletionRepository.updateStatus(task.getConversationId(), "FAILED", newRetryCount, errorMsg);
+            deletionRepository.releaseLock(task.getConversationId());
             log.error("Deletion FAILED for conversation {} after {} retries: {}",
                     task.getConversationId(), newRetryCount, errorMsg);
         } else {
             long backoffSeconds = (long) Math.pow(2, newRetryCount);
             deletionRepository.updateStatus(task.getConversationId(), "REQUESTED", newRetryCount, errorMsg);
+            deletionRepository.releaseLock(task.getConversationId());
             log.warn("Deletion retry {} for conversation {} (backoff {}s): {}",
                     newRetryCount, task.getConversationId(), backoffSeconds, errorMsg);
         }

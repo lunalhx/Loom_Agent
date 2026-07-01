@@ -17,6 +17,8 @@ public interface ConversationDeletionRepository {
 
     boolean updateStatus(String conversationId, String status, int retryCount, String lastError);
 
+    boolean updateStatusAndReleaseLock(String conversationId, String status, int retryCount, String lastError);
+
     boolean markCompleted(String conversationId);
 
     boolean resetForRetry(String conversationId);

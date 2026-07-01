@@ -52,6 +52,7 @@ public class ConversationDeletionService {
                 .conversationId(conversationId)
                 .status("REQUESTED")
                 .requestedAt(Instant.now())
+                .updatedAt(Instant.now())
                 .retryCount(0)
                 .build();
         deletionRepository.save(deletion);
