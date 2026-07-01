@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -26,11 +25,6 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
 
     private static final String FINGERPRINT_VERSION = "replace-v1";
 
-    public ReplaceInFileTool(AgentRuntimeProperties properties) {
-        super(properties);
-    }
-
-    @Autowired
     public ReplaceInFileTool(AgentRuntimeProperties properties, WorkspacePort workspacePort) {
         super(properties, workspacePort);
     }

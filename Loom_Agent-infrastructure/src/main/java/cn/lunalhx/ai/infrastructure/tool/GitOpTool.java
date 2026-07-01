@@ -11,7 +11,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -24,12 +23,6 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
 
     private final CommandExecutor commandExecutor;
 
-    public GitOpTool(AgentRuntimeProperties properties) {
-        super(properties);
-        this.commandExecutor = new LocalCommandExecutor();
-    }
-
-    @Autowired
     public GitOpTool(AgentRuntimeProperties properties, WorkspacePort workspacePort, CommandExecutor commandExecutor) {
         super(properties, workspacePort);
         this.commandExecutor = commandExecutor;
