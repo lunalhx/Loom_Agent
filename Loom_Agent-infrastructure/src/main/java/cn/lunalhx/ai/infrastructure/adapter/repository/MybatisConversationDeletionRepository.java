@@ -44,6 +44,11 @@ public class MybatisConversationDeletionRepository implements ConversationDeleti
     }
 
     @Override
+    public boolean updateStatusAndReleaseLock(String conversationId, String status, int retryCount, String lastError) {
+        return dao.updateStatusAndReleaseLock(conversationId, status, retryCount, lastError) > 0;
+    }
+
+    @Override
     public boolean markCompleted(String conversationId) {
         return dao.markCompleted(conversationId) > 0;
     }

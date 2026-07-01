@@ -57,6 +57,11 @@ public class InMemoryConversationDeletionRepository implements ConversationDelet
     }
 
     @Override
+    public boolean updateStatusAndReleaseLock(String conversationId, String status, int retryCount, String lastError) {
+        return updateStatus(conversationId, status, retryCount, lastError);
+    }
+
+    @Override
     public boolean markCompleted(String conversationId) {
         ConversationDeletion existing = store.get(conversationId);
         if (existing == null) return false;
