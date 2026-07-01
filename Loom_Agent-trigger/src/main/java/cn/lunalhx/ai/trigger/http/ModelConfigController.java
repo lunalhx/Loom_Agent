@@ -3,7 +3,6 @@ package cn.lunalhx.ai.trigger.http;
 import cn.lunalhx.ai.api.dto.ModelConfigResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
-import cn.lunalhx.ai.types.enums.ResponseCode;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.env.Environment;
@@ -34,11 +33,7 @@ public class ModelConfigController {
                 .retryMaxAttempts(modelRuntimeProperties.getRetryMaxAttempts())
                 .allowedModels(modelRuntimeProperties.getAllowedModels())
                 .build();
-        return Response.<ModelConfigResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(config)
-                .build();
+        return Response.success(config);
     }
 
     private String mask(String apiKey) {

@@ -24,6 +24,7 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.ConversationDeletionService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.trigger.http.AgentCodeController;
 import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
@@ -118,7 +119,7 @@ public class AgentCodeControllerContractTest {
         when(deletionService.isConversationDeleted(any())).thenReturn(false);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
                 queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null,
-                null, workspaceResolver, properties, deletionService, agentRunRepository);
+                null, workspaceResolver, properties, deletionService, agentRunRepository, null);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 

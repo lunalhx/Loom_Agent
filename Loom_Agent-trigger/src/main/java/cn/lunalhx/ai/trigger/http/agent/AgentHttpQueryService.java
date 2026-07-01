@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
-import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +31,7 @@ public class AgentHttpQueryService {
 
     public Response<AgentApprovalResponse> approval(String approvalId) {
         return approvalStore.find(approvalId)
-                .map(this::toApprovalSuccess)
+                .map(approval -> Response.success(responseMapper.toApprovalResponse(approval)))
                 .orElseGet(this::approvalNotFound);
     }
 
@@ -48,11 +47,7 @@ public class AgentHttpQueryService {
         if (events.isEmpty()) {
             return traceError("未找到 trace");
         }
-        return Response.<AgentTraceTimelineResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(responseMapper.toTraceTimeline(runId, events))
-                .build();
+        return Response.success(responseMapper.toTraceTimeline(runId, events));
     }
 
     public Response<AgentReplayResponse> replay(String runId, boolean includeChildren) {
@@ -63,23 +58,11 @@ public class AgentHttpQueryService {
         if (timeline.getEvents().isEmpty()) {
             return replayError("未找到可 replay 的 trace");
         }
-        return Response.<AgentReplayResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(responseMapper.toReplayResponse(timeline))
-                .build();
+        return Response.success(responseMapper.toReplayResponse(timeline));
     }
 
     public AgentReplayTimeline replayTimeline(String runId, boolean includeChildren) {
         return replayService.replayRun(runId, includeChildren);
-    }
-
-    private Response<AgentApprovalResponse> toApprovalSuccess(PendingApproval approval) {
-        return Response.<AgentApprovalResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(responseMapper.toApprovalResponse(approval))
-                .build();
     }
 
     private Response<AgentApprovalResponse> approvalNotFound() {

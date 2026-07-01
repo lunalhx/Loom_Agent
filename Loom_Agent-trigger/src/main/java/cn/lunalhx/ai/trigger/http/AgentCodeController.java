@@ -175,11 +175,7 @@ public class AgentCodeController {
                     .build();
         }
         boolean cancelled = agentLoopService.cancelRun(result.value());
-        return Response.<Boolean>builder()
-                .code("0000")
-                .info(cancelled ? "cancelled" : "run_not_active")
-                .data(cancelled)
-                .build();
+        return Response.success(cancelled, cancelled ? "cancelled" : "run_not_active");
     }
 
     @GetMapping("/runs/{runId}/trace")
@@ -226,11 +222,7 @@ public class AgentCodeController {
     public Response<List<SkillQueryResponse>> querySkills(@RequestBody(required = false) SkillQueryRequest request) {
         AgentRuntimeProperties.SkillProperties skillProps = agentRuntimeProperties.getSkills();
         if (skillProps != null && Boolean.FALSE.equals(skillProps.getEnabled())) {
-            return Response.<List<SkillQueryResponse>>builder()
-                    .code("0000")
-                    .info("ok")
-                    .data(List.of())
-                    .build();
+            return Response.success(List.of());
         }
 
         String workspace = request == null ? null : request.getWorkspace();
@@ -251,11 +243,7 @@ public class AgentCodeController {
                     .diagnostics(catalog.diagnostics())
                     .build());
         }
-        return Response.<List<SkillQueryResponse>>builder()
-                .code("0000")
-                .info("ok")
-                .data(items)
-                .build();
+        return Response.success(items);
     }
 
     @GetMapping("/conversations")
@@ -268,11 +256,7 @@ public class AgentCodeController {
                         .workspace(s.getWorkspace())
                         .build())
                 .toList();
-        return Response.<List<ConversationSummaryResponse>>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info("ok")
-                .data(list)
-                .build();
+        return Response.success(list);
     }
 
     @DeleteMapping("/conversations/{conversationId}")
@@ -287,25 +271,15 @@ public class AgentCodeController {
         }
 
         HttpStatus httpStatus = result.isAlreadyCompleted() ? HttpStatus.OK : HttpStatus.ACCEPTED;
-        return Response.<ConversationDeletionResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(result.isAlreadyCompleted() ? "already deleted" : "deletion requested")
-                .data(toDeletionResponse(result))
-                .build();
+        return Response.success(toDeletionResponse(result),
+                result.isAlreadyCompleted() ? "already deleted" : "deletion requested");
     }
 
     @GetMapping("/conversations/{conversationId}/deletion")
     public Response<ConversationDeletionResponse> deletionStatus(@PathVariable String conversationId) {
         return deletionService.getDeletionStatus(conversationId)
-                .map(result -> Response.<ConversationDeletionResponse>builder()
-                        .code(ResponseCode.SUCCESS.getCode())
-                        .info("ok")
-                        .data(toDeletionResponse(result))
-                        .build())
-                .orElseGet(() -> Response.<ConversationDeletionResponse>builder()
-                        .code(ResponseCode.SUCCESS.getCode())
-                        .info("not found")
-                        .build());
+                .map(result -> Response.success(toDeletionResponse(result)))
+                .orElseGet(() -> Response.<ConversationDeletionResponse>success(null, "not found"));
     }
 
     @GetMapping("/runs/{runId}/background-tasks")
@@ -333,11 +307,7 @@ public class AgentCodeController {
                         .completionNotified(t.isCompletionNotified())
                         .build())
                 .toList();
-        return Response.<List<BackgroundTaskResponse>>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info("ok")
-                .data(list)
-                .build();
+        return Response.success(list);
     }
 
     @GetMapping("/runs/{runId}/background-tasks/{taskId}")
@@ -359,10 +329,7 @@ public class AgentCodeController {
         long stdoutEnd = stdoutOffset + (stdoutChunk != null ? stdoutChunk.length() : 0);
         long stderrEnd = stderrOffset + (stderrChunk != null ? stderrChunk.length() : 0);
 
-        return Response.<BackgroundTaskDetailResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info("ok")
-                .data(BackgroundTaskDetailResponse.builder()
+        return Response.success(BackgroundTaskDetailResponse.builder()
                         .taskId(task.getTaskId())
                         .runId(task.getRunId())
                         .status(task.getStatus() == null ? null : task.getStatus().name())
@@ -381,8 +348,7 @@ public class AgentCodeController {
                         .cwd(task.getCwd())
                         .launchMode(task.getLaunchMode() == null ? null : task.getLaunchMode().name())
                         .timeoutMs(task.getTimeoutMs())
-                        .build())
-                .build();
+                        .build());
     }
 
     @PostMapping("/runs/{runId}/background-tasks/{taskId}/cancel")
@@ -395,15 +361,11 @@ public class AgentCodeController {
                     .info("任务未找到")
                     .build();
         }
-        return Response.<BackgroundTaskResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info("ok")
-                .data(BackgroundTaskResponse.builder()
+        return Response.success(BackgroundTaskResponse.builder()
                         .taskId(task.getTaskId())
                         .runId(task.getRunId())
                         .status(task.getStatus() == null ? null : task.getStatus().name())
-                        .build())
-                .build();
+                        .build());
     }
 
     private String readChunk(String filePath, long offset, int limitBytes) {
