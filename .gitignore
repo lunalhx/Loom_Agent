@@ -43,6 +43,7 @@ AGENTS.md
 ### Local environment ###
 docs/env/.env
 docs/env/*.local
+/.playwright-mcp/
 
 ### Runtime logs ###
 Loom_Agent-app/data/
