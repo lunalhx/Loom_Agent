@@ -51,6 +51,10 @@ public class AgentSseResponder {
             AgentEventType.USER_INPUT_REQUIRED,
             AgentEventType.POLICY_DENIED,
             AgentEventType.ANSWER,
+            AgentEventType.BACKGROUND_TASK_STARTED,
+            AgentEventType.BACKGROUND_TASK_COMPLETED,
+            AgentEventType.BACKGROUND_TASK_FAILED,
+            AgentEventType.BACKGROUND_TASK_CANCELLED,
             AgentEventType.STOP_HOOK_RESULT,
             AgentEventType.DONE,
             AgentEventType.ERROR

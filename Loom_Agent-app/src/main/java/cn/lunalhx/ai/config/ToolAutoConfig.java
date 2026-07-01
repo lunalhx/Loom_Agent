@@ -9,11 +9,14 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.mcp.McpClientManager;
 import cn.lunalhx.ai.infrastructure.skill.SkillTools;
+import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
 import cn.lunalhx.ai.infrastructure.tool.MemorySaveTool;
 import cn.lunalhx.ai.infrastructure.tool.MemorySearchTool;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
+import cn.lunalhx.ai.infrastructure.tool.ShellTaskTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -94,5 +97,12 @@ public class ToolAutoConfig {
         String projectDir = agentRuntimeProperties.getSkills() != null
                 ? agentRuntimeProperties.getSkills().getProjectDir() : ".agents/skills";
         return new SkillTools.CreateSkillTool(projectDir);
+    }
+
+    @Bean
+    public ShellTaskTool shellTaskTool(BackgroundShellTaskRepository taskRepository,
+                                        BackgroundProcessManager processManager,
+                                        AgentRuntimeProperties properties) {
+        return new ShellTaskTool(taskRepository, processManager, properties);
     }
 }

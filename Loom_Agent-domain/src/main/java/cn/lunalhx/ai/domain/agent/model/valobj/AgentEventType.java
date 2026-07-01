@@ -22,6 +22,10 @@ public enum AgentEventType {
     POLICY_DENIED("policy_denied"),
     OBSERVATION("observation"),
     ANSWER("answer"),
+    BACKGROUND_TASK_STARTED("background_task_started"),
+    BACKGROUND_TASK_COMPLETED("background_task_completed"),
+    BACKGROUND_TASK_FAILED("background_task_failed"),
+    BACKGROUND_TASK_CANCELLED("background_task_cancelled"),
     STOP_HOOK_RESULT("stop_hook_result"),
     DONE("done"),
     ERROR("error");
