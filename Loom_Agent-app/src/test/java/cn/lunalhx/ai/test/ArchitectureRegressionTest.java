@@ -117,6 +117,38 @@ public class ArchitectureRegressionTest {
                     .orShould().dependOnClassesThat()
                     .haveFullyQualifiedName("cn.lunalhx.ai.domain.model.adapter.port.ModelGateway");
 
+    // ---- Rule 7b: Agent Controller（拆分后）构造参数 ≤5 且公开端点 ≤5 ----
+
+    @ArchTest
+    public static final ArchRule agent_controllers_have_at_most_5_params_and_endpoints =
+            classes().that().haveFullyQualifiedName(
+                            "cn.lunalhx.ai.trigger.http.AgentExecutionController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentApprovalController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentRunController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentConversationController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentSkillController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentBackgroundTaskController")
+                    .should(haveConstructorsWithAtMost5Params())
+                    .andShould(haveAtMost5PublicEndpoints());
+
+    // ---- Rule 7c: Agent Controller（拆分后）不得依赖 repository port 或文件 I/O ----
+
+    @ArchTest
+    public static final ArchRule agent_controllers_must_not_depend_on_repositories_or_files =
+            noClasses().that().haveFullyQualifiedName(
+                            "cn.lunalhx.ai.trigger.http.AgentExecutionController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentApprovalController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentRunController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentConversationController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentSkillController")
+                    .or().haveFullyQualifiedName("cn.lunalhx.ai.trigger.http.AgentBackgroundTaskController")
+                    .should().dependOnClassesThat()
+                    .resideInAnyPackage("cn.lunalhx.ai.domain..adapter.port..")
+                    .orShould().dependOnClassesThat()
+                    .haveFullyQualifiedName("java.nio.file.Files")
+                    .orShould().dependOnClassesThat()
+                    .haveFullyQualifiedName("java.nio.file.Path");
+
     // ---- Rule 8: 策略/调度器/辅助组件保持 package-private ----
 
     @ArchTest
@@ -302,6 +334,26 @@ public class ArchitectureRegressionTest {
                                 method.getFullName() + " is annotated with @Bean — "
                                         + "AiRuntimeConfig must only use @Import"));
                     }
+                }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> haveAtMost5PublicEndpoints() {
+        return new ArchCondition<>("have at most 5 public endpoint methods") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                long count = javaClass.getMethods().stream()
+                        .filter(m -> m.getModifiers().contains(java.lang.reflect.Modifier.PUBLIC))
+                        .filter(m -> m.isAnnotatedWith("org.springframework.web.bind.annotation.GetMapping")
+                                || m.isAnnotatedWith("org.springframework.web.bind.annotation.PostMapping")
+                                || m.isAnnotatedWith("org.springframework.web.bind.annotation.DeleteMapping")
+                                || m.isAnnotatedWith("org.springframework.web.bind.annotation.PutMapping")
+                                || m.isAnnotatedWith("org.springframework.web.bind.annotation.RequestMapping"))
+                        .count();
+                if (count > 5) {
+                    events.add(SimpleConditionEvent.violated(javaClass,
+                            javaClass.getFullName() + " has " + count + " public endpoints (max 5)"));
                 }
             }
         };

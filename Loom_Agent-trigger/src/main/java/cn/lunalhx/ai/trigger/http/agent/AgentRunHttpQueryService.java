@@ -1,11 +1,9 @@
 package cn.lunalhx.ai.trigger.http.agent;
 
-import cn.lunalhx.ai.api.dto.AgentApprovalResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
@@ -21,19 +19,12 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AgentHttpQueryService {
+public class AgentRunHttpQueryService {
 
-    private final ApprovalStore approvalStore;
     private final AgentRunRepository agentRunRepository;
     private final TraceRecorder traceRecorder;
     private final ReplayService replayService;
     private final AgentResponseMapper responseMapper;
-
-    public Response<AgentApprovalResponse> approval(String approvalId) {
-        return approvalStore.find(approvalId)
-                .map(approval -> Response.success(responseMapper.toApprovalResponse(approval)))
-                .orElseGet(this::approvalNotFound);
-    }
 
     public Response<AgentTraceTimelineResponse> trace(String runId) {
         if (runId == null || runId.isBlank()) {
@@ -63,13 +54,6 @@ public class AgentHttpQueryService {
 
     public AgentReplayTimeline replayTimeline(String runId, boolean includeChildren) {
         return replayService.replayRun(runId, includeChildren);
-    }
-
-    private Response<AgentApprovalResponse> approvalNotFound() {
-        return Response.<AgentApprovalResponse>builder()
-                .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                .info("审批不存在或已过期")
-                .build();
     }
 
     private Response<AgentTraceTimelineResponse> traceError(String message) {
