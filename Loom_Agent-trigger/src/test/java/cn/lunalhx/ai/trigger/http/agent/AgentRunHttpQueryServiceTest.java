@@ -1,16 +1,13 @@
 package cn.lunalhx.ai.trigger.http.agent;
 
-import cn.lunalhx.ai.api.dto.AgentApprovalResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
-import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import org.junit.Before;
@@ -26,44 +23,20 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class AgentHttpQueryServiceTest {
+public class AgentRunHttpQueryServiceTest {
 
-    private ApprovalStore approvalStore;
     private AgentRunRepository agentRunRepository;
     private TraceRecorder traceRecorder;
     private ReplayService replayService;
-    private AgentHttpQueryService queryService;
+    private AgentRunHttpQueryService queryService;
 
     @Before
     public void setUp() {
-        approvalStore = mock(ApprovalStore.class);
         agentRunRepository = mock(AgentRunRepository.class);
         traceRecorder = mock(TraceRecorder.class);
         replayService = mock(ReplayService.class);
         AgentResponseMapper responseMapper = new AgentResponseMapper();
-        queryService = new AgentHttpQueryService(approvalStore, agentRunRepository, traceRecorder, replayService, responseMapper);
-    }
-
-    // ===== approval =====
-
-    @Test
-    public void approvalFoundShouldReturnSuccess() {
-        PendingApproval approval = PendingApproval.builder()
-                .approvalId("ap-1").runId("r-1").requestId("req-1").conversationId("c-1")
-                .build();
-        when(approvalStore.find("ap-1")).thenReturn(Optional.of(approval));
-        Response<AgentApprovalResponse> result = queryService.approval("ap-1");
-        assertEquals(ResponseCode.SUCCESS.getCode(), result.getCode());
-        assertEquals("ap-1", result.getData().getApprovalId());
-        assertEquals("PENDING", result.getData().getStatus());
-    }
-
-    @Test
-    public void approvalNotFoundShouldReturnIllegalParameter() {
-        when(approvalStore.find("missing")).thenReturn(Optional.empty());
-        Response<AgentApprovalResponse> result = queryService.approval("missing");
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("审批不存在或已过期", result.getInfo());
+        queryService = new AgentRunHttpQueryService(agentRunRepository, traceRecorder, replayService, responseMapper);
     }
 
     // ===== trace =====
