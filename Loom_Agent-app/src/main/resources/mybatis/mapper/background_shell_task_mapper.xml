@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.BackgroundShellTaskDao">
+
+    <resultMap id="BackgroundShellTaskMap" type="cn.lunalhx.ai.infrastructure.dao.po.BackgroundShellTaskPO">
+        <id column="id" property="id"/>
+        <result column="task_id" property="taskId"/>
+        <result column="run_id" property="runId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="workspace" property="workspace"/>
+        <result column="command" property="command"/>
+        <result column="cwd" property="cwd"/>
+        <result column="launch_mode" property="launchMode"/>
+        <result column="timeout_ms" property="timeoutMs"/>
+        <result column="pid" property="pid"/>
+        <result column="status" property="status"/>
+        <result column="exit_code" property="exitCode"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="stdout_file" property="stdoutFile"/>
+        <result column="stderr_file" property="stderrFile"/>
+        <result column="stdout_bytes" property="stdoutBytes"/>
+        <result column="stderr_bytes" property="stderrBytes"/>
+        <result column="started_at" property="startedAt"/>
+        <result column="completed_at" property="completedAt"/>
+        <result column="completion_notified" property="completionNotified"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.BackgroundShellTaskPO">
+        INSERT INTO agent_background_shell_task
+        (task_id, run_id, conversation_id, workspace, command, cwd, launch_mode, timeout_ms, pid,
+         status, exit_code, error_code, error_message, stdout_file, stderr_file, stdout_bytes, stderr_bytes,
+         started_at, completed_at, completion_notified)
+        VALUES
+        (#{taskId}, #{runId}, #{conversationId}, #{workspace}, #{command}, #{cwd}, #{launchMode}, #{timeoutMs}, #{pid},
+         #{status}, #{exitCode}, #{errorCode}, #{errorMessage}, #{stdoutFile}, #{stderrFile}, #{stdoutBytes}, #{stderrBytes},
+         #{startedAt}, #{completedAt}, #{completionNotified})
+        ON CONFLICT(task_id) DO UPDATE SET
+        run_id = excluded.run_id,
+        conversation_id = excluded.conversation_id,
+        workspace = excluded.workspace,
+        command = excluded.command,
+        cwd = excluded.cwd,
+        launch_mode = excluded.launch_mode,
+        timeout_ms = excluded.timeout_ms,
+        pid = excluded.pid,
+        status = excluded.status,
+        exit_code = excluded.exit_code,
+        error_code = excluded.error_code,
+        error_message = excluded.error_message,
+        stdout_file = excluded.stdout_file,
+        stderr_file = excluded.stderr_file,
+        stdout_bytes = excluded.stdout_bytes,
+        stderr_bytes = excluded.stderr_bytes,
+        started_at = excluded.started_at,
+        completed_at = excluded.completed_at,
+        completion_notified = excluded.completion_notified,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    </insert>
+
+    <select id="selectByTaskId" resultMap="BackgroundShellTaskMap">
+        SELECT * FROM agent_background_shell_task WHERE task_id = #{taskId} LIMIT 1
+    </select>
+
+    <select id="selectByRunId" resultMap="BackgroundShellTaskMap">
+        SELECT * FROM agent_background_shell_task WHERE run_id = #{runId} ORDER BY create_time ASC
+    </select>
+
+    <select id="selectRunningByRunId" resultMap="BackgroundShellTaskMap">
+        SELECT * FROM agent_background_shell_task
+        WHERE run_id = #{runId} AND status IN ('STARTING', 'RUNNING')
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="selectStaleRunning" resultMap="BackgroundShellTaskMap">
+        SELECT * FROM agent_background_shell_task
+        WHERE status IN
+        <foreach collection="statuses" item="s" open="(" close=")" separator=",">
+            #{s}
+        </foreach>
+        ORDER BY create_time ASC
+    </select>
+
+    <update id="markNotified">
+        UPDATE agent_background_shell_task
+        SET completion_notified = 1,
+            update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE task_id = #{taskId} AND completion_notified = 0
+    </update>
+
+    <delete id="deleteByRunId">
+        DELETE FROM agent_background_shell_task WHERE run_id = #{runId}
+    </delete>
+
+    <delete id="deleteByConversationId">
+        DELETE FROM agent_background_shell_task WHERE conversation_id = #{conversationId}
+    </delete>
+
+</mapper>

@@ -22,6 +22,7 @@ public class AgentRuntimeProperties {
     private Integer searchMaxResults = 50;
     private Long approvalTtlSeconds = 900L;
     private Long shellTimeoutMs = 120000L;
+    private Long shellMaxTimeoutMs = 600000L;
     private Integer shellMaxOutputChars = 12000;
     private Integer shellMaxStderrChars = 4000;
     private String highRiskPolicy = "CONFIRM";
@@ -44,6 +45,7 @@ public class AgentRuntimeProperties {
     private StepBudgetProperties stepBudget = new StepBudgetProperties();
     private UndoProperties undo = new UndoProperties();
     private SkillProperties skills = new SkillProperties();
+    private BackgroundShellProperties backgroundShell = new BackgroundShellProperties();
 
     @Data
     public static class BudgetProperties {
@@ -157,6 +159,20 @@ public class AgentRuntimeProperties {
         private Integer maxResourceFiles = 256;
         private Long maxResourceBytes = 10_485_760L;
         private Long maxSnapshotBytes = 52_428_800L;
+
+    }
+
+    @Data
+    public static class BackgroundShellProperties {
+
+        private boolean enabled = true;
+        private int globalMaxTasks = 8;
+        private int perRunMaxTasks = 4;
+        private int ioThreads = 4;
+        private long foregroundYieldMs = 10_000L;
+        private long maxForegroundYieldMs = 30_000L;
+        private long taskRetentionHours = 24;
+        private String dataDir;
 
     }
 

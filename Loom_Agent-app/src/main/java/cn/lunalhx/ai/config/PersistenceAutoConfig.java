@@ -11,9 +11,11 @@ import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
+import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryBackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryUndoSnapshotRepository;
@@ -21,6 +23,7 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryWorkspaceUndoLock
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
+import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisBackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisTraceRecorder;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisUndoSnapshotRepository;
@@ -36,6 +39,7 @@ import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentWorkspaceUndoLockDao;
+import cn.lunalhx.ai.infrastructure.dao.BackgroundShellTaskDao;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -240,6 +244,26 @@ public class PersistenceAutoConfig {
                                                             AgentRuntimeProperties agentRuntimeProperties) {
         return new UndoSnapshotCleanupTask(undoSnapshotRepository, workspaceUndoLockRepository,
                 workspaceSnapshotPort, agentRuntimeProperties.getUndo());
+    }
+
+    @Bean
+    public BackgroundShellTaskRepository backgroundShellTaskRepository(PersistenceProperties persistence,
+                                                                       ObjectProvider<BackgroundShellTaskDao> daoProvider) {
+        BackgroundShellTaskDao dao = daoProvider.getIfAvailable();
+        return switch (persistence.getMode()) {
+            case MEMORY -> {
+                log.info("BackgroundShellTaskRepository: InMemory (mode=memory)");
+                yield new InMemoryBackgroundShellTaskRepository();
+            }
+            case SQLITE -> {
+                if (dao == null) {
+                    throw new IllegalStateException(
+                            "persistence mode=sqlite requires BackgroundShellTaskDao, but MyBatis DAO is not available");
+                }
+                log.info("BackgroundShellTaskRepository: MyBatis (mode=sqlite)");
+                yield new MybatisBackgroundShellTaskRepository(dao);
+            }
+        };
     }
 
 }
