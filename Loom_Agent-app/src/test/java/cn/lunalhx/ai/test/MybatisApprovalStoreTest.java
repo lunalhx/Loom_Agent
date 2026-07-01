@@ -35,6 +35,11 @@ public class MybatisApprovalStoreTest {
             public int markConsumed(String approvalId) {
                 return 1;
             }
+
+            @Override
+            public int deleteByConversationId(String conversationId) {
+                return 0;
+            }
         };
         MybatisApprovalStore store = new MybatisApprovalStore(dao, new ObjectMapper());
         PendingApproval approval = PendingApproval.builder()

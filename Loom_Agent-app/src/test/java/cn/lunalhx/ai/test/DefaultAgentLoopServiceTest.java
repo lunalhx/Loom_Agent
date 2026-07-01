@@ -65,8 +65,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -123,6 +125,61 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(prompts.get(2).contains("Step 2 - tool_result"));
         assertEquals("DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+    }
+
+    @Test
+    public void shouldCancelActiveRunAndPersistCancelledStatus() throws Exception {
+        CountDownLatch modelStarted = new CountDownLatch(1);
+        CountDownLatch releaseModel = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(1);
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                modelStarted.countDown();
+                try {
+                    assertTrue(releaseModel.await(2, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("{\"type\":\"final\",\"answer\":\"should not finish\"}")
+                        .finishReason("stop")
+                        .build());
+            }
+        };
+        InMemoryAgentRunRepository runRepository = new InMemoryAgentRunRepository();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
+                .modelGateway(gateway)
+                .runRepository(runRepository)
+                .executor(executor)
+                .buildAgentLoop();
+
+        try {
+            service.ask(AgentQuestion.builder()
+                            .runId("cancel-run")
+                            .question("cancel me")
+                            .build())
+                    .doFinally(signal -> completed.countDown())
+                    .subscribe();
+
+            assertTrue(modelStarted.await(2, TimeUnit.SECONDS));
+            assertTrue(service.cancelRun("cancel-run"));
+            releaseModel.countDown();
+            assertTrue(completed.await(2, TimeUnit.SECONDS));
+            assertEquals(AgentRunStatus.CANCELLED,
+                    runRepository.find("cancel-run").orElseThrow().getStatus());
+            assertFalse(service.cancelRun("cancel-run"));
+        } finally {
+            releaseModel.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test

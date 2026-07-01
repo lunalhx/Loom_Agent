@@ -67,4 +67,23 @@
         LIMIT 1
     </select>
 
+    <update id="cancelBySourceRunIds">
+        UPDATE agent_memory_generation_job
+        SET status = 'CANCELLED',
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE source_run_id IN
+        <foreach collection="sourceRunIds" item="sourceRunId" open="(" separator="," close=")">
+            #{sourceRunId}
+        </foreach>
+        AND status IN ('PENDING', 'RUNNING')
+    </update>
+
+    <delete id="deleteBySourceRunIds">
+        DELETE FROM agent_memory_generation_job
+        WHERE source_run_id IN
+        <foreach collection="sourceRunIds" item="sourceRunId" open="(" separator="," close=")">
+            #{sourceRunId}
+        </foreach>
+    </delete>
+
 </mapper>

@@ -12,4 +12,5 @@ public interface AgentPendingApprovalDao {
 
     int markConsumed(String approvalId);
 
+    int deleteByConversationId(String conversationId);
 }

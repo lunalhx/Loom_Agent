@@ -36,4 +36,8 @@ public class InMemoryContextBlobStore implements ContextBlobStore {
         return blobs.getOrDefault(storageUri, "");
     }
 
+    @Override
+    public void delete(String storageUri) {
+        blobs.remove(storageUri);
+    }
 }

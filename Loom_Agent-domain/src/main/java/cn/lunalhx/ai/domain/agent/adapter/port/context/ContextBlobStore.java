@@ -6,4 +6,5 @@ public interface ContextBlobStore {
 
     String read(String storageUri);
 
+    void delete(String storageUri);
 }

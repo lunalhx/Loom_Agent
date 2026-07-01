@@ -20,4 +20,7 @@ public interface AgentContextArtifactDao {
                                                    @Param("query") String query,
                                                    @Param("limit") int limit);
 
+    List<AgentContextArtifactPO> selectByConversationId(String conversationId);
+
+    int deleteByConversationId(String conversationId);
 }

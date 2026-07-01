@@ -99,7 +99,7 @@ public class ToolSchemaValidatorTest {
                 "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"name\"],\"additionalProperties\":false}",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"content\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"create\",\"overwrite\"],\"default\":\"create\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}",
                 "{\"type\":\"object\",\"properties\":{\"paths\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":20,\"items\":{\"type\":\"string\",\"minLength\":1}}},\"required\":[\"paths\"],\"additionalProperties\":false}",
-                "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":[\"status\",\"diff\",\"log\",\"init\",\"add\",\"commit\",\"push\",\"reset\",\"clean\",\"rebase\",\"checkout\"]}},\"required\":[\"operation\"],\"additionalProperties\":false,\"oneOf\":[{\"properties\":{\"operation\":{\"const\":\"status\"}}},{\"properties\":{\"operation\":{\"const\":\"diff\"},\"path\":{\"type\":\"string\"}}}]}"
+                "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":[\"status\",\"diff\",\"log\",\"init\",\"add\",\"commit\",\"push\",\"reset\",\"clean\",\"rebase\",\"checkout\"]}},\"required\":[\"operation\"],\"oneOf\":[{\"properties\":{\"operation\":{\"const\":\"status\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"diff\"},\"path\":{\"type\":\"string\"}},\"additionalProperties\":false}]}"
         };
         for (int i = 0; i < schemas.length; i++) {
             validator.compile(schemas[i]);

@@ -52,6 +52,19 @@ public class LocalFileContextBlobStore implements ContextBlobStore {
         }
     }
 
+    @Override
+    public void delete(String storageUri) {
+        try {
+            Path file = resolveFile(storageUri);
+            if (!file.startsWith(storageRoot)) {
+                return;
+            }
+            Files.deleteIfExists(file);
+        } catch (Exception e) {
+            // deletion is best-effort
+        }
+    }
+
     private Path resolveFile(String storageUri) {
         if (storageUri.startsWith(URI_PREFIX)) {
             String relative = storageUri.substring(URI_PREFIX.length());

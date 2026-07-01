@@ -7,6 +7,7 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
+import cn.lunalhx.ai.api.dto.ConversationDeletionResponse;
 import cn.lunalhx.ai.api.dto.SkillQueryRequest;
 import cn.lunalhx.ai.api.dto.SkillQueryResponse;
 import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
@@ -23,14 +24,18 @@ import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.agent.service.ConversationDeletionService;
 import cn.lunalhx.ai.trigger.http.agent.AgentHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
 import cn.lunalhx.ai.trigger.http.agent.AgentUndoHttpService;
+import cn.lunalhx.ai.types.enums.ResponseCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,6 +43,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
@@ -59,6 +65,7 @@ public class AgentCodeController {
     private final SkillRepository skillRepository;
     private final AgentWorkspaceResolver workspaceResolver;
     private final AgentRuntimeProperties agentRuntimeProperties;
+    private final ConversationDeletionService deletionService;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
@@ -66,6 +73,12 @@ public class AgentCodeController {
         AgentRequestMapper.Result<AgentQuestion> result = requestMapper.mapAsk(request);
         if (!result.valid()) {
             return sseResponder.completedAgentError(result.problem());
+        }
+
+        AgentQuestion question = result.value();
+        if (question.getConversationId() != null && deletionService.isConversationDeleted(question.getConversationId())) {
+            return sseResponder.completedAgentError(
+                    new AgentRequestMapper.Problem(ResponseCode.CONVERSATION_DELETED.getCode(), "会话已删除"));
         }
 
         String clientKey = streamRequestLimiter.resolveClientKey(httpRequest);
@@ -81,8 +94,8 @@ public class AgentCodeController {
 
         return sseResponder.streamAgentEvents(
                 "ask",
-                result.value().getRequestId(),
-                () -> agentLoopService.ask(result.value()),
+                question.getRequestId(),
+                () -> agentLoopService.ask(question),
                 profile,
                 lease::release
         );
@@ -138,6 +151,24 @@ public class AgentCodeController {
                 () -> agentLoopService.resumeWithUserInput(runId, result.value().action(), result.value().message()),
                 AgentSseResponder.StreamProfile.ALL_EVENTS
         );
+    }
+
+    @PostMapping("/runs/{runId}/cancel")
+    public Response<Boolean> cancelRun(@PathVariable String runId) {
+        AgentRequestMapper.Result<String> result = requestMapper.mapRunId(runId);
+        if (!result.valid()) {
+            return Response.<Boolean>builder()
+                    .code(result.problem().code())
+                    .info(result.problem().message())
+                    .data(false)
+                    .build();
+        }
+        boolean cancelled = agentLoopService.cancelRun(result.value());
+        return Response.<Boolean>builder()
+                .code("0000")
+                .info(cancelled ? "cancelled" : "run_not_active")
+                .data(cancelled)
+                .build();
     }
 
     @GetMapping("/runs/{runId}/trace")
@@ -213,6 +244,51 @@ public class AgentCodeController {
                 .code("0000")
                 .info("ok")
                 .data(items)
+                .build();
+    }
+
+    @DeleteMapping("/conversations/{conversationId}")
+    public Response<ConversationDeletionResponse> deleteConversation(@PathVariable String conversationId) {
+        ConversationDeletionService.DeletionRequestResult result = deletionService.requestDeletion(conversationId);
+
+        if (result.invalid()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, result.lastError());
+        }
+        if (result.notFound()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "conversation not found");
+        }
+
+        HttpStatus httpStatus = result.isAlreadyCompleted() ? HttpStatus.OK : HttpStatus.ACCEPTED;
+        return Response.<ConversationDeletionResponse>builder()
+                .code(ResponseCode.SUCCESS.getCode())
+                .info(result.isAlreadyCompleted() ? "already deleted" : "deletion requested")
+                .data(toDeletionResponse(result))
+                .build();
+    }
+
+    @GetMapping("/conversations/{conversationId}/deletion")
+    public Response<ConversationDeletionResponse> deletionStatus(@PathVariable String conversationId) {
+        return deletionService.getDeletionStatus(conversationId)
+                .map(result -> Response.<ConversationDeletionResponse>builder()
+                        .code(ResponseCode.SUCCESS.getCode())
+                        .info("ok")
+                        .data(toDeletionResponse(result))
+                        .build())
+                .orElseGet(() -> Response.<ConversationDeletionResponse>builder()
+                        .code(ResponseCode.SUCCESS.getCode())
+                        .info("not found")
+                        .build());
+    }
+
+    private static ConversationDeletionResponse toDeletionResponse(
+            ConversationDeletionService.DeletionRequestResult result) {
+        return ConversationDeletionResponse.builder()
+                .conversationId(result.conversationId())
+                .status(result.status())
+                .requestedAt(result.requestedAt())
+                .completedAt(result.completedAt())
+                .retryCount(result.retryCount())
+                .lastError(result.lastError())
                 .build();
     }
 }

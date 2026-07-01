@@ -53,4 +53,20 @@
         ORDER BY create_time ASC, run_id ASC, sequence_no ASC, id ASC
     </select>
 
+    <delete id="deleteByRunIds">
+        DELETE FROM agent_trace_event
+        WHERE run_id IN
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+    </delete>
+
+    <delete id="deleteByRootRunIds">
+        DELETE FROM agent_trace_event
+        WHERE root_run_id IN
+        <foreach collection="rootRunIds" item="rootRunId" open="(" separator="," close=")">
+            #{rootRunId}
+        </foreach>
+    </delete>
+
 </mapper>

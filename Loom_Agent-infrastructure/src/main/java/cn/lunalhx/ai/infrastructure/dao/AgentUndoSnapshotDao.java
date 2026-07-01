@@ -33,4 +33,8 @@ public interface AgentUndoSnapshotDao {
                        @Param("expected") String expected,
                        @Param("next") String next,
                        @Param("expectedVersion") Long expectedVersion);
+
+    List<AgentUndoSnapshotPO> selectByConversationId(String conversationId);
+
+    int deleteByConversationId(String conversationId);
 }

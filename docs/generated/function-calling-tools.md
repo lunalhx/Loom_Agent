@@ -296,13 +296,13 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
     }
   },
   "required" : [ "operation" ],
-  "additionalProperties" : false,
   "oneOf" : [ {
     "properties" : {
       "operation" : {
         "const" : "status"
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -312,7 +312,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "string",
         "description" : "可选相对路径"
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -324,13 +325,15 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "maximum" : 50,
         "default" : 10
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
         "const" : "init"
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -340,7 +343,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "string",
         "description" : "可选相对路径"
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -350,7 +354,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "string",
         "minLength" : 1
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -368,7 +373,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "boolean",
         "default" : false
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -382,7 +388,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "boolean",
         "default" : false
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -392,7 +399,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "boolean",
         "default" : true
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -402,7 +410,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "string",
         "description" : "可选分支"
       }
-    }
+    },
+    "additionalProperties" : false
   }, {
     "properties" : {
       "operation" : {
@@ -416,7 +425,8 @@ Create a new project-level skill. The skill is written to .agents/skills/<name>/
         "type" : "string",
         "description" : "可选相对路径"
       }
-    }
+    },
+    "additionalProperties" : false
   } ]
 }
 ```

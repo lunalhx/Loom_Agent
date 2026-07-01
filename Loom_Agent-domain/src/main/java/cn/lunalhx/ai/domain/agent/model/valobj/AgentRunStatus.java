@@ -7,6 +7,7 @@ public enum AgentRunStatus {
     WAITING_USER_INPUT,
     COMPLETED,
     FAILED,
-    BUDGET_EXCEEDED
+    BUDGET_EXCEEDED,
+    CANCELLED
 
 }

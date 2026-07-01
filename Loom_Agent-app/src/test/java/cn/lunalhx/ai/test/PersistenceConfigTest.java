@@ -177,25 +177,33 @@ public class PersistenceConfigTest {
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO selectByRunId(String runId) { return null; }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO> selectByParentRunId(String parentRunId) { return java.util.List.of(); }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO selectLatestRootByConversationId(String conversationId) { return null; }
+        @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO> selectByConversationId(String conversationId) { return java.util.List.of(); }
+        @Override public int deleteByConversationId(String conversationId) { return 0; }
     }
     private static class MockAgentRunCheckpointDao implements AgentRunCheckpointDao {
         @Override public Long insertNext(cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO checkpoint) { return 1L; }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO selectLatest(String runId) { return null; }
+        @Override public int deleteByRunIds(java.util.List<String> runIds) { return 0; }
     }
     private static class MockAgentPendingApprovalDao implements AgentPendingApprovalDao {
         @Override public int upsert(cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO approval) { return 1; }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO selectByApprovalId(String approvalId) { return null; }
         @Override public int markConsumed(String approvalId) { return 1; }
+        @Override public int deleteByConversationId(String conversationId) { return 0; }
     }
     private static class MockAgentTraceEventDao implements AgentTraceEventDao {
         @Override public Long insertNext(cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO event) { return 1L; }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO> selectByRunId(String runId) { return java.util.List.of(); }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentTraceEventPO> selectByTraceId(String traceId) { return java.util.List.of(); }
+        @Override public int deleteByRunIds(java.util.List<String> runIds) { return 0; }
+        @Override public int deleteByRootRunIds(java.util.List<String> rootRunIds) { return 0; }
     }
     private static class MockAgentContextArtifactDao implements AgentContextArtifactDao {
         @Override public int insert(cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO artifact) { return 1; }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO selectByArtifactIdAndRootRunId(String artifactId, String rootRunId) { return null; }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> selectByRootRunId(String rootRunId) { return java.util.List.of(); }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> searchByRootRunId(String rootRunId, String query, int limit) { return java.util.List.of(); }
+        @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> selectByConversationId(String conversationId) { return java.util.List.of(); }
+        @Override public int deleteByConversationId(String conversationId) { return 0; }
     }
 }

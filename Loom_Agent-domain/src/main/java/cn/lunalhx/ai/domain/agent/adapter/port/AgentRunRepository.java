@@ -15,4 +15,5 @@ public interface AgentRunRepository {
 
     Optional<AgentRun> findLatestRootByConversationId(String conversationId);
 
+    List<AgentRun> findByConversationId(String conversationId);
 }

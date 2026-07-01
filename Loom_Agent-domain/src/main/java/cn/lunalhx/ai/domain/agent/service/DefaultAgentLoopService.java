@@ -24,7 +24,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -35,6 +38,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final AgentLoopComponents components;
     private final Executor executor;
     private final UndoSessionCoordinator undoCoordinator;
+    private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
 
     // ==================== 生产构造器 ====================
 
@@ -107,6 +112,44 @@ public class DefaultAgentLoopService implements AgentLoopService {
         });
     }
 
+    @Override
+    public boolean cancelRun(String runId) {
+        if (StringUtils.isBlank(runId)) {
+            return false;
+        }
+        AtomicBoolean cancellation = cancellationRequests.get(runId);
+        return cancellation != null && cancellation.compareAndSet(false, true);
+    }
+
+    @Override
+    public void cancelConversation(String conversationId) {
+        if (StringUtils.isBlank(conversationId)) {
+            return;
+        }
+        Set<String> runIds = conversationRuns.getOrDefault(conversationId, Set.of());
+        for (String runId : runIds) {
+            cancelRun(runId);
+        }
+    }
+
+    @Override
+    public boolean hasActiveRuns(String conversationId) {
+        if (StringUtils.isBlank(conversationId)) {
+            return false;
+        }
+        Set<String> runIds = conversationRuns.get(conversationId);
+        if (runIds == null || runIds.isEmpty()) {
+            return false;
+        }
+        for (String runId : runIds) {
+            AtomicBoolean c = cancellationRequests.get(runId);
+            if (c != null && !c.get()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== 核心编排 ====================
 
     private Flux<AgentEvent> executeAsync(String operation, String reference,
@@ -157,38 +200,62 @@ public class DefaultAgentLoopService implements AgentLoopService {
     }
 
     private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {
-        while (!sink.isCancelled()) {
-            if (isTotalTimeout(context)) {
-                fail(context, AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");
-                currentNode = AgentNodeNames.FAIL;
-            }
+        AtomicBoolean cancellation = new AtomicBoolean(false);
+        AtomicBoolean existing = cancellationRequests.putIfAbsent(context.getRunId(), cancellation);
+        AtomicBoolean activeCancellation = existing == null ? cancellation : existing;
+        String convId = context.getConversationId();
+        if (convId != null) {
+            conversationRuns.computeIfAbsent(convId, k -> ConcurrentHashMap.newKeySet()).add(context.getRunId());
+        }
+        try {
+            while (!sink.isCancelled() && !activeCancellation.get()) {
+                if (isTotalTimeout(context)) {
+                    fail(context, AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");
+                    currentNode = AgentNodeNames.FAIL;
+                }
 
-            AgentNode node = nodes.get(currentNode);
-            context.setCurrentNode(currentNode);
-            if (node == null) {
-                fail(context, AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
-                node = nodes.get(AgentNodeNames.FAIL);
-            }
+                AgentNode node = nodes.get(currentNode);
+                context.setCurrentNode(currentNode);
+                if (node == null) {
+                    fail(context, AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
+                    node = nodes.get(AgentNodeNames.FAIL);
+                }
 
-            AgentNodeExecution execution =
-                    components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
+                AgentNodeExecution execution =
+                        components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
 
-            if (execution.terminal() && execution.hasDeferredTerminalEvents()) {
-                execution = components.nodeLifecycle().resolveStop(
-                        context, node, execution.terminalEvents(), events -> emit(sink, events));
-            }
+                if (execution.terminal() && execution.hasDeferredTerminalEvents()) {
+                    execution = components.nodeLifecycle().resolveStop(
+                            context, node, execution.terminalEvents(), events -> emit(sink, events));
+                }
 
-            if (execution.isStopContinued()) {
+                if (execution.isStopContinued()) {
+                    currentNode = execution.nextNode();
+                    continue;
+                }
+
+                if (execution.terminal()) {
+                    sink.complete();
+                    return;
+                }
+
                 currentNode = execution.nextNode();
-                continue;
             }
-
-            if (execution.terminal()) {
-                sink.complete();
-                return;
+            components.nodeLifecycle().cancelled(context, events -> emit(sink, events));
+            sink.complete();
+        } finally {
+            if (existing == null) {
+                cancellationRequests.remove(context.getRunId(), cancellation);
             }
-
-            currentNode = execution.nextNode();
+            if (convId != null) {
+                Set<String> runIds = conversationRuns.get(convId);
+                if (runIds != null) {
+                    runIds.remove(context.getRunId());
+                    if (runIds.isEmpty()) {
+                        conversationRuns.remove(convId, runIds);
+                    }
+                }
+            }
         }
     }
 

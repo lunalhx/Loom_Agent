@@ -134,4 +134,14 @@
           AND version = #{expectedVersion}
     </update>
 
+    <select id="selectByConversationId" resultMap="AgentUndoSnapshotMap">
+        SELECT * FROM agent_undo_snapshot
+        WHERE conversation_id = #{conversationId}
+        ORDER BY created_at DESC
+    </select>
+
+    <delete id="deleteByConversationId">
+        DELETE FROM agent_undo_snapshot WHERE conversation_id = #{conversationId}
+    </delete>
+
 </mapper>

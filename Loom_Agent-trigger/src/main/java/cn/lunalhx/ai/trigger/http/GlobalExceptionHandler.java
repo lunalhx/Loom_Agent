@@ -7,6 +7,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @Slf4j
 @RestControllerAdvice
@@ -18,6 +19,11 @@ public class GlobalExceptionHandler {
                 .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
                 .info(e.getMessage())
                 .build();
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncRequestNotUsable(AsyncRequestNotUsableException e) {
+        // 客户端已断开，无法写入响应
     }
 
     @ExceptionHandler(Exception.class)

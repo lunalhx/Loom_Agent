@@ -72,4 +72,14 @@
         LIMIT 1
     </select>
 
+    <select id="selectByConversationId" resultMap="AgentRunMap">
+        SELECT * FROM agent_run
+        WHERE conversation_id = #{conversationId}
+        ORDER BY create_time ASC
+    </select>
+
+    <delete id="deleteByConversationId">
+        DELETE FROM agent_run WHERE conversation_id = #{conversationId}
+    </delete>
+
 </mapper>

@@ -46,4 +46,14 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectByConversationId" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE conversation_id = #{conversationId}
+        ORDER BY create_time ASC
+    </select>
+
+    <delete id="deleteByConversationId">
+        DELETE FROM agent_context_artifact WHERE conversation_id = #{conversationId}
+    </delete>
+
 </mapper>

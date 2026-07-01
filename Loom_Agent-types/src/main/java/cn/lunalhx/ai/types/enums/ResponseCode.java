@@ -15,6 +15,7 @@ public enum ResponseCode {
     AI_MODEL_ERROR("1001", "模型调用失败"),
     AI_MODEL_TIMEOUT("1002", "模型调用超时"),
     AI_OUTPUT_INVALID("1003", "模型输出格式错误"),
+    CONVERSATION_DELETED("1004", "会话已删除"),
     ;
 
     private String code;

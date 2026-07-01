@@ -43,6 +43,13 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
         return Optional.ofNullable(agentRunDao.selectLatestRootByConversationId(conversationId)).map(this::toEntity);
     }
 
+    @Override
+    public List<AgentRun> findByConversationId(String conversationId) {
+        return agentRunDao.selectByConversationId(conversationId).stream()
+                .map(this::toEntity)
+                .toList();
+    }
+
     private AgentRunPO toPo(AgentRun run) {
         AgentRunPO po = new AgentRunPO();
         po.setRunId(run.getRunId());

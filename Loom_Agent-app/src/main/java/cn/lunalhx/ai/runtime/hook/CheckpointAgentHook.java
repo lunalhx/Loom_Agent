@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -86,6 +87,8 @@ public class CheckpointAgentHook implements AgentHook {
         AgentRunStatus status = AgentRunStatus.RUNNING;
         if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
             status = AgentRunStatus.BUDGET_EXCEEDED;
+        } else if (context.getStopReason() == AgentStopReason.USER_CANCELLED) {
+            status = AgentRunStatus.CANCELLED;
         } else if (context.getStopReason() != null && context.getErrorCode() == null) {
             status = AgentRunStatus.COMPLETED;
         } else if (context.getErrorCode() != null) {

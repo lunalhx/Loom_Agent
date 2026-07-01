@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -153,6 +154,18 @@ public final class AgentNodeLifecycle {
                 .build()));
         MDC.clear();
         return new AgentNodeExecution(NodeResult.terminal(List.of()), terminalNode.name());
+    }
+
+    public void cancelled(AgentContext context, Consumer<List<AgentEvent>> emitter) {
+        context.setStopReason(AgentStopReason.USER_CANCELLED);
+        traceRecorder.recordStop(context, "cancelled", "user_cancelled");
+        agentMetrics.recordRun(runKind(context), "cancelled", null);
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
+                .agentContext(context)
+                .node(context.getCurrentNode())
+                .reason("user_cancelled")
+                .build()));
+        MDC.clear();
     }
 
     private void recordContextCompactedEvents(AgentContext context, AgentNode node, long startedAt, List<AgentEvent> events) {

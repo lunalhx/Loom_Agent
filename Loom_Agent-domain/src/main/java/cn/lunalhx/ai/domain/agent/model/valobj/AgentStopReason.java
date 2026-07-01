@@ -10,6 +10,7 @@ public enum AgentStopReason {
     MODEL_ERROR,
     BUDGET_EXCEEDED,
     CONTEXT_OVERFLOW,
-    NO_PROGRESS
+    NO_PROGRESS,
+    USER_CANCELLED
 
 }

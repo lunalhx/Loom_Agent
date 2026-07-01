@@ -72,4 +72,15 @@ public class InMemoryAgentRunRepository implements AgentRunRepository {
                 .max(Comparator.comparing(run -> run.getUpdatedAt() != null ? run.getUpdatedAt() : run.getCreatedAt()));
     }
 
+    @Override
+    public List<AgentRun> findByConversationId(String conversationId) {
+        if (StringUtils.isBlank(conversationId)) {
+            return List.of();
+        }
+        return runs.values().stream()
+                .filter(run -> conversationId.equals(run.getConversationId()))
+                .sorted(Comparator.comparing(run -> run.getCreatedAt() != null ? run.getCreatedAt() : Instant.now()))
+                .toList();
+    }
+
 }

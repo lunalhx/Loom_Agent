@@ -22,6 +22,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.ConversationDeletionService;
 import cn.lunalhx.ai.domain.agent.service.ReplayService;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.trigger.http.AgentCodeController;
@@ -113,9 +114,11 @@ public class AgentCodeControllerContractTest {
                 agentRunRepository, traceRecorder, replayService, responseMapper);
         AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
         AgentWorkspaceResolver workspaceResolver = new AgentWorkspaceResolver(properties);
+        ConversationDeletionService deletionService = mock(ConversationDeletionService.class);
+        when(deletionService.isConversationDeleted(any())).thenReturn(false);
         AgentCodeController controller = new AgentCodeController(agentLoopService, requestMapper,
                 queryService, sseResponder, limiter != null ? limiter : noopLimiter(), null,
-                null, workspaceResolver, properties);
+                null, workspaceResolver, properties, deletionService);
         return MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -498,6 +501,37 @@ public class AgentCodeControllerContractTest {
         String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
         // replay 异常 -> replay_failed
         assertTrue(content.contains("\"code\":\"replay_failed\""));
+    }
+
+    // ===== 9. POST /runs/{id}/cancel =====
+
+    @Test
+    public void cancelRunShouldDelegateToAgentLoopService() throws Exception {
+        AgentLoopService service = mock(AgentLoopService.class);
+        when(service.cancelRun("r-1")).thenReturn(true);
+        MockMvc mvc = buildMockMvc(service, mock(ApprovalStore.class),
+                mock(AgentRunRepository.class), mock(TraceRecorder.class), mock(ReplayService.class),
+                enabledProperties(), syncExecutor());
+
+        mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/runs/r-1/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("0000"))
+                .andExpect(jsonPath("$.data").value(true));
+
+        verify(service).cancelRun("r-1");
+    }
+
+    @Test
+    public void cancelInactiveRunShouldReturnFalse() throws Exception {
+        AgentLoopService service = mock(AgentLoopService.class);
+        MockMvc mvc = buildMockMvc(service, mock(ApprovalStore.class),
+                mock(AgentRunRepository.class), mock(TraceRecorder.class), mock(ReplayService.class),
+                enabledProperties(), syncExecutor());
+
+        mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/runs/missing/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("0000"))
+                .andExpect(jsonPath("$.data").value(false));
     }
 
     // ===== rate limiting =====

@@ -66,4 +66,8 @@
         WHERE approval_id = #{approvalId}
     </update>
 
+    <delete id="deleteByConversationId">
+        DELETE FROM agent_pending_approval WHERE conversation_id = #{conversationId}
+    </delete>
+
 </mapper>

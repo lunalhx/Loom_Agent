@@ -16,4 +16,9 @@ public interface AgentLoopService {
 
     Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message);
 
+    boolean cancelRun(String runId);
+
+    void cancelConversation(String conversationId);
+
+    boolean hasActiveRuns(String conversationId);
 }

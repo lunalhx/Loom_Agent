@@ -32,4 +32,12 @@
         LIMIT 1
     </select>
 
+    <delete id="deleteByRunIds">
+        DELETE FROM agent_run_checkpoint
+        WHERE run_id IN
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+    </delete>
+
 </mapper>
