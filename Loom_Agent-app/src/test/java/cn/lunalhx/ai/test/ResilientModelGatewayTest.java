@@ -2,7 +2,7 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
-import cn.lunalhx.ai.domain.agent.service.ModelCallTraceContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;

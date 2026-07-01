@@ -659,7 +659,7 @@ Read a text resource from an activated skill's snapshot. Use to access skill-pro
 
 ## 15. `run_shell` (Built-in)
 
-在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认
+在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。
 
 <details>
 <summary>Schema</summary>
@@ -681,8 +681,20 @@ Read a text resource from an activated skill's snapshot. Use to access skill-pro
     "timeoutMs" : {
       "type" : "integer",
       "minimum" : 1,
-      "default" : 30000,
+      "default" : 120000,
       "description" : "超时毫秒，受系统配置上限限制"
+    },
+    "runInBackground" : {
+      "type" : "boolean",
+      "default" : false,
+      "description" : "是否显式要求后台执行，不等待 yield 窗口"
+    },
+    "foregroundYieldMs" : {
+      "type" : "integer",
+      "minimum" : 0,
+      "maximum" : 30000,
+      "default" : 10000,
+      "description" : "前台等待毫秒，超时未完成自动转后台"
     }
   },
   "required" : [ "command" ],

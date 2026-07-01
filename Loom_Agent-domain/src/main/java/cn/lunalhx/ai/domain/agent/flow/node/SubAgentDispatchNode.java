@@ -11,8 +11,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.SubAgentResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.SubAgentStatus;
-import cn.lunalhx.ai.domain.agent.service.SubAgentCoordinator;
-import cn.lunalhx.ai.domain.agent.service.SubAgentToolSpecs;
+import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
+import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 

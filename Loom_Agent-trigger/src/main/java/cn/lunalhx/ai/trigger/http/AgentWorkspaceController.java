@@ -8,7 +8,7 @@ import cn.lunalhx.ai.api.dto.AgentWorkspaceTreeResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
-import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;

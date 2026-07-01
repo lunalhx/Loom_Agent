@@ -4,7 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
-import cn.lunalhx.ai.domain.agent.service.DefaultBudgetGuard;
+import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelPricing;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;

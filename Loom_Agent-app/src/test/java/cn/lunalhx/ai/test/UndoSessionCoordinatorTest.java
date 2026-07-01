@@ -7,8 +7,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.UndoSnapshotStatus;
-import cn.lunalhx.ai.domain.agent.service.AgentWorkspaceResolver;
-import cn.lunalhx.ai.domain.agent.service.UndoSessionCoordinator;
+import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import org.junit.Test;
 
 import java.nio.file.Path;

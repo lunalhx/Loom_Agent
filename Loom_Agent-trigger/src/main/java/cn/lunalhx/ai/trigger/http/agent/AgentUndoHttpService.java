@@ -4,7 +4,7 @@ import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
 import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
 import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
-import cn.lunalhx.ai.domain.agent.service.WorkspaceUndoService;
+import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

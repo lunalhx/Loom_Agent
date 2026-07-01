@@ -6,7 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
-import cn.lunalhx.ai.domain.agent.service.ProgressGuard;
+import cn.lunalhx.ai.domain.agent.service.execution.ProgressGuard;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 

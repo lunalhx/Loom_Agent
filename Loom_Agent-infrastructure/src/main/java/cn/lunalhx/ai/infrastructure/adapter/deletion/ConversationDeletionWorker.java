@@ -6,7 +6,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceSnapshotPort;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationDeletion;
-import cn.lunalhx.ai.domain.agent.service.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
