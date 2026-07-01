@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.infrastructure.dao;
 
 import cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO;
+import cn.lunalhx.ai.infrastructure.dao.po.ConversationSummaryPO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -20,4 +21,6 @@ public interface AgentRunDao {
     List<AgentRunPO> selectByConversationId(String conversationId);
 
     int deleteByConversationId(String conversationId);
+
+    List<ConversationSummaryPO> selectConversationSummaries();
 }

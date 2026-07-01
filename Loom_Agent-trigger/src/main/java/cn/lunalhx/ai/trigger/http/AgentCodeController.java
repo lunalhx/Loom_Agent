@@ -8,12 +8,14 @@ import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
 import cn.lunalhx.ai.api.dto.ConversationDeletionResponse;
+import cn.lunalhx.ai.api.dto.ConversationSummaryResponse;
 import cn.lunalhx.ai.api.dto.SkillQueryRequest;
 import cn.lunalhx.ai.api.dto.SkillQueryResponse;
 import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
 import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
 import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillCatalog;
@@ -66,6 +68,7 @@ public class AgentCodeController {
     private final AgentWorkspaceResolver workspaceResolver;
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final ConversationDeletionService deletionService;
+    private final AgentRunRepository runRepository;
 
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody(required = false) AgentAskRequest request,
@@ -244,6 +247,23 @@ public class AgentCodeController {
                 .code("0000")
                 .info("ok")
                 .data(items)
+                .build();
+    }
+
+    @GetMapping("/conversations")
+    public Response<List<ConversationSummaryResponse>> listConversations() {
+        List<ConversationSummaryResponse> list = runRepository.listConversationSummaries().stream()
+                .map(s -> ConversationSummaryResponse.builder()
+                        .conversationId(s.getConversationId())
+                        .title(s.getTitle())
+                        .runCount(s.getRunCount())
+                        .workspace(s.getWorkspace())
+                        .build())
+                .toList();
+        return Response.<List<ConversationSummaryResponse>>builder()
+                .code(ResponseCode.SUCCESS.getCode())
+                .info("ok")
+                .data(list)
                 .build();
     }
 

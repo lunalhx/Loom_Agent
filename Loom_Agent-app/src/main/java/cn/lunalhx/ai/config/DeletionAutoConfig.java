@@ -20,7 +20,7 @@ import cn.lunalhx.ai.infrastructure.dao.ConversationDeletionDao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -63,7 +63,7 @@ public class DeletionAutoConfig {
     }
 
     @Bean
-    @ConditionalOnBean(AgentRunDao.class)
+    @ConditionalOnProperty(prefix = "loom.agent.persistence", name = "mode", havingValue = "sqlite", matchIfMissing = true)
     public ConversationDeletionWorker conversationDeletionWorker(
             ConversationDeletionRepository deletionRepository,
             AgentRunRepository runRepository,
@@ -84,7 +84,7 @@ public class DeletionAutoConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
-    @ConditionalOnBean(ConversationDeletionWorker.class)
+    @ConditionalOnProperty(prefix = "loom.agent.persistence", name = "mode", havingValue = "sqlite", matchIfMissing = true)
     public ScheduledExecutorService deletionWorkerScheduler(ConversationDeletionWorker worker) {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "conv-deletion-worker");

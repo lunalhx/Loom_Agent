@@ -2,11 +2,13 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationSummary;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO;
+import cn.lunalhx.ai.infrastructure.dao.po.ConversationSummaryPO;
 
 import java.time.Instant;
 import java.util.List;
@@ -47,6 +49,13 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
     public List<AgentRun> findByConversationId(String conversationId) {
         return agentRunDao.selectByConversationId(conversationId).stream()
                 .map(this::toEntity)
+                .toList();
+    }
+
+    @Override
+    public List<ConversationSummary> listConversationSummaries() {
+        return agentRunDao.selectConversationSummaries().stream()
+                .map(this::toSummary)
                 .toList();
     }
 
@@ -97,6 +106,15 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .estimatedCost(po.getEstimatedCost())
                 .createdAt(po.getCreateTime())
                 .updatedAt(po.getUpdateTime())
+                .build();
+    }
+
+    private ConversationSummary toSummary(ConversationSummaryPO po) {
+        return ConversationSummary.builder()
+                .conversationId(po.getConversationId())
+                .title(po.getTitle())
+                .runCount(po.getRunCount())
+                .workspace(po.getWorkspace())
                 .build();
     }
 
