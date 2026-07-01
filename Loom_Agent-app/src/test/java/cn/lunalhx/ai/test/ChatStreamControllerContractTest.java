@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.trigger.http.ChatStreamController;
 import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
+import cn.lunalhx.ai.trigger.http.chat.ChatSseResponder;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.After;
@@ -50,6 +51,10 @@ public class ChatStreamControllerContractTest {
         return executor;
     }
 
+    private ChatSseResponder chatSseResponder() {
+        return new ChatSseResponder(modelProperties(), syncExecutor());
+    }
+
     @Test
     public void streamRateLimitedShouldReturnErrorWithoutCallingService() throws Exception {
         ChatStreamService svc = mock(ChatStreamService.class);
@@ -60,7 +65,7 @@ public class ChatStreamControllerContractTest {
         StreamRequestLimiter limiter = new StreamRequestLimiter(config);
 
         ChatStreamController controller = new ChatStreamController(
-                svc, modelProperties(), validator, syncExecutor(), limiter);
+                svc, validator, limiter, chatSseResponder());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         MvcResult r = mvc.perform(MockMvcRequestBuilders.post("/api/v1/chat/stream")
@@ -88,7 +93,7 @@ public class ChatStreamControllerContractTest {
         StreamRequestLimiter limiter = new StreamRequestLimiter(config);
 
         ChatStreamController controller = new ChatStreamController(
-                svc, modelProperties(), validator, syncExecutor(), limiter);
+                svc, validator, limiter, chatSseResponder());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         // First request completes normally, releasing the lease
