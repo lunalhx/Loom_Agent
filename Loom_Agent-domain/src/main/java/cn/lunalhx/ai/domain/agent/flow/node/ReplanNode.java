@@ -113,6 +113,7 @@ public class ReplanNode extends AbstractAgentNode {
                         .requestId(context.getRequestId())
                         .conversationId(context.getConversationId())
                         .message(promptText)
+                        .model(context.getCurrentModel())
                         .maxTokens(maxTokens <= 0 ? null : maxTokens)
                         .capability(ModelCapabilities.COMPLETE_REPLAN)
                         .purpose(ModelCallPurpose.CONTROL_JSON)

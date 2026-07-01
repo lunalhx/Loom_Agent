@@ -86,6 +86,9 @@ public final class AgentContextFactory {
         }
         context.getDynamicText().appendUserTask(context.getQuestion());
         context.setRequestedSkills(question.getSkills());
+        if (StringUtils.isNotBlank(question.getModel())) {
+            context.setCurrentModel(question.getModel());
+        }
         return context;
     }
 
@@ -113,6 +116,9 @@ public final class AgentContextFactory {
         }
         context.setToolSpecs(specs);
         initStepBudget(context, question);
+        if (StringUtils.isNotBlank(question.getModel())) {
+            context.setCurrentModel(question.getModel());
+        }
     }
 
     private void initStepBudget(AgentContext context, AgentQuestion question) {
