@@ -105,4 +105,15 @@
           AND version = #{expectedVersion}
     </update>
 
+    <select id="selectByContentHash" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND content_hash = #{contentHash}
+    </select>
+
+    <select id="selectBySourceRunId" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE source_run_id = #{sourceRunId}
+    </select>
+
 </mapper>

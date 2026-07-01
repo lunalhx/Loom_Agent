@@ -8,8 +8,11 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemoryGenerationJob;
+import cn.lunalhx.ai.domain.memory.model.entity.MemoryExtractionPayload;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryGenerationJobStatus;
 import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -29,11 +32,14 @@ public class MemoryExtractionHook implements AgentHook {
 
     private final AgentMemoryGenerationJobRepository jobRepository;
     private final MemoryProperties memoryProperties;
+    private final ObjectMapper objectMapper;
 
     public MemoryExtractionHook(AgentMemoryGenerationJobRepository jobRepository,
-                                 MemoryProperties memoryProperties) {
+                                 MemoryProperties memoryProperties,
+                                 ObjectMapper objectMapper) {
         this.jobRepository = jobRepository;
         this.memoryProperties = memoryProperties;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -67,11 +73,24 @@ public class MemoryExtractionHook implements AgentHook {
 
         Instant notBefore = Instant.now().plus(Duration.ofMinutes(memoryProperties.getGenerationDelayMinutes()));
 
+        String summaryJson;
+        try {
+            MemoryExtractionPayload payload = new MemoryExtractionPayload(
+                    agentContext.getQuestion(),
+                    agentContext.getFinalAnswer(),
+                    agentContext.getStep(),
+                    workspacePath);
+            summaryJson = objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize memory extraction payload for run={}: {}", sourceRunId, e.getMessage());
+            return AgentHookResult.proceed();
+        }
+
         AgentMemoryGenerationJob job = AgentMemoryGenerationJob.builder()
                 .jobId(UUID.randomUUID().toString())
                 .sourceRunId(sourceRunId)
                 .workspaceKey(workspaceKey)
-                .conversationSummaryJson(buildSummaryJson(agentContext))
+                .conversationSummaryJson(summaryJson)
                 .status(MemoryGenerationJobStatus.PENDING)
                 .notBefore(notBefore)
                 .retryCount(0)
@@ -84,17 +103,5 @@ public class MemoryExtractionHook implements AgentHook {
         }
 
         return AgentHookResult.proceed();
-    }
-
-    private String buildSummaryJson(AgentContext ctx) {
-        return "{\"question\":\"" + escapeJson(ctx.getQuestion()) + "\","
-                + "\"finalAnswer\":\"" + escapeJson(ctx.getFinalAnswer()) + "\","
-                + "\"step\":" + ctx.getStep() + "}";
-    }
-
-    private String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", "\\n").replace("\r", "\\r");
     }
 }

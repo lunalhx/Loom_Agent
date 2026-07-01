@@ -179,6 +179,7 @@ public class PersistenceConfigTest {
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO selectLatestRootByConversationId(String conversationId) { return null; }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO> selectByConversationId(String conversationId) { return java.util.List.of(); }
         @Override public int deleteByConversationId(String conversationId) { return 0; }
+        @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.ConversationSummaryPO> selectConversationSummaries() { return java.util.List.of(); }
     }
     private static class MockAgentRunCheckpointDao implements AgentRunCheckpointDao {
         @Override public Long insertNext(cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO checkpoint) { return 1L; }

@@ -25,4 +25,8 @@ public interface AgentMemoryDao {
     int countActive(String workspaceKey);
 
     int updateStatus(String memoryId, String status, long expectedVersion);
+
+    List<AgentMemoryPO> selectByContentHash(String workspaceKey, String contentHash);
+
+    List<AgentMemoryPO> selectBySourceRunId(String sourceRunId);
 }

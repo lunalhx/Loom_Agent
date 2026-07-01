@@ -28,7 +28,7 @@ public class InMemoryAgentMemoryGenerationJobRepository implements AgentMemoryGe
                 .conversationSummaryJson(job.getConversationSummaryJson())
                 .status(MemoryGenerationJobStatus.PENDING)
                 .notBefore(job.getNotBefore() != null ? job.getNotBefore() : Instant.now())
-                .retryCount(0)
+                .retryCount(job.getRetryCount())
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .build();
@@ -55,6 +55,7 @@ public class InMemoryAgentMemoryGenerationJobRepository implements AgentMemoryGe
                             .lockedBy(workerId)
                             .lockExpiresAt(now.plus(leaseDuration))
                             .retryCount(j.getRetryCount())
+                            .errorMsg(j.getErrorMsg())
                             .createdAt(j.getCreatedAt())
                             .updatedAt(Instant.now())
                             .build();
@@ -64,47 +65,141 @@ public class InMemoryAgentMemoryGenerationJobRepository implements AgentMemoryGe
     }
 
     @Override
-    public boolean updateStatus(String jobId, MemoryGenerationJobStatus status, String errorMsg, int retryCount) {
-        AgentMemoryGenerationJob existing = store.get(jobId);
-        if (existing == null) return false;
-        AgentMemoryGenerationJob updated = AgentMemoryGenerationJob.builder()
-                .jobId(existing.getJobId())
-                .sourceRunId(existing.getSourceRunId())
-                .workspaceKey(existing.getWorkspaceKey())
-                .conversationSummaryJson(existing.getConversationSummaryJson())
-                .status(status)
-                .notBefore(existing.getNotBefore())
-                .lockedBy(existing.getLockedBy())
-                .lockExpiresAt(existing.getLockExpiresAt())
-                .retryCount(retryCount)
-                .errorMsg(errorMsg)
-                .createdAt(existing.getCreatedAt())
-                .updatedAt(Instant.now())
-                .build();
-        store.put(jobId, updated);
-        return true;
+    public boolean transitionToSucceeded(String jobId, String lockedBy) {
+        return store.compute(jobId, (id, existing) -> {
+            if (existing == null
+                    || existing.getStatus() != MemoryGenerationJobStatus.RUNNING
+                    || !lockedBy.equals(existing.getLockedBy())) {
+                return existing;
+            }
+            return AgentMemoryGenerationJob.builder()
+                    .jobId(existing.getJobId())
+                    .sourceRunId(existing.getSourceRunId())
+                    .workspaceKey(existing.getWorkspaceKey())
+                    .conversationSummaryJson(existing.getConversationSummaryJson())
+                    .status(MemoryGenerationJobStatus.SUCCEEDED)
+                    .notBefore(existing.getNotBefore())
+                    .lockedBy(null)
+                    .lockExpiresAt(null)
+                    .retryCount(existing.getRetryCount())
+                    .errorMsg(null)
+                    .createdAt(existing.getCreatedAt())
+                    .updatedAt(Instant.now())
+                    .build();
+        }) != null && store.get(jobId).getStatus() == MemoryGenerationJobStatus.SUCCEEDED;
     }
 
     @Override
-    public int recoverStaleJobs(Duration staleThreshold) {
+    public boolean transitionToSkipped(String jobId, String lockedBy) {
+        return store.compute(jobId, (id, existing) -> {
+            if (existing == null
+                    || existing.getStatus() != MemoryGenerationJobStatus.RUNNING
+                    || !lockedBy.equals(existing.getLockedBy())) {
+                return existing;
+            }
+            return AgentMemoryGenerationJob.builder()
+                    .jobId(existing.getJobId())
+                    .sourceRunId(existing.getSourceRunId())
+                    .workspaceKey(existing.getWorkspaceKey())
+                    .conversationSummaryJson(existing.getConversationSummaryJson())
+                    .status(MemoryGenerationJobStatus.SKIPPED)
+                    .notBefore(existing.getNotBefore())
+                    .lockedBy(null)
+                    .lockExpiresAt(null)
+                    .retryCount(existing.getRetryCount())
+                    .errorMsg(null)
+                    .createdAt(existing.getCreatedAt())
+                    .updatedAt(Instant.now())
+                    .build();
+        }) != null && store.get(jobId).getStatus() == MemoryGenerationJobStatus.SKIPPED;
+    }
+
+    @Override
+    public boolean transitionToRetry(String jobId, int retryCount, Instant notBefore, String errorMsg) {
+        return store.compute(jobId, (id, existing) -> {
+            if (existing == null) {
+                return null;
+            }
+            return AgentMemoryGenerationJob.builder()
+                    .jobId(existing.getJobId())
+                    .sourceRunId(existing.getSourceRunId())
+                    .workspaceKey(existing.getWorkspaceKey())
+                    .conversationSummaryJson(existing.getConversationSummaryJson())
+                    .status(MemoryGenerationJobStatus.PENDING)
+                    .notBefore(notBefore)
+                    .lockedBy(null)
+                    .lockExpiresAt(null)
+                    .retryCount(retryCount)
+                    .errorMsg(errorMsg)
+                    .createdAt(existing.getCreatedAt())
+                    .updatedAt(Instant.now())
+                    .build();
+        }) != null;
+    }
+
+    @Override
+    public boolean transitionToFailed(String jobId, int retryCount, String errorMsg) {
+        return store.compute(jobId, (id, existing) -> {
+            if (existing == null) {
+                return null;
+            }
+            return AgentMemoryGenerationJob.builder()
+                    .jobId(existing.getJobId())
+                    .sourceRunId(existing.getSourceRunId())
+                    .workspaceKey(existing.getWorkspaceKey())
+                    .conversationSummaryJson(existing.getConversationSummaryJson())
+                    .status(MemoryGenerationJobStatus.FAILED)
+                    .notBefore(existing.getNotBefore())
+                    .lockedBy(null)
+                    .lockExpiresAt(null)
+                    .retryCount(retryCount)
+                    .errorMsg(errorMsg)
+                    .createdAt(existing.getCreatedAt())
+                    .updatedAt(Instant.now())
+                    .build();
+        }) != null;
+    }
+
+    @Override
+    public int recoverStaleJobs(Duration staleThreshold, int maxRetries) {
         Instant cutoff = Instant.now().minus(staleThreshold);
         int count = 0;
         for (AgentMemoryGenerationJob job : store.values()) {
             if (job.getStatus() == MemoryGenerationJobStatus.RUNNING
                     && job.getLockExpiresAt() != null
                     && job.getLockExpiresAt().isBefore(cutoff)) {
-                AgentMemoryGenerationJob recovered = AgentMemoryGenerationJob.builder()
-                        .jobId(job.getJobId())
-                        .sourceRunId(job.getSourceRunId())
-                        .workspaceKey(job.getWorkspaceKey())
-                        .conversationSummaryJson(job.getConversationSummaryJson())
-                        .status(MemoryGenerationJobStatus.PENDING)
-                        .notBefore(job.getNotBefore())
-                        .retryCount(job.getRetryCount())
-                        .createdAt(job.getCreatedAt())
-                        .updatedAt(Instant.now())
-                        .build();
-                store.put(job.getJobId(), recovered);
+                int newRetryCount = job.getRetryCount() + 1;
+                if (newRetryCount > maxRetries) {
+                    store.put(job.getJobId(), AgentMemoryGenerationJob.builder()
+                            .jobId(job.getJobId())
+                            .sourceRunId(job.getSourceRunId())
+                            .workspaceKey(job.getWorkspaceKey())
+                            .conversationSummaryJson(job.getConversationSummaryJson())
+                            .status(MemoryGenerationJobStatus.FAILED)
+                            .notBefore(job.getNotBefore())
+                            .lockedBy(null)
+                            .lockExpiresAt(null)
+                            .retryCount(newRetryCount)
+                            .errorMsg("Exceeded max retries after stale recovery")
+                            .createdAt(job.getCreatedAt())
+                            .updatedAt(Instant.now())
+                            .build());
+                } else {
+                    store.put(job.getJobId(), AgentMemoryGenerationJob.builder()
+                            .jobId(job.getJobId())
+                            .sourceRunId(job.getSourceRunId())
+                            .workspaceKey(job.getWorkspaceKey())
+                            .conversationSummaryJson(job.getConversationSummaryJson())
+                            .status(MemoryGenerationJobStatus.PENDING)
+                            .notBefore(Instant.now())
+                            .lockedBy(null)
+                            .lockExpiresAt(null)
+                            .retryCount(newRetryCount)
+                            .errorMsg("Stale job recovered")
+                            .createdAt(job.getCreatedAt())
+                            .updatedAt(Instant.now())
+                            .build());
+                }
                 count++;
             }
         }

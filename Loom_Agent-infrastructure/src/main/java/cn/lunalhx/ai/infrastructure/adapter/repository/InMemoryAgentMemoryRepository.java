@@ -146,4 +146,19 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
         store.put(memoryId, updated);
         return true;
     }
+
+    @Override
+    public List<AgentMemory> findByContentHash(String workspaceKey, String contentHash) {
+        return store.values().stream()
+                .filter(m -> workspaceKey.equals(m.getWorkspaceKey())
+                        && contentHash.equals(m.getContentHash()))
+                .toList();
+    }
+
+    @Override
+    public List<AgentMemory> findBySourceRunId(String sourceRunId) {
+        return store.values().stream()
+                .filter(m -> sourceRunId.equals(m.getSourceRunId()))
+                .toList();
+    }
 }

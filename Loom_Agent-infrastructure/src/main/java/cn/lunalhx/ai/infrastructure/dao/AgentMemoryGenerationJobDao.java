@@ -15,9 +15,21 @@ public interface AgentMemoryGenerationJobDao {
 
     int claimJob(String jobId, String lockedBy, String lockExpiresAt);
 
-    int updateStatus(String jobId, String status, String errorMessage, int retryCount);
+    int transitionToTerminal(@Param("jobId") String jobId,
+                             @Param("status") String status,
+                             @Param("lockedBy") String lockedBy);
 
-    int recoverStaleJobs(String staleThreshold);
+    int transitionToRetry(@Param("jobId") String jobId,
+                          @Param("retryCount") int retryCount,
+                          @Param("notBefore") String notBefore,
+                          @Param("errorMessage") String errorMessage);
+
+    int transitionToFailed(@Param("jobId") String jobId,
+                           @Param("retryCount") int retryCount,
+                           @Param("errorMessage") String errorMessage);
+
+    int recoverStaleJobs(@Param("staleThreshold") String staleThreshold,
+                         @Param("maxRetries") int maxRetries);
 
     AgentMemoryGenerationJobPO selectBySourceRunId(String sourceRunId);
 

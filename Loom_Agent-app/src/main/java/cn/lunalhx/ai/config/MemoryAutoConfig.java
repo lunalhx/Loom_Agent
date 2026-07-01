@@ -2,7 +2,9 @@ package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
+import cn.lunalhx.ai.domain.memory.service.MemoryExtractionService;
 import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
+import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryGenerationJobRepository;
@@ -10,6 +12,7 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryReposit
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryRevisionDao;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -76,5 +79,13 @@ public class MemoryAutoConfig {
         return new MemorySelectionService(agentMemoryRepository,
                 memoryProperties.getMaxSelected(),
                 memoryProperties.getMaxInjectedChars());
+    }
+
+    @Bean
+    public MemoryExtractionService memoryExtractionService(ModelGateway modelGateway,
+                                                            ObjectMapper objectMapper,
+                                                            MemoryProperties memoryProperties) {
+        return new MemoryExtractionService(modelGateway, objectMapper,
+                memoryProperties.getExtractionModel());
     }
 }
