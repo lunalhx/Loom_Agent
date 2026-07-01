@@ -52,7 +52,7 @@ public class AgentWorkspaceController {
         }
         try {
             AgentWorkspace workspace = workspaceResolver.resolve(safeRequest.getWorkspace());
-            return success(AgentWorkspaceResponse.builder()
+            return Response.success(AgentWorkspaceResponse.builder()
                     .workspace(workspace.getRoot().toString())
                     .displayName(workspace.getDisplayName())
                     .defaultWorkspace(workspaceResolver.getDefaultWorkspace().getRoot().toString())
@@ -81,7 +81,7 @@ public class AgentWorkspaceController {
                 return illegal("path 不是目录：" + StringUtils.defaultIfBlank(safeRequest.getPath(), "."));
             }
             TreeBuildResult result = directoryNode(workspace.getRoot(), target, limit(safeRequest.getLimit()), true);
-            return success(AgentWorkspaceTreeResponse.builder()
+            return Response.success(AgentWorkspaceTreeResponse.builder()
                     .workspace(workspace.getRoot().toString())
                     .displayName(workspace.getDisplayName())
                     .path(relative(workspace.getRoot(), target))
@@ -113,7 +113,7 @@ public class AgentWorkspaceController {
                     .filter(node -> "directory".equals(node.getType()))
                     .collect(Collectors.toList());
             result.node().setChildren(folders);
-            return success(AgentWorkspaceTreeResponse.builder()
+            return Response.success(AgentWorkspaceTreeResponse.builder()
                     .workspace(workspace.getRoot().toString())
                     .displayName(workspace.getDisplayName())
                     .path(relative(workspace.getRoot(), target))
@@ -251,14 +251,6 @@ public class AgentWorkspaceController {
                 .distinct()
                 .collect(Collectors.joining("; "));
         return illegal(message);
-    }
-
-    private <T> Response<T> success(T data) {
-        return Response.<T>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(data)
-                .build();
     }
 
     private <T> Response<T> illegal(String message) {

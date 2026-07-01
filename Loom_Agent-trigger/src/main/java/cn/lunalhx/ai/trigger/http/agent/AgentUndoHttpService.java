@@ -50,11 +50,7 @@ public class AgentUndoHttpService {
                 .expiresAt(result.expiresAt())
                 .build();
 
-        return Response.<UndoStatusResponse>builder()
-                .code(ResponseCode.SUCCESS.getCode())
-                .info(ResponseCode.SUCCESS.getInfo())
-                .data(data)
-                .build();
+        return Response.success(data);
     }
 
     public Response<UndoExecuteResponse> execute(String runId, UndoExecuteRequest request) {
@@ -77,11 +73,7 @@ public class AgentUndoHttpService {
                 .build();
 
         if (result.success()) {
-            return Response.<UndoExecuteResponse>builder()
-                    .code(ResponseCode.SUCCESS.getCode())
-                    .info(ResponseCode.SUCCESS.getInfo())
-                    .data(data)
-                    .build();
+            return Response.success(data);
         }
 
         return Response.<UndoExecuteResponse>builder()

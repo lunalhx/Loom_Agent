@@ -36,24 +36,20 @@ public class AgentMemoryController {
 
     private final AgentMemoryRepository memoryRepository;
 
-    private static <T> Response<T> ok(T data) {
-        return Response.<T>builder().code("0000").info("success").data(data).build();
-    }
-
     @GetMapping("/memories")
     public Response<List<AgentMemory>> listMemories(
             @RequestParam String workspacePath,
             @RequestParam(defaultValue = "100") int limit) {
         String workspaceKey = cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil.compute(workspacePath);
         List<AgentMemory> memories = memoryRepository.findActive(workspaceKey, Math.min(limit, 200));
-        return ok(memories);
+        return Response.success(memories);
     }
 
     @GetMapping("/memories/{memoryId}")
     public Response<AgentMemory> getMemory(@PathVariable String memoryId) {
         return memoryRepository.findById(memoryId)
                 .filter(m -> m.getStatus() != MemoryStatus.DELETED)
-                .map(m -> ok(m))
+                .map(m -> Response.success(m))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "记忆不存在"));
     }
 
@@ -87,7 +83,7 @@ public class AgentMemoryController {
                 .updatedAt(Instant.now())
                 .build();
 
-        return ok(memoryRepository.save(memory));
+        return Response.success(memoryRepository.save(memory));
     }
 
     @PutMapping("/memories/{memoryId}")
@@ -133,7 +129,7 @@ public class AgentMemoryController {
                 .updatedAt(Instant.now())
                 .build();
 
-        return ok(memoryRepository.save(updated));
+        return Response.success(memoryRepository.save(updated));
     }
 
     @DeleteMapping("/memories/{memoryId}")
@@ -142,6 +138,6 @@ public class AgentMemoryController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "记忆不存在"));
 
         memoryRepository.updateStatus(memoryId, MemoryStatus.DELETED, existing.getVersion());
-        return ok(null);
+        return Response.success(null);
     }
 }
