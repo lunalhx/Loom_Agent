@@ -6,24 +6,21 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.trigger.http.sse.SseResponder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
-import java.io.IOException;
 import java.util.EnumSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -34,6 +31,8 @@ public class AgentSseResponder {
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final ThreadPoolExecutor threadPoolExecutor;
     private final AgentResponseMapper responseMapper;
+
+    private final SseResponder sseResponder = new SseResponder();
 
     private static final Set<AgentEventType> PUBLIC_ASK_WHITELIST = EnumSet.of(
             AgentEventType.META,
@@ -66,19 +65,9 @@ public class AgentSseResponder {
         WITHOUT_CHECKPOINT
     }
 
-    private static class Session {
-        final SseEmitter emitter;
-        final AtomicBoolean completed = new AtomicBoolean(false);
-        final AtomicReference<Disposable> subscription = new AtomicReference<>();
-        final AtomicReference<java.util.concurrent.Future<?>> backgroundTask = new AtomicReference<>();
-
-        Session(SseEmitter emitter) {
-            this.emitter = emitter;
-        }
-    }
-
     public SseEmitter completedAgentError(AgentRequestMapper.Problem problem) {
-        Session session = new Session(new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L));
+        SseResponder.Session session = sseResponder.open(
+                agentRuntimeProperties.getTotalTimeoutMs() + 5000L, (Runnable) null);
         threadPoolExecutor.execute(() -> {
             AgentEvent errorEvent = AgentEvent.builder()
                     .type(AgentEventType.ERROR)
@@ -87,10 +76,10 @@ public class AgentSseResponder {
                     .code(problem.code())
                     .message(problem.message())
                     .build();
-            send(session, errorEvent);
-            complete(session);
+            session.sendAndComplete(errorEvent.getType().eventName(),
+                    responseMapper.toStreamEvent(errorEvent));
         });
-        return session.emitter;
+        return session.emitter();
     }
 
     public SseEmitter streamAgentEvents(String operation, String requestId,
@@ -103,11 +92,13 @@ public class AgentSseResponder {
                                          Supplier<Flux<AgentEvent>> source,
                                          StreamProfile profile,
                                          Runnable onTerminate) {
-        Session session = new Session(new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L));
+        SseResponder.TimeoutEvent timeoutEvent = new SseResponder.TimeoutEvent(
+                AgentEventType.ERROR.eventName(),
+                responseMapper.toStreamEvent(timeoutAgentEvent()));
 
-        emitterOnCompletion(session, onTerminate);
-        emitterOnTimeout(session, onTerminate);
-        emitterOnError(session, onTerminate);
+        SseResponder.Session session = sseResponder.open(
+                agentRuntimeProperties.getTotalTimeoutMs() + 5000L,
+                () -> timeoutEvent, onTerminate);
 
         MDC.put("request_id", requestId);
         try {
@@ -116,75 +107,65 @@ public class AgentSseResponder {
                 flux = source.get();
             } catch (Exception e) {
                 log.warn("Agent {} source supplier threw exception: {}", operation, e.getMessage(), e);
-                sendAndComplete(session, fallbackAgentEvent());
-                if (onTerminate != null) {
-                    onTerminate.run();
-                }
-                MDC.clear();
-                return session.emitter;
+                session.sendAndComplete(
+                        AgentEventType.ERROR.eventName(),
+                        responseMapper.toStreamEvent(fallbackAgentEvent()));
+                return session.emitter();
             }
 
             Disposable disposable = flux
                     .filter(event -> shouldSend(event, profile))
                     .subscribe(
-                            event -> withMdc(event, () -> send(session, event)),
-                            throwable -> {
-                                sendAndComplete(session, fallbackAgentEvent());
-                                if (onTerminate != null) {
-                                    onTerminate.run();
-                                }
-                            },
-                            () -> {
-                                complete(session);
-                                if (onTerminate != null) {
-                                    onTerminate.run();
-                                }
-                            }
+                            event -> withMdc(event, () ->
+                                    session.send(event.getType().eventName(),
+                                            responseMapper.toStreamEvent(event))),
+                            throwable -> session.sendAndComplete(
+                                    AgentEventType.ERROR.eventName(),
+                                    responseMapper.toStreamEvent(fallbackAgentEvent())),
+                            session::complete
                     );
-            session.subscription.set(disposable);
+            session.bind(disposable);
         } finally {
             MDC.clear();
         }
 
-        return session.emitter;
+        return session.emitter();
     }
 
     public SseEmitter completedReplayError(AgentRequestMapper.Problem problem) {
-        Session session = new Session(new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L));
+        SseResponder.Session session = sseResponder.open(
+                agentRuntimeProperties.getTotalTimeoutMs() + 5000L, (Runnable) null);
         threadPoolExecutor.execute(() -> {
-            sendReplayAndComplete(session, "error",
+            session.sendAndComplete("error",
                     responseMapper.replayError(problem.code(), problem.message()));
         });
-        return session.emitter;
+        return session.emitter();
     }
 
     public SseEmitter streamReplay(String runId, boolean includeChildren,
                                     Supplier<AgentReplayTimeline> timelineSupplier) {
-        Session session = new Session(new SseEmitter(agentRuntimeProperties.getTotalTimeoutMs() + 5000L));
+        SseResponder.Session session = sseResponder.open(
+                agentRuntimeProperties.getTotalTimeoutMs() + 5000L, (Runnable) null);
 
-        java.util.concurrent.Future<?> future = threadPoolExecutor.submit(() -> {
+        Future<?> future = threadPoolExecutor.submit(() -> {
             try {
                 AgentReplayTimeline timeline = timelineSupplier.get();
-                sendReplay(session, "replay_started",
+                session.send("replay_started",
                         responseMapper.replayStarted(runId, includeChildren, timeline));
                 for (AgentTraceEvent event : timeline.getEvents()) {
-                    sendReplay(session, "replay_event", responseMapper.toReplayEvent(event));
+                    session.send("replay_event", responseMapper.toReplayEvent(event));
                 }
-                sendReplayAndComplete(session, "replay_done",
+                session.sendAndComplete("replay_done",
                         responseMapper.replayDone(runId, timeline.getEvents().size()));
             } catch (Exception e) {
                 log.warn("Replay stream failed, runId={}, message={}", runId, e.getMessage(), e);
-                sendReplayAndComplete(session, "error",
+                session.sendAndComplete("error",
                         responseMapper.replayError("replay_failed", "Replay 失败"));
             }
         });
-        session.backgroundTask.set(future);
+        session.bind(future);
 
-        emitterOnCompletion(session);
-        emitterOnTimeoutReplay(session);
-        emitterOnError(session);
-
-        return session.emitter;
+        return session.emitter();
     }
 
     // ---- event filtering ----
@@ -195,54 +176,6 @@ public class AgentSseResponder {
             case PUBLIC_ASK -> PUBLIC_ASK_WHITELIST.contains(event.getType());
             case WITHOUT_CHECKPOINT -> event.getType() != AgentEventType.CHECKPOINT_SAVED;
         };
-    }
-
-    // ---- SSE send helpers ----
-
-    private void send(Session session, AgentEvent event) {
-        if (session.completed.get()) {
-            return;
-        }
-        try {
-            synchronized (session.emitter) {
-                session.emitter.send(SseEmitter.event()
-                        .name(event.getType().eventName())
-                        .data(responseMapper.toStreamEvent(event), MediaType.APPLICATION_JSON));
-            }
-        } catch (IOException | IllegalStateException e) {
-            log.warn("Failed to send agent SSE event: {}", e.getMessage());
-        }
-    }
-
-    private void sendReplay(Session session, String eventName, Object data) {
-        if (session.completed.get()) {
-            return;
-        }
-        try {
-            synchronized (session.emitter) {
-                session.emitter.send(SseEmitter.event()
-                        .name(eventName)
-                        .data(data, MediaType.APPLICATION_JSON));
-            }
-        } catch (IOException | IllegalStateException e) {
-            log.warn("Failed to send replay SSE event: {}", e.getMessage());
-        }
-    }
-
-    private void sendAndComplete(Session session, AgentEvent event) {
-        send(session, event);
-        complete(session);
-    }
-
-    private void sendReplayAndComplete(Session session, String eventName, Object data) {
-        sendReplay(session, eventName, data);
-        complete(session);
-    }
-
-    private void complete(Session session) {
-        if (session.completed.compareAndSet(false, true)) {
-            session.emitter.complete();
-        }
     }
 
     // ---- MDC ----
@@ -266,64 +199,6 @@ public class AgentSseResponder {
         MDC.put("node", StringUtils.defaultString(event.getNode()));
     }
 
-    // ---- emitter lifecycle callbacks ----
-
-    private void emitterOnCompletion(Session session) {
-        emitterOnCompletion(session, null);
-    }
-
-    private void emitterOnCompletion(Session session, Runnable onTerminate) {
-        session.emitter.onCompletion(() -> {
-            Disposable d = session.subscription.get();
-            if (d != null) {
-                d.dispose();
-            }
-            if (onTerminate != null) {
-                onTerminate.run();
-            }
-        });
-    }
-
-    private void emitterOnTimeout(Session session, Runnable onTerminate) {
-        session.emitter.onTimeout(() -> {
-            Disposable d = session.subscription.get();
-            if (d != null) {
-                d.dispose();
-            }
-            sendAndComplete(session, timeoutEvent());
-            if (onTerminate != null) {
-                onTerminate.run();
-            }
-        });
-    }
-
-    private void emitterOnTimeoutReplay(Session session) {
-        session.emitter.onTimeout(() -> {
-            java.util.concurrent.Future<?> f = session.backgroundTask.get();
-            if (f != null) {
-                f.cancel(true);
-            }
-            complete(session);
-        });
-    }
-
-    private void emitterOnError(Session session) {
-        emitterOnError(session, null);
-    }
-
-    private void emitterOnError(Session session, Runnable onTerminate) {
-        session.emitter.onError(throwable -> {
-            Disposable d = session.subscription.get();
-            if (d != null) {
-                d.dispose();
-            }
-            log.warn("Agent SSE connection closed with error: {}", throwable.getMessage());
-            if (onTerminate != null) {
-                onTerminate.run();
-            }
-        });
-    }
-
     // ---- error events ----
 
     private AgentEvent fallbackAgentEvent() {
@@ -334,7 +209,7 @@ public class AgentSseResponder {
                 .build();
     }
 
-    private AgentEvent timeoutEvent() {
+    private AgentEvent timeoutAgentEvent() {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .code("agent_timeout")
