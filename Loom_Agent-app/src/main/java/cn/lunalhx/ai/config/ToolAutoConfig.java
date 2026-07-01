@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.infrastructure.mcp.McpClientManager;
 import cn.lunalhx.ai.infrastructure.skill.SkillTools;
 import cn.lunalhx.ai.infrastructure.tool.MemorySaveTool;
@@ -77,5 +78,12 @@ public class ToolAutoConfig {
     @Bean
     public SkillTools.CopySkillResourceTool copySkillResourceTool(SkillRepository skillRepository) {
         return new SkillTools.CopySkillResourceTool(skillRepository);
+    }
+
+    @Bean
+    public SkillTools.CreateSkillTool createSkillTool(AgentRuntimeProperties agentRuntimeProperties) {
+        String projectDir = agentRuntimeProperties.getSkills() != null
+                ? agentRuntimeProperties.getSkills().getProjectDir() : ".agents/skills";
+        return new SkillTools.CreateSkillTool(projectDir);
     }
 }

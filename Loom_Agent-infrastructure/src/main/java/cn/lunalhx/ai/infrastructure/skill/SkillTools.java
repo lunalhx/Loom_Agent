@@ -8,23 +8,28 @@ import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class SkillTools {
 
     private SkillTools() {}
 
-    // --- shared constants ---
+    // --- shared constants and helpers ---
     private static final Set<String> ALLOWED_TEXT_EXTENSIONS = Set.of(
             ".md", ".txt", ".json", ".yaml", ".yml", ".xml", ".py", ".js", ".ts", ".sh", ".java", ".properties", ".css", ".html");
+    private static final Pattern SKILL_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$");
+    private static final String SKILL_FILE = "SKILL.md";
 
     private static boolean isSkillActive(ToolCall call, String skillName) {
         if (call == null || call.getActiveSkillNames() == null) {
@@ -255,6 +260,99 @@ public final class SkillTools {
             } catch (IOException e) {
                 log.warn("Failed to copy skill resource: {} -> {}", path, destination, e);
                 return ToolResult.failure("copy_skill_resource_io_error", e.getMessage(), elapsed(startedAt));
+            }
+        }
+
+        private long elapsed(long startedAt) {
+            return System.currentTimeMillis() - startedAt;
+        }
+    }
+
+    // ==================== CreateSkillTool ====================
+
+    public static class CreateSkillTool implements AgentTool {
+
+        private static final Logger log = LoggerFactory.getLogger(CreateSkillTool.class);
+
+        private final String projectSkillsDir;
+
+        public CreateSkillTool(String projectSkillsDir) {
+            this.projectSkillsDir = projectSkillsDir != null ? projectSkillsDir : ".agents/skills";
+        }
+
+        @Override
+        public ToolSpec spec() {
+            return ToolSpec.builder()
+                    .name("create_skill")
+                    .description("Create a new project-level skill. The skill is written to .agents/skills/<name>/SKILL.md in the workspace. After creation the skill becomes available in the catalog for the current and future runs. Only project skills can be created; user skills must be created manually.")
+                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Skill name, must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$\"},\"description\":{\"type\":\"string\",\"description\":\"Short one-line description of the skill\"},\"content\":{\"type\":\"string\",\"description\":\"Full SKILL.md body content (after frontmatter). The system will wrap it with correct YAML frontmatter automatically.\"}},\"required\":[\"name\",\"description\",\"content\"]}")
+                    .build();
+        }
+
+        @Override
+        public ToolPolicyDecision policy(ToolCall call) {
+            return ToolPolicyDecision.writeConfirm("创建项目级 Skill 需要确认", "create_skill");
+        }
+
+        @Override
+        public ToolResult call(ToolCall call) {
+            long startedAt = System.currentTimeMillis();
+            JsonNode input = call.getInput();
+            String name = input == null ? "" : input.path("name").asText("").strip();
+            String description = input == null ? "" : input.path("description").asText("").strip();
+            String content = input == null ? "" : input.path("content").asText("");
+
+            if (StringUtils.isBlank(name)) {
+                return ToolResult.failure("create_skill_name_required", "name 不能为空", elapsed(startedAt));
+            }
+            if (StringUtils.isBlank(description)) {
+                return ToolResult.failure("create_skill_description_required", "description 不能为空", elapsed(startedAt));
+            }
+            if (StringUtils.isBlank(content)) {
+                return ToolResult.failure("create_skill_content_required", "content 不能为空", elapsed(startedAt));
+            }
+
+            if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
+                return ToolResult.failure("create_skill_invalid_name",
+                        "名称格式无效，必须匹配 ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", elapsed(startedAt));
+            }
+
+            Path workspaceRoot = resolveWorkspaceRoot(call);
+            Path skillDir = workspaceRoot.resolve(projectSkillsDir).resolve(name).normalize();
+            Path skillFile = skillDir.resolve(SKILL_FILE);
+
+            // Path must stay within workspace
+            if (!skillDir.startsWith(workspaceRoot.normalize())) {
+                return ToolResult.failure("create_skill_path_escape",
+                        "技能路径必须在工作区内", elapsed(startedAt));
+            }
+
+            if (Files.exists(skillFile)) {
+                return ToolResult.failure("create_skill_already_exists",
+                        "Skill '" + name + "' 已存在，不能重复创建", elapsed(startedAt));
+            }
+
+            // Build SKILL.md with frontmatter
+            String sha256hex = DigestUtils.sha256Hex(content.getBytes(StandardCharsets.UTF_8));
+            String skillMd = "---\n"
+                    + "name: " + name + "\n"
+                    + "description: " + description + "\n"
+                    + "compatibility: loom-agent\n"
+                    + "---\n"
+                    + content + "\n";
+
+            try {
+                Files.createDirectories(skillDir);
+                Files.writeString(skillFile, skillMd, StandardCharsets.UTF_8);
+                log.info("Skill created: {} -> {}", name, skillFile);
+                return ToolResult.success(
+                        "skill created: name=" + name + " sha256=" + sha256hex
+                                + " path=" + skillFile + "\n"
+                                + "该 Skill 已创建，可立即在当前会话及后续会话中使用。\n",
+                        false, elapsed(startedAt));
+            } catch (IOException e) {
+                log.warn("Failed to create skill: {}", name, e);
+                return ToolResult.failure("create_skill_io_error", "创建失败: " + e.getMessage(), elapsed(startedAt));
             }
         }
 
