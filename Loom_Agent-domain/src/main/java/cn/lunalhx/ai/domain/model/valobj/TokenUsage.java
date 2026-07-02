@@ -14,5 +14,7 @@ public class TokenUsage {
     private Integer promptTokens;
     private Integer completionTokens;
     private Integer totalTokens;
+    private Integer promptCacheHitTokens;
+    private Integer promptCacheMissTokens;
 
 }

@@ -201,6 +201,8 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .promptTokens(integerOrNull(usageNode.path("prompt_tokens")))
                 .completionTokens(integerOrNull(usageNode.path("completion_tokens")))
                 .totalTokens(integerOrNull(usageNode.path("total_tokens")))
+                .promptCacheHitTokens(integerOrNull(usageNode.path("prompt_cache_hit_tokens")))
+                .promptCacheMissTokens(integerOrNull(usageNode.path("prompt_cache_miss_tokens")))
                 .build();
     }
 

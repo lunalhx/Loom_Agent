@@ -240,6 +240,8 @@ public class AgentResponseMapper {
                 .promptTokens(usage.getPromptTokens())
                 .completionTokens(usage.getCompletionTokens())
                 .totalTokens(usage.getTotalTokens())
+                .promptCacheHitTokens(usage.getPromptCacheHitTokens())
+                .promptCacheMissTokens(usage.getPromptCacheMissTokens())
                 .build();
     }
 
