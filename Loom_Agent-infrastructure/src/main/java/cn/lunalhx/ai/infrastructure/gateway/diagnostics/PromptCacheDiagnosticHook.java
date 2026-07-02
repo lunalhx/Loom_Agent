@@ -52,6 +52,7 @@ public class PromptCacheDiagnosticHook {
      */
     private final PromptCacheDiagnosticStateStore state;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public PromptCacheDiagnosticHook(PromptCacheDiagnosticProperties properties) {
         this(properties,
                 new PromptCacheDiagnostics(),

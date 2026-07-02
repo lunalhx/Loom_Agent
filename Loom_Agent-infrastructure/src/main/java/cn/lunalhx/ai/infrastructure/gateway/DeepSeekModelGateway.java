@@ -64,6 +64,7 @@ public class DeepSeekModelGateway implements ModelGateway {
                 new PromptCacheDiagnosticHook(null));
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public DeepSeekModelGateway(Environment environment,
                                 ObjectMapper objectMapper,
                                 ModelRuntimeProperties runtimeProperties,
