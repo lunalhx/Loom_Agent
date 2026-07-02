@@ -16,6 +16,9 @@ import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -53,15 +56,16 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                 return failure("query_required", "query 不能为空", startedAt);
             }
             Path searchRoot = resolveDirectory(call, "path", ".");
-            int limit = Math.max(1, Math.min(properties.getSearchMaxResults(), integer(call.getInput(), "limit", 20)));
+            int userLimit = Math.max(1, Math.min(properties.getSearchMaxResults(), integer(call.getInput(), "limit", 20)));
+            int collectLimit = properties.getSearchMaxResults();
             AtomicInteger count = new AtomicInteger();
-            StringBuilder output = new StringBuilder();
+            List<SearchMatch> matches = new ArrayList<>();
             String lowerQuery = query.toLowerCase(Locale.ROOT);
 
             Files.walkFileTree(searchRoot, new FileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt) || count.get() >= limit) {
+                    if (timedOut(startedAt) || count.get() >= collectLimit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (isTraversalBlocked(dir)) {
@@ -72,10 +76,13 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt) || count.get() >= limit) {
+                    if (timedOut(startedAt) || count.get() >= collectLimit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (!Files.isRegularFile(file)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    if (Files.isSymbolicLink(file)) {
                         return FileVisitResult.CONTINUE;
                     }
                     if (isSensitiveFileName(file.getFileName().toString())) {
@@ -88,7 +95,7 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                     } catch (IOException e) {
                         return FileVisitResult.CONTINUE;
                     }
-                    searchFile(call, file, lowerQuery, count, limit, output);
+                    searchFile(call, file, lowerQuery, count, collectLimit, matches);
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -103,32 +110,55 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                 }
             });
 
-            boolean truncated = count.get() >= limit || timedOut(startedAt);
+            // Sort deterministically: by path, then by line number within the same file.
+            matches.sort(Comparator.comparing(SearchMatch::path).thenComparingInt(SearchMatch::lineNumber));
+
+            StringBuilder output = new StringBuilder();
+            int shown = 0;
+            for (SearchMatch match : matches) {
+                if (shown >= userLimit) {
+                    break;
+                }
+                output.append(match.path())
+                        .append(':')
+                        .append(match.lineNumber())
+                        .append(": ")
+                        .append(match.line())
+                        .append('\n');
+                shown++;
+            }
+
+            boolean truncated = count.get() >= collectLimit || timedOut(startedAt) || matches.size() > userLimit;
             return ToolResult.success(output.toString(), truncated, elapsed(startedAt));
         } catch (Exception e) {
             return failure("code_search_failed", e.getMessage(), startedAt);
         }
     }
 
-    private void searchFile(ToolCall call, Path file, String lowerQuery, AtomicInteger count, int limit, StringBuilder output) {
+    private void searchFile(ToolCall call, Path file, String lowerQuery, AtomicInteger count, int collectLimit, List<SearchMatch> matches) {
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String relPath = relativeNormalized(call, file);
             String line;
             int lineNumber = 0;
-            while ((line = reader.readLine()) != null && count.get() < limit) {
+            while ((line = reader.readLine()) != null && count.get() < collectLimit) {
                 lineNumber++;
                 if (line.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
                     count.incrementAndGet();
-                    output.append(relative(call, file))
-                            .append(':')
-                            .append(lineNumber)
-                            .append(": ")
-                            .append(line.strip())
-                            .append('\n');
+                    matches.add(new SearchMatch(relPath, lineNumber, line.strip()));
                 }
             }
         } catch (Exception ignored) {
             // Non-UTF-8 or unreadable files are invisible to code search.
         }
     }
+
+    /**
+     * A single search match with deterministic sort keys.
+     *
+     * @param path       workspace-relative normalized path ({@code /} separator)
+     * @param lineNumber 1-based line number within the file
+     * @param line       the matched line content, stripped
+     */
+    private record SearchMatch(String path, int lineNumber, String line) {}
 
 }

@@ -167,6 +167,14 @@ abstract class FileSystemToolSupport {
         }
     }
 
+    /**
+     * Workspace-relative path with '/' separator for deterministic,
+     * platform-independent output consumed by the model.
+     */
+    protected String relativeNormalized(ToolCall call, Path path) {
+        return relative(call, path).replace('\\', '/');
+    }
+
     protected Path workspaceRoot(ToolCall call) throws IOException {
         if (call == null || call.getWorkspaceRoot() == null) {
             return workspacePort.requireLocalRoot(call);
