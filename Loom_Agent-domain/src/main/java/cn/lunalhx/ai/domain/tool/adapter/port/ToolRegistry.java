@@ -11,16 +11,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 public class ToolRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(ToolRegistry.class);
 
-    private final Map<String, AgentTool> tools = new LinkedHashMap<>();
+    private final Map<String, AgentTool> tools = new TreeMap<>();
     private final ToolSchemaValidator schemaValidator;
 
     public ToolRegistry(Collection<AgentTool> tools, ToolSchemaValidator schemaValidator) {
