@@ -1,33 +1,35 @@
 package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.tool.adapter.port.TaskLogReader;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
+import cn.lunalhx.ai.domain.tool.model.LogChunk;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-public class ShellTaskTool implements AgentTool {
+public class ShellTaskTool implements cn.lunalhx.ai.domain.tool.adapter.port.AgentTool {
 
     private static final long POLL_MAX_WAIT_MS = 30_000;
     private static final int DEFAULT_LIMIT_BYTES = 8192;
 
     private final BackgroundShellTaskRepository taskRepository;
-    private final BackgroundProcessManager processManager;
+    private final BackgroundTaskCancelService cancelService;
+    private final TaskLogReader logReader;
     private final AgentRuntimeProperties properties;
 
     public ShellTaskTool(BackgroundShellTaskRepository taskRepository,
-                         BackgroundProcessManager processManager,
+                         BackgroundTaskCancelService cancelService,
+                         TaskLogReader logReader,
                          AgentRuntimeProperties properties) {
         this.taskRepository = taskRepository;
-        this.processManager = processManager;
+        this.cancelService = cancelService;
+        this.logReader = logReader;
         this.properties = properties;
     }
 
@@ -99,7 +101,22 @@ public class ShellTaskTool implements AgentTool {
             return ToolResult.failure("background_task_not_found", "任务未找到: " + taskId, startedAt);
         }
 
-        // Wait for up to 30s if still running
+        long stdoutOffset = call.getInput() != null
+                ? call.getInput().path("stdoutOffset").asLong(0) : 0;
+        long stderrOffset = call.getInput() != null
+                ? call.getInput().path("stderrOffset").asLong(0) : 0;
+        int limitBytes = call.getInput() != null
+                ? call.getInput().path("limitBytes").asInt(DEFAULT_LIMIT_BYTES) : DEFAULT_LIMIT_BYTES;
+
+        if (stdoutOffset < 0 || stderrOffset < 0) {
+            return ToolResult.failure("invalid_log_range", "offset 不能为负数", startedAt);
+        }
+        if (limitBytes < TaskLogReader.MIN_LIMIT_BYTES || limitBytes > TaskLogReader.MAX_LIMIT_BYTES) {
+            return ToolResult.failure("invalid_log_range",
+                    "limitBytes 必须在 [" + TaskLogReader.MIN_LIMIT_BYTES + ", " + TaskLogReader.MAX_LIMIT_BYTES + "] 范围内",
+                    startedAt);
+        }
+
         if (task.isRunning()) {
             long deadline = System.currentTimeMillis() + POLL_MAX_WAIT_MS;
             while (System.currentTimeMillis() < deadline && task.isRunning()) {
@@ -113,18 +130,13 @@ public class ShellTaskTool implements AgentTool {
             }
         }
 
-        long stdoutOffset = call.getInput() != null
-                ? call.getInput().path("stdoutOffset").asLong(0) : 0;
-        long stderrOffset = call.getInput() != null
-                ? call.getInput().path("stderrOffset").asLong(0) : 0;
-        int limitBytes = call.getInput() != null
-                ? call.getInput().path("limitBytes").asInt(DEFAULT_LIMIT_BYTES) : DEFAULT_LIMIT_BYTES;
+        LogChunk stdoutChunk = readChunkSafe(task.getStdoutFile(), stdoutOffset, limitBytes);
+        LogChunk stderrChunk = readChunkSafe(task.getStderrFile(), stderrOffset, limitBytes);
 
-        String stdoutChunk = readFileChunk(task.getStdoutFile(), stdoutOffset, limitBytes);
-        String stderrChunk = readFileChunk(task.getStderrFile(), stderrOffset, limitBytes);
-
-        boolean stdoutEof = stdoutOffset + (stdoutChunk != null ? stdoutChunk.length() : 0) >= task.getStdoutBytes();
-        boolean stderrEof = stderrOffset + (stderrChunk != null ? stderrChunk.length() : 0) >= task.getStderrBytes();
+        long newStdoutOffset = stdoutChunk != null ? stdoutChunk.getNextOffset() : stdoutOffset;
+        long newStderrOffset = stderrChunk != null ? stderrChunk.getNextOffset() : stderrOffset;
+        boolean stdoutEof = stdoutChunk != null ? stdoutChunk.isEof() : true;
+        boolean stderrEof = stderrChunk != null ? stderrChunk.isEof() : true;
 
         StringBuilder sb = new StringBuilder();
         sb.append("task_id: ").append(task.getTaskId()).append("\n");
@@ -138,12 +150,12 @@ public class ShellTaskTool implements AgentTool {
         if (task.getErrorMessage() != null) {
             sb.append("error_message: ").append(task.getErrorMessage()).append("\n");
         }
-        sb.append("stdout_offset: ").append(stdoutOffset + (stdoutChunk != null ? stdoutChunk.length() : 0)).append("\n");
-        sb.append("stderr_offset: ").append(stderrOffset + (stderrChunk != null ? stderrChunk.length() : 0)).append("\n");
+        sb.append("stdout_offset: ").append(newStdoutOffset).append("\n");
+        sb.append("stderr_offset: ").append(newStderrOffset).append("\n");
         sb.append("stdout_eof: ").append(stdoutEof).append("\n");
         sb.append("stderr_eof: ").append(stderrEof).append("\n");
-        sb.append("\n[stdout]:\n").append(stdoutChunk != null ? stdoutChunk : "(empty)");
-        sb.append("\n[stderr]:\n").append(stderrChunk != null ? stderrChunk : "(empty)");
+        sb.append("\n[stdout]:\n").append(stdoutChunk != null && stdoutChunk.getContent() != null ? stdoutChunk.getContent() : "(empty)");
+        sb.append("\n[stderr]:\n").append(stderrChunk != null && stderrChunk.getContent() != null ? stderrChunk.getContent() : "(empty)");
 
         return ToolResult.success(sb.toString(), false,
                 System.currentTimeMillis() - startedAt);
@@ -156,45 +168,32 @@ public class ShellTaskTool implements AgentTool {
             return ToolResult.failure("missing_task_id", "cancel 需要 taskId", startedAt);
         }
 
-        BackgroundShellTask task = taskRepository.find(taskId).orElse(null);
-        if (task == null || !call.getRunId().equals(task.getRunId())) {
+        BackgroundTaskCancelService.CancelResult result = cancelService.cancel(call.getRunId(), taskId);
+
+        if (!result.success() && "BACKGROUND_TASK_NOT_FOUND".equals(result.errorCode())) {
             return ToolResult.failure("background_task_not_found", "任务未找到: " + taskId, startedAt);
         }
-
-        if (task.isTerminal()) {
-            return ToolResult.success("任务已处于终态: " + task.getStatus(), false,
-                    System.currentTimeMillis() - startedAt);
+        if (!result.success()) {
+            return ToolResult.failure("cancel_failed", "无法取消任务，进程可能已结束", startedAt);
         }
 
-        boolean cancelled = processManager.cancel(call.getRunId(), taskId);
-        if (cancelled) {
-            task.setStatus(cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus.CANCELLED);
-            task.setCompletedAt(java.time.Instant.now());
-            taskRepository.save(task);
+        if (result.status() == cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus.CANCELLED) {
             return ToolResult.success("任务已取消: " + taskId, false,
                     System.currentTimeMillis() - startedAt);
         }
-        return ToolResult.failure("cancel_failed", "无法取消任务，进程可能已结束", startedAt);
+        return ToolResult.success("任务已处于终态: " + result.status(), false,
+                System.currentTimeMillis() - startedAt);
     }
 
-    private String readFileChunk(String filePath, long offset, int limitBytes) {
+    private LogChunk readChunkSafe(String filePath, long offset, int limitBytes) {
         if (filePath == null) {
             return null;
         }
         Path path = Path.of(filePath);
-        if (!Files.exists(path)) {
-            return null;
-        }
         try {
-            byte[] bytes = Files.readAllBytes(path);
-            int start = (int) Math.min(offset, bytes.length);
-            int end = Math.min(start + limitBytes, bytes.length);
-            if (start >= end) {
-                return "";
-            }
-            return new String(bytes, start, end - start, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return "(读取错误: " + e.getMessage() + ")";
+            return logReader.readChunk(path, offset, limitBytes);
+        } catch (Exception e) {
+            return LogChunk.empty(0, 0);
         }
     }
 

@@ -2,9 +2,13 @@ package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.tool.adapter.port.TaskLogReader;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus;
+import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
 import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
+import cn.lunalhx.ai.infrastructure.tool.SeekableTaskLogReader;
+import cn.lunalhx.ai.service.DefaultBackgroundTaskCancelService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -19,7 +23,8 @@ public class BackgroundShellAutoConfig {
     private static final Logger log = LoggerFactory.getLogger(BackgroundShellAutoConfig.class);
 
     @Bean
-    public BackgroundProcessManager backgroundProcessManager(AgentRuntimeProperties properties) {
+    public BackgroundProcessManager backgroundProcessManager(AgentRuntimeProperties properties,
+                                                              BackgroundShellTaskRepository taskRepository) {
         AgentRuntimeProperties.BackgroundShellProperties bg = properties.getBackgroundShell();
         String dataDir = bg.getDataDir();
         if (dataDir == null || dataDir.isBlank()) {
@@ -35,12 +40,25 @@ public class BackgroundShellAutoConfig {
 
         BackgroundProcessManager manager = new BackgroundProcessManager(
                 taskLogDir, defaultTimeout, yield, maxTimeout,
-                bg.getGlobalMaxTasks(), bg.getPerRunMaxTasks(), bg.getIoThreads());
+                bg.getGlobalMaxTasks(), bg.getPerRunMaxTasks(), bg.getIoThreads(),
+                taskRepository);
 
         log.info("BackgroundProcessManager initialized: logDir={} globalMax={} perRunMax={} yieldMs={}",
                 taskLogDir, bg.getGlobalMaxTasks(), bg.getPerRunMaxTasks(), yield);
 
         return manager;
+    }
+
+    @Bean
+    public TaskLogReader taskLogReader() {
+        return new SeekableTaskLogReader();
+    }
+
+    @Bean
+    public BackgroundTaskCancelService backgroundTaskCancelService(
+            BackgroundShellTaskRepository taskRepository,
+            BackgroundProcessManager processManager) {
+        return new DefaultBackgroundTaskCancelService(taskRepository, processManager);
     }
 
     @Bean

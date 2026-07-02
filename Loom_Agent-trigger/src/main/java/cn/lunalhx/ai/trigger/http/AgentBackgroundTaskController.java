@@ -30,29 +30,43 @@ public class AgentBackgroundTaskController {
 
     @GetMapping("/runs/{runId}/background-tasks/{taskId}")
     public Response<BackgroundTaskDetailResponse> getBackgroundTask(@PathVariable String runId,
-                                                                      @PathVariable String taskId,
-                                                                      @RequestParam(defaultValue = "0") long stdoutOffset,
-                                                                      @RequestParam(defaultValue = "0") long stderrOffset,
-                                                                      @RequestParam(defaultValue = "8192") int limitBytes) {
-        BackgroundTaskDetailResponse detail = backgroundTaskHttpService.getTaskDetail(
-                runId, taskId, stdoutOffset, stderrOffset, limitBytes);
-        if (detail == null) {
+                                                                       @PathVariable String taskId,
+                                                                       @RequestParam(defaultValue = "0") long stdoutOffset,
+                                                                       @RequestParam(defaultValue = "0") long stderrOffset,
+                                                                       @RequestParam(defaultValue = "8192") int limitBytes) {
+        try {
+            BackgroundTaskDetailResponse detail = backgroundTaskHttpService.getTaskDetail(
+                    runId, taskId, stdoutOffset, stderrOffset, limitBytes);
+            if (detail == null) {
+                return Response.<BackgroundTaskDetailResponse>builder()
+                        .code("BACKGROUND_TASK_NOT_FOUND")
+                        .info("任务未找到")
+                        .build();
+            }
+            return Response.success(detail);
+        } catch (IllegalArgumentException e) {
             return Response.<BackgroundTaskDetailResponse>builder()
-                    .code("BACKGROUND_TASK_NOT_FOUND")
-                    .info("任务未找到")
+                    .code("INVALID_PARAMETER")
+                    .info(e.getMessage())
                     .build();
         }
-        return Response.success(detail);
     }
 
     @PostMapping("/runs/{runId}/background-tasks/{taskId}/cancel")
     public Response<BackgroundTaskResponse> cancelBackgroundTask(@PathVariable String runId,
-                                                                   @PathVariable String taskId) {
+                                                                    @PathVariable String taskId) {
         BackgroundTaskResponse task = backgroundTaskHttpService.cancelTask(runId, taskId);
         if (task == null) {
             return Response.<BackgroundTaskResponse>builder()
                     .code("BACKGROUND_TASK_NOT_FOUND")
                     .info("任务未找到")
+                    .build();
+        }
+        if ("CANCEL_FAILED".equals(task.getStatus())) {
+            return Response.<BackgroundTaskResponse>builder()
+                    .code("BACKGROUND_TASK_CANCEL_FAILED")
+                    .info("无法取消任务")
+                    .data(task)
                     .build();
         }
         return Response.success(task);

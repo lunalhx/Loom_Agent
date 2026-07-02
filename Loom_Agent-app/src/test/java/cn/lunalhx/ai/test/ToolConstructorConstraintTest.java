@@ -69,15 +69,14 @@ public class ToolConstructorConstraintTest {
     }
 
     @Test
-    public void runShellToolConstructorShouldAcceptAllFiveDependencies() {
+    public void runShellToolConstructorShouldAcceptAllFourDependencies() {
         Constructor<?> ctor = RunShellTool.class.getDeclaredConstructors()[0];
         Class<?>[] params = ctor.getParameterTypes();
-        assertEquals(5, params.length);
+        assertEquals(4, params.length);
         assertEquals(cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties.class, params[0]);
         assertEquals(WorkspacePort.class, params[1]);
         assertEquals(CommandExecutor.class, params[2]);
         assertEquals(BackgroundProcessManager.class, params[3]);
-        assertEquals(cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository.class, params[4]);
     }
 
     @Test

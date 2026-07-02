@@ -1,14 +1,12 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryBackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
 import cn.lunalhx.ai.infrastructure.tool.GitOpTool;
 import cn.lunalhx.ai.infrastructure.tool.ListDirectoryTool;
@@ -45,14 +43,12 @@ public class AgentFileToolTest {
     private LocalWorkspacePort workspacePort;
     private BackgroundProcessManager processManager;
     private LocalCommandExecutor commandExecutor;
-    private InMemoryBackgroundShellTaskRepository taskRepository;
 
     @Before
     public void setUp() throws Exception {
         workspacePort = new LocalWorkspacePort();
-        taskRepository = new InMemoryBackgroundShellTaskRepository();
         Path logDir = temporaryFolder.newFolder("bg-logs").toPath();
-        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2);
+        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2, null);
         commandExecutor = new LocalCommandExecutor(processManager);
     }
 
@@ -148,7 +144,7 @@ public class AgentFileToolTest {
     @Test
     public void runShellShouldClassifyMavenTestAndDangerousCommand() throws Exception {
         RunShellTool tool = new RunShellTool(properties(), workspacePort,
-                mock(CommandExecutor.class), mock(BackgroundProcessManager.class), mock(BackgroundShellTaskRepository.class));
+                mock(CommandExecutor.class), mock(BackgroundProcessManager.class));
 
         ObjectNode mavenInput = objectMapper.createObjectNode();
         mavenInput.put("command", "mvn -pl Loom_Agent-app -am test");
@@ -164,7 +160,7 @@ public class AgentFileToolTest {
     @Test
     public void runShellShouldPreserveInterruptFlagAndReturnInterruptedError() throws Exception {
         RunShellTool tool = new RunShellTool(properties(), workspacePort,
-                commandExecutor, processManager, taskRepository);
+                commandExecutor, processManager);
 
         Thread.currentThread().interrupt();
         try {
@@ -258,7 +254,7 @@ public class AgentFileToolTest {
         input.put("command", "pwd");
         input.put("cwd", "..");
         ToolResult result = new RunShellTool(properties(workspace), workspacePort,
-                commandExecutor, processManager, taskRepository)
+                commandExecutor, processManager)
                 .call(call("run_shell", input, workspace));
 
         assertFalse(result.isSuccess());

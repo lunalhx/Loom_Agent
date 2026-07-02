@@ -2,7 +2,6 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
-import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.BackgroundLaunchMode;
@@ -32,15 +31,12 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
     private final CommandExecutor commandExecutor;
     private final BackgroundProcessManager backgroundProcessManager;
-    private final BackgroundShellTaskRepository taskRepository;
 
     public RunShellTool(AgentRuntimeProperties properties, WorkspacePort workspacePort,
-                        CommandExecutor commandExecutor, BackgroundProcessManager backgroundProcessManager,
-                        BackgroundShellTaskRepository taskRepository) {
+                        CommandExecutor commandExecutor, BackgroundProcessManager backgroundProcessManager) {
         super(properties, workspacePort);
         this.commandExecutor = commandExecutor;
         this.backgroundProcessManager = backgroundProcessManager;
-        this.taskRepository = taskRepository;
     }
 
     @Override
@@ -213,9 +209,6 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         }
 
         BackgroundShellTask task = bgResult.task();
-        if (taskRepository != null) {
-            taskRepository.save(task);
-        }
 
         long elapsedMs = System.currentTimeMillis() - startedAt;
         String observation = "后台任务已启动\n"

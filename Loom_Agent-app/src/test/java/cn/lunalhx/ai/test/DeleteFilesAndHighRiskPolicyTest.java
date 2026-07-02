@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.CommandExecutor;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
@@ -617,8 +616,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("command", "rm -rf /");
             RunShellTool tool = new RunShellTool(props, workspacePort,
-                    mock(CommandExecutor.class), mock(BackgroundProcessManager.class),
-                    mock(BackgroundShellTaskRepository.class));
+                    mock(CommandExecutor.class), mock(BackgroundProcessManager.class));
             ToolPolicyDecision decision = tool.policy(call("run_shell", input));
             assertEquals("rm should always be HIGH_RISK_DENY with policy=" + policy,
                     ToolPermissionLevel.HIGH_RISK_DENY, decision.getPermissionLevel());
@@ -729,8 +727,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
 
     private RunShellTool runShellTool() {
         return new RunShellTool(properties(), workspacePort,
-                mock(CommandExecutor.class), mock(BackgroundProcessManager.class),
-                mock(BackgroundShellTaskRepository.class));
+                mock(CommandExecutor.class), mock(BackgroundProcessManager.class));
     }
 
     private GitOpTool gitOpTool() {

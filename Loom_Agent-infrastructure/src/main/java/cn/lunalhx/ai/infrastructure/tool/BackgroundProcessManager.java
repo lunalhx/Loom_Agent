@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.infrastructure.tool;
 
+import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.model.BackgroundLaunchMode;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus;
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class BackgroundProcessManager {
@@ -37,21 +39,23 @@ public class BackgroundProcessManager {
     private final long maxTimeoutMs;
     private final int globalMaxTasks;
     private final int perRunMaxTasks;
+    private final BackgroundShellTaskRepository taskRepository;
 
-    private final Map<String, Process> processRegistry = new ConcurrentHashMap<>();
+    private final Map<String, ActiveTaskHandle> activeHandles = new ConcurrentHashMap<>();
     private final Map<String, Thread> monitorThreads = new ConcurrentHashMap<>();
     private final AtomicInteger globalTaskCount = new AtomicInteger(0);
     private final ExecutorService ioExecutor;
 
     public BackgroundProcessManager(Path taskLogDir, long defaultTimeoutMs, long foregroundYieldMs,
                                      long maxTimeoutMs, int globalMaxTasks, int perRunMaxTasks,
-                                     int ioThreads) {
+                                     int ioThreads, BackgroundShellTaskRepository taskRepository) {
         this.taskLogDir = taskLogDir;
         this.defaultTimeoutMs = defaultTimeoutMs;
         this.foregroundYieldMs = foregroundYieldMs;
         this.maxTimeoutMs = maxTimeoutMs;
         this.globalMaxTasks = globalMaxTasks;
         this.perRunMaxTasks = perRunMaxTasks;
+        this.taskRepository = taskRepository;
         this.ioExecutor = Executors.newFixedThreadPool(ioThreads, r -> {
             Thread t = new Thread(r, "bg-task-io");
             t.setDaemon(true);
@@ -64,7 +68,7 @@ public class BackgroundProcessManager {
     }
 
     public int perRunActiveCount(String runId) {
-        return (int) processRegistry.keySet().stream()
+        return (int) activeHandles.keySet().stream()
                 .filter(k -> k.startsWith(runId + "/"))
                 .count();
     }
@@ -130,8 +134,8 @@ public class BackgroundProcessManager {
                                          BackgroundShellTask task) {}
 
     public BackgroundStartResult startBackground(List<String> command, Path cwd, long requestedTimeoutMs,
-                                                   String runId, String conversationId, String workspace,
-                                                   BackgroundLaunchMode launchMode) {
+                                                  String runId, String conversationId, String workspace,
+                                                  BackgroundLaunchMode launchMode) {
         long timeoutMs = Math.min(Math.max(1L, requestedTimeoutMs), maxTimeoutMs);
         long actualTimeout = timeoutMs > 0 ? timeoutMs : defaultTimeoutMs;
 
@@ -189,12 +193,17 @@ public class BackgroundProcessManager {
             globalTaskCount.incrementAndGet();
 
             String registryKey = runId + "/" + taskId;
-            processRegistry.put(registryKey, process);
+            ActiveTaskHandle handle = new ActiveTaskHandle(process, task, registryKey);
+            activeHandles.put(registryKey, handle);
 
-            ioExecutor.submit(() -> streamToFile(process.getInputStream(), stdoutFile, task));
-            ioExecutor.submit(() -> streamToFile(process.getErrorStream(), stderrFile, task));
+            if (taskRepository != null) {
+                taskRepository.save(task);
+            }
 
-            Thread monitor = new Thread(() -> monitorProcess(process, task, actualTimeout), "bg-monitor-" + taskId);
+            ioExecutor.submit(() -> streamToFile(process.getInputStream(), stdoutFile, handle));
+            ioExecutor.submit(() -> streamToFile(process.getErrorStream(), stderrFile, handle));
+
+            Thread monitor = new Thread(() -> monitorProcess(handle, actualTimeout), "bg-monitor-" + taskId);
             monitor.setDaemon(true);
             monitor.start();
             monitorThreads.put(registryKey, monitor);
@@ -205,12 +214,16 @@ public class BackgroundProcessManager {
             task.setErrorCode("background_start_failed");
             task.setErrorMessage(e.getMessage());
             task.setCompletedAt(Instant.now());
+            task.setUpdatedAt(Instant.now());
+            if (taskRepository != null) {
+                taskRepository.save(task);
+            }
             return new BackgroundStartResult(false, "background_start_failed",
                     "后台进程启动失败: " + e.getMessage(), task);
         }
     }
 
-    private void streamToFile(InputStream in, Path file, BackgroundShellTask task) {
+    private void streamToFile(InputStream in, Path file, ActiveTaskHandle handle) {
         try (OutputStream out = Files.newOutputStream(file)) {
             byte[] buf = new byte[8192];
             long total = 0;
@@ -225,12 +238,12 @@ public class BackgroundProcessManager {
                 total += n;
             }
             if (file.toString().endsWith("stdout.log")) {
-                task.setStdoutBytes(total);
+                handle.task.setStdoutBytes(total);
             } else {
-                task.setStderrBytes(total);
+                handle.task.setStderrBytes(total);
             }
-            if (total >= MAX_OUTPUT_BYTES) {
-                killTask(task, "output_limit_exceeded", "输出超过 50 MiB 上限");
+            if (total >= MAX_OUTPUT_BYTES && !handle.cancelled.get()) {
+                killTask(handle, "output_limit_exceeded", "输出超过 50 MiB 上限");
             }
             while (in.read(buf) >= 0) {
                 // drain
@@ -240,86 +253,108 @@ public class BackgroundProcessManager {
         }
     }
 
-    private void monitorProcess(Process process, BackgroundShellTask task, long timeoutMs) {
+    private void monitorProcess(ActiveTaskHandle handle, long timeoutMs) {
         try {
-            boolean completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+            boolean completed = handle.process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+            if (handle.cancelled.get()) {
+                return;
+            }
             if (!completed) {
-                killProcessTree(process);
-                task.setStatus(BackgroundTaskStatus.TIMED_OUT);
-                task.setErrorCode("command_timeout");
-                task.setErrorMessage("命令执行超时");
+                killProcessTree(handle.process);
+                handle.task.setStatus(BackgroundTaskStatus.TIMED_OUT);
+                handle.task.setErrorCode("command_timeout");
+                handle.task.setErrorMessage("命令执行超时");
             } else {
-                int exitCode = process.exitValue();
-                task.setExitCode(exitCode);
+                int exitCode = handle.process.exitValue();
+                handle.task.setExitCode(exitCode);
                 if (exitCode == 0) {
-                    task.setStatus(BackgroundTaskStatus.SUCCEEDED);
+                    handle.task.setStatus(BackgroundTaskStatus.SUCCEEDED);
                 } else {
-                    task.setStatus(BackgroundTaskStatus.FAILED);
-                    task.setErrorCode("command_failed");
-                    task.setErrorMessage("命令退出码：" + exitCode);
+                    handle.task.setStatus(BackgroundTaskStatus.FAILED);
+                    handle.task.setErrorCode("command_failed");
+                    handle.task.setErrorMessage("命令退出码：" + exitCode);
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            task.setStatus(BackgroundTaskStatus.FAILED);
-            task.setErrorCode("monitor_interrupted");
-            task.setErrorMessage("监控线程被中断");
+            if (handle.cancelled.get()) {
+                return;
+            }
+            handle.task.setStatus(BackgroundTaskStatus.FAILED);
+            handle.task.setErrorCode("monitor_interrupted");
+            handle.task.setErrorMessage("监控线程被中断");
+        } finally {
+            cleanup(handle);
         }
-        task.setCompletedAt(Instant.now());
-        task.setUpdatedAt(Instant.now());
-        String registryKey = task.getRunId() + "/" + task.getTaskId();
-        processRegistry.remove(registryKey);
-        monitorThreads.remove(registryKey);
-        globalTaskCount.decrementAndGet();
     }
 
-    public boolean cancel(String runId, String taskId) {
+    public boolean cancelProcess(String runId, String taskId) {
         String key = runId + "/" + taskId;
-        Process process = processRegistry.get(key);
-        if (process == null) {
+        ActiveTaskHandle handle = activeHandles.get(key);
+        if (handle == null) {
             return false;
         }
-        killProcessTree(process);
-        processRegistry.remove(key);
-        Thread monitor = monitorThreads.remove(key);
-        if (monitor != null) {
-            monitor.interrupt();
+        if (!handle.cancelled.compareAndSet(false, true)) {
+            return true;
         }
-        globalTaskCount.decrementAndGet();
+        handle.task.setStatus(BackgroundTaskStatus.CANCELLED);
+        handle.task.setCompletedAt(Instant.now());
+        handle.task.setUpdatedAt(Instant.now());
+        killProcessTree(handle.process);
+        cleanup(handle);
         return true;
     }
 
-    public void cancelAllForRun(String runId) {
-        processRegistry.keySet().stream()
+    public void cancelAllProcessesForRun(String runId) {
+        activeHandles.keySet().stream()
                 .filter(k -> k.startsWith(runId + "/"))
                 .toList()
                 .forEach(k -> {
                     String taskId = k.substring(runId.length() + 1);
-                    cancel(runId, taskId);
+                    cancelProcess(runId, taskId);
                 });
     }
 
     public void shutdown() {
-        processRegistry.values().forEach(this::killProcessTree);
-        processRegistry.clear();
+        for (ActiveTaskHandle h : List.copyOf(activeHandles.values())) {
+            h.cancelled.set(true);
+            killProcessTree(h.process);
+        }
+        activeHandles.clear();
         monitorThreads.values().forEach(Thread::interrupt);
         monitorThreads.clear();
         ioExecutor.shutdownNow();
     }
 
-    private void killTask(BackgroundShellTask task, String errorCode, String message) {
-        String key = task.getRunId() + "/" + task.getTaskId();
-        Process process = processRegistry.get(key);
-        if (process != null) {
-            killProcessTree(process);
-            processRegistry.remove(key);
+    private void killTask(ActiveTaskHandle handle, String errorCode, String message) {
+        if (!handle.cancelled.compareAndSet(false, true)) {
+            return;
         }
-        task.setStatus(BackgroundTaskStatus.FAILED);
-        task.setErrorCode(errorCode);
-        task.setErrorMessage(message);
-        task.setCompletedAt(Instant.now());
-        task.setUpdatedAt(Instant.now());
+        killProcessTree(handle.process);
+        handle.task.setStatus(BackgroundTaskStatus.FAILED);
+        handle.task.setErrorCode(errorCode);
+        handle.task.setErrorMessage(message);
+        handle.task.setCompletedAt(Instant.now());
+        handle.task.setUpdatedAt(Instant.now());
+        cleanup(handle);
+    }
+
+    private void cleanup(ActiveTaskHandle handle) {
+        if (!handle.cleanedUp.compareAndSet(false, true)) {
+            return;
+        }
+        if (handle.task.getCompletedAt() == null) {
+            handle.task.setCompletedAt(Instant.now());
+        }
+        if (handle.task.getUpdatedAt() == null) {
+            handle.task.setUpdatedAt(Instant.now());
+        }
+        activeHandles.remove(handle.registryKey);
+        monitorThreads.remove(handle.registryKey);
         globalTaskCount.decrementAndGet();
+        if (taskRepository != null) {
+            taskRepository.save(handle.task);
+        }
     }
 
     private void killProcessTree(Process process) {
@@ -327,15 +362,15 @@ public class BackgroundProcessManager {
             return;
         }
         try {
-            ProcessHandle handle = process.toHandle();
-            handle.descendants().forEach(ph -> {
+            ProcessHandle phandle = process.toHandle();
+            phandle.descendants().forEach(ph -> {
                 try {
                     ph.destroyForcibly();
                 } catch (Exception ignored) {
                 }
             });
-            handle.destroyForcibly();
-            handle.descendants().forEach(ph -> {
+            phandle.destroyForcibly();
+            phandle.descendants().forEach(ph -> {
                 try {
                     ph.destroyForcibly();
                 } catch (Exception ignored) {
@@ -343,6 +378,20 @@ public class BackgroundProcessManager {
             });
         } catch (Exception e) {
             process.destroyForcibly();
+        }
+    }
+
+    private static final class ActiveTaskHandle {
+        final Process process;
+        final BackgroundShellTask task;
+        final String registryKey;
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicBoolean cleanedUp = new AtomicBoolean(false);
+
+        ActiveTaskHandle(Process process, BackgroundShellTask task, String registryKey) {
+            this.process = process;
+            this.task = task;
+            this.registryKey = registryKey;
         }
     }
 

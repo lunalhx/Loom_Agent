@@ -10,9 +10,10 @@ import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.tool.adapter.port.TaskLogReader;
+import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
 import cn.lunalhx.ai.infrastructure.mcp.McpClientManager;
 import cn.lunalhx.ai.infrastructure.skill.SkillTools;
-import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
 import cn.lunalhx.ai.infrastructure.tool.MemorySaveTool;
 import cn.lunalhx.ai.infrastructure.tool.MemorySearchTool;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
@@ -101,8 +102,9 @@ public class ToolAutoConfig {
 
     @Bean
     public ShellTaskTool shellTaskTool(BackgroundShellTaskRepository taskRepository,
-                                        BackgroundProcessManager processManager,
-                                        AgentRuntimeProperties properties) {
-        return new ShellTaskTool(taskRepository, processManager, properties);
+                                         BackgroundTaskCancelService cancelService,
+                                         TaskLogReader logReader,
+                                         AgentRuntimeProperties properties) {
+        return new ShellTaskTool(taskRepository, cancelService, logReader, properties);
     }
 }

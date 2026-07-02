@@ -79,6 +79,19 @@ public class AgentBackgroundTaskControllerContractTest {
     }
 
     @Test
+    public void getTaskDetailInvalidParameterShouldReturnErrorCode() throws Exception {
+        AgentBackgroundTaskHttpService svc = mock(AgentBackgroundTaskHttpService.class);
+        when(svc.getTaskDetail(anyString(), anyString(), anyLong(), anyLong(), anyInt()))
+                .thenThrow(new IllegalArgumentException("offset must be >= 0"));
+
+        MockMvc mvc = buildMockMvc(svc);
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/r-1/background-tasks/t-1")
+                        .param("stdoutOffset", "-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("INVALID_PARAMETER"));
+    }
+
+    @Test
     public void cancelTaskShouldReturnSuccess() throws Exception {
         AgentBackgroundTaskHttpService svc = mock(AgentBackgroundTaskHttpService.class);
         BackgroundTaskResponse task = BackgroundTaskResponse.builder()
@@ -102,5 +115,19 @@ public class AgentBackgroundTaskControllerContractTest {
         mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/runs/r-1/background-tasks/missing/cancel"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("BACKGROUND_TASK_NOT_FOUND"));
+    }
+
+    @Test
+    public void cancelTaskFailShouldReturnErrorCode() throws Exception {
+        AgentBackgroundTaskHttpService svc = mock(AgentBackgroundTaskHttpService.class);
+        BackgroundTaskResponse task = BackgroundTaskResponse.builder()
+                .taskId("t-1").runId("r-1").status("CANCEL_FAILED")
+                .errorCode("BACKGROUND_TASK_CANCEL_FAILED").build();
+        when(svc.cancelTask("r-1", "t-1")).thenReturn(task);
+
+        MockMvc mvc = buildMockMvc(svc);
+        mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/runs/r-1/background-tasks/t-1/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("BACKGROUND_TASK_CANCEL_FAILED"));
     }
 }

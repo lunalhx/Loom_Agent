@@ -12,7 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
-import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
+import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -29,12 +29,12 @@ public class BackgroundTaskFinalGuardHook implements AgentHook {
     private static final int MAX_IGNORED_ATTEMPTS = 3;
 
     private final BackgroundShellTaskRepository taskRepository;
-    private final BackgroundProcessManager processManager;
+    private final BackgroundTaskCancelService cancelService;
 
     public BackgroundTaskFinalGuardHook(BackgroundShellTaskRepository taskRepository,
-                                         BackgroundProcessManager processManager) {
+                                         BackgroundTaskCancelService cancelService) {
         this.taskRepository = taskRepository;
-        this.processManager = processManager;
+        this.cancelService = cancelService;
     }
 
     @Override
@@ -108,15 +108,9 @@ public class BackgroundTaskFinalGuardHook implements AgentHook {
                     List.of(hookEvent));
         }
 
-        // Max attempts exceeded: force fail
         log.warn("Agent run={} ignored {} stop-hook warnings, force-finalizing with unresolved tasks",
                 agentContext.getRunId(), MAX_IGNORED_ATTEMPTS);
-        running.forEach(t -> {
-            processManager.cancel(t.getRunId(), t.getTaskId());
-            t.setStatus(cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus.CANCELLED);
-            t.setCompletedAt(java.time.Instant.now());
-            taskRepository.save(t);
-        });
+        running.forEach(t -> cancelService.cancel(t.getRunId(), t.getTaskId()));
 
         agentContext.setStopReason(AgentStopReason.TOOL_ERROR);
         agentContext.setErrorCode("background_tasks_unresolved");
