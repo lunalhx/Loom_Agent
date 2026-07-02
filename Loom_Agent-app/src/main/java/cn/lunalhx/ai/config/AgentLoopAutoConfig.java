@@ -76,7 +76,6 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
-    @ConfigurationProperties(prefix = "loom.http.stream-limit")
     public StreamRequestLimitProperties streamRequestLimitProperties() {
         return new StreamRequestLimitProperties();
     }
