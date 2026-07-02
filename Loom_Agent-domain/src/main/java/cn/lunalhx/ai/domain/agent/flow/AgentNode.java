@@ -8,8 +8,20 @@ public interface AgentNode {
 
     String name();
 
-    List<String> inputKeys();
+    /**
+     * Declares which state partitions this node reads and writes.
+     * Defaults to {@link NodeAccess#NONE}.
+     */
+    default NodeAccess access() {
+        return NodeAccess.NONE;
+    }
+
+    /**
+     * Derives input keys from {@link #access()}. Override to restrict further.
+     */
+    default List<String> inputKeys() {
+        return access().inputKeys();
+    }
 
     NodeResult apply(AgentContext context);
-
 }

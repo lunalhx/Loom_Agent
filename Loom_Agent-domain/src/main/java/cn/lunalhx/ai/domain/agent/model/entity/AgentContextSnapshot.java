@@ -1,33 +1,46 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentApprovalState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Checkpoint snapshot v2 — only durable state needed for recovery.
+ *
+ * <p>Excluded from persistence: currentPrompt, render cache, modelOutput, current span,
+ * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
+ * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private static final int LARGE_TEXT_LIMIT = 4000;
+    private int schemaVersion = 2;
 
+    // -- identity (durable) --
     private String runId;
     private String parentRunId;
     private String rootRunId;
@@ -36,47 +49,60 @@ public class AgentContextSnapshot {
     private AgentRole agentRole;
     private Integer agentDepth;
     private Integer childOrdinal;
+
+    // -- run definition (durable) --
     private String question;
     private String pathScope;
-    private String resolvedWorkspace;
-    private WorkspaceRef workspace;
-    private String workspaceDisplayName;
     private Integer maxSteps;
+    private Integer maxSegments;
+    private Integer maxTotalSteps;
+
+    // -- environment (only workspace ref; resolved path re-injected) --
+    private WorkspaceRef workspace;
+
+    // -- runtime (durable) --
     private Integer step;
     private Integer parseErrors;
     private Instant startedAt;
-    private List<ToolSpec> toolSpecs;
     private List<AgentStep> history;
     private List<DynamicTextEntry> dynamicTextEntries;
-    private String currentPrompt;
-    private String modelOutput;
-    private AgentDecision decision;
-    private ToolResult toolResult;
+    private String currentNode;
+    private Long checkpointVersion;
     private String finalAnswer;
     private AgentStopReason stopReason;
     private String errorCode;
     private String errorMessage;
+    private Integer segmentIndex;
+    private Integer segmentStartStep;
+    private Integer stopHookContinuationCount;
+    private String lastActionFingerprint;
+    private Integer sameActionRepeats;
+    private String lastFailureFingerprint;
+    private Integer sameFailureRepeats;
+    private Integer noProgressRounds;
+
+    // -- action (durable) --
+    private AgentDecision decision;
+    private ToolResult toolResult;
     private AgentPlan plan;
     private ReplanReason replanReason;
     private String replanMessage;
-    private String currentNode;
-    private Long checkpointVersion;
+
+    // -- approval (durable) --
     private Boolean unsafeResumeRequired;
     private String pendingApprovalId;
     private String approvedTool;
     private String approvedPolicyFingerprint;
     private Boolean approvalExpired;
     private String expiredApprovalId;
-    private Boolean subAgentSpawnAllowed;
-    private String traceId;
-    private String currentSpanId;
-    private String parentSpanId;
-    private Long traceSequenceNo;
+
+    // -- budget (durable usage snapshot) --
     private Long usedPromptTokens;
     private Long usedCompletionTokens;
     private Long usedTokens;
     private BigDecimal estimatedCost;
-    private String budgetBlockedReason;
+
+    // -- recovery (durable) --
     private Integer reactiveCompactAttempts;
     private String currentModel;
     private String fallbackReason;
@@ -84,109 +110,110 @@ public class AgentContextSnapshot {
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
-    private Integer stopHookContinuationCount;
-    private Integer segmentIndex;
-    private Integer segmentStartStep;
-    private Integer maxSegments;
-    private Integer maxTotalSteps;
-    private String lastActionFingerprint;
-    private Integer sameActionRepeats;
-    private String lastFailureFingerprint;
-    private Integer sameFailureRepeats;
-    private Integer noProgressRounds;
+
+    // -- skill (durable subset; catalog and catalog text re-injected) --
     private List<String> requestedSkills;
-    private SkillCatalog availableSkillCatalog;
     private List<SkillActivation> activatedSkills;
     private List<String> approvedSkillNames;
     private List<String> rejectedSkillNames;
 
-    public static AgentContextSnapshot from(AgentContext context) {
-        return AgentContextSnapshot.builder()
-                .runId(context.getRunId())
-                .parentRunId(context.getParentRunId())
-                .rootRunId(context.getRootRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .agentRole(context.getAgentRole())
-                .agentDepth(context.getAgentDepth())
-                .childOrdinal(context.getChildOrdinal())
-                .question(context.getQuestion())
-                .pathScope(context.getPathScope())
-                .resolvedWorkspace(context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString())
-                .workspace(context.getWorkspace())
-                .workspaceDisplayName(context.getWorkspaceDisplayName())
-                .maxSteps(context.getMaxSteps())
-                .step(context.getStep())
-                .parseErrors(context.getParseErrors())
-                .startedAt(context.getStartedAt())
-                .toolSpecs(new ArrayList<>(context.getToolSpecs()))
-                .history(new ArrayList<>(context.getHistory()))
-                .dynamicTextEntries(context.getDynamicText().entries())
-                .currentPrompt(summarizeLargeText(context.getCurrentPrompt()))
-                .modelOutput(summarizeLargeText(context.getModelOutput()))
-                .decision(context.getDecision())
-                .toolResult(context.getToolResult())
-                .finalAnswer(context.getFinalAnswer())
-                .stopReason(context.getStopReason())
-                .errorCode(context.getErrorCode())
-                .errorMessage(context.getErrorMessage())
-                .plan(context.getPlan())
-                .replanReason(context.getReplanReason())
-                .replanMessage(context.getReplanMessage())
-                .currentNode(context.getCurrentNode())
-                .checkpointVersion(context.getCheckpointVersion())
-                .unsafeResumeRequired(context.isUnsafeResumeRequired())
-                .pendingApprovalId(context.getPendingApprovalId())
-                .approvedTool(context.getApprovedTool())
-                .approvedPolicyFingerprint(context.getApprovedPolicyFingerprint())
-                .approvalExpired(context.isApprovalExpired())
-                .expiredApprovalId(context.getExpiredApprovalId())
-                .subAgentSpawnAllowed(context.isSubAgentSpawnAllowed())
-                .traceId(context.getTraceId())
-                .currentSpanId(context.getCurrentSpanId())
-                .parentSpanId(context.getParentSpanId())
-                .traceSequenceNo(context.getTraceSequenceNo())
-                .usedPromptTokens(context.getUsedPromptTokens())
-                .usedCompletionTokens(context.getUsedCompletionTokens())
-                .usedTokens(context.getUsedTokens())
-                .estimatedCost(context.getEstimatedCost())
-                .budgetBlockedReason(context.getBudgetBlockedReason())
-                .reactiveCompactAttempts(context.getReactiveCompactAttempts())
-                .currentModel(context.getCurrentModel())
-                .fallbackReason(context.getFallbackReason())
-                .contextRecoveryStage(context.getContextRecoveryStage())
-                .recoveryModelOverride(context.getRecoveryModelOverride())
-                .contextTranscriptArtifactId(context.getContextTranscriptArtifactId())
-                .contextBlockedReason(context.getContextBlockedReason())
-                .stopHookContinuationCount(context.getStopHookContinuationCount())
-                .segmentIndex(context.getSegmentIndex())
-                .segmentStartStep(context.getSegmentStartStep())
-                .maxSegments(context.getMaxSegments())
-                .maxTotalSteps(context.getMaxTotalSteps())
-                .lastActionFingerprint(context.getLastActionFingerprint())
-                .sameActionRepeats(context.getSameActionRepeats())
-                .lastFailureFingerprint(context.getLastFailureFingerprint())
-                .sameFailureRepeats(context.getSameFailureRepeats())
-                .noProgressRounds(context.getNoProgressRounds())
-                .requestedSkills(context.getRequestedSkills() == null ? null : new ArrayList<>(context.getRequestedSkills()))
-                .availableSkillCatalog(context.getAvailableSkillCatalog())
-                .activatedSkills(context.getActivatedSkills() == null ? null : new ArrayList<>(context.getActivatedSkills()))
-                .approvedSkillNames(context.getApprovedSkillNames() == null ? null : new ArrayList<>(context.getApprovedSkillNames()))
-                .rejectedSkillNames(context.getRejectedSkillNames() == null ? null : new ArrayList<>(context.getRejectedSkillNames()))
-                .build();
-    }
+    // -- trace (only root identity; span IDs are transient) --
+    private String traceId;
+    private Long traceSequenceNo;
 
-    private static String summarizeLargeText(String text) {
-        if (StringUtils.length(text) <= LARGE_TEXT_LIMIT) {
-            return text;
-        }
-        return StringUtils.abbreviate(text, LARGE_TEXT_LIMIT)
-                + "\n[checkpoint_truncated length=" + text.length()
-                + " sha256=" + DigestUtils.sha256Hex(text) + "]";
+    // ---- factory methods ----
+
+    public static AgentContextSnapshot from(AgentContext context) {
+        AgentIdentity id = context.identity();
+        AgentRunDefinition def = context.runDefinition();
+        AgentRuntimeState runtime = context.runtime();
+        AgentActionState action = context.action();
+        AgentApprovalState approval = context.approval();
+        AgentBudgetState budget = context.budget();
+        AgentRecoveryState recovery = context.recovery();
+        AgentSkillState skill = context.skill();
+        AgentTraceState trace = context.trace();
+
+        return AgentContextSnapshot.builder()
+                .schemaVersion(2)
+                // identity
+                .runId(id.runId())
+                .parentRunId(id.parentRunId())
+                .rootRunId(id.rootRunId())
+                .requestId(id.requestId())
+                .conversationId(id.conversationId())
+                .agentRole(id.agentRole())
+                .agentDepth(id.agentDepth())
+                .childOrdinal(id.childOrdinal())
+                // run definition
+                .question(def.question())
+                .pathScope(def.pathScope())
+                .maxSteps(def.maxSteps())
+                .maxSegments(def.maxSegments())
+                .maxTotalSteps(def.maxTotalSteps())
+                // environment
+                .workspace(context.environment().workspace())
+                // runtime
+                .step(runtime.step())
+                .parseErrors(runtime.parseErrors())
+                .startedAt(runtime.startedAt())
+                .history(runtime.history() == null ? null : new ArrayList<>(runtime.history()))
+                .dynamicTextEntries(context.prompt().dynamicText().entries())
+                .currentNode(runtime.currentNode())
+                .checkpointVersion(runtime.checkpointVersion())
+                .finalAnswer(runtime.finalAnswer())
+                .stopReason(runtime.stopReason())
+                .errorCode(runtime.errorCode())
+                .errorMessage(runtime.errorMessage())
+                .segmentIndex(runtime.segmentIndex())
+                .segmentStartStep(runtime.segmentStartStep())
+                .stopHookContinuationCount(runtime.stopHookContinuationCount())
+                .lastActionFingerprint(runtime.lastActionFingerprint())
+                .sameActionRepeats(runtime.sameActionRepeats())
+                .lastFailureFingerprint(runtime.lastFailureFingerprint())
+                .sameFailureRepeats(runtime.sameFailureRepeats())
+                .noProgressRounds(runtime.noProgressRounds())
+                // action
+                .decision(action.decision())
+                .toolResult(action.toolResult())
+                .plan(action.plan())
+                .replanReason(action.replanReason())
+                .replanMessage(action.replanMessage())
+                // approval
+                .unsafeResumeRequired(approval.unsafeResumeRequired())
+                .pendingApprovalId(approval.pendingApprovalId())
+                .approvedTool(approval.approvedTool())
+                .approvedPolicyFingerprint(approval.approvedPolicyFingerprint())
+                .approvalExpired(approval.approvalExpired())
+                .expiredApprovalId(approval.expiredApprovalId())
+                // budget
+                .usedPromptTokens(budget.usedPromptTokens())
+                .usedCompletionTokens(budget.usedCompletionTokens())
+                .usedTokens(budget.usedTokens())
+                .estimatedCost(budget.estimatedCost())
+                // recovery
+                .reactiveCompactAttempts(recovery.reactiveCompactAttempts())
+                .currentModel(recovery.currentModel())
+                .fallbackReason(recovery.fallbackReason())
+                .contextRecoveryStage(recovery.contextRecoveryStage())
+                .recoveryModelOverride(recovery.recoveryModelOverride())
+                .contextTranscriptArtifactId(recovery.contextTranscriptArtifactId())
+                .contextBlockedReason(recovery.contextBlockedReason())
+                // skill
+                .requestedSkills(skill.requestedSkills() == null ? null : new ArrayList<>(skill.requestedSkills()))
+                .activatedSkills(skill.activatedSkills() == null ? null : new ArrayList<>(skill.activatedSkills()))
+                .approvedSkillNames(skill.approvedSkillNames() == null ? null : new ArrayList<>(skill.approvedSkillNames()))
+                .rejectedSkillNames(skill.rejectedSkillNames() == null ? null : new ArrayList<>(skill.rejectedSkillNames()))
+                // trace
+                .traceId(trace.traceId())
+                .traceSequenceNo(trace.traceSequenceNo())
+                .build();
     }
 
     public AgentContext restore() {
         AgentContext context = new AgentContext();
+
+        // identity
         context.setRunId(runId);
         context.setParentRunId(parentRunId);
         context.setRootRunId(rootRunId);
@@ -195,51 +222,62 @@ public class AgentContextSnapshot {
         context.setAgentRole(agentRole);
         context.setAgentDepth(agentDepth == null ? 0 : agentDepth);
         context.setChildOrdinal(childOrdinal == null ? 0 : childOrdinal);
+
+        // run definition
         context.setQuestion(question);
         context.setPathScope(pathScope);
-        context.setResolvedWorkspace(resolvedWorkspace == null ? null : Path.of(resolvedWorkspace));
-        context.setWorkspace(workspace == null && resolvedWorkspace != null
-                ? WorkspaceRef.local(Path.of(resolvedWorkspace), workspaceDisplayName)
-                : workspace);
-        context.setWorkspaceDisplayName(workspaceDisplayName);
         context.setMaxSteps(maxSteps == null ? 0 : maxSteps);
+        context.setMaxSegments(maxSegments == null ? 1 : maxSegments);
+        context.setMaxTotalSteps(maxTotalSteps == null ? context.getMaxSteps() : maxTotalSteps);
+
+        // environment — workspace ref only; resolved path and toolSpecs re-injected by factory
+        context.setWorkspace(workspace);
+
+        // runtime
         context.setStep(step == null ? 0 : step);
         context.setParseErrors(parseErrors == null ? 0 : parseErrors);
         context.setStartedAt(startedAt);
-        context.setToolSpecs(toolSpecs == null ? new ArrayList<>() : new ArrayList<>(toolSpecs));
         context.setHistory(history == null ? new ArrayList<>() : new ArrayList<>(history));
-        DynamicText dynamicText = new DynamicText();
-        dynamicText.replaceEntries(dynamicTextEntries == null ? List.of() : dynamicTextEntries);
-        context.setDynamicText(dynamicText);
-        context.setCurrentPrompt(currentPrompt);
-        context.setModelOutput(modelOutput);
-        context.setDecision(decision);
-        context.setToolResult(toolResult);
+        DynamicText dt = new DynamicText();
+        dt.replaceEntries(dynamicTextEntries == null ? List.of() : dynamicTextEntries);
+        context.setDynamicText(dt);
+        context.setCurrentNode(currentNode);
+        context.setCheckpointVersion(checkpointVersion);
         context.setFinalAnswer(finalAnswer);
         context.setStopReason(stopReason);
         context.setErrorCode(errorCode);
         context.setErrorMessage(errorMessage);
+        context.setSegmentIndex(segmentIndex == null ? 0 : segmentIndex);
+        context.setSegmentStartStep(segmentStartStep == null ? 0 : segmentStartStep);
+        context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
+        context.setLastActionFingerprint(lastActionFingerprint);
+        context.setSameActionRepeats(sameActionRepeats == null ? 0 : sameActionRepeats);
+        context.setLastFailureFingerprint(lastFailureFingerprint);
+        context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
+        context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
+
+        // action
+        context.setDecision(decision);
+        context.setToolResult(toolResult);
         context.setPlan(plan);
         context.setReplanReason(replanReason);
         context.setReplanMessage(replanMessage);
-        context.setCurrentNode(currentNode);
-        context.setCheckpointVersion(checkpointVersion);
+
+        // approval
         context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
         context.setPendingApprovalId(pendingApprovalId);
         context.setApprovedTool(approvedTool);
         context.setApprovedPolicyFingerprint(approvedPolicyFingerprint);
         context.setApprovalExpired(Boolean.TRUE.equals(approvalExpired));
         context.setExpiredApprovalId(expiredApprovalId);
-        context.setSubAgentSpawnAllowed(Boolean.TRUE.equals(subAgentSpawnAllowed));
-        context.setTraceId(traceId);
-        context.setCurrentSpanId(currentSpanId);
-        context.setParentSpanId(parentSpanId);
-        context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
+
+        // budget
         context.setUsedPromptTokens(usedPromptTokens == null ? 0L : usedPromptTokens);
         context.setUsedCompletionTokens(usedCompletionTokens == null ? 0L : usedCompletionTokens);
         context.setUsedTokens(usedTokens == null ? 0L : usedTokens);
         context.setEstimatedCost(estimatedCost == null ? BigDecimal.ZERO : estimatedCost);
-        context.setBudgetBlockedReason(budgetBlockedReason);
+
+        // recovery
         context.setReactiveCompactAttempts(reactiveCompactAttempts == null ? 0 : reactiveCompactAttempts);
         context.setCurrentModel(currentModel);
         context.setFallbackReason(fallbackReason);
@@ -247,22 +285,17 @@ public class AgentContextSnapshot {
         context.setRecoveryModelOverride(recoveryModelOverride);
         context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
         context.setContextBlockedReason(contextBlockedReason);
-        context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
-        context.setSegmentIndex(segmentIndex == null ? 0 : segmentIndex);
-        context.setSegmentStartStep(segmentStartStep == null ? 0 : segmentStartStep);
-        context.setMaxSegments(maxSegments == null ? 1 : maxSegments);
-        context.setMaxTotalSteps(maxTotalSteps == null ? context.getMaxSteps() : maxTotalSteps);
-        context.setLastActionFingerprint(lastActionFingerprint);
-        context.setSameActionRepeats(sameActionRepeats == null ? 0 : sameActionRepeats);
-        context.setLastFailureFingerprint(lastFailureFingerprint);
-        context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
-        context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
+
+        // skill
         context.setRequestedSkills(requestedSkills == null ? null : new ArrayList<>(requestedSkills));
-        context.setAvailableSkillCatalog(availableSkillCatalog);
         context.setActivatedSkills(activatedSkills == null ? null : new ArrayList<>(activatedSkills));
         context.setApprovedSkillNames(approvedSkillNames == null ? null : new ArrayList<>(approvedSkillNames));
         context.setRejectedSkillNames(rejectedSkillNames == null ? null : new ArrayList<>(rejectedSkillNames));
+
+        // trace
+        context.setTraceId(traceId);
+        context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
+
         return context;
     }
-
 }

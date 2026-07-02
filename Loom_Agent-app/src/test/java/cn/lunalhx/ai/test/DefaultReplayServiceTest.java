@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class DefaultReplayServiceTest {
@@ -61,7 +62,7 @@ public class DefaultReplayServiceTest {
     }
 
     @Test
-    public void shouldSummarizeLargePromptAndModelOutputInCheckpoint() {
+    public void shouldNotPersistTransientPromptAndModelOutputInSnapshotV2() {
         AgentContext context = context("checkpoint-run", null, "checkpoint-run", "trace-checkpoint");
         context.setCurrentNode(AgentNodeNames.MODEL_CALL);
         context.setCurrentPrompt("p".repeat(6000));
@@ -69,10 +70,11 @@ public class DefaultReplayServiceTest {
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
 
-        assertTrue(snapshot.getCurrentPrompt().contains("checkpoint_truncated"));
-        assertTrue(snapshot.getCurrentPrompt().contains("sha256="));
-        assertTrue(snapshot.getCurrentPrompt().length() < 4200);
-        assertTrue(snapshot.getModelOutput().contains("checkpoint_truncated"));
+        assertEquals(2, snapshot.getSchemaVersion());
+        // v2 snapshots exclude transient prompt/model output; restore re-injects toolSpecs etc.
+        AgentContext restored = snapshot.restore();
+        assertNull(restored.getCurrentPrompt());
+        assertNull(restored.getModelOutput());
     }
 
     private AgentContext context(String runId, String parentRunId, String rootRunId, String traceId) {

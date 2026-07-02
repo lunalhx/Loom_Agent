@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
@@ -23,7 +25,7 @@ public class ProgressGuard {
             return ProgressResult.CONTINUE;
         }
 
-        ToolResult result = context.getToolResult();
+        ToolResult result = context.action().toolResult();
         if (result == null) {
             return ProgressResult.CONTINUE;
         }
@@ -41,21 +43,22 @@ public class ProgressGuard {
     }
 
     private boolean isProgressMaking(AgentContext context) {
-        if (context.getDecision() == null) {
+        AgentActionState action = context.action();
+        if (action.decision() == null) {
             return false;
         }
-        String tool = context.getDecision().getTool();
+        String tool = action.decision().getTool();
         if ("todo_write".equals(tool)) {
             return true;
         }
         if (isWriteTool(tool)) {
             return true;
         }
-        if ("run_shell".equals(tool) && context.getToolResult() != null
-                && context.getToolResult().isSuccess()) {
+        if ("run_shell".equals(tool) && action.toolResult() != null
+                && action.toolResult().isSuccess()) {
             return true;
         }
-        if (context.getPlan() != null && context.getPlan().getVersion() > 0) {
+        if (action.plan() != null && action.plan().getVersion() > 0) {
             return true;
         }
         return false;
@@ -72,19 +75,19 @@ public class ProgressGuard {
         int maxRepeats = stepBudget.getSameActionMaxRepeats() != null
                 ? stepBudget.getSameActionMaxRepeats() : 2;
 
-        if (fingerprint.equals(context.getLastActionFingerprint())) {
-            int repeats = context.getSameActionRepeats() + 1;
-            context.setSameActionRepeats(repeats);
+        AgentRuntimeState runtime = context.runtime();
+        if (fingerprint.equals(runtime.lastActionFingerprint())) {
+            int repeats = runtime.sameActionRepeats() + 1;
+            runtime.setSameActionRepeats(repeats);
             if (repeats >= maxRepeats) {
-                context.setStopReason(AgentStopReason.NO_PROGRESS);
-                context.setErrorCode("repeated_action");
-                context.setErrorMessage("连续重复相同工具和输入 " + repeats + " 次，无进展");
-                context.setReplanReason(ReplanReason.REPEATED_ACTION);
+                runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_action",
+                        "连续重复相同工具和输入 " + repeats + " 次，无进展");
+                context.action().setReplanReason(ReplanReason.REPEATED_ACTION);
                 return ProgressResult.TERMINATE;
             }
         } else {
-            context.setLastActionFingerprint(fingerprint);
-            context.setSameActionRepeats(1);
+            runtime.setLastActionFingerprint(fingerprint);
+            runtime.setSameActionRepeats(1);
         }
         return ProgressResult.CONTINUE;
     }
@@ -94,44 +97,45 @@ public class ProgressGuard {
         int maxRepeats = stepBudget.getSameFailureMaxRepeats() != null
                 ? stepBudget.getSameFailureMaxRepeats() : 2;
 
-        if (fingerprint.equals(context.getLastFailureFingerprint())) {
-            int repeats = context.getSameFailureRepeats() + 1;
-            context.setSameFailureRepeats(repeats);
+        AgentRuntimeState runtime = context.runtime();
+        if (fingerprint.equals(runtime.lastFailureFingerprint())) {
+            int repeats = runtime.sameFailureRepeats() + 1;
+            runtime.setSameFailureRepeats(repeats);
             if (repeats >= maxRepeats) {
-                context.setStopReason(AgentStopReason.NO_PROGRESS);
-                context.setErrorCode("repeated_failure");
-                context.setErrorMessage("连续相同失败 " + repeats + " 次，无进展");
-                context.setReplanReason(ReplanReason.REPEATED_ERROR);
+                runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_failure",
+                        "连续相同失败 " + repeats + " 次，无进展");
+                context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
                 return ProgressResult.TERMINATE;
             }
         } else {
-            context.setLastFailureFingerprint(fingerprint);
-            context.setSameFailureRepeats(1);
+            runtime.setLastFailureFingerprint(fingerprint);
+            runtime.setSameFailureRepeats(1);
         }
         return ProgressResult.CONTINUE;
     }
 
     private void resetAll(AgentContext context) {
-        context.setLastActionFingerprint(null);
-        context.setSameActionRepeats(0);
-        context.setLastFailureFingerprint(null);
-        context.setSameFailureRepeats(0);
-        context.setNoProgressRounds(0);
+        AgentRuntimeState runtime = context.runtime();
+        runtime.setLastActionFingerprint(null);
+        runtime.setSameActionRepeats(0);
+        runtime.setLastFailureFingerprint(null);
+        runtime.setSameFailureRepeats(0);
+        runtime.setNoProgressRounds(0);
     }
 
     private String actionFingerprint(AgentContext context) {
-        if (context.getDecision() == null) {
+        if (context.action().decision() == null) {
             return "";
         }
-        String tool = StringUtils.defaultString(context.getDecision().getTool());
-        String input = context.getDecision().getInput() == null
-                ? "" : context.getDecision().getInput().toString();
+        String tool = StringUtils.defaultString(context.action().decision().getTool());
+        String input = context.action().decision().getInput() == null
+                ? "" : context.action().decision().getInput().toString();
         return DigestUtils.sha256Hex((tool + "|" + normalizeInput(input)).getBytes(StandardCharsets.UTF_8));
     }
 
     private String failureFingerprint(AgentContext context, ToolResult result) {
-        String tool = context.getDecision() != null
-                ? StringUtils.defaultString(context.getDecision().getTool()) : "";
+        String tool = context.action().decision() != null
+                ? StringUtils.defaultString(context.action().decision().getTool()) : "";
         String errorCode = StringUtils.defaultString(result.getErrorCode());
         String obsHash = DigestUtils.sha256Hex(
                 StringUtils.defaultString(result.getObservation()).getBytes(StandardCharsets.UTF_8));
@@ -146,5 +150,4 @@ public class ProgressGuard {
         CONTINUE,
         TERMINATE
     }
-
 }

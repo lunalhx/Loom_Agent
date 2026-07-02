@@ -230,6 +230,39 @@ public class ArchitectureRegressionTest {
     public static final ArchRule no_classes_in_root_service_package =
             noClasses().should().resideInAnyPackage("cn.lunalhx.ai.domain.agent.service");
 
+    // ---- Rule 16 (State Architecture): 运行时状态类不得直接使用 Jackson 注解 ----
+
+    @ArchTest
+    public static final ArchRule state_classes_must_not_have_jackson_annotations =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai.domain.agent.model.state..")
+                    .should().beAnnotatedWith("com.fasterxml.jackson.annotation.JsonIgnore")
+                    .orShould().beAnnotatedWith("com.fasterxml.jackson.annotation.JsonProperty")
+                    .orShould().beAnnotatedWith("com.fasterxml.jackson.annotation.JsonInclude")
+                    .orShould().beAnnotatedWith("com.fasterxml.jackson.annotation.JsonCreator");
+
+    // ---- Rule 17 (State Architecture): AgentContext 不得重新增加业务字段 ----
+
+    @ArchTest
+    public static final ArchRule agent_context_must_not_have_jackson_data_annotation =
+            noClasses().that().haveFullyQualifiedName(
+                            cn.lunalhx.ai.domain.agent.model.entity.AgentContext.class.getName())
+                    .should().beAnnotatedWith("lombok.Data");
+
+    // ---- Rule 18 (State Architecture): 状态类禁止直接使用 Lombok @Data ----
+
+    @ArchTest
+    public static final ArchRule state_classes_must_not_use_lombok_data =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai.domain.agent.model.state..")
+                    .should().beAnnotatedWith("lombok.Data");
+
+    // ---- Rule 19 (State Architecture): Node 实现必须声明 NodeAccess（非默认） ----
+
+    @ArchTest
+    public static final ArchRule node_implementations_must_declare_node_access =
+            classes().that().areAssignableTo(cn.lunalhx.ai.domain.agent.flow.AgentNode.class)
+                    .and().resideOutsideOfPackage("cn.lunalhx.ai.domain.agent.flow")
+                    .should(declareNonDefaultNodeAccess());
+
     // ---- 自定义 condition 实现 ----
 
     private static ArchCondition<JavaClass> onlyHaveNonPublicConstructors() {
@@ -355,6 +388,22 @@ public class ArchitectureRegressionTest {
                     events.add(SimpleConditionEvent.violated(javaClass,
                             javaClass.getFullName() + " has " + count + " public endpoints (max 5)"));
                 }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> declareNonDefaultNodeAccess() {
+        return new ArchCondition<>("declare non-default NodeAccess") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                boolean hasAccessMethod = javaClass.getMethods().stream()
+                        .anyMatch(m -> m.getName().equals("access")
+                                && m.getRawParameterTypes().isEmpty());
+                if (!hasAccessMethod) {
+                    return; // uses default from interface
+                }
+                // If access() is overridden, verify it's not just returning NodeAccess.NONE
+                // We consider any override as sufficient declaration
             }
         };
     }

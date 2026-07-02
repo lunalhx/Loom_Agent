@@ -4,6 +4,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentStep;
+import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -38,42 +41,44 @@ public abstract class AbstractAgentNode implements AgentNode {
     protected abstract NodeResult doApply(AgentContext context);
 
     protected AgentEvent.AgentEventBuilder event(AgentContext context, AgentEventType type) {
+        AgentIdentity id = context.identity();
         return AgentEvent.builder()
                 .type(type)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId());
+                .runId(id.runId())
+                .requestId(id.requestId())
+                .conversationId(id.conversationId())
+                .workspace(context.environment().workspaceDisplayName())
+                .parentRunId(id.parentRunId());
     }
 
     protected void fail(AgentContext context, AgentStopReason reason, String code, String message) {
-        context.setStopReason(reason);
-        context.setErrorCode(code);
-        context.setErrorMessage(message);
+        context.runtime().fail(reason, code, message);
     }
 
     protected void appendStep(AgentContext context, boolean success) {
-        AgentDecision decision = context.getDecision();
-        ToolResult result = context.getToolResult();
-        context.getHistory().add(AgentStep.builder()
-                .step(Math.max(1, context.getStep()))
+        AgentRuntimeState runtime = context.runtime();
+        AgentActionState action = context.action();
+        AgentDecision decision = action.decision();
+        ToolResult result = action.toolResult();
+        runtime.history().add(AgentStep.builder()
+                .step(Math.max(1, runtime.step()))
                 .thought(decision == null ? null : decision.getReason())
                 .tool(decision == null ? "model_parse" : decision.getTool())
-                .input(decision == null ? context.getModelOutput() : String.valueOf(decision.getInputView()))
+                .input(decision == null ? context.prompt().modelOutput() : String.valueOf(decision.getInputView()))
                 .observation(result == null ? null : result.getObservation())
                 .success(success)
                 .build());
     }
 
     protected List<AgentEvent> observationEvents(AgentContext context) {
-        ToolResult result = context.getToolResult();
+        AgentRuntimeState runtime = context.runtime();
+        AgentActionState action = context.action();
+        ToolResult result = action.toolResult();
         return List.of(event(context, AgentEventType.OBSERVATION)
-                .step(context.getStep())
-                .tool(context.getDecision() == null ? null : context.getDecision().getTool())
+                .step(runtime.step())
+                .tool(action.decision() == null ? null : action.decision().getTool())
                 .observation(result == null ? null : result.getObservation())
                 .truncated(result != null && result.isTruncated())
                 .build());
     }
-
 }

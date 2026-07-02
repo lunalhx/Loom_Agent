@@ -120,7 +120,7 @@ public class DefaultBudgetGuard implements BudgetGuard {
             BudgetState base = existing != null ? existing : BudgetState.EMPTY;
             return base.plus(promptTokens, completionTokens, finalTotalTokens, costAmount);
         });
-        context.setBudgetState(updated);
+        context.budget().replace(updated);
         return cost;
     }
 
@@ -139,13 +139,13 @@ public class DefaultBudgetGuard implements BudgetGuard {
         }
         BudgetState state = states.get(rootRunId(context));
         if (state != null) {
-            BudgetState current = context.getBudgetState();
+            BudgetState current = context.budget().budgetState();
             long mergedPrompt = Math.max(current.usedPromptTokens(), state.usedPromptTokens());
             long mergedCompletion = Math.max(current.usedCompletionTokens(), state.usedCompletionTokens());
             long mergedTokens = Math.max(current.usedTokens(), state.usedTokens());
             BigDecimal mergedCost = state.estimatedCost().compareTo(current.estimatedCost()) > 0
                     ? state.estimatedCost() : current.estimatedCost();
-            context.setBudgetState(new BudgetState(mergedPrompt, mergedCompletion, mergedTokens, mergedCost));
+            context.budget().replace(new BudgetState(mergedPrompt, mergedCompletion, mergedTokens, mergedCost));
         }
         return context.getUsedTokens();
     }

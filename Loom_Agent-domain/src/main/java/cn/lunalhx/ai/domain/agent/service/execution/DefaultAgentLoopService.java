@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
@@ -202,23 +203,23 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {
         AtomicBoolean cancellation = new AtomicBoolean(false);
-        AtomicBoolean existing = cancellationRequests.putIfAbsent(context.getRunId(), cancellation);
+        AtomicBoolean existing = cancellationRequests.putIfAbsent(context.identity().runId(), cancellation);
         AtomicBoolean activeCancellation = existing == null ? cancellation : existing;
-        String convId = context.getConversationId();
+        String convId = context.identity().conversationId();
         if (convId != null) {
-            conversationRuns.computeIfAbsent(convId, k -> ConcurrentHashMap.newKeySet()).add(context.getRunId());
+            conversationRuns.computeIfAbsent(convId, k -> ConcurrentHashMap.newKeySet()).add(context.identity().runId());
         }
         try {
             while (!sink.isCancelled() && !activeCancellation.get()) {
                 if (isTotalTimeout(context)) {
-                    fail(context, AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");
+                    context.runtime().fail(AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");
                     currentNode = AgentNodeNames.FAIL;
                 }
 
                 AgentNode node = nodes.get(currentNode);
-                context.setCurrentNode(currentNode);
+                context.runtime().enterNode(currentNode);
                 if (node == null) {
-                    fail(context, AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
+                    context.runtime().fail(AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
                     node = nodes.get(AgentNodeNames.FAIL);
                 }
 
@@ -246,12 +247,12 @@ public class DefaultAgentLoopService implements AgentLoopService {
             sink.complete();
         } finally {
             if (existing == null) {
-                cancellationRequests.remove(context.getRunId(), cancellation);
+                cancellationRequests.remove(context.identity().runId(), cancellation);
             }
             if (convId != null) {
                 Set<String> runIds = conversationRuns.get(convId);
                 if (runIds != null) {
-                    runIds.remove(context.getRunId());
+                    runIds.remove(context.identity().runId());
                     if (runIds.isEmpty()) {
                         conversationRuns.remove(convId, runIds);
                     }
@@ -262,14 +263,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     // ==================== 私有辅助 ====================
 
-    private void fail(AgentContext context, AgentStopReason reason, String code, String message) {
-        context.setStopReason(reason);
-        context.setErrorCode(code);
-        context.setErrorMessage(message);
-    }
-
     private boolean isTotalTimeout(AgentContext context) {
-        return Duration.between(context.getStartedAt(), Instant.now()).toMillis() > properties.getTotalTimeoutMs();
+        return Duration.between(context.runtime().startedAt(), Instant.now()).toMillis() > properties.getTotalTimeoutMs();
     }
 
     private void emit(FluxSink<AgentEvent> sink, List<AgentEvent> events) {

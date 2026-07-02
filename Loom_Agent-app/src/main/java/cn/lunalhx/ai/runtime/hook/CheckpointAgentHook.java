@@ -11,6 +11,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
@@ -46,31 +48,31 @@ public class CheckpointAgentHook implements AgentHook {
             return AgentHookResult.proceed();
         }
         AgentContext context = hookContext.getAgentContext();
-        if (context == null || StringUtils.isBlank(context.getRunId())) {
+        if (context == null || StringUtils.isBlank(context.identity().runId())) {
             return AgentHookResult.proceed();
         }
         String currentNode = StringUtils.defaultIfBlank(hookContext.getNextNode(), hookContext.getNode());
-        context.setCurrentNode(currentNode);
+        context.runtime().enterNode(currentNode);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         AgentCheckpoint checkpoint = checkpointRepository.save(AgentCheckpoint.builder()
-                .runId(context.getRunId())
+                .runId(context.identity().runId())
                 .currentNode(currentNode)
                 .contextSnapshot(snapshot)
-                .plan(context.getPlan())
+                .plan(context.action().plan())
                 .lastToolExecutionJson(toJson(hookContext))
                 .reason(StringUtils.defaultIfBlank(hookContext.getReason(), event.name()))
                 .build());
-        context.setCheckpointVersion(checkpoint.getVersion());
-        BudgetState budget = context.getBudgetState();
+        context.runtime().setCheckpointVersion(checkpoint.getVersion());
+        BudgetState budget = context.budget().budgetState();
         saveRun(context, currentNode, budget);
         return AgentHookResult.proceed(List.of(AgentEvent.builder()
                 .type(AgentEventType.CHECKPOINT_SAVED)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(context.getWorkspaceDisplayName())
+                .runId(context.identity().runId())
+                .requestId(context.identity().requestId())
+                .conversationId(context.identity().conversationId())
+                .workspace(context.environment().workspaceDisplayName())
                 .node(currentNode)
-                .step(context.getStep())
+                .step(context.runtime().step())
                 .checkpointVersion(checkpoint.getVersion())
                 .build()));
     }
@@ -84,40 +86,43 @@ public class CheckpointAgentHook implements AgentHook {
     }
 
     private void saveRun(AgentContext context, String currentNode, BudgetState budget) {
+        AgentRuntimeState runtime = context.runtime();
+        AgentIdentity id = context.identity();
+
         AgentRunStatus status = AgentRunStatus.RUNNING;
-        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+        if (StringUtils.isNotBlank(context.budget().budgetBlockedReason())) {
             status = AgentRunStatus.BUDGET_EXCEEDED;
-        } else if (context.getStopReason() == AgentStopReason.USER_CANCELLED) {
+        } else if (runtime.stopReason() == AgentStopReason.USER_CANCELLED) {
             status = AgentRunStatus.CANCELLED;
-        } else if (context.getStopReason() != null && context.getErrorCode() == null) {
+        } else if (runtime.stopReason() != null && runtime.errorCode() == null) {
             status = AgentRunStatus.COMPLETED;
-        } else if (context.getErrorCode() != null) {
+        } else if (runtime.errorCode() != null) {
             status = AgentRunStatus.FAILED;
         }
-        if ("approval_gate".equals(currentNode) && context.getStopReason() == null) {
+        if ("approval_gate".equals(currentNode) && runtime.stopReason() == null) {
             status = AgentRunStatus.WAITING_APPROVAL;
-        } else if ("user_input_gate".equals(currentNode) && context.getStopReason() == null) {
+        } else if ("user_input_gate".equals(currentNode) && runtime.stopReason() == null) {
             status = AgentRunStatus.WAITING_USER_INPUT;
         }
         runRepository.save(AgentRun.builder()
-                .runId(context.getRunId())
-                .parentRunId(context.getParentRunId())
-                .rootRunId(StringUtils.defaultIfBlank(context.getRootRunId(), context.getRunId()))
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .agentRole(context.getAgentRole())
-                .runKind(StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT : AgentRunKind.CHILD)
-                .depth(context.getAgentDepth())
-                .childOrdinal(context.getChildOrdinal())
-                .question(context.getQuestion())
-                .workspace(context.getWorkspaceDisplayName())
+                .runId(id.runId())
+                .parentRunId(id.parentRunId())
+                .rootRunId(StringUtils.defaultIfBlank(id.rootRunId(), id.runId()))
+                .requestId(id.requestId())
+                .conversationId(id.conversationId())
+                .agentRole(id.agentRole())
+                .runKind(StringUtils.isBlank(id.parentRunId()) ? AgentRunKind.ROOT : AgentRunKind.CHILD)
+                .depth(id.agentDepth())
+                .childOrdinal(id.childOrdinal())
+                .question(context.runDefinition().question())
+                .workspace(context.environment().workspaceDisplayName())
                 .status(status)
                 .currentNode(currentNode)
-                .step(context.getStep())
-                .checkpointVersion(context.getCheckpointVersion())
-                .summaryJson(context.getAgentRole() == null ? null : context.getFinalAnswer())
+                .step(runtime.step())
+                .checkpointVersion(runtime.checkpointVersion())
+                .summaryJson(id.agentRole() == null ? null : runtime.finalAnswer())
                 .blockedReason(StringUtils.defaultIfBlank(
-                        context.getBudgetBlockedReason(), context.getContextBlockedReason()))
+                        context.budget().budgetBlockedReason(), context.recovery().contextBlockedReason()))
                 .usedTokens(budget.usedTokens())
                 .estimatedCost(budget.estimatedCost())
                 .updatedAt(Instant.now())
@@ -137,5 +142,4 @@ public class CheckpointAgentHook implements AgentHook {
 
     private record ToolExecutionSnapshot(Object call, Object result) {
     }
-
 }

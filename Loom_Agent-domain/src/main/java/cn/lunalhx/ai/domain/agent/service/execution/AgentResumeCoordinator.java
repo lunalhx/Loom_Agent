@@ -6,9 +6,11 @@ import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
@@ -63,9 +65,7 @@ public final class AgentResumeCoordinator {
         events.add(eventFactory.resumeStarted(context));
 
         if (decision == ApprovalDecision.APPROVE) {
-            context.setApprovedTool(approval.getTool());
-            context.setApprovedPolicyFingerprint(approval.getPolicyFingerprint());
-            // Skill activation approvals route to skill_bootstrap to complete activation
+            context.approval().approve(approval.getTool(), approval.getPolicyFingerprint());
             if (isSkillActivation(approval)) {
                 List<String> skillNames = extractSkillNames(approval);
                 context.setApprovedSkillNames(skillNames);
@@ -75,11 +75,9 @@ public final class AgentResumeCoordinator {
         }
 
         // REJECT
-        context.setApprovedTool(null);
-        context.setApprovedPolicyFingerprint(null);
+        context.approval().reject();
 
         if (isSkillActivation(approval)) {
-            // Remove rejected project skills from requested list, log reason, continue from START
             List<String> rejectedNames = extractSkillNames(approval);
             context.setRejectedSkillNames(rejectedNames);
             if (context.getRequestedSkills() != null) {
@@ -88,11 +86,11 @@ public final class AgentResumeCoordinator {
                 context.setRequestedSkills(filtered);
             }
             context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.SKILL_BOOTSTRAP, context.getDecision());
-            context.setStep(context.getStep() + 1);
+            context.runtime().advanceStep();
             return AgentResumePlan.continueAt(context, AgentNodeNames.START, events);
         }
 
-        context.setStep(context.getStep() + 1);
+        context.runtime().advanceStep();
         context.setToolResult(ToolResult.failure(
                 "approval_rejected",
                 StringUtils.defaultIfBlank(reason, "用户拒绝执行该写操作"),
@@ -112,7 +110,12 @@ public final class AgentResumeCoordinator {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
-        AgentContext context = checkpoint.getContextSnapshot().restore();
+        AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
+        if (snapshot.getSchemaVersion() != 2) {
+            return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
+        }
+
+        AgentContext context = snapshot.restore();
         contextFactory.prepareCheckpointResume(context,
                 context.getResolvedWorkspace() == null ? null : context.getResolvedWorkspace().toString(),
                 checkpoint.getVersion());
@@ -120,9 +123,11 @@ public final class AgentResumeCoordinator {
         List<AgentEvent> events = new ArrayList<>();
         events.add(eventFactory.resumeStarted(context));
 
+        AgentRuntimeState runtime = context.runtime();
+
         if (AgentNodeNames.APPROVAL_GATE.equals(checkpoint.getCurrentNode())
-                && StringUtils.isNotBlank(context.getPendingApprovalId())) {
-            PendingApproval approval = approvalStore.find(context.getPendingApprovalId()).orElse(null);
+                && StringUtils.isNotBlank(context.approval().pendingApprovalId())) {
+            PendingApproval approval = approvalStore.find(context.approval().pendingApprovalId()).orElse(null);
             if (approval != null) {
                 if (approval.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM) {
                     events.add(eventFactory.highRiskApprovalRequired(context, approval));
@@ -131,28 +136,26 @@ public final class AgentResumeCoordinator {
                 }
                 return AgentResumePlan.complete(events);
             }
-            String expiredId = context.getPendingApprovalId();
-            context.setPendingApprovalId(null);
-            context.setApprovalExpired(true);
-            context.setExpiredApprovalId(expiredId);
-            context.setStep(context.getStep() + 1);
+            String expiredId = context.approval().pendingApprovalId();
+            context.approval().expire(expiredId);
+            runtime.advanceStep();
             context.setToolResult(ToolResult.failure(
                     "policy_denied",
                     "审批已过期或不可用，写操作未执行",
                     0L));
-            context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
+            context.getDynamicText().appendAssistantAction(runtime.step(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
             return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
         }
 
         if (AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                || context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+                || context.recovery().contextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
             events.add(eventFactory.userInputRequired(context));
             return AgentResumePlan.complete(events);
         }
 
         String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.RENDER_PROMPT);
-        if (context.isUnsafeResumeRequired() || requiresResumeReplan(currentNode)) {
-            context.setUnsafeResumeRequired(true);
+        if (context.approval().unsafeResumeRequired() || requiresResumeReplan(currentNode)) {
+            context.approval().setUnsafeResumeRequired(true);
             currentNode = AgentNodeNames.REPLAN_GUARD;
         }
         return AgentResumePlan.continueAt(context, currentNode, events);
@@ -164,9 +167,14 @@ public final class AgentResumeCoordinator {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
-        AgentContext context = checkpoint.getContextSnapshot().restore();
+        AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
+        if (snapshot.getSchemaVersion() != 2) {
+            return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
+        }
+
+        AgentContext context = snapshot.restore();
         if (!AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                && context.getContextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
+                && context.recovery().contextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
             return AgentResumePlan.complete(List.of(eventFactory.runNotWaitingUserInput(runId)));
         }
 
@@ -181,24 +189,18 @@ public final class AgentResumeCoordinator {
         List<AgentEvent> events = new ArrayList<>();
         events.add(eventFactory.resumeStarted(context));
 
+        AgentRuntimeState runtime = context.runtime();
+
         if (action == UserInputAction.ABORT) {
-            context.setContextRecoveryStage(ContextRecoveryStage.NONE);
-            context.setStopReason(AgentStopReason.CONTEXT_OVERFLOW);
-            context.setErrorCode(ModelErrorCode.CONTEXT_OVERFLOW.code());
-            context.setErrorMessage("用户在上下文恢复等待阶段终止了本次运行");
+            context.recovery().reset();
+            runtime.fail(AgentStopReason.CONTEXT_OVERFLOW, ModelErrorCode.CONTEXT_OVERFLOW.code(),
+                    "用户在上下文恢复等待阶段终止了本次运行");
             return AgentResumePlan.continueAt(context, AgentNodeNames.FAIL, events);
         }
 
-        context.getDynamicText().appendUserInput(context.getStep(), StringUtils.trim(message));
-        context.setContextRecoveryStage(ContextRecoveryStage.NONE);
-        context.setReactiveCompactAttempts(0);
-        context.setRecoveryModelOverride(null);
-        context.setContextTranscriptArtifactId(null);
-        context.setContextBlockedReason(null);
-        context.setFallbackReason(null);
-        context.setStopReason(null);
-        context.setErrorCode(null);
-        context.setErrorMessage(null);
+        context.getDynamicText().appendUserInput(runtime.step(), StringUtils.trim(message));
+        context.recovery().reset();
+        runtime.clearOutcomeForContinuation();
         return AgentResumePlan.continueAt(context, AgentNodeNames.RENDER_PROMPT, events);
     }
 

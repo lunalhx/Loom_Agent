@@ -12,6 +12,8 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.flow.hook.StopHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -48,10 +50,10 @@ public final class AgentNodeLifecycle {
     }
 
     public AgentNodeExecution execute(AgentContext context, AgentNode node, Consumer<List<AgentEvent>> emitter) {
-        String parentSpanId = context.getCurrentSpanId();
+        String parentSpanId = context.trace().currentSpanId();
         String spanId = traceRecorder.recordNodeStart(context, node, parentSpanId);
-        context.setParentSpanId(parentSpanId);
-        context.setCurrentSpanId(spanId);
+        context.trace().setParentSpanId(parentSpanId);
+        context.trace().setCurrentSpanId(spanId);
         long startedAt = System.currentTimeMillis();
         putNodeMdc(context, node.name());
 
@@ -66,15 +68,12 @@ public final class AgentNodeLifecycle {
         if (beforeResult.continued()) {
             AgentHookAction action = beforeResult.action();
             if (action.isClearTerminalState()) {
-                context.setStopReason(null);
-                context.setFinalAnswer(null);
-                context.setErrorCode(null);
-                context.setErrorMessage(null);
-                context.setPendingApprovalId(null);
+                context.runtime().clearOutcomeForContinuation();
+                context.approval().setPendingApprovalId(null);
             }
             traceRecorder.recordStop(context, "continued",
                     "before_node_hook_continued to " + action.getNextNode());
-            agentMetrics.recordRun(runKind(context), "continued", context.getErrorCode());
+            agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
             MDC.clear();
             return AgentNodeExecution.stopContinued(action.getNextNode(), action);
         }
@@ -113,10 +112,6 @@ public final class AgentNodeLifecycle {
         return new AgentNodeExecution(result, nextNode);
     }
 
-    /**
-     * Resolve a terminal node: run STOP hooks, and either emit terminal events (proceed)
-     * or return a continuation action (intercepted by a stop hook).
-     */
     public AgentNodeExecution resolveStop(AgentContext context, AgentNode terminalNode,
                                           List<AgentEvent> terminalEvents,
                                           Consumer<List<AgentEvent>> emitter) {
@@ -131,14 +126,11 @@ public final class AgentNodeLifecycle {
         if (stopResult.continued()) {
             AgentHookAction action = stopResult.action();
             if (action.isClearTerminalState()) {
-                context.setStopReason(null);
-                context.setFinalAnswer(null);
-                context.setErrorCode(null);
-                context.setErrorMessage(null);
-                context.setPendingApprovalId(null);
+                context.runtime().clearOutcomeForContinuation();
+                context.approval().setPendingApprovalId(null);
             }
             traceRecorder.recordStop(context, "continued", "stop_hook_continued to " + action.getNextNode());
-            agentMetrics.recordRun(runKind(context), "continued", context.getErrorCode());
+            agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
             MDC.clear();
             return AgentNodeExecution.stopContinued(action.getNextNode(), action);
         }
@@ -146,7 +138,7 @@ public final class AgentNodeLifecycle {
         emitter.accept(terminalEvents);
 
         traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
-        agentMetrics.recordRun(runKind(context), stopStatus(context), context.getErrorCode());
+        agentMetrics.recordRun(runKind(context), stopStatus(context), context.runtime().errorCode());
         emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
                 .agentContext(context)
                 .node(terminalNode.name())
@@ -157,12 +149,12 @@ public final class AgentNodeLifecycle {
     }
 
     public void cancelled(AgentContext context, Consumer<List<AgentEvent>> emitter) {
-        context.setStopReason(AgentStopReason.USER_CANCELLED);
+        context.runtime().cancel();
         traceRecorder.recordStop(context, "cancelled", "user_cancelled");
         agentMetrics.recordRun(runKind(context), "cancelled", null);
         emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
                 .agentContext(context)
-                .node(context.getCurrentNode())
+                .node(context.runtime().currentNode())
                 .reason("user_cancelled")
                 .build()));
         MDC.clear();
@@ -187,7 +179,7 @@ public final class AgentNodeLifecycle {
     }
 
     public static String nodeStatus(AgentContext context, NodeResult result) {
-        if (StringUtils.isNotBlank(context.getErrorCode())) {
+        if (StringUtils.isNotBlank(context.runtime().errorCode())) {
             return "failed";
         }
         if (result != null && result.isTerminal()) {
@@ -197,37 +189,38 @@ public final class AgentNodeLifecycle {
     }
 
     public static String stopStatus(AgentContext context) {
-        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
+        if (StringUtils.isNotBlank(context.budget().budgetBlockedReason())) {
             return "budget_exceeded";
         }
-        if (StringUtils.isNotBlank(context.getErrorCode())) {
+        if (StringUtils.isNotBlank(context.runtime().errorCode())) {
             return "failed";
         }
-        if (context.getContextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+        if (context.recovery().contextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
             return "waiting_user_input";
         }
         return "completed";
     }
 
     public static String stopSummary(AgentContext context) {
-        if (StringUtils.isNotBlank(context.getBudgetBlockedReason())) {
-            return context.getBudgetBlockedReason();
+        if (StringUtils.isNotBlank(context.budget().budgetBlockedReason())) {
+            return context.budget().budgetBlockedReason();
         }
-        if (StringUtils.isNotBlank(context.getFinalAnswer())) {
-            return StringUtils.abbreviate(context.getFinalAnswer(), 500);
+        if (StringUtils.isNotBlank(context.runtime().finalAnswer())) {
+            return StringUtils.abbreviate(context.runtime().finalAnswer(), 500);
         }
-        return StringUtils.defaultString(context.getErrorMessage());
+        return StringUtils.defaultString(context.runtime().errorMessage());
     }
 
     public static String runKind(AgentContext context) {
-        return StringUtils.isBlank(context.getParentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
+        return StringUtils.isBlank(context.identity().parentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
     }
 
     private void putNodeMdc(AgentContext context, String node) {
-        MDC.put("trace_id", StringUtils.defaultString(context.getTraceId()));
-        MDC.put("run_id", StringUtils.defaultString(context.getRunId()));
-        MDC.put("request_id", StringUtils.defaultString(context.getRequestId()));
-        MDC.put("conversation_id", StringUtils.defaultString(context.getConversationId()));
+        AgentIdentity id = context.identity();
+        MDC.put("trace_id", StringUtils.defaultString(context.trace().traceId()));
+        MDC.put("run_id", StringUtils.defaultString(id.runId()));
+        MDC.put("request_id", StringUtils.defaultString(id.requestId()));
+        MDC.put("conversation_id", StringUtils.defaultString(id.conversationId()));
         MDC.put("node", StringUtils.defaultString(node));
     }
 }

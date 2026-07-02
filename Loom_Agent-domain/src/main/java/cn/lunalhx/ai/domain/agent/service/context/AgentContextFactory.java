@@ -4,6 +4,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.state.AgentEnvironmentState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
+import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -53,8 +56,6 @@ public final class AgentContextFactory {
         AgentContext context = new AgentContext();
         context.setRunId(runId);
         context.setParentRunId(question.getParentRunId());
-        // 续聊沿用同一会话的根 run，优先从历史快照恢复，避免 rootRunId 为 null 导致
-        // ContextArtifact 持久化时违反 agent_context_artifact.root_run_id 非空约束。
         String rootRunId = previous != null && StringUtils.isNotBlank(previous.getRootRunId())
                 ? previous.getRootRunId()
                 : StringUtils.defaultIfBlank(question.getRootRunId(), runId);
@@ -152,6 +153,12 @@ public final class AgentContextFactory {
         context.setStartedAt(Instant.now());
         context.setCheckpointVersion(checkpointVersion);
         context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
+        // re-inject toolSpecs and sub-agent capability from current configuration
+        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
+        if (context.isSubAgentSpawnAllowed()) {
+            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        context.setToolSpecs(specs);
         return context;
     }
 
@@ -162,6 +169,11 @@ public final class AgentContextFactory {
         context.setStartedAt(Instant.now());
         context.setPendingApprovalId(null);
         context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
+        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
+        if (context.isSubAgentSpawnAllowed()) {
+            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        context.setToolSpecs(specs);
         return context;
     }
 
