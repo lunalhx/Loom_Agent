@@ -120,6 +120,13 @@ loom:
       deepseek-v4-pro:
         input-price-per-1k: ${DEEPSEEK_PRO_INPUT_PRICE_PER_1K:0}
         output-price-per-1k: ${DEEPSEEK_PRO_OUTPUT_PRICE_PER_1K:0}
+    diagnostics:
+      prompt-cache:
+        enabled: ${AI_DIAGNOSTICS_PROMPT_CACHE_ENABLED:false}
+        log-redacted-body: ${AI_DIAGNOSTICS_PROMPT_CACHE_LOG_REDACTED_BODY:false}
+        body-preview-limit: ${AI_DIAGNOSTICS_PROMPT_CACHE_BODY_PREVIEW_LIMIT:240}
+        max-conversation-keys: ${AI_DIAGNOSTICS_PROMPT_CACHE_MAX_CONVERSATION_KEYS:1024}
+        entry-ttl-seconds: ${AI_DIAGNOSTICS_PROMPT_CACHE_ENTRY_TTL_SECONDS:600}
   agent:
     enabled: ${AGENT_ENABLED:true}
     workspace-root: ${AGENT_WORKSPACE_ROOT:.}

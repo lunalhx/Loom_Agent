@@ -10,6 +10,8 @@ import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
+import cn.lunalhx.ai.infrastructure.gateway.diagnostics.PromptCacheDiagnosticContext;
+import cn.lunalhx.ai.infrastructure.gateway.diagnostics.PromptCacheDiagnosticHook;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -52,11 +54,21 @@ public class DeepSeekModelGateway implements ModelGateway {
     private final ModelRuntimeProperties runtimeProperties;
     private final ThreadPoolExecutor executor;
     private final HttpClient httpClient;
+    private final PromptCacheDiagnosticHook diagnosticHook;
 
     public DeepSeekModelGateway(Environment environment,
                                 ObjectMapper objectMapper,
                                 ModelRuntimeProperties runtimeProperties,
                                 ThreadPoolExecutor executor) {
+        this(environment, objectMapper, runtimeProperties, executor,
+                new PromptCacheDiagnosticHook(null));
+    }
+
+    public DeepSeekModelGateway(Environment environment,
+                                ObjectMapper objectMapper,
+                                ModelRuntimeProperties runtimeProperties,
+                                ThreadPoolExecutor executor,
+                                PromptCacheDiagnosticHook diagnosticHook) {
         this.environment = environment;
         this.objectMapper = objectMapper;
         this.runtimeProperties = runtimeProperties;
@@ -65,6 +77,10 @@ public class DeepSeekModelGateway implements ModelGateway {
                 .connectTimeout(Duration.ofMillis(runtimeProperties.getConnectTimeoutMs()))
                 .executor(executor)
                 .build();
+        // 诊断默认关闭：未启用时 hook.beforeSend / afterSend 都是 fast-return，不分配对象。
+        this.diagnosticHook = diagnosticHook != null
+                ? diagnosticHook
+                : new PromptCacheDiagnosticHook(null);
     }
 
     @Override
@@ -79,29 +95,50 @@ public class DeepSeekModelGateway implements ModelGateway {
     }
 
     private void executeStream(ChatPrompt prompt, FluxSink<ModelStreamChunk> sink) {
-        try {
-            String apiKey = apiKey();
-            if (StringUtils.isBlank(apiKey)) {
-                sink.error(new ModelGatewayException(ModelErrorCode.CONFIG_ERROR, "DEEPSEEK_API_KEY 不能为空", false, null, null));
-                return;
-            }
+        String apiKey = apiKey();
+        if (StringUtils.isBlank(apiKey)) {
+            sink.error(new ModelGatewayException(ModelErrorCode.CONFIG_ERROR, "DEEPSEEK_API_KEY 不能为空", false, null, null));
+            return;
+        }
 
+        // 1) 序列化 body 一次：buildRequestPayload 同时返回 body 字符串和 messages 列表
+        RequestPayload requestPayload;
+        try {
+            requestPayload = buildRequestPayload(prompt, true);
+        } catch (IOException e) {
+            sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR,
+                    ModelErrorCode.MODEL_ERROR.defaultMessage(), false, null, e));
+            return;
+        }
+
+        // 2) 诊断前置：与 BodyPublisher 共享同一字符串引用，绝不二次序列化
+        String resolvedModel = resolvedModel(prompt);
+        PromptCacheDiagnosticContext diagnosticContext = diagnosticHook.beforeSend(
+                resolvedModel,
+                prompt.getCapability(),
+                prompt.getPurpose() == null ? null : prompt.getPurpose().name(),
+                prompt.getConversationId(),
+                requestPayload.body(),
+                requestPayload.messages());
+        TokenUsage lastUsage = null;
+
+        try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint()))
                     .timeout(requestTimeout(prompt))
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
                     .header("Authorization", "Bearer " + apiKey)
-                    .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt, true), StandardCharsets.UTF_8))
+                    .POST(HttpRequest.BodyPublishers.ofString(requestPayload.body(), StandardCharsets.UTF_8))
                     .build();
 
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 String responseBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                sink.error(toHttpException(response.statusCode(), responseBody, response.headers(), resolvedModel(prompt)));
+                sink.error(toHttpException(response.statusCode(), responseBody, response.headers(), resolvedModel));
                 return;
             }
-            consumeSse(response.body(), sink);
+            lastUsage = consumeSse(response.body(), sink);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             sink.error(interruptedException(e));
@@ -109,6 +146,10 @@ public class DeepSeekModelGateway implements ModelGateway {
             sink.error(new ModelGatewayException(ModelErrorCode.PROVIDER_UNAVAILABLE, "模型服务网络异常", true, null, e));
         } catch (Exception e) {
             sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR, ModelErrorCode.MODEL_ERROR.defaultMessage(), false, null, e));
+        } finally {
+            // 3) 诊断后置：不论成功 / 4xx / IOException / 中断，都写出诊断日志
+            // 失败时 lastUsage 为 null，符合「usage 缺失 = provider 未声明」的语义
+            diagnosticHook.afterSend(diagnosticContext, lastUsage);
         }
     }
 
@@ -117,25 +158,44 @@ public class DeepSeekModelGateway implements ModelGateway {
         if (StringUtils.isBlank(apiKey)) {
             throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR, "DEEPSEEK_API_KEY 不能为空", false, null, null);
         }
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint()))
-                .timeout(requestTimeout(prompt))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(toRequestBody(prompt, false), StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<String> response;
+        // 1) 序列化 body 一次
+        RequestPayload requestPayload = buildRequestPayload(prompt, false);
+        // 2) 诊断前置：与 BodyPublisher 共享同一字符串引用
+        String resolvedModel = resolvedModel(prompt);
+        PromptCacheDiagnosticContext diagnosticContext = diagnosticHook.beforeSend(
+                resolvedModel,
+                prompt.getCapability(),
+                prompt.getPurpose() == null ? null : prompt.getPurpose().name(),
+                prompt.getConversationId(),
+                requestPayload.body(),
+                requestPayload.messages());
+        TokenUsage usage = null;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw interruptedException(e);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint()))
+                    .timeout(requestTimeout(prompt))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(HttpRequest.BodyPublishers.ofString(requestPayload.body(), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw interruptedException(e);
+            }
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw toHttpException(response.statusCode(), response.body(), response.headers(), resolvedModel);
+            }
+            ModelChatResult result = parseChatResult(response.body());
+            usage = result == null ? null : result.getUsage();
+            return result;
+        } finally {
+            // 3) 诊断后置：成功路径下带 usage，失败路径下 usage 为 null
+            diagnosticHook.afterSend(diagnosticContext, usage);
         }
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw toHttpException(response.statusCode(), response.body(), response.headers(), resolvedModel(prompt));
-        }
-        return parseChatResult(response.body());
     }
 
     private ModelGatewayException interruptedException(InterruptedException cause) {
@@ -143,12 +203,16 @@ public class DeepSeekModelGateway implements ModelGateway {
                 ModelErrorCode.MODEL_ERROR, "模型调用线程被中断", false, null, cause);
     }
 
-    private void consumeSse(InputStream inputStream, FluxSink<ModelStreamChunk> sink) throws IOException {
+    private TokenUsage consumeSse(InputStream inputStream, FluxSink<ModelStreamChunk> sink) throws IOException {
+        // DeepSeek 在 stream_options.include_usage=true 时把 usage 放在最后一个 SSE 事件上。
+        // 收集「最后一次出现的 usage」以供诊断日志关联：最后一次非 null 用法代表整次流式调用的
+        // 最终 cache usage（hit / miss 反映 provider 侧对本次 prompt 的实际判定）。
+        TokenUsage latestUsage = null;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (sink.isCancelled()) {
-                    return;
+                    return latestUsage;
                 }
                 if (!line.startsWith("data:")) {
                     continue;
@@ -159,15 +223,19 @@ public class DeepSeekModelGateway implements ModelGateway {
                 }
                 if ("[DONE]".equals(data)) {
                     sink.complete();
-                    return;
+                    return latestUsage;
                 }
                 ModelStreamChunk chunk = parseChunk(data);
                 if (chunk != null) {
+                    if (chunk.getUsage() != null) {
+                        latestUsage = chunk.getUsage();
+                    }
                     sink.next(chunk);
                 }
             }
             sink.complete();
         }
+        return latestUsage;
     }
 
     private ModelStreamChunk parseChunk(String data) throws IOException {
@@ -222,9 +290,23 @@ public class DeepSeekModelGateway implements ModelGateway {
     }
 
     private String toRequestBody(ChatPrompt prompt, boolean stream) throws IOException {
+        // 仅作为「对测试可见、只关心 body 字符串」的便捷方法存在；生产代码走 buildRequestPayload
+        // 以同时拿到 messages（诊断需要）。
+        return buildRequestPayload(prompt, stream).body();
+    }
+
+    /**
+     * 构造一次 DeepSeek 请求：单次序列化得到 body JSON，并同时返回实际进入 body 的 messages。
+     *
+     * <p>关键不变量：{@code body} 字符串会被原样传给 {@code HttpRequest.BodyPublishers.ofString(...)}
+     * 与 {@link PromptCacheDiagnosticHook#beforeSend}，绝不被二次序列化；后者在接收端做
+     * SHA-256 哈希即可与线上发送内容严格对齐。
+     */
+    private RequestPayload buildRequestPayload(ChatPrompt prompt, boolean stream) throws IOException {
+        List<Map<String, String>> messageList = messages(prompt);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", resolvedModel(prompt));
-        body.put("messages", messages(prompt));
+        body.put("messages", messageList);
         body.put("stream", stream);
         if (stream) {
             body.put("stream_options", Map.of("include_usage", true));
@@ -234,7 +316,15 @@ public class DeepSeekModelGateway implements ModelGateway {
         if (OutputFormat.JSON_OBJECT == prompt.getOutputFormat()) {
             body.put("response_format", Map.of("type", "json_object"));
         }
-        return objectMapper.writeValueAsString(body);
+        String json = objectMapper.writeValueAsString(body);
+        return new RequestPayload(json, messageList);
+    }
+
+    /**
+     * 一次请求的「最终 payload」：body 字符串 + 实际进入 body 的 messages 列表。
+     * 两者是同一序列化的产物，body 字符串可被安全地直接传给 BodyPublisher。
+     */
+    private record RequestPayload(String body, List<Map<String, String>> messages) {
     }
 
     private List<Map<String, String>> messages(ChatPrompt prompt) {

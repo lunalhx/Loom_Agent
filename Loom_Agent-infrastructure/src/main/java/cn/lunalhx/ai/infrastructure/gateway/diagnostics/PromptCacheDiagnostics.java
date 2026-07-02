@@ -301,18 +301,26 @@ public final class PromptCacheDiagnostics {
     }
 
     private RawPayloadSignals computeRawPayloadSignals(CacheDiagnosticInput input) {
-        String prevRaw = input.previousRawPayload();
+        // currentRawPayloadHash 必须每次都计算（只要 current 不为 null），与是否有 previous 无关。
+        // 网关层每次请求都需要把「实际下发的 body 的 hash」写进诊断日志，验收要求 hash 对应实际发送字符串。
         String currRaw = input.currentRawPayload();
-        if (prevRaw == null || currRaw == null) {
+        if (currRaw == null) {
             return new RawPayloadSignals(null, null, -1);
         }
         int limit = input.rawPayloadHashLimit();
-        String boundedPrev = prevRaw.length() > limit ? prevRaw.substring(0, limit) : prevRaw;
         String boundedCurr = currRaw.length() > limit ? currRaw.substring(0, limit) : currRaw;
+        String currentHash = hasher.hashRawPayload(boundedCurr);
+
+        String prevRaw = input.previousRawPayload();
+        if (prevRaw == null) {
+            // 没有 previous：previousHash 留 null，但 currentHash 仍然给出
+            return new RawPayloadSignals(null, currentHash, -1);
+        }
+        String boundedPrev = prevRaw.length() > limit ? prevRaw.substring(0, limit) : prevRaw;
         int lcp = CanonicalMessagesHasher.charLcpLength(boundedPrev, boundedCurr);
         return new RawPayloadSignals(
                 hasher.hashRawPayload(boundedPrev),
-                hasher.hashRawPayload(boundedCurr),
+                currentHash,
                 lcp);
     }
 
