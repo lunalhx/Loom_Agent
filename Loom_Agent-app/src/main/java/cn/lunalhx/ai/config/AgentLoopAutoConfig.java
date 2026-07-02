@@ -31,10 +31,7 @@ import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
-import cn.lunalhx.ai.domain.conversation.service.ChatStreamService;
-import cn.lunalhx.ai.domain.conversation.service.DefaultChatStreamService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
-import cn.lunalhx.ai.domain.model.service.OutputFormatValidator;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -85,11 +82,6 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
-    public OutputFormatValidator outputFormatValidator(ObjectMapper objectMapper) {
-        return new OutputFormatValidator(objectMapper);
-    }
-
-    @Bean
     public StreamRequestLimiter streamRequestLimiter(StreamRequestLimitProperties properties) {
         StreamRequestLimiter.Config config = new StreamRequestLimiter.Config();
         config.enabled = properties.isEnabled();
@@ -98,7 +90,6 @@ public class AgentLoopAutoConfig {
         config.maxClientStates = properties.getMaxClientStates();
         config.clientStateTtlSeconds = properties.getClientStateTtlSeconds();
         config.agentAsk = toEndpointLimit(properties.getAgentAsk());
-        config.chatStream = toEndpointLimit(properties.getChatStream());
         return new StreamRequestLimiter(config);
     }
 
@@ -106,17 +97,6 @@ public class AgentLoopAutoConfig {
         return new StreamRequestLimiter.EndpointLimit(
                 p.getMaxConcurrentGlobal(), p.getMaxConcurrentPerClient(),
                 p.getMaxStartsPerWindow(), p.getWindowSeconds());
-    }
-
-    @Bean
-    public ChatStreamService chatStreamService(ModelGateway modelGateway,
-                                               ModelRuntimeProperties modelRuntimeProperties,
-                                               OutputFormatValidator outputFormatValidator,
-                                               Environment environment) {
-        String model = environment.getProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash");
-        Double temperature = environment.getProperty("spring.ai.deepseek.chat.temperature", Double.class, 0.7D);
-        Integer maxTokens = environment.getProperty("spring.ai.deepseek.chat.max-tokens", Integer.class, 2048);
-        return new DefaultChatStreamService(modelGateway, modelRuntimeProperties, outputFormatValidator, model, temperature, maxTokens);
     }
 
     @Bean
@@ -422,9 +402,7 @@ public class AgentLoopAutoConfig {
             }
             if (streamLimitProperties.isEnabled()) {
                 validateEndpointLimit(streamLimitProperties.getAgentAsk(), "agent-ask");
-                validateEndpointLimit(streamLimitProperties.getChatStream(), "chat-stream");
-                if (streamLimitProperties.getClientStateTtlSeconds() <= streamLimitProperties.getAgentAsk().getWindowSeconds()
-                        || streamLimitProperties.getClientStateTtlSeconds() <= streamLimitProperties.getChatStream().getWindowSeconds()) {
+                if (streamLimitProperties.getClientStateTtlSeconds() <= streamLimitProperties.getAgentAsk().getWindowSeconds()) {
                     throw new IllegalStateException("loom.http.stream-limit.client-state-ttl-seconds 必须大于各 endpoint 的 window-seconds");
                 }
                 if (streamLimitProperties.getMaxClientStates() <= 0) {

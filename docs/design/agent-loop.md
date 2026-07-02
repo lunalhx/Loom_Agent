@@ -61,21 +61,21 @@ flowchart TD
 ```text
 ## user_task - User Task
 SourceNode: start
-DefaultChatStreamService.stream 在哪里定义？做什么用？
+AgentLoopService.ask 在哪里定义？做什么用？
 
 ## Step 1 - assistant_action - Assistant Action
 SourceNode: tool_dispatch
 Tool: code_search
-Input: {query=DefaultChatStreamService.stream, limit=10}
+Input: {query=AgentLoopService.ask, limit=10}
 Thought: 先搜索函数定义
 
 ## Step 1 - tool_result - Tool Result
 SourceNode: observation
 Tool: code_search
-Input: {query=DefaultChatStreamService.stream, limit=10}
+Input: {query=AgentLoopService.ask, limit=10}
 Success: true
 Observation:
-DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
+AgentLoopService.java:42: public Flux<AgentEvent> ask(...)
 ```
 
 ## 工具协议
@@ -100,7 +100,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
   "thought": "搜索函数定义",
   "tool": "code_search",
   "input": {
-    "query": "DefaultChatStreamService stream",
+    "query": "AgentLoopService ask",
     "limit": 10
   }
 }
@@ -111,7 +111,7 @@ DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(...)
 ```json
 {
   "type": "final",
-  "answer": "DefaultChatStreamService.stream 定义在 ...",
+  "answer": "AgentLoopService.ask 定义在 ...",
   "evidence": [
     {
       "file": "Loom_Agent-domain/src/main/java/...",
@@ -254,7 +254,7 @@ curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
-  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":30,"maxSegments":5,"includeTrace":true}'
+  -d '{"question":"AgentLoopService.ask 在哪里定义？做什么用？","maxSteps":30,"maxSegments":5,"includeTrace":true}'
 ```
 
 选择白名单下的工作区：

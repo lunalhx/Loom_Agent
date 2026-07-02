@@ -3,11 +3,12 @@ package cn.lunalhx.ai.trigger.http;
 import cn.lunalhx.ai.api.dto.AgentAskRequest;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationDeletionService;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
-import cn.lunalhx.ai.types.enums.ResponseCode;
+import cn.lunalhx.ai.types.error.ApplicationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,11 +45,11 @@ public class AgentExecutionController {
         AgentQuestion question = result.value();
         if (question.getConversationId() != null && deletionService.isConversationDeleted(question.getConversationId())) {
             return sseResponder.completedAgentError(
-                    new AgentRequestMapper.Problem(ResponseCode.CONVERSATION_DELETED.getCode(), "会话已删除"));
+                    new AgentRequestMapper.Problem(AgentErrorCode.CONVERSATION_DELETED));
         }
 
         String clientKey = streamRequestLimiter.resolveClientKey(httpRequest);
-        StreamRequestLimiter.Lease lease = streamRequestLimiter.tryAcquire(clientKey, "agent-ask");
+        StreamRequestLimiter.Lease lease = streamRequestLimiter.tryAcquire(clientKey);
         if (!lease.isAllowed()) {
             return sseResponder.completedAgentError(
                     new AgentRequestMapper.Problem(lease.rejectCode(), lease.rejectMessage()));
@@ -102,11 +103,7 @@ public class AgentExecutionController {
     public Response<Boolean> cancelRun(@PathVariable String runId) {
         AgentRequestMapper.Result<String> result = requestMapper.mapRunId(runId);
         if (!result.valid()) {
-            return Response.<Boolean>builder()
-                    .code(result.problem().code())
-                    .info(result.problem().message())
-                    .data(false)
-                    .build();
+            throw new ApplicationException(result.problem().errorCode(), result.problem().message());
         }
         boolean cancelled = agentLoopService.cancelRun(result.value());
         return Response.success(cancelled, cancelled ? "cancelled" : "run_not_active");

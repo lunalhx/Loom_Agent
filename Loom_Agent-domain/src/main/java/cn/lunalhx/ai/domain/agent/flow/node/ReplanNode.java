@@ -140,7 +140,7 @@ public class ReplanNode extends AbstractAgentNode {
             if (isLength(result.getFinishReason())) {
                 if (traceRecorder != null) {
                     traceRecorder.recordModelGatewayEvent(context, "model_recovery_exhausted", name(), "error", 0L,
-                            ModelErrorCode.MODEL_DECISION_TRUNCATED.message(), null,
+                            ModelErrorCode.MODEL_DECISION_TRUNCATED.defaultMessage(), null,
                             Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
                                     "errorCode", ModelErrorCode.MODEL_DECISION_TRUNCATED.code()));
                 }

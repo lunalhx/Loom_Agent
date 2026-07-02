@@ -9,7 +9,7 @@ import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
-import cn.lunalhx.ai.types.enums.ResponseCode;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -254,10 +254,7 @@ public class AgentWorkspaceController {
     }
 
     private <T> Response<T> illegal(String message) {
-        return Response.<T>builder()
-                .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                .info(message)
-                .build();
+        return Response.failure(CommonErrorCode.INVALID_PARAMETER, message);
     }
 
     private record TreeBuildResult(AgentWorkspaceTreeNode node, boolean truncated) {

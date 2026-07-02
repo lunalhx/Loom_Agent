@@ -108,7 +108,7 @@ public class DeepSeekModelGateway implements ModelGateway {
         } catch (IOException e) {
             sink.error(new ModelGatewayException(ModelErrorCode.PROVIDER_UNAVAILABLE, "模型服务网络异常", true, null, e));
         } catch (Exception e) {
-            sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR, ModelErrorCode.MODEL_ERROR.message(), false, null, e));
+            sink.error(new ModelGatewayException(ModelErrorCode.MODEL_ERROR, ModelErrorCode.MODEL_ERROR.defaultMessage(), false, null, e));
         }
     }
 
@@ -289,7 +289,7 @@ public class DeepSeekModelGateway implements ModelGateway {
         } else {
             errorCode = ModelErrorCode.MODEL_ERROR;
         }
-        String message = StringUtils.defaultIfBlank(providerMessage, errorCode.message());
+        String message = StringUtils.defaultIfBlank(providerMessage, errorCode.defaultMessage());
         log.warn("DeepSeek API returned status {}, model={}, errorCode={}, message={}",
                 statusCode, model, errorCode.code(), message);
         return new ModelGatewayException(errorCode, message, retryable, statusCode,

@@ -126,7 +126,7 @@ public final class ModelCallPreflight {
 
     private ModelGatewayException deadlineExceeded(String model) {
         return new ModelGatewayException(ModelErrorCode.MODEL_CALL_TIMEOUT,
-                ModelErrorCode.MODEL_CALL_TIMEOUT.message(), false, null, null, model, null);
+                ModelErrorCode.MODEL_CALL_TIMEOUT.defaultMessage(), false, null, null, model, null);
     }
 
 }

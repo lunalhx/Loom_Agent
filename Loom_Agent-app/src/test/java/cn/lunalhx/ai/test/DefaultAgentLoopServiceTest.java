@@ -92,18 +92,18 @@ public class DefaultAgentLoopServiceTest {
         List<String> prompts = new java.util.ArrayList<>();
         ModelGateway modelGateway = completeGateway(
                 prompts,
-                "{\"type\":\"action\",\"thought\":\"搜索函数\",\"tool\":\"code_search\",\"input\":{\"query\":\"DefaultChatStreamService.stream\",\"limit\":10}}",
-                "{\"type\":\"action\",\"thought\":\"读取文件\",\"tool\":\"read_file\",\"input\":{\"path\":\"Loom_Agent-domain/src/main/java/cn/lunalhx/ai/domain/conversation/service/DefaultChatStreamService.java\",\"startLine\":42,\"endLine\":80}}",
-                "{\"type\":\"final\",\"answer\":\"DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。\",\"evidence\":[{\"file\":\"DefaultChatStreamService.java\",\"line\":42}]}"
+                "{\"type\":\"action\",\"thought\":\"搜索函数\",\"tool\":\"code_search\",\"input\":{\"query\":\"AgentLoopService.ask\",\"limit\":10}}",
+                "{\"type\":\"action\",\"thought\":\"读取文件\",\"tool\":\"read_file\",\"input\":{\"path\":\"Loom_Agent-domain/src/main/java/cn/lunalhx/ai/domain/agent/service/execution/AgentLoopService.java\",\"startLine\":42,\"endLine\":80}}",
+                "{\"type\":\"final\",\"answer\":\"AgentLoopService.ask 定义在 AgentLoopService.java，负责驱动 Agent Loop 并输出 SSE 事件。\",\"evidence\":[{\"file\":\"AgentLoopService.java\",\"line\":42}]}"
         );
 
         DefaultAgentLoopService service = newService(modelGateway, List.of(
-                fakeTool("code_search", "DefaultChatStreamService.java:42: public Flux<StreamEvent> stream(ChatPrompt rawPrompt)"),
-                fakeTool("read_file", "42: public Flux<StreamEvent> stream(ChatPrompt rawPrompt) {")
+                fakeTool("code_search", "AgentLoopService.java:42: public Flux<AgentEvent> ask(AgentQuestion question)"),
+                fakeTool("read_file", "42: public Flux<AgentEvent> ask(AgentQuestion question) {")
         ));
 
         List<AgentEvent> events = service.ask(AgentQuestion.builder()
-                        .question("DefaultChatStreamService.stream 在哪里定义？做什么用？")
+                        .question("AgentLoopService.ask 在哪里定义？做什么用？")
                         .maxSteps(6)
                         .build())
                 .collectList()
@@ -120,10 +120,10 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(prompts.get(1).contains("动态上下文"));
         assertTrue(prompts.get(1).contains("assistant_action"));
         assertTrue(prompts.get(1).contains("tool_result"));
-        assertTrue(prompts.get(1).contains("DefaultChatStreamService.java:42"));
+        assertTrue(prompts.get(1).contains("AgentLoopService.java:42"));
         assertTrue(prompts.get(2).contains("Step 2 - assistant_action"));
         assertTrue(prompts.get(2).contains("Step 2 - tool_result"));
-        assertEquals("DefaultChatStreamService.stream 定义在 DefaultChatStreamService.java，负责归一化请求、调用模型流并输出 SSE 事件。",
+        assertEquals("AgentLoopService.ask 定义在 AgentLoopService.java，负责驱动 Agent Loop 并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
 

@@ -5,10 +5,10 @@ import cn.lunalhx.ai.api.dto.ConversationSummaryResponse;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationSummary;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationDeletionService;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
+import cn.lunalhx.ai.types.error.ApplicationException;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
@@ -61,7 +61,7 @@ public class AgentConversationHttpServiceTest {
     }
 
     @Test
-    public void requestDeletionInvalidShouldThrowBadRequest() {
+    public void requestDeletionInvalidShouldThrowApplicationException() {
         ConversationDeletionService.DeletionRequestResult result =
                 new ConversationDeletionService.DeletionRequestResult(
                         null, null, null, null, 0, "invalid id", false, true);
@@ -69,15 +69,15 @@ public class AgentConversationHttpServiceTest {
 
         try {
             service.requestDeletion("bad");
-            fail("Expected ResponseStatusException");
-        } catch (ResponseStatusException e) {
-            assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
-            assertEquals("invalid id", e.getReason());
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_PARAMETER.code(), e.code());
+            assertEquals("invalid id", e.getMessage());
         }
     }
 
     @Test
-    public void requestDeletionNotFoundShouldThrowNotFound() {
+    public void requestDeletionNotFoundShouldThrowApplicationException() {
         ConversationDeletionService.DeletionRequestResult result =
                 new ConversationDeletionService.DeletionRequestResult(
                         null, null, null, null, 0, null, true, false);
@@ -85,9 +85,9 @@ public class AgentConversationHttpServiceTest {
 
         try {
             service.requestDeletion("missing");
-            fail("Expected ResponseStatusException");
-        } catch (ResponseStatusException e) {
-            assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_REQUEST.code(), e.code());
         }
     }
 

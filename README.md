@@ -72,41 +72,15 @@ App 以 dev profile 运行，直接访问本地文件系统，`workspace` 可以
 # 检查模型配置
 curl http://localhost:8091/api/v1/model/config
 
-# 调用流式接口
-curl -N \
-  -H "Accept: text/event-stream" \
-  -H "Content-Type: application/json" \
-  -X POST http://localhost:8091/api/v1/chat/stream \
-  -d '{"message":"用一句话介绍你自己"}'
-
 # 调用代码分析 Agent
 curl -N \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
   -X POST http://localhost:8091/api/v1/agent/code/ask/stream \
-  -d '{"question":"DefaultChatStreamService.stream 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
+  -d '{"question":"AgentLoopService.ask 在哪里定义？做什么用？","maxSteps":6,"includeTrace":true}'
 ```
 
 ## 接口
-
-`POST /api/v1/chat/stream`
-
-请求字段：
-
-- `message`：必填，用户消息。
-- `conversationId`：可选，会话 ID。
-- `systemPrompt`：可选，系统提示词。
-- `model`：可选，仅支持 `deepseek-v4-flash`、`deepseek-v4-pro`。
-- `temperature`：可选，0 到 2。
-- `maxTokens`：可选，最大输出 token。
-- `responseFormat`：可选，`TEXT` 或 `JSON_OBJECT`。
-
-SSE 事件：
-
-- `meta`：返回 `requestId`、`conversationId`、`model`。
-- `token`：逐个 Unicode 字符返回模型内容。
-- `done`：正常结束，包含 `finishReason` 和 token usage。
-- `error`：兜底错误，包含 `code` 和可展示 `message`。
 
 `GET /api/v1/model/config`
 

@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
@@ -212,7 +213,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         try {
             while (!sink.isCancelled() && !activeCancellation.get()) {
                 if (isTotalTimeout(context)) {
-                    context.runtime().fail(AgentStopReason.TIMEOUT, "agent_timeout", "Agent 执行超时");
+                    context.runtime().fail(AgentStopReason.TIMEOUT, AgentErrorCode.AGENT_TIMEOUT.code(), "Agent 执行超时");
                     currentNode = AgentNodeNames.FAIL;
                 }
 

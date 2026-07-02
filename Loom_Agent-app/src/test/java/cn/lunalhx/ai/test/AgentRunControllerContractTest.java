@@ -10,7 +10,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
 import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
 import cn.lunalhx.ai.trigger.http.AgentRunController;
+import cn.lunalhx.ai.trigger.http.GlobalExceptionHandler;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentRunHttpQueryService;
@@ -70,7 +72,9 @@ public class AgentRunControllerContractTest {
         AgentUndoHttpService undoHttpService = new AgentUndoHttpService(undoService);
         AgentRunController controller = new AgentRunController(
                 requestMapper, sseResponder, runHttpQueryService, undoHttpService);
-        return MockMvcBuilders.standaloneSetup(controller).build();
+        return MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
     private String json(Object value) throws Exception {
@@ -97,25 +101,25 @@ public class AgentRunControllerContractTest {
     }
 
     @Test
-    public void traceRunMissingShouldReturnIllegalParameter() throws Exception {
+    public void traceRunMissingShouldReturnBadRequest() throws Exception {
         AgentRunRepository runRepo = mock(AgentRunRepository.class);
         when(runRepo.find("missing")).thenReturn(Optional.empty());
         MockMvc mvc = buildMockMvc(runRepo, mock(TraceRecorder.class), mock(ReplayService.class), mock(WorkspaceUndoService.class));
         mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/missing/trace"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResponseCode.ILLEGAL_PARAMETER.getCode()));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
     }
 
     @Test
-    public void traceEmptyShouldReturnIllegalParameter() throws Exception {
+    public void traceEmptyShouldReturnBadRequest() throws Exception {
         AgentRunRepository runRepo = mock(AgentRunRepository.class);
         when(runRepo.find("r-empty")).thenReturn(Optional.of(AgentRun.builder().runId("r-empty").build()));
         TraceRecorder traceRecorder = mock(TraceRecorder.class);
         when(traceRecorder.timeline("r-empty")).thenReturn(List.of());
         MockMvc mvc = buildMockMvc(runRepo, traceRecorder, mock(ReplayService.class), mock(WorkspaceUndoService.class));
         mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/r-empty/trace"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResponseCode.ILLEGAL_PARAMETER.getCode()));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
     }
 
     // ===== 2. GET /runs/{id}/replay =====
@@ -137,15 +141,15 @@ public class AgentRunControllerContractTest {
     }
 
     @Test
-    public void replayEmptyShouldReturnIllegalParameter() throws Exception {
+    public void replayEmptyShouldReturnBadRequest() throws Exception {
         ReplayService replayService = mock(ReplayService.class);
         when(replayService.replayRun(any(), anyBoolean())).thenReturn(AgentReplayTimeline.builder()
                 .mode("DRY_REPLAY").runId("r-empty").events(List.of()).build());
         MockMvc mvc = buildMockMvc(mock(AgentRunRepository.class), mock(TraceRecorder.class), replayService,
                 mock(WorkspaceUndoService.class));
         mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/r-empty/replay"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResponseCode.ILLEGAL_PARAMETER.getCode()));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
     }
 
     @Test

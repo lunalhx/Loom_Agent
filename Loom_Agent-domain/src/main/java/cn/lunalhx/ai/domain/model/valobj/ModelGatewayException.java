@@ -1,20 +1,22 @@
 package cn.lunalhx.ai.domain.model.valobj;
 
+import cn.lunalhx.ai.types.error.ErrorCode;
+
 public class ModelGatewayException extends RuntimeException {
 
     private static final long serialVersionUID = -734176253641175884L;
 
-    private final ModelErrorCode errorCode;
+    private final ErrorCode errorCode;
     private final boolean retryable;
     private final Integer httpStatus;
     private final Long retryAfterMs;
     private String model;
 
-    public ModelGatewayException(ModelErrorCode errorCode, String message, boolean retryable, Integer httpStatus, Throwable cause) {
+    public ModelGatewayException(ErrorCode errorCode, String message, boolean retryable, Integer httpStatus, Throwable cause) {
         this(errorCode, message, retryable, httpStatus, null, null, cause);
     }
 
-    public ModelGatewayException(ModelErrorCode errorCode,
+    public ModelGatewayException(ErrorCode errorCode,
                                  String message,
                                  boolean retryable,
                                  Integer httpStatus,
@@ -29,7 +31,7 @@ public class ModelGatewayException extends RuntimeException {
         this.model = model;
     }
 
-    public ModelErrorCode getErrorCode() {
+    public ErrorCode getErrorCode() {
         return errorCode;
     }
 

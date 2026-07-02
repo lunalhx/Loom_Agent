@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
+import cn.lunalhx.ai.types.error.ErrorCode;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
@@ -80,7 +81,7 @@ public class ModelCallNode extends AbstractAgentNode {
         if (result.isTruncationExhausted()) {
             fail(context, AgentStopReason.MODEL_ERROR,
                     ModelErrorCode.MODEL_DECISION_TRUNCATED.code(),
-                    ModelErrorCode.MODEL_DECISION_TRUNCATED.message());
+                    ModelErrorCode.MODEL_DECISION_TRUNCATED.defaultMessage());
             budgetCoordinator.traceRecovery(context, "model_recovery_exhausted", AgentNodeNames.MODEL_CALL,
                     Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
                             "finishReason", StringUtils.defaultString(result.chatResult().getFinishReason())));
@@ -94,12 +95,12 @@ public class ModelCallNode extends AbstractAgentNode {
             case BUDGET_EXCEEDED:
                 context.setBudgetBlockedReason("fallback model exceeds remaining budget");
                 fail(context, AgentStopReason.BUDGET_EXCEEDED,
-                        ModelErrorCode.BUDGET_EXCEEDED.code(), ModelErrorCode.BUDGET_EXCEEDED.message());
+                        ModelErrorCode.BUDGET_EXCEEDED.code(), ModelErrorCode.BUDGET_EXCEEDED.defaultMessage());
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
 
             case TIMEOUT:
                 fail(context, AgentStopReason.TIMEOUT,
-                        ModelErrorCode.MODEL_CALL_TIMEOUT.code(), ModelErrorCode.MODEL_CALL_TIMEOUT.message());
+                        ModelErrorCode.MODEL_CALL_TIMEOUT.code(), ModelErrorCode.MODEL_CALL_TIMEOUT.defaultMessage());
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
 
             case CONTEXT_OVERFLOW:
@@ -109,10 +110,10 @@ public class ModelCallNode extends AbstractAgentNode {
 
             case GATEWAY_ERROR: {
                 ModelGatewayException gatewayException = failureClassifier.modelGatewayException(error);
-                ModelErrorCode errorCode = gatewayException.getErrorCode() == null
+                ErrorCode errorCode = gatewayException.getErrorCode() == null
                         ? ModelErrorCode.MODEL_ERROR : gatewayException.getErrorCode();
                 fail(context, AgentStopReason.MODEL_ERROR, errorCode.code(),
-                        StringUtils.defaultIfBlank(gatewayException.getMessage(), errorCode.message()));
+                        StringUtils.defaultIfBlank(gatewayException.getMessage(), errorCode.defaultMessage()));
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
             }
 

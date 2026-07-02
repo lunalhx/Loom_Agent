@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
+import cn.lunalhx.ai.types.error.ApplicationException;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import org.junit.Before;
 import org.junit.Test;
@@ -17,6 +19,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -42,27 +46,39 @@ public class AgentRunHttpQueryServiceTest {
     // ===== trace =====
 
     @Test
-    public void traceBlankRunIdShouldReturnIllegalParameter() {
-        Response<AgentTraceTimelineResponse> result = queryService.trace(null);
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("runId 不能为空", result.getInfo());
+    public void traceBlankRunIdShouldThrowApplicationException() {
+        try {
+            queryService.trace(null);
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_PARAMETER.code(), e.code());
+            assertEquals("runId 不能为空", e.getMessage());
+        }
     }
 
     @Test
-    public void traceRunNotFoundShouldReturnIllegalParameter() {
+    public void traceRunNotFoundShouldThrowApplicationException() {
         when(agentRunRepository.find("r-1")).thenReturn(Optional.empty());
-        Response<AgentTraceTimelineResponse> result = queryService.trace("r-1");
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("未找到 run", result.getInfo());
+        try {
+            queryService.trace("r-1");
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_REQUEST.code(), e.code());
+            assertEquals("未找到 run", e.getMessage());
+        }
     }
 
     @Test
-    public void traceEmptyShouldReturnIllegalParameter() {
+    public void traceEmptyShouldThrowApplicationException() {
         when(agentRunRepository.find("r-1")).thenReturn(Optional.of(AgentRun.builder().runId("r-1").build()));
         when(traceRecorder.timeline("r-1")).thenReturn(List.of());
-        Response<AgentTraceTimelineResponse> result = queryService.trace("r-1");
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("未找到 trace", result.getInfo());
+        try {
+            queryService.trace("r-1");
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_REQUEST.code(), e.code());
+            assertEquals("未找到 trace", e.getMessage());
+        }
     }
 
     @Test
@@ -82,19 +98,27 @@ public class AgentRunHttpQueryServiceTest {
     // ===== replay =====
 
     @Test
-    public void replayBlankRunIdShouldReturnIllegalParameter() {
-        Response<AgentReplayResponse> result = queryService.replay(null, true);
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("runId 不能为空", result.getInfo());
+    public void replayBlankRunIdShouldThrowApplicationException() {
+        try {
+            queryService.replay(null, true);
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_PARAMETER.code(), e.code());
+            assertEquals("runId 不能为空", e.getMessage());
+        }
     }
 
     @Test
-    public void replayEmptyTimelineShouldReturnIllegalParameter() {
+    public void replayEmptyTimelineShouldThrowApplicationException() {
         when(replayService.replayRun(eq("r-1"), anyBoolean())).thenReturn(
                 AgentReplayTimeline.builder().mode("DRY_REPLAY").runId("r-1").events(List.of()).build());
-        Response<AgentReplayResponse> result = queryService.replay("r-1", true);
-        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), result.getCode());
-        assertEquals("未找到可 replay 的 trace", result.getInfo());
+        try {
+            queryService.replay("r-1", true);
+            fail("Expected ApplicationException");
+        } catch (ApplicationException e) {
+            assertEquals(CommonErrorCode.INVALID_REQUEST.code(), e.code());
+            assertEquals("未找到可 replay 的 trace", e.getMessage());
+        }
     }
 
     @Test

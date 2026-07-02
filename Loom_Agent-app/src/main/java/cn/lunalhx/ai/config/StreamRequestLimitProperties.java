@@ -19,8 +19,6 @@ public class StreamRequestLimitProperties {
 
     private EndpointLimit agentAsk = new EndpointLimit(8, 2, 6, 60);
 
-    private EndpointLimit chatStream = new EndpointLimit(20, 4, 30, 60);
-
     @Data
     public static class EndpointLimit {
         private int maxConcurrentGlobal;

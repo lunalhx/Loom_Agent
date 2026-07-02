@@ -3,6 +3,7 @@ package cn.lunalhx.ai.trigger.http.agent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -160,7 +161,8 @@ public class AgentSseResponder {
             } catch (Exception e) {
                 log.warn("Replay stream failed, runId={}, message={}", runId, e.getMessage(), e);
                 session.sendAndComplete("error",
-                        responseMapper.replayError("replay_failed", "Replay 失败"));
+                        responseMapper.replayError(AgentErrorCode.REPLAY_FAILED.code(),
+                                AgentErrorCode.REPLAY_FAILED.defaultMessage()));
             }
         });
         session.bind(future);
@@ -204,16 +206,16 @@ public class AgentSseResponder {
     private AgentEvent fallbackAgentEvent() {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
-                .code("agent_error")
-                .message("Agent 执行失败")
+                .code(AgentErrorCode.AGENT_ERROR.code())
+                .message(AgentErrorCode.AGENT_ERROR.defaultMessage())
                 .build();
     }
 
     private AgentEvent timeoutAgentEvent() {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
-                .code("agent_timeout")
-                .message("Agent 执行超时")
+                .code(AgentErrorCode.AGENT_TIMEOUT.code())
+                .message(AgentErrorCode.AGENT_TIMEOUT.defaultMessage())
                 .build();
     }
 }

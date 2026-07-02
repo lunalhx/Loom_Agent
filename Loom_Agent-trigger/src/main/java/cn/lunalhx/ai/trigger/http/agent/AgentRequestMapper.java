@@ -5,9 +5,12 @@ import cn.lunalhx.ai.api.dto.AgentAskRequest;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentUserInputRequest;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
+import cn.lunalhx.ai.types.error.ErrorCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +30,29 @@ public class AgentRequestMapper {
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final Validator validator;
 
-    public record Problem(String code, String message) {}
+    public record Problem(ErrorCode errorCode, String message, String code) {
+
+        public Problem(ErrorCode errorCode, String message) {
+            this(errorCode, message, errorCode.code());
+        }
+
+        public Problem(ErrorCode errorCode) {
+            this(errorCode, errorCode.defaultMessage(), errorCode.code());
+        }
+
+        // Legacy compatibility constructor for callers with raw string codes
+        public Problem(String code, String message) {
+            this(null, message, code);
+        }
+
+        public String code() {
+            return code;
+        }
+
+        public String message() {
+            return message;
+        }
+    }
 
     public record Result<T>(T value, Problem problem) {
         public boolean valid() {
@@ -38,6 +63,15 @@ public class AgentRequestMapper {
             return new Result<>(value, null);
         }
 
+        public static <T> Result<T> failure(ErrorCode errorCode, String message) {
+            return new Result<>(null, new Problem(errorCode, message));
+        }
+
+        public static <T> Result<T> failure(ErrorCode errorCode) {
+            return new Result<>(null, new Problem(errorCode));
+        }
+
+        // Legacy compatibility for callers using raw string codes
         public static <T> Result<T> failure(String code, String message) {
             return new Result<>(null, new Problem(code, message));
         }
@@ -49,10 +83,10 @@ public class AgentRequestMapper {
 
     public Result<AgentQuestion> mapAsk(AgentAskRequest request) {
         if (request == null) {
-            return Result.failure("invalid_request", "请求体不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "请求体不能为空");
         }
         if (!Boolean.TRUE.equals(agentRuntimeProperties.getEnabled())) {
-            return Result.failure("agent_disabled", "Agent 功能未启用");
+            return Result.failure(AgentErrorCode.AGENT_DISABLED);
         }
         Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
@@ -60,10 +94,10 @@ public class AgentRequestMapper {
                     .map(ConstraintViolation::getMessage)
                     .distinct()
                     .collect(Collectors.joining("; "));
-            return Result.failure("invalid_request", message);
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, message);
         }
         if (StringUtils.isBlank(request.getQuestion()) && StringUtils.isBlank(request.getMessage())) {
-            return Result.failure("invalid_request", "question 不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "question 不能为空");
         }
         String requestId = UUID.randomUUID().toString();
         AgentQuestion question = AgentQuestion.builder()
@@ -82,10 +116,10 @@ public class AgentRequestMapper {
 
     public Result<ApprovalCommand> mapApproval(AgentApprovalDecisionRequest request) {
         if (request == null) {
-            return Result.failure("invalid_request", "请求体不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "请求体不能为空");
         }
         if (!Boolean.TRUE.equals(agentRuntimeProperties.getEnabled())) {
-            return Result.failure("agent_disabled", "Agent 功能未启用");
+            return Result.failure(AgentErrorCode.AGENT_DISABLED);
         }
         Set<ConstraintViolation<AgentApprovalDecisionRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
@@ -93,31 +127,31 @@ public class AgentRequestMapper {
                     .map(ConstraintViolation::getMessage)
                     .distinct()
                     .collect(Collectors.joining("; "));
-            return Result.failure("invalid_request", message);
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, message);
         }
         ApprovalDecision decision = parseApprovalDecision(request.getDecision());
         if (decision == null) {
-            return Result.failure("invalid_request", "decision 只能是 APPROVE 或 REJECT");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "decision 只能是 APPROVE 或 REJECT");
         }
         return Result.success(new ApprovalCommand(decision, request.getReason()));
     }
 
     public Result<String> mapRunId(String runId) {
         if (StringUtils.isBlank(runId)) {
-            return Result.failure("invalid_request", "runId 不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "runId 不能为空");
         }
         return Result.success(runId);
     }
 
     public Result<UserInputCommand> mapUserInput(String runId, AgentUserInputRequest request) {
         if (StringUtils.isBlank(runId)) {
-            return Result.failure("invalid_request", "runId 不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "runId 不能为空");
         }
         if (request == null) {
-            return Result.failure("invalid_request", "请求体不能为空");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "请求体不能为空");
         }
         if (!Boolean.TRUE.equals(agentRuntimeProperties.getEnabled())) {
-            return Result.failure("agent_disabled", "Agent 功能未启用");
+            return Result.failure(AgentErrorCode.AGENT_DISABLED);
         }
         Set<ConstraintViolation<AgentUserInputRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
@@ -125,14 +159,14 @@ public class AgentRequestMapper {
                     .map(ConstraintViolation::getMessage)
                     .distinct()
                     .collect(Collectors.joining("; "));
-            return Result.failure("invalid_request", message);
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, message);
         }
         UserInputAction action = parseUserInputAction(request.getAction());
         if (action == null) {
-            return Result.failure("invalid_request", "action 只能是 CONTINUE 或 ABORT");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "action 只能是 CONTINUE 或 ABORT");
         }
         if (action == UserInputAction.CONTINUE && StringUtils.isBlank(request.getMessage())) {
-            return Result.failure("invalid_request", "CONTINUE 必须提供非空 message");
+            return Result.failure(CommonErrorCode.INVALID_REQUEST, "CONTINUE 必须提供非空 message");
         }
         return Result.success(new UserInputCommand(action, request.getMessage()));
     }

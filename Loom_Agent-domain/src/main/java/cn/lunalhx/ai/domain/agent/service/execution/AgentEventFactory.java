@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
@@ -116,8 +117,8 @@ public final class AgentEventFactory {
     public AgentEvent agentError() {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
-                .code("agent_error")
-                .message("Agent 执行失败")
+                .code(AgentErrorCode.AGENT_ERROR.code())
+                .message(AgentErrorCode.AGENT_ERROR.defaultMessage())
                 .build();
     }
 
@@ -125,8 +126,8 @@ public final class AgentEventFactory {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .approvalId(approvalId)
-                .code("approval_not_found")
-                .message("审批不存在或已过期")
+                .code(AgentErrorCode.APPROVAL_NOT_FOUND.code())
+                .message(AgentErrorCode.APPROVAL_NOT_FOUND.defaultMessage())
                 .build();
     }
 
@@ -134,8 +135,8 @@ public final class AgentEventFactory {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .runId(runId)
-                .code("checkpoint_not_found")
-                .message("未找到可恢复的 checkpoint")
+                .code(AgentErrorCode.CHECKPOINT_NOT_FOUND.code())
+                .message(AgentErrorCode.CHECKPOINT_NOT_FOUND.defaultMessage())
                 .build();
     }
 
@@ -143,8 +144,8 @@ public final class AgentEventFactory {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .runId(runId)
-                .code("run_not_waiting_user_input")
-                .message("当前运行不在等待用户输入状态")
+                .code(AgentErrorCode.RUN_NOT_WAITING_USER_INPUT.code())
+                .message(AgentErrorCode.RUN_NOT_WAITING_USER_INPUT.defaultMessage())
                 .build();
     }
 
@@ -152,8 +153,8 @@ public final class AgentEventFactory {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .runId(runId)
-                .code("invalid_user_input")
-                .message("CONTINUE 必须提供非空 message")
+                .code(AgentErrorCode.INVALID_USER_INPUT.code())
+                .message(AgentErrorCode.INVALID_USER_INPUT.defaultMessage())
                 .build();
     }
 
@@ -165,8 +166,8 @@ public final class AgentEventFactory {
                 .conversationId(run.getConversationId())
                 .workspace(run.getWorkspace())
                 .parentRunId(run.getParentRunId())
-                .code("run_already_terminal")
-                .message("当前运行已结束，不能再次恢复")
+                .code(AgentErrorCode.RUN_ALREADY_TERMINAL.code())
+                .message(AgentErrorCode.RUN_ALREADY_TERMINAL.defaultMessage())
                 .metadata(Map.of("status", run.getStatus().name()))
                 .build();
     }

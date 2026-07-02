@@ -14,7 +14,6 @@ public class StreamRequestLimiter {
     private final Config config;
 
     private final AtomicInteger agentAskGlobal = new AtomicInteger(0);
-    private final AtomicInteger chatStreamGlobal = new AtomicInteger(0);
     private final ConcurrentHashMap<String, ClientState> clientStates = new ConcurrentHashMap<>();
 
     public StreamRequestLimiter(Config config) {
@@ -42,14 +41,12 @@ public class StreamRequestLimiter {
         return request.getRemoteAddr();
     }
 
-    public Lease tryAcquire(String clientKey, String endpoint) {
+    public Lease tryAcquire(String clientKey) {
         if (!config.enabled) {
             return Lease.GRANTED;
         }
 
-        EndpointLimit limit = endpoint.equals("chat-stream")
-                ? config.chatStream
-                : config.agentAsk;
+        EndpointLimit limit = config.agentAsk;
 
         ClientState state = clientStates.computeIfAbsent(clientKey, k -> {
             if (clientStates.size() >= config.maxClientStates) {
@@ -68,27 +65,27 @@ public class StreamRequestLimiter {
             return new Lease(false, true, false, null);
         }
 
-        AtomicInteger globalCounter = endpoint.equals("chat-stream") ? chatStreamGlobal : agentAskGlobal;
+        AtomicInteger globalCounter = agentAskGlobal;
         int global = globalCounter.incrementAndGet();
         if (global > limit.maxConcurrentGlobal) {
             globalCounter.decrementAndGet();
             return new Lease(false, false, true, null);
         }
 
-        int perClient = state.inFlight(endpoint).incrementAndGet();
+        int perClient = state.agentAskInFlight.incrementAndGet();
         if (perClient > limit.maxConcurrentPerClient) {
-            state.inFlight(endpoint).decrementAndGet();
+            state.agentAskInFlight.decrementAndGet();
             globalCounter.decrementAndGet();
             return new Lease(false, false, true, null);
         }
 
         return new Lease(true, false, false,
-                () -> release(globalCounter, state, endpoint));
+                () -> release(globalCounter, state));
     }
 
-    private void release(AtomicInteger globalCounter, ClientState state, String endpoint) {
+    private void release(AtomicInteger globalCounter, ClientState state) {
         globalCounter.decrementAndGet();
-        state.inFlight(endpoint).decrementAndGet();
+        state.agentAskInFlight.decrementAndGet();
     }
 
     void evictStale() {
@@ -97,8 +94,7 @@ public class StreamRequestLimiter {
         clientStates.entrySet().removeIf(entry -> {
             long lastAccess = entry.getValue().lastAccess.get();
             return (now - lastAccess) > ttlMs
-                    && entry.getValue().agentAskInFlight.get() <= 0
-                    && entry.getValue().chatStreamInFlight.get() <= 0;
+                    && entry.getValue().agentAskInFlight.get() <= 0;
         });
     }
 
@@ -109,7 +105,6 @@ public class StreamRequestLimiter {
         public int maxClientStates = 10000;
         public int clientStateTtlSeconds = 3600;
         public EndpointLimit agentAsk = new EndpointLimit(8, 2, 6, 60);
-        public EndpointLimit chatStream = new EndpointLimit(20, 4, 30, 60);
     }
 
     public static class EndpointLimit {
@@ -178,13 +173,8 @@ public class StreamRequestLimiter {
 
     static class ClientState {
         final AtomicInteger agentAskInFlight = new AtomicInteger(0);
-        final AtomicInteger chatStreamInFlight = new AtomicInteger(0);
         final AtomicLong lastAccess = new AtomicLong(System.currentTimeMillis());
         volatile Window window = new Window(0, 0, 0);
-
-        AtomicInteger inFlight(String endpoint) {
-            return endpoint.equals("chat-stream") ? chatStreamInFlight : agentAskInFlight;
-        }
 
         void touch() {
             lastAccess.set(System.currentTimeMillis());

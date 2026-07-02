@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.gateway.resilience;
 
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
+import cn.lunalhx.ai.types.error.ErrorCode;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.apache.commons.lang3.StringUtils;
 
@@ -68,7 +69,7 @@ public final class ModelFailureClassifier {
 
     ModelGatewayException deadlineExceeded(String model) {
         return new ModelGatewayException(ModelErrorCode.MODEL_CALL_TIMEOUT,
-                ModelErrorCode.MODEL_CALL_TIMEOUT.message(), false, null, null, model, null);
+                ModelErrorCode.MODEL_CALL_TIMEOUT.defaultMessage(), false, null, null, model, null);
     }
 
     private boolean isNonRetryable(ModelGatewayException exception) {
@@ -78,7 +79,7 @@ public final class ModelFailureClassifier {
                 || exception.getHttpStatus() == 422)) {
             return true;
         }
-        ModelErrorCode code = exception.getErrorCode();
+        ErrorCode code = exception.getErrorCode();
         return code == ModelErrorCode.CONFIG_ERROR
                 || code == ModelErrorCode.INVALID_REQUEST
                 || code == ModelErrorCode.BAD_REQUEST

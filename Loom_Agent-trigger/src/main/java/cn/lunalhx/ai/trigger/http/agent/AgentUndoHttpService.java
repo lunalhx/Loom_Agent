@@ -5,7 +5,8 @@ import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
 import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
-import cn.lunalhx.ai.types.enums.ResponseCode;
+import cn.lunalhx.ai.domain.common.CommonErrorCode;
+import cn.lunalhx.ai.types.error.ApplicationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,10 +23,7 @@ public class AgentUndoHttpService {
 
     public Response<UndoStatusResponse> query(String runId) {
         if (runId == null || runId.isBlank()) {
-            return Response.<UndoStatusResponse>builder()
-                    .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                    .info("runId 不能为空")
-                    .build();
+            throw new ApplicationException(CommonErrorCode.INVALID_PARAMETER, "runId 不能为空");
         }
 
         WorkspaceUndoService.UndoStatusResult result = workspaceUndoService.queryStatus(runId);
@@ -55,10 +53,7 @@ public class AgentUndoHttpService {
 
     public Response<UndoExecuteResponse> execute(String runId, UndoExecuteRequest request) {
         if (runId == null || runId.isBlank()) {
-            return Response.<UndoExecuteResponse>builder()
-                    .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                    .info("runId 不能为空")
-                    .build();
+            throw new ApplicationException(CommonErrorCode.INVALID_PARAMETER, "runId 不能为空");
         }
 
         WorkspaceUndoService.UndoExecuteResult result =
@@ -76,10 +71,6 @@ public class AgentUndoHttpService {
             return Response.success(data);
         }
 
-        return Response.<UndoExecuteResponse>builder()
-                .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                .info(result.message())
-                .data(data)
-                .build();
+        return Response.failure(CommonErrorCode.INVALID_PARAMETER, result.message());
     }
 }

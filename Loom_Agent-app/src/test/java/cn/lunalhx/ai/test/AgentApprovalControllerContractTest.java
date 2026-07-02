@@ -11,7 +11,9 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.trigger.http.AgentApprovalController;
+import cn.lunalhx.ai.trigger.http.GlobalExceptionHandler;
 import cn.lunalhx.ai.trigger.http.agent.AgentApprovalHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
@@ -70,7 +72,9 @@ public class AgentApprovalControllerContractTest {
                 new AgentApprovalHttpQueryService(approvalStore, responseMapper);
         AgentApprovalController controller = new AgentApprovalController(
                 requestMapper, sseResponder, agentLoopService, approvalHttpQueryService);
-        return MockMvcBuilders.standaloneSetup(controller).build();
+        return MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
     private String json(Object value) throws Exception {
@@ -131,12 +135,12 @@ public class AgentApprovalControllerContractTest {
     }
 
     @Test
-    public void approvalNotFoundShouldReturnIllegalParameter() throws Exception {
+    public void approvalNotFoundShouldReturnNotFound() throws Exception {
         ApprovalStore store = mock(ApprovalStore.class);
         when(store.find("missing")).thenReturn(Optional.empty());
         MockMvc mvc = buildMockMvc(mock(AgentLoopService.class), store);
         mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/approvals/missing"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResponseCode.ILLEGAL_PARAMETER.getCode()));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(AgentErrorCode.APPROVAL_NOT_FOUND.code()));
     }
 }

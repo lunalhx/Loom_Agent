@@ -32,12 +32,12 @@ public class StreamRequestLimiterTest {
         String key = limiter.resolveClientKey(req);
 
         for (int i = 0; i < 3; i++) {
-            StreamRequestLimiter.Lease lease = limiter.tryAcquire(key, "agent-ask");
+            StreamRequestLimiter.Lease lease = limiter.tryAcquire(key);
             assertTrue("request " + i + " should be allowed", lease.isAllowed());
             lease.release();
         }
 
-        StreamRequestLimiter.Lease rejected = limiter.tryAcquire(key, "agent-ask");
+        StreamRequestLimiter.Lease rejected = limiter.tryAcquire(key);
         assertFalse(rejected.isAllowed());
         assertTrue(rejected.isRateLimited());
         assertEquals("rate_limited", rejected.rejectCode());
@@ -52,17 +52,17 @@ public class StreamRequestLimiterTest {
         String key2 = limiter.resolveClientKey(req2);
         String key3 = limiter.resolveClientKey(req3);
 
-        StreamRequestLimiter.Lease l1 = limiter.tryAcquire(key1, "agent-ask");
-        StreamRequestLimiter.Lease l2 = limiter.tryAcquire(key2, "agent-ask");
+        StreamRequestLimiter.Lease l1 = limiter.tryAcquire(key1);
+        StreamRequestLimiter.Lease l2 = limiter.tryAcquire(key2);
         assertTrue(l1.isAllowed());
         assertTrue(l2.isAllowed());
 
-        StreamRequestLimiter.Lease l3 = limiter.tryAcquire(key3, "agent-ask");
+        StreamRequestLimiter.Lease l3 = limiter.tryAcquire(key3);
         assertFalse(l3.isAllowed());
         assertTrue(l3.isConcurrencyLimited());
 
         l1.release();
-        StreamRequestLimiter.Lease l4 = limiter.tryAcquire(key3, "agent-ask");
+        StreamRequestLimiter.Lease l4 = limiter.tryAcquire(key3);
         assertTrue(l4.isAllowed());
         l2.release();
         l4.release();
@@ -75,13 +75,13 @@ public class StreamRequestLimiterTest {
         String keyA = limiter.resolveClientKey(reqA);
         String keyB = limiter.resolveClientKey(reqB);
 
-        StreamRequestLimiter.Lease l1 = limiter.tryAcquire(keyA, "agent-ask");
+        StreamRequestLimiter.Lease l1 = limiter.tryAcquire(keyA);
         assertTrue(l1.isAllowed());
 
-        StreamRequestLimiter.Lease l2 = limiter.tryAcquire(keyA, "agent-ask");
+        StreamRequestLimiter.Lease l2 = limiter.tryAcquire(keyA);
         assertFalse("same client second request should be rejected", l2.isAllowed());
 
-        StreamRequestLimiter.Lease l3 = limiter.tryAcquire(keyB, "agent-ask");
+        StreamRequestLimiter.Lease l3 = limiter.tryAcquire(keyB);
         assertTrue("different client should still be allowed", l3.isAllowed());
 
         l1.release();
@@ -93,12 +93,12 @@ public class StreamRequestLimiterTest {
         HttpServletRequest req = mockRequest("10.0.0.1");
         String key = limiter.resolveClientKey(req);
 
-        StreamRequestLimiter.Lease lease = limiter.tryAcquire(key, "agent-ask");
+        StreamRequestLimiter.Lease lease = limiter.tryAcquire(key);
         assertTrue(lease.isAllowed());
         lease.release();
         lease.release();
 
-        StreamRequestLimiter.Lease next = limiter.tryAcquire(key, "agent-ask");
+        StreamRequestLimiter.Lease next = limiter.tryAcquire(key);
         assertTrue("should be able to acquire after release", next.isAllowed());
         next.release();
     }
@@ -112,7 +112,7 @@ public class StreamRequestLimiterTest {
         String key = disabledLimiter.resolveClientKey(req);
 
         for (int i = 0; i < 100; i++) {
-            StreamRequestLimiter.Lease lease = disabledLimiter.tryAcquire(key, "agent-ask");
+            StreamRequestLimiter.Lease lease = disabledLimiter.tryAcquire(key);
             assertTrue(lease.isAllowed());
         }
     }
@@ -157,27 +157,6 @@ public class StreamRequestLimiterTest {
         when(req.getRemoteAddr()).thenReturn("10.0.0.1");
 
         assertEquals("203.0.113.1", trustedLimiter.resolveClientKey(req));
-    }
-
-    @Test
-    public void chatStreamEndpointUsesSeparateCounters() {
-        StreamRequestLimiter.Config separateConfig = new StreamRequestLimiter.Config();
-        separateConfig.enabled = true;
-        separateConfig.agentAsk = new StreamRequestLimiter.EndpointLimit(2, 1, 5, 60);
-        separateConfig.chatStream = new StreamRequestLimiter.EndpointLimit(1, 1, 5, 60);
-        StreamRequestLimiter separateLimiter = new StreamRequestLimiter(separateConfig);
-
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        String key = separateLimiter.resolveClientKey(req);
-
-        StreamRequestLimiter.Lease agentLease = separateLimiter.tryAcquire(key, "agent-ask");
-        assertTrue(agentLease.isAllowed());
-
-        StreamRequestLimiter.Lease chatLease = separateLimiter.tryAcquire(key, "chat-stream");
-        assertTrue("chat-stream has separate global counter", chatLease.isAllowed());
-
-        agentLease.release();
-        chatLease.release();
     }
 
     private static HttpServletRequest mockRequest(String remoteAddr) {

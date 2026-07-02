@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.api.response;
 
 import cn.lunalhx.ai.types.enums.ResponseCode;
+import cn.lunalhx.ai.types.error.ApiError;
+import cn.lunalhx.ai.types.error.ErrorCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -34,5 +36,20 @@ public class Response<T> implements Serializable {
                 .info(info)
                 .data(data)
                 .build();
+    }
+
+    public static <T> Response<T> failure(ApiError apiError) {
+        return Response.<T>builder()
+                .code(apiError.code())
+                .info(apiError.message())
+                .build();
+    }
+
+    public static <T> Response<T> failure(ErrorCode errorCode, String message) {
+        return failure(ApiError.of(errorCode, message));
+    }
+
+    public static <T> Response<T> failure(ErrorCode errorCode) {
+        return failure(ApiError.of(errorCode));
     }
 }

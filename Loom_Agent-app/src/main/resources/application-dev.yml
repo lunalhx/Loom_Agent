@@ -211,11 +211,6 @@ loom:
         max-concurrent-per-client: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_CONCURRENT_PER_CLIENT:2}
         max-starts-per-window: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_STARTS_PER_WINDOW:6}
         window-seconds: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_WINDOW_SECONDS:60}
-      chat-stream:
-        max-concurrent-global: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_CONCURRENT_GLOBAL:20}
-        max-concurrent-per-client: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_CONCURRENT_PER_CLIENT:4}
-        max-starts-per-window: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_MAX_STARTS_PER_WINDOW:30}
-        window-seconds: ${LOOM_HTTP_STREAM_LIMIT_CHAT_STREAM_WINDOW_SECONDS:60}
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml
   config-location: classpath:/mybatis/config/mybatis-config.xml
