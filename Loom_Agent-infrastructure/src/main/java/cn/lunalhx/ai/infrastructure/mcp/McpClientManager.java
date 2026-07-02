@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +83,8 @@ public class McpClientManager {
             }
         }
 
+        // Sort by generated local name for deterministic ordering
+        allTools.sort(Comparator.comparing(t -> t.spec().getName()));
         McpToolNameGenerator.checkConflicts(allTools.stream()
                 .map(t -> t.spec().getName())
                 .collect(Collectors.toList()));
@@ -131,6 +134,8 @@ public class McpClientManager {
         int maxTools = properties.getMaxToolsPerServer();
 
         List<McpSchema.Tool> filtered = filterTools(serverAlias, config, discovered);
+        // Sort by remote tool name for deterministic ordering before limit
+        filtered.sort(Comparator.comparing(McpSchema.Tool::name));
         if (filtered.size() > maxTools) {
             log.warn("MCP server '{}': {} tools discovered, limiting to {}", serverAlias, filtered.size(), maxTools);
             filtered = filtered.subList(0, maxTools);

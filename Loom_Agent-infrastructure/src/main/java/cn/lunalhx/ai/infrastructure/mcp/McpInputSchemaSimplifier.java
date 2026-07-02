@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +50,10 @@ public final class McpInputSchemaSimplifier {
         }
 
         List<String> required = schema.required() == null ? List.of() : schema.required();
-        List<String> requiredShown = required.subList(0, Math.min(required.size(), maxProperties));
+        // Sort for deterministic ordering before limit
+        List<String> sortedRequired = new ArrayList<>(required);
+        Collections.sort(sortedRequired);
+        List<String> requiredShown = sortedRequired.subList(0, Math.min(sortedRequired.size(), maxProperties));
 
         Map<String, Object> rawProps = schema.properties();
         if (rawProps == null) {
@@ -57,13 +61,20 @@ public final class McpInputSchemaSimplifier {
         }
 
         List<String> orderedNames = new ArrayList<>();
-        // required first (preserving original order)
+        // required first (deterministic order after sort)
         for (String name : requiredShown) {
             orderedNames.add(name);
         }
-        // then remaining optional properties
+        // then remaining optional properties (sorted deterministically)
+        List<String> optionalNames = new ArrayList<>();
         for (String name : rawProps.keySet()) {
-            if (!orderedNames.contains(name) && orderedNames.size() < maxProperties) {
+            if (!orderedNames.contains(name)) {
+                optionalNames.add(name);
+            }
+        }
+        Collections.sort(optionalNames);
+        for (String name : optionalNames) {
+            if (orderedNames.size() < maxProperties) {
                 orderedNames.add(name);
             }
         }
@@ -111,11 +122,13 @@ public final class McpInputSchemaSimplifier {
         String desc = asString(m.get("description"));
         Object enumObj = m.get("enum");
         if (enumObj instanceof List<?> e) {
-            if (e.size() <= maxEnumValues) {
-                out.put("enum", e);
+            // Sort for deterministic output before checking size limit
+            List<Object> sortedEnum = sortEnumIfComparable(new ArrayList<>(e));
+            if (sortedEnum.size() <= maxEnumValues) {
+                out.put("enum", sortedEnum);
             } else {
                 String prefix = (desc != null ? desc : "");
-                desc = prefix + " (enum: " + e.size() + " values)";
+                desc = prefix + " (enum: " + sortedEnum.size() + " values)";
             }
         }
 
@@ -206,5 +219,19 @@ public final class McpInputSchemaSimplifier {
             return s;
         }
         return null;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<Object> sortEnumIfComparable(List<Object> values) {
+        if (values.isEmpty()) {
+            return values;
+        }
+        try {
+            // All elements must be mutually Comparable for sort to succeed
+            Collections.sort((List) values);
+        } catch (ClassCastException ignored) {
+            // Mixed types — leave unsorted
+        }
+        return values;
     }
 }

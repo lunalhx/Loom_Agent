@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 @Data
 public class McpClientProperties {
@@ -24,7 +25,7 @@ public class McpClientProperties {
     private int maxEnumValues = 12;
     private int maxResultChars = 100000;
     private List<String> stdioEnvAllowlist = List.of("PATH", "HOME", "TMPDIR", "LANG");
-    private Map<String, ServerConfig> servers = new HashMap<>();
+    private Map<String, ServerConfig> servers = new TreeMap<>();
 
     @Data
     public static class ServerConfig {

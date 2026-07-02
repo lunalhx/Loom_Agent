@@ -240,7 +240,7 @@ public class McpInputSchemaSimplifierTest {
         String out2 = simplifier.simplify(schema);
         assertEquals("Same schema must produce identical output", out1, out2);
 
-        // Verify insertion order is preserved
+        // Verify alphabetical order is used
         int posA = out1.indexOf("\"alpha\"");
         int posB = out1.indexOf("\"beta\"");
         int posC = out1.indexOf("\"gamma\"");
@@ -317,6 +317,84 @@ public class McpInputSchemaSimplifierTest {
         JsonNode refPropNode = node.path("properties").path("refProp");
         assertEquals("object", refPropNode.path("type").asText());
         assertEquals("(ref)", refPropNode.path("description").asText());
+    }
+
+    @Test
+    public void shuffledPropertiesProduceIdenticalOutput() throws Exception {
+        // Schema A: alpha, beta, gamma in insertion order
+        Map<String, Object> propsA = new LinkedHashMap<>();
+        propsA.put("alpha", buildStringProp("First"));
+        propsA.put("beta", buildStringProp("Second"));
+        propsA.put("gamma", buildStringProp("Third"));
+
+        // Schema B: shuffled insertion order
+        Map<String, Object> propsB = new LinkedHashMap<>();
+        propsB.put("gamma", buildStringProp("Third"));
+        propsB.put("alpha", buildStringProp("First"));
+        propsB.put("beta", buildStringProp("Second"));
+
+        McpSchema.JsonSchema schemaA = new McpSchema.JsonSchema(
+                "object", propsA, List.of("beta"), null, null, null);
+        McpSchema.JsonSchema schemaB = new McpSchema.JsonSchema(
+                "object", propsB, List.of("beta"), null, null, null);
+
+        String outA = simplifier.simplify(schemaA);
+        String outB = simplifier.simplify(schemaB);
+
+        assertEquals("Shuffled property insertion order must produce identical output", outA, outB);
+    }
+
+    @Test
+    public void shuffledRequiredListProducesIdenticalOutput() throws Exception {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("alpha", buildStringProp("First"));
+        props.put("beta", buildStringProp("Second"));
+        props.put("gamma", buildStringProp("Third"));
+
+        McpSchema.JsonSchema schemaA = new McpSchema.JsonSchema(
+                "object", props, List.of("beta", "alpha"), null, null, null);
+        McpSchema.JsonSchema schemaB = new McpSchema.JsonSchema(
+                "object", props, List.of("alpha", "beta"), null, null, null);
+
+        String outA = simplifier.simplify(schemaA);
+        String outB = simplifier.simplify(schemaB);
+
+        assertEquals("Shuffled required list must produce identical output", outA, outB);
+    }
+
+    @Test
+    public void shuffledEnumValuesProduceIdenticalOutput() throws Exception {
+        Map<String, Object> propsA = new LinkedHashMap<>();
+        Map<String, Object> enumPropA = new LinkedHashMap<>();
+        enumPropA.put("type", "string");
+        enumPropA.put("enum", List.of("c", "a", "b"));
+        propsA.put("color", enumPropA);
+
+        Map<String, Object> propsB = new LinkedHashMap<>();
+        Map<String, Object> enumPropB = new LinkedHashMap<>();
+        enumPropB.put("type", "string");
+        enumPropB.put("enum", List.of("b", "c", "a"));
+        propsB.put("color", enumPropB);
+
+        McpSchema.JsonSchema schemaA = new McpSchema.JsonSchema(
+                "object", propsA, null, null, null, null);
+        McpSchema.JsonSchema schemaB = new McpSchema.JsonSchema(
+                "object", propsB, null, null, null, null);
+
+        String outA = simplifier.simplify(schemaA);
+        String outB = simplifier.simplify(schemaB);
+
+        assertEquals("Shuffled enum values must produce identical output", outA, outB);
+
+        // Verify enums are sorted alphabetically
+        assertTrue("Enums must be sorted", outA.contains("\"enum\":[\"a\",\"b\",\"c\"]"));
+    }
+
+    private static Map<String, Object> buildStringProp(String description) {
+        Map<String, Object> prop = new LinkedHashMap<>();
+        prop.put("type", "string");
+        prop.put("description", description);
+        return prop;
     }
 
     private McpSchema.JsonSchema buildDeeplyNestedSchema() {
