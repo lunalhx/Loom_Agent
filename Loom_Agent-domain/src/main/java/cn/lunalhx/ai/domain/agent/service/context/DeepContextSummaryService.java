@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import lombok.Builder;
 import lombok.Value;
 import org.apache.commons.lang3.StringUtils;
@@ -125,8 +126,11 @@ public class DeepContextSummaryService {
             TraceCost cost = budgetGuard == null ? null
                     : budgetGuard.recordModelUsage(context, result.getActualModel(), result.getUsage());
             if (traceRecorder != null) {
-                traceRecorder.recordModelUsage(context, NODE, result.getUsage(), cost,
-                        Map.of("purpose", ModelCallPurpose.CONTEXT_SUMMARY.name()));
+                Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, NODE,
+                        ModelCapabilities.COMPLETE_CONTEXT_SUMMARY, ModelCallPurpose.CONTEXT_SUMMARY,
+                        result.getActualModel(), result.getUsage(),
+                        Map.of("inputChars", chunk.length()));
+                traceRecorder.recordModelUsage(context, NODE, result.getUsage(), cost, metadata);
                 traceRecorder.recordModelGatewayEvent(context, "context_summary_call", NODE, "success",
                         System.currentTimeMillis() - startedAt, "context summary completed", null,
                         Map.of("model", StringUtils.defaultString(result.getActualModel()),

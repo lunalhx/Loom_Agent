@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.service.MemoryExtractionService;
@@ -84,8 +85,9 @@ public class MemoryAutoConfig {
     @Bean
     public MemoryExtractionService memoryExtractionService(ModelGateway modelGateway,
                                                             ObjectMapper objectMapper,
-                                                            MemoryProperties memoryProperties) {
+                                                            MemoryProperties memoryProperties,
+                                                            TraceRecorder traceRecorder) {
         return new MemoryExtractionService(modelGateway, objectMapper,
-                memoryProperties.getExtractionModel());
+                memoryProperties.getExtractionModel(), traceRecorder);
     }
 }

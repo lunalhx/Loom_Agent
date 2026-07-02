@@ -6,7 +6,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import org.apache.commons.lang3.StringUtils;
 
@@ -59,9 +61,12 @@ final class ModelCallBudgetCoordinator {
         TraceCost cost = budgetGuard == null ? null
                 : budgetGuard.recordModelUsage(context, result.getActualModel(), result.getUsage());
         if (traceRecorder != null) {
-            Map<String, Object> metadata = result.getUsage() == null
-                    ? Map.of("usageMissing", true)
+            Map<String, Object> extras = result.getUsage() == null
+                    ? null
                     : Map.of("finishReason", StringUtils.defaultString(result.getFinishReason()));
+            Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, nodeName,
+                    ModelCapabilities.COMPLETE_AGENT_DECISION, ModelCallPurpose.CONTROL_JSON,
+                    result.getActualModel(), result.getUsage(), extras);
             traceRecorder.recordModelUsage(context, nodeName, result.getUsage(), cost, metadata);
         }
     }

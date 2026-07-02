@@ -1,15 +1,20 @@
 package cn.lunalhx.ai.domain.memory.service;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.memory.model.entity.MemoryExtractionPayload;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryType;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,12 +24,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MemoryExtractionService {
 
     private static final Logger log = LoggerFactory.getLogger(MemoryExtractionService.class);
+    private static final String NODE = "memory_extraction";
 
     private static final int MAX_MEMORIES = 5;
     private static final int MAX_TITLE_LENGTH = 200;
@@ -37,16 +45,24 @@ public class MemoryExtractionService {
     private final ModelGateway modelGateway;
     private final ObjectMapper objectMapper;
     private final String extractionModel;
+    private final TraceRecorder traceRecorder;
 
     public MemoryExtractionService(ModelGateway modelGateway, ObjectMapper objectMapper,
                                     String extractionModel) {
+        this(modelGateway, objectMapper, extractionModel, null);
+    }
+
+    public MemoryExtractionService(ModelGateway modelGateway, ObjectMapper objectMapper,
+                                    String extractionModel, TraceRecorder traceRecorder) {
         this.modelGateway = modelGateway;
         this.objectMapper = objectMapper;
         this.extractionModel = extractionModel;
+        this.traceRecorder = traceRecorder;
     }
 
     public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs) {
         ChatPrompt prompt = ChatPrompt.builder()
+                .capability(ModelCapabilities.COMPLETE_AGENT_DECISION)
                 .purpose(ModelCallPurpose.MEMORY_EXTRACTION)
                 .outputFormat(OutputFormat.JSON_OBJECT)
                 .model(extractionModel != null && !extractionModel.isBlank() ? extractionModel : null)
@@ -64,11 +80,32 @@ public class MemoryExtractionService {
             return ExtractionResult.retryable("Model call failed: " + truncate(e.getMessage(), MAX_ERROR_MSG_LENGTH));
         }
 
+        recordUsage(result);
+
         if (result == null || result.getContent() == null || result.getContent().isBlank()) {
             return ExtractionResult.retryable("Empty or null model response");
         }
 
         return parseResponse(result.getContent());
+    }
+
+    private void recordUsage(ModelChatResult result) {
+        if (traceRecorder == null || result == null) {
+            return;
+        }
+        // Memory extraction 是后台 worker 调起的，没有真实 Agent 上下文。
+        // 构造一个最小可用的合成上下文，让现有 recordModelUsage 写入 model_usage 事件并保留 hit/miss。
+        String syntheticRunId = "memory-extraction-" + UUID.randomUUID();
+        AgentContext context = new AgentContext();
+        context.setRunId(syntheticRunId);
+        context.setRootRunId(syntheticRunId);
+        context.setTraceId(syntheticRunId);
+        // getCurrentSpanId() / getParentSpanId() 在新 AgentContext 上为 null，
+        // recordModelUsage 仅把它们原样透传给 AgentTraceEvent，对最终 JSON 无影响。
+        Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, NODE,
+                ModelCapabilities.COMPLETE_AGENT_DECISION, ModelCallPurpose.MEMORY_EXTRACTION,
+                result.getActualModel(), result.getUsage(), null);
+        traceRecorder.recordModelUsage(context, NODE, result.getUsage(), null, metadata);
     }
 
     private ExtractionResult parseResponse(String raw) {

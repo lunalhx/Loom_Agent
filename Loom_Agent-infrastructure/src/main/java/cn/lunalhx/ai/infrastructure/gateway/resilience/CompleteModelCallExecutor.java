@@ -63,6 +63,8 @@ public final class CompleteModelCallExecutor {
                     ModelCircuitBreakerManager.CircuitTransition transition =
                             circuitBreakerManager.success(permit, durationMs);
                     observer.attemptSucceeded(context, state.key(), durationMs, state.attemptNo());
+                    // 成功尝试只触发一次：失败的重试 / fallback 切换不会进入这里，因此 cache usage 不会重复累计。
+                    observer.recordCacheUsage(context, state.key(), state.prompt().getPurpose(), result.getUsage());
                     observer.circuitTransition(context, state.key(), transition, state.attemptNo(), null);
                 })
                 .onErrorResume(error -> {

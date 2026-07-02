@@ -22,6 +22,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
+import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -217,9 +218,12 @@ public class ReplanNode extends AbstractAgentNode {
         TraceCost cost = budgetGuard == null ? null
                 : budgetGuard.recordModelUsage(context, result.getActualModel(), result.getUsage());
         if (traceRecorder != null) {
-            Map<String, Object> metadata = result.getUsage() == null
-                    ? Map.of("usageMissing", true)
+            Map<String, Object> extras = result.getUsage() == null
+                    ? null
                     : Map.of("finishReason", StringUtils.defaultString(result.getFinishReason()));
+            Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, name(),
+                    ModelCapabilities.COMPLETE_REPLAN, ModelCallPurpose.CONTROL_JSON,
+                    result.getActualModel(), result.getUsage(), extras);
             traceRecorder.recordModelUsage(context, name(), result.getUsage(), cost, metadata);
         }
     }

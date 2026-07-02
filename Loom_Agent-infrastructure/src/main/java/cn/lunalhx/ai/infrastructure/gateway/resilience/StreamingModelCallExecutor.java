@@ -4,12 +4,14 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class StreamingModelCallExecutor {
 
@@ -39,12 +41,15 @@ public final class StreamingModelCallExecutor {
 
     public Flux<ModelStreamChunk> execute(ChatPrompt prompt, ModelCallKey key, AgentContext context) {
         AtomicBoolean tokenEmitted = new AtomicBoolean(false);
+        // 用于在 doOnComplete 之前收集最后一次的 usage（DeepSeek SSE 在 stream_options.include_usage=true 时
+        // 把 usage 放在最后一个 chunk 上；前置错误不会到这里，所以每个逻辑调用最多只记录一次）。
+        AtomicReference<TokenUsage> latestUsage = new AtomicReference<>();
         ModelAttemptState state = new ModelAttemptState(prompt, key, 1, 0, null);
-        return attempt(state, context, tokenEmitted);
+        return attempt(state, context, tokenEmitted, latestUsage);
     }
 
     private Flux<ModelStreamChunk> attempt(ModelAttemptState state, AgentContext context,
-                                            AtomicBoolean tokenEmitted) {
+                                            AtomicBoolean tokenEmitted, AtomicReference<TokenUsage> latestUsage) {
         preflight.validate(state.prompt(), state.key(), context);
 
         ModelCircuitBreakerManager.CircuitPermit permit;
@@ -67,12 +72,18 @@ public final class StreamingModelCallExecutor {
                     if (StringUtils.isNotEmpty(chunk.getContent())) {
                         tokenEmitted.set(true);
                     }
+                    if (chunk.getUsage() != null) {
+                        latestUsage.set(chunk.getUsage());
+                    }
                 })
                 .doOnComplete(() -> {
                     long durationMs = elapsed(startedAt);
                     ModelCircuitBreakerManager.CircuitTransition transition =
                             circuitBreakerManager.success(permit, durationMs);
                     observer.attemptSucceeded(context, state.key(), durationMs, state.attemptNo());
+                    // 成功尝试只触发一次：失败的重试不会进入 doOnComplete（流异常会走 onErrorResume），
+                    // 因此 cache usage 不会重复累计。
+                    observer.recordCacheUsage(context, state.key(), state.prompt().getPurpose(), latestUsage.get());
                     observer.circuitTransition(context, state.key(), transition, state.attemptNo(), null);
                 })
                 .onErrorResume(error -> {
@@ -86,7 +97,7 @@ public final class StreamingModelCallExecutor {
                     observer.circuitTransition(context, state.key(), transition, state.attemptNo(), normalized);
 
                     ModelRetryDecision decision = retryPolicy.decide(state, normalized, context, retryable);
-                    return handleDecision(decision, state, context, tokenEmitted, durationMs);
+                    return handleDecision(decision, state, context, tokenEmitted, latestUsage, durationMs);
                 });
     }
 
@@ -94,6 +105,7 @@ public final class StreamingModelCallExecutor {
                                                    ModelAttemptState originalState,
                                                    AgentContext context,
                                                    AtomicBoolean tokenEmitted,
+                                                   AtomicReference<TokenUsage> latestUsage,
                                                    long durationMs) {
         if (decision.action() == ModelRetryDecision.Action.STOP) {
             if (decision.retryExhausted()) {
@@ -110,7 +122,7 @@ public final class StreamingModelCallExecutor {
                 classifier.errorCode(decision.terminalError()));
 
         return Mono.delay(Duration.ofMillis(decision.delayMs()))
-                .thenMany(Flux.defer(() -> attempt(decision.nextAttempt(), context, tokenEmitted)));
+                .thenMany(Flux.defer(() -> attempt(decision.nextAttempt(), context, tokenEmitted, latestUsage)));
     }
 
     private long elapsed(long startedAt) {
