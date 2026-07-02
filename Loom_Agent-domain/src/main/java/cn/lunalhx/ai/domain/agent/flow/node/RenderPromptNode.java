@@ -67,6 +67,8 @@ public class RenderPromptNode extends AbstractAgentNode {
 
     private String renderPromptText(AgentContext context) {
         StringBuilder prompt = new StringBuilder();
+
+        // ===== 1. 固定角色/协议/安全规则 =====
         if (context.getAgentRole() == null) {
             prompt.append("你是一个受权限约束的代码修改 Agent。先用只读工具理解代码，再用写类工具做最小改动，最后用测试命令验证。\n");
             if (context.isSubAgentSpawnAllowed()) {
@@ -85,7 +87,16 @@ public class RenderPromptNode extends AbstractAgentNode {
         prompt.append("写文件、运行测试、Git 暂存/提交可能需要人工确认；如果操作被拒绝或高危拦截，请改用更安全的下一步，不要重复同一个被拦截动作。\n");
         prompt.append("删除文件前如果文件名不确定，必须先调用 find_files 获取准确路径，不要猜测文件名。\n\n");
 
-        // Active skills section
+        // ===== 2. 固定 Action/Final JSON 示例 =====
+        prompt.append("Action JSON 示例：{\"type\":\"action\",\"reason\":\"一句简短理由\",\"tool\":\"<可用工具名>\",\"input\":{}}\n");
+        if (context.getAgentRole() == null) {
+            prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"结论，包含改动、测试结果和文件路径证据\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");
+        } else {
+            prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"{\\\"summary\\\":\\\"结论摘要\\\",\\\"findings\\\":[{\\\"file\\\":\\\"path\\\",\\\"line\\\":1,\\\"symbol\\\":\\\"Name\\\",\\\"reason\\\":\\\"为什么相关\\\"}],\\\"confidence\\\":\\\"high\\\",\\\"truncated\\\":false,\\\"followUp\\\":\\\"可选\\\"}\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");
+        }
+        prompt.append('\n');
+
+        // ===== 3. active skills、available skills、已确定排序的工具目录 =====
         List<SkillActivation> activatedSkills = context.getActivatedSkills();
         if (activatedSkills != null && !activatedSkills.isEmpty()) {
             prompt.append("<active_skills>\n");
@@ -102,20 +113,31 @@ public class RenderPromptNode extends AbstractAgentNode {
             prompt.append("</active_skills>\n\n");
         }
 
-        // Available skills catalog
         if (context.getSkillCatalogText() != null && !context.getSkillCatalogText().isEmpty()) {
             prompt.append("<available_skills>\n");
             prompt.append(context.getSkillCatalogText());
             prompt.append("</available_skills>\n\n");
         }
 
-        if (context.getMemoryContext() != null && !context.getMemoryContext().isEmpty()) {
-            prompt.append("<memory_context>\n");
-            prompt.append(context.getMemoryContext());
-            prompt.append("\n</memory_context>\n\n");
+        prompt.append("可用工具：\n");
+        for (ToolSpec spec : context.getToolSpecs()) {
+            prompt.append("- ").append(spec.getName()).append(": ").append(spec.getDescription())
+                    .append(" input=").append(spec.getInputSchema()).append("\n");
         }
 
-        prompt.append("用户问题：").append(context.getQuestion()).append("\n\n");
+        // ===== 4. 当前用户任务等 run 内稳定内容 =====
+        prompt.append("\n用户问题：").append(context.getQuestion()).append("\n\n");
+
+        // ===== 5. DynamicText 历史 =====
+        if (!context.getDynamicText().isEmpty()) {
+            prompt.append("动态上下文：\n");
+            prompt.append("上下文按 user_task / assistant_action / tool_result / system_note 组织。");
+            prompt.append("assistant_action 是你上一轮请求的工具调用，tool_result 是后端实际执行工具后的观察结果。\n");
+            prompt.append(context.getDynamicText().render()).append('\n');
+        }
+
+        // ===== 6. 动态尾部：步数预算、当前计划、memoryContext =====
+        prompt.append('\n');
         if (context.getMaxSegments() > 1) {
             prompt.append("执行预算：第 ").append(context.getSegmentIndex() + 1).append("/")
                     .append(context.getMaxSegments()).append(" 段，全局步数 ")
@@ -126,23 +148,12 @@ public class RenderPromptNode extends AbstractAgentNode {
             prompt.append("当前计划：\n");
             prompt.append(context.getPlan().render()).append("\n\n");
         }
-        prompt.append("可用工具：\n");
-        for (ToolSpec spec : context.getToolSpecs()) {
-            prompt.append("- ").append(spec.getName()).append(": ").append(spec.getDescription())
-                    .append(" input=").append(spec.getInputSchema()).append("\n");
+        if (context.getMemoryContext() != null && !context.getMemoryContext().isEmpty()) {
+            prompt.append("<memory_context>\n");
+            prompt.append(context.getMemoryContext());
+            prompt.append("\n</memory_context>\n\n");
         }
-        if (!context.getDynamicText().isEmpty()) {
-            prompt.append("\n动态上下文：\n");
-            prompt.append("上下文按 user_task / assistant_action / tool_result / system_note 组织。");
-            prompt.append("assistant_action 是你上一轮请求的工具调用，tool_result 是后端实际执行工具后的观察结果。\n");
-            prompt.append(context.getDynamicText().render()).append('\n');
-        }
-        prompt.append("\nAction JSON 示例：{\"type\":\"action\",\"reason\":\"一句简短理由\",\"tool\":\"<可用工具名>\",\"input\":{}}\n");
-        if (context.getAgentRole() == null) {
-            prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"结论，包含改动、测试结果和文件路径证据\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");
-        } else {
-            prompt.append("Final JSON 示例：{\"type\":\"final\",\"answer\":\"{\\\"summary\\\":\\\"结论摘要\\\",\\\"findings\\\":[{\\\"file\\\":\\\"path\\\",\\\"line\\\":1,\\\"symbol\\\":\\\"Name\\\",\\\"reason\\\":\\\"为什么相关\\\"}],\\\"confidence\\\":\\\"high\\\",\\\"truncated\\\":false,\\\"followUp\\\":\\\"可选\\\"}\",\"evidence\":[{\"file\":\"path\",\"line\":1}]}\n");
-        }
+
         return prompt.toString();
     }
 
@@ -174,6 +185,13 @@ public class RenderPromptNode extends AbstractAgentNode {
                     .append(spec.getDescription()).append(':')
                     .append(spec.getInputSchema()).append(';');
         }
+        key.append('|');
+        key.append("maxSteps=").append(context.getMaxSteps()).append('|');
+        key.append("maxTotalSteps=").append(context.getMaxTotalSteps()).append('|');
+        key.append("step=").append(context.getStep()).append('|');
+        key.append("segmentStartStep=").append(context.getSegmentStartStep()).append('|');
+        key.append("segmentIndex=").append(context.getSegmentIndex()).append('|');
+        key.append("maxSegments=").append(context.getMaxSegments());
         return key.toString();
     }
 

@@ -355,8 +355,7 @@ public class ToolRegistryTest {
         if (start < 0) return null;
         start += marker.length();
         int end = prompt.indexOf("\n\n", start);
-        if (end < 0) end = prompt.indexOf("\n动态上下文：", start);
-        if (end < 0) end = prompt.indexOf("\nAction JSON 示例：", start);
+        if (end < 0) end = prompt.indexOf("\n用户问题：", start);
         if (end < 0) end = prompt.length();
         return prompt.substring(start, end).stripTrailing();
     }
