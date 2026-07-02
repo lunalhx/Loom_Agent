@@ -82,7 +82,8 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             int maxDepth = Math.max(MIN_MAX_DEPTH, Math.min(MAX_MAX_DEPTH,
                     integer(call.getInput(), "maxDepth", DEFAULT_MAX_DEPTH)));
             int rawLimit = Math.max(1, integer(call.getInput(), "limit", properties.getSearchMaxResults()));
-            final int limit = Math.min(rawLimit, properties.getSearchMaxResults());
+            final int userLimit = Math.min(rawLimit, properties.getSearchMaxResults());
+            final int collectLimit = properties.getSearchMaxResults();
             boolean caseSensitive = call.getInput() != null
                     && call.getInput().has("caseSensitive")
                     && call.getInput().get("caseSensitive").asBoolean(false);
@@ -114,7 +115,7 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
                         timedOut[0] = true;
                         return FileVisitResult.TERMINATE;
                     }
-                    if (results.size() >= limit) {
+                    if (results.size() >= collectLimit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (Files.isSymbolicLink(file)) {
@@ -150,12 +151,17 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             if (results.isEmpty()) {
                 output.append("未找到匹配文件：").append(pattern);
             } else {
+                int shown = 0;
                 for (String result : results) {
+                    if (shown >= userLimit) {
+                        break;
+                    }
                     output.append(result).append('\n');
+                    shown++;
                 }
             }
 
-            boolean truncated = timedOut[0] || results.size() >= limit;
+            boolean truncated = timedOut[0] || results.size() >= collectLimit || results.size() > userLimit;
             if (truncated && !results.isEmpty()) {
                 output.append("\n结果已截断，建议缩小搜索范围");
             }

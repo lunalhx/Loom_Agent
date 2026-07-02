@@ -64,13 +64,14 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (entries.size() >= limit + 1) {
+                    if (entries.size() >= limit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (isSensitiveFileName(file.getFileName().toString())) {
                         return FileVisitResult.CONTINUE;
                     }
-                    entries.add((Files.isDirectory(file) ? "D " : "F ") + relative(call, file));
+                    String prefix = Files.isDirectory(file) ? "D " : "F ";
+                    entries.add(prefix + relativeNormalized(call, file));
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -82,7 +83,7 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
                 @Override
                 public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
                     if (!dir.equals(path)) {
-                        entries.add("D " + relative(call, dir));
+                        entries.add("D " + relativeNormalized(call, dir));
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -100,7 +101,7 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
                 shown++;
             }
 
-            boolean truncated = entries.size() > limit;
+            boolean truncated = entries.size() >= limit;
             return ToolResult.success(output.toString(), truncated, elapsed(startedAt));
         } catch (Exception e) {
             return failure("list_dir_failed", e.getMessage(), startedAt);
