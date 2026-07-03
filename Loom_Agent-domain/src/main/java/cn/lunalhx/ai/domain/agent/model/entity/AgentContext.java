@@ -175,7 +175,7 @@ public class AgentContext {
     public String getModelOutput() { return prompt.modelOutput(); }
     public void setModelOutput(String v) { prompt.setModelOutput(v); }
 
-    // -- legacy prompt/memory delegates pending removal --
+    // ---- legacy prompt/memory delegates pending removal ----
     public String getCurrentSystemPrompt() { return prompt.currentSystemPrompt(); }
     public void setCurrentSystemPrompt(String v) { prompt.setCurrentSystemPrompt(v); }
     public String getCurrentUserPrompt() { return prompt.currentUserPrompt(); }
@@ -186,6 +186,17 @@ public class AgentContext {
     public void setSelectedMemoryIds(List<String> v) { prompt.setSelectedMemoryIds(v); }
     public long getSelectedMemoryVersion() { return prompt.selectedMemoryVersion(); }
     public void setSelectedMemoryVersion(long v) { prompt.setSelectedMemoryVersion(v); }
+
+    // ---- conversation ledger delegates (C1) ----
+    public ConversationLedger getConversationLedger() { return prompt.conversationLedger(); }
+    public void setConversationLedger(ConversationLedger v) { prompt.setConversationLedger(v); }
+    public StablePrefix getStablePrefix() { return prompt.stablePrefix(); }
+    public void setStablePrefix(StablePrefix v) { prompt.setStablePrefix(v); }
+    public int getGeneration() { return prompt.generation(); }
+    public void setGeneration(int v) { prompt.setGeneration(v); }
+    public boolean isLedgerActive() { return prompt.isLedgerActive(); }
+    public void ensureLedgerActive() { prompt.ensureLedgerActive(); }
+    public int incrementGeneration() { return prompt.incrementGeneration(); }
 
     // ==================== action delegates ====================
 

@@ -44,6 +44,7 @@ public class AgentRuntimeProperties {
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
     private StepBudgetProperties stepBudget = new StepBudgetProperties();
     private UndoProperties undo = new UndoProperties();
+    private ConversationLedgerProperties conversationLedger = new ConversationLedgerProperties();
     private SkillProperties skills = new SkillProperties();
     private BackgroundShellProperties backgroundShell = new BackgroundShellProperties();
 
@@ -146,6 +147,14 @@ public class AgentRuntimeProperties {
                 "rm", "rmdir", "find", "python", "python3",
                 "sh", "bash", "zsh", "dash", "ksh", "csh", "fish", "ash", "exec", "eval", "source"));
         private String unknownLevel = "WRITE_CONFIRM";
+
+    }
+
+    @Data
+    public static class ConversationLedgerProperties {
+
+        private Boolean enabled = false;
+        private Boolean shadowEnabled = false;
 
     }
 
