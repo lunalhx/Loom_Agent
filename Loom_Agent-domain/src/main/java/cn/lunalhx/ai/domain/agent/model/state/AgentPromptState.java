@@ -26,6 +26,10 @@ public final class AgentPromptState {
     private int lastLedgerPlanVersion;
     private String configFingerprint;
 
+    // ---- ledger compaction (C10) ----
+    private int lastCompactionGeneration = -1;
+    private String ledgerBaselineArtifactId;
+
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
@@ -52,6 +56,12 @@ public final class AgentPromptState {
     /** Config fingerprint set by the factory. */
     public String configFingerprint() { return configFingerprint; }
 
+    /** C10: The generation in which the last compaction was applied; -1 if never. */
+    public int lastCompactionGeneration() { return lastCompactionGeneration; }
+
+    /** C10: Transcript artifact ID from the most recent ledger compaction. */
+    public String ledgerBaselineArtifactId() { return ledgerBaselineArtifactId; }
+
     /** Whether bootstrap has completed and the ledger is ready for model input. */
     public boolean ledgerReady() { return ledgerReady; }
 
@@ -77,6 +87,8 @@ public final class AgentPromptState {
     public void setGeneration(int v) { this.generation = v; }
     public void setLastLedgerPlanVersion(int v) { this.lastLedgerPlanVersion = v; }
     public void setConfigFingerprint(String v) { this.configFingerprint = v; }
+    public void setLastCompactionGeneration(int v) { this.lastCompactionGeneration = v; }
+    public void setLedgerBaselineArtifactId(String v) { this.ledgerBaselineArtifactId = v; }
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
 

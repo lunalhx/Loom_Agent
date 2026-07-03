@@ -136,6 +136,10 @@ public class AgentContextSnapshot {
      *  Used on continuation/resume to detect config drift and trigger generation bumps. */
     private String configFingerprint;
 
+    // -- ledger compaction (C10) --
+    private int lastCompactionGeneration;
+    private String ledgerBaselineArtifactId;
+
     // ---- factory methods ----
 
     /** Defensive copy of ledger entries for snapshot isolation. */
@@ -239,6 +243,9 @@ public class AgentContextSnapshot {
                 .generation(context.prompt().generation())
                 // config fingerprint (C9)
                 .configFingerprint(context.prompt().configFingerprint())
+                // ledger compaction (C10)
+                .lastCompactionGeneration(context.prompt().lastCompactionGeneration())
+                .ledgerBaselineArtifactId(context.prompt().ledgerBaselineArtifactId())
                 .build();
     }
 
@@ -337,6 +344,8 @@ public class AgentContextSnapshot {
         context.setStablePrefix(stablePrefix);
         context.setGeneration(generation);
         context.setConfigFingerprint(configFingerprint);
+        context.setLastCompactionGeneration(lastCompactionGeneration);
+        context.setLedgerBaselineArtifactId(ledgerBaselineArtifactId);
 
         return context;
     }

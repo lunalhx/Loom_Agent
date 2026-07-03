@@ -19,10 +19,13 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionResult;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,12 +40,13 @@ public class RenderPromptNode extends AbstractAgentNode {
     private final LedgerShadowDiagnostic shadowDiagnostic;
     private final LedgerBootstrapService bootstrapService;
     private final StablePrefixBuilder prefixBuilder;
+    private final LedgerCompactionService ledgerCompactionService;
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
                             SkillRepository skillRepository,
                             ContextArtifactRepository artifactRepository,
                             ContextBlobStore blobStore) {
-        this(contextWindowManager, skillRepository, artifactRepository, blobStore, null, null, null);
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore, null, null, null, null);
     }
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
@@ -50,7 +54,7 @@ public class RenderPromptNode extends AbstractAgentNode {
                             ContextArtifactRepository artifactRepository,
                             ContextBlobStore blobStore,
                             LedgerShadowDiagnostic shadowDiagnostic) {
-        this(contextWindowManager, skillRepository, artifactRepository, blobStore, shadowDiagnostic, null, null);
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore, shadowDiagnostic, null, null, null);
     }
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
@@ -60,6 +64,18 @@ public class RenderPromptNode extends AbstractAgentNode {
                             LedgerShadowDiagnostic shadowDiagnostic,
                             LedgerBootstrapService bootstrapService,
                             StablePrefixBuilder prefixBuilder) {
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore,
+                shadowDiagnostic, bootstrapService, prefixBuilder, null);
+    }
+
+    public RenderPromptNode(ContextWindowManager contextWindowManager,
+                            SkillRepository skillRepository,
+                            ContextArtifactRepository artifactRepository,
+                            ContextBlobStore blobStore,
+                            LedgerShadowDiagnostic shadowDiagnostic,
+                            LedgerBootstrapService bootstrapService,
+                            StablePrefixBuilder prefixBuilder,
+                            LedgerCompactionService ledgerCompactionService) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         this.skillRepository = skillRepository;
@@ -68,6 +84,7 @@ public class RenderPromptNode extends AbstractAgentNode {
         this.shadowDiagnostic = shadowDiagnostic;
         this.bootstrapService = bootstrapService;
         this.prefixBuilder = prefixBuilder != null ? prefixBuilder : new StablePrefixBuilder();
+        this.ledgerCompactionService = ledgerCompactionService;
     }
 
     @Override
@@ -88,6 +105,17 @@ public class RenderPromptNode extends AbstractAgentNode {
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
         ContextCompactResult compactResult = contextWindowManager.compactBeforePrompt(context);
+
+        // ---- C10: Ledger compaction (independent of DynamicText compaction) ----
+        List<AgentEvent> compactEvents = new ArrayList<>();
+        if (compactResult.isCompacted()) {
+            compactEvents.add(compactEvent(context, compactResult));
+        }
+        LedgerCompactionResult ledgerResult = compactLedgerIfNeeded(context);
+        if (ledgerResult.compacted()) {
+            compactEvents.add(ledgerCompactEvent(context, ledgerResult));
+        }
+
         String cacheKey = computeCacheKey(context);
         if (!cacheKey.equals(context.getPromptRenderCacheKey()) || context.getCurrentPrompt() == null) {
             context.setCurrentPrompt(renderPromptText(context));
@@ -98,7 +126,7 @@ public class RenderPromptNode extends AbstractAgentNode {
         runShadowDiagnostic(context);
 
         return NodeResult.next(AgentNodeNames.MODEL_CALL,
-                compactResult.isCompacted() ? List.of(compactEvent(context, compactResult)) : List.of());
+                compactEvents.isEmpty() ? List.of() : compactEvents);
     }
 
     private String renderPromptText(AgentContext context) {
@@ -260,6 +288,45 @@ public class RenderPromptNode extends AbstractAgentNode {
                         "artifactCount", result.getArtifactCount(),
                         "transcriptArtifactId", result.getTranscriptArtifactId() == null
                                 ? "" : result.getTranscriptArtifactId()))
+                .build();
+    }
+
+    // ================================================================
+    // C10: Ledger compaction
+    // ================================================================
+
+    /**
+     * Run ledger compaction if the entry count exceeds the high watermark.
+     *
+     * <p>Returns a non-null result; caller checks {@code compacted()}.
+     */
+    private LedgerCompactionResult compactLedgerIfNeeded(AgentContext context) {
+        if (ledgerCompactionService == null) {
+            return LedgerCompactionResult.notNeeded(
+                    context.getConversationLedger() != null ? context.getConversationLedger().size() : 0,
+                    context.getGeneration());
+        }
+        try {
+            return ledgerCompactionService.compactIfNeeded(context);
+        } catch (Exception e) {
+            // Bounded failure — ledger compaction failure must not interrupt the agent.
+            return LedgerCompactionResult.notNeeded(
+                    context.getConversationLedger() != null ? context.getConversationLedger().size() : 0,
+                    context.getGeneration());
+        }
+    }
+
+    private AgentEvent ledgerCompactEvent(AgentContext context, LedgerCompactionResult result) {
+        return event(context, AgentEventType.CONTEXT_COMPACTED)
+                .message("Ledger compacted before model call")
+                .metadata(Map.of(
+                        "compactionType", "ledger",
+                        "generation", result.generation(),
+                        "beforeEntryCount", result.beforeEntryCount(),
+                        "afterEntryCount", result.afterEntryCount(),
+                        "strategy", result.strategy() == null ? "" : result.strategy(),
+                        "transcriptArtifactId", result.transcriptArtifactId() == null
+                                ? "" : result.transcriptArtifactId()))
                 .build();
     }
 

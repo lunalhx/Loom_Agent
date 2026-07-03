@@ -155,6 +155,10 @@ public class AgentRuntimeProperties {
 
         private Boolean enabled = false;
         private Boolean shadowEnabled = false;
+        /** C10: ledger compaction triggers when entry count exceeds this. */
+        private Integer compactionHighWatermark = 200;
+        /** C10: compaction reduces to this many entries (including summary). */
+        private Integer compactionLowWatermark = 50;
 
     }
 

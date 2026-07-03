@@ -149,7 +149,12 @@ public class ModelCallNode extends AbstractAgentNode {
         context.setContextRecoveryStage(ContextRecoveryStage.NONE);
         context.setReactiveCompactAttempts(0);
         context.setRecoveryModelOverride(null);
-        context.setContextTranscriptArtifactId(null);
+        // C10: preserve transcript artifact set by ledger compaction as the
+        // current-generation baseline; only clear recovery-specific transcript id.
+        if (!Objects.equals(context.getContextTranscriptArtifactId(),
+                context.getLedgerBaselineArtifactId())) {
+            context.setContextTranscriptArtifactId(null);
+        }
         context.setContextBlockedReason(null);
     }
 

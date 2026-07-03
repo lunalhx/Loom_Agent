@@ -119,6 +119,37 @@ public final class ConversationLedger {
         return nextSequence;
     }
 
+    /**
+     * Replace the entire entry list for compaction.
+     *
+     * <p>Clears existing entries and {@code seenEventKeys}, then adds the
+     * new entries and rebuilds the dedup set from any non-null event keys
+     * they carry. {@code nextSequence} is set to
+     * {@code max(newMaxSeq + 1, currentNextSequence)} so sequence
+     * monotonicity is preserved.
+     *
+     * <p>This is the only mutation that removes entries — it exists solely
+     * for ledger compaction and must not be used for other purposes.
+     */
+    public void replaceEntries(List<ConversationLedgerEntry> newEntries) {
+        Objects.requireNonNull(newEntries, "newEntries must not be null");
+        entries.clear();
+        seenEventKeys.clear();
+        long maxSeq = -1;
+        for (ConversationLedgerEntry e : newEntries) {
+            entries.add(e);
+            if (e.eventKey() != null) {
+                seenEventKeys.add(e.eventKey());
+            }
+            if (e.sequence() > maxSeq) {
+                maxSeq = e.sequence();
+            }
+        }
+        if (maxSeq >= nextSequence) {
+            nextSequence = maxSeq + 1;
+        }
+    }
+
     @Override
     public String toString() {
         return "ConversationLedger{size=" + entries.size() + ", nextSeq=" + nextSequence + '}';

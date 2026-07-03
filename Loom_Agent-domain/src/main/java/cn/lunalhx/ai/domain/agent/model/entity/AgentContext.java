@@ -198,6 +198,10 @@ public class AgentContext {
     public void setLastLedgerPlanVersion(int v) { prompt.setLastLedgerPlanVersion(v); }
     public String getConfigFingerprint() { return prompt.configFingerprint(); }
     public void setConfigFingerprint(String v) { prompt.setConfigFingerprint(v); }
+    public int getLastCompactionGeneration() { return prompt.lastCompactionGeneration(); }
+    public void setLastCompactionGeneration(int v) { prompt.setLastCompactionGeneration(v); }
+    public String getLedgerBaselineArtifactId() { return prompt.ledgerBaselineArtifactId(); }
+    public void setLedgerBaselineArtifactId(String v) { prompt.setLedgerBaselineArtifactId(v); }
     public boolean isLedgerActive() { return prompt.isLedgerActive(); }
     public boolean isLedgerReady() { return prompt.ledgerReady(); }
     public void setLedgerReady(boolean v) { prompt.setLedgerReady(v); }
