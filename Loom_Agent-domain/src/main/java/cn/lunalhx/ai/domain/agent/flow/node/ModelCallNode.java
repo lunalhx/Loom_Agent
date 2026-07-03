@@ -45,7 +45,8 @@ public class ModelCallNode extends AbstractAgentNode {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
 
-        this.promptFactory = new ModelPromptFactory();
+        this.promptFactory = new ModelPromptFactory(
+                Boolean.TRUE.equals(properties.getConversationLedger().getEnabled()));
         this.budgetCoordinator = new ModelCallBudgetCoordinator(budgetGuard, traceRecorder, promptFactory);
         this.failureClassifier = new ModelCallFailureClassifier();
         this.executor = new ModelCallExecutor(modelGateway, promptFactory, budgetCoordinator);
