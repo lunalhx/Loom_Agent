@@ -17,6 +17,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
 
@@ -30,16 +31,26 @@ public class RenderPromptNode extends AbstractAgentNode {
     private final SkillRepository skillRepository;
     private final ContextArtifactRepository artifactRepository;
     private final ContextBlobStore blobStore;
+    private final LedgerShadowDiagnostic shadowDiagnostic;
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
                             SkillRepository skillRepository,
                             ContextArtifactRepository artifactRepository,
                             ContextBlobStore blobStore) {
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore, null);
+    }
+
+    public RenderPromptNode(ContextWindowManager contextWindowManager,
+                            SkillRepository skillRepository,
+                            ContextArtifactRepository artifactRepository,
+                            ContextBlobStore blobStore,
+                            LedgerShadowDiagnostic shadowDiagnostic) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         this.skillRepository = skillRepository;
         this.artifactRepository = artifactRepository;
         this.blobStore = blobStore;
+        this.shadowDiagnostic = shadowDiagnostic;
     }
 
     @Override
@@ -62,6 +73,10 @@ public class RenderPromptNode extends AbstractAgentNode {
             context.setCurrentPrompt(renderPromptText(context));
             context.setPromptRenderCacheKey(cacheKey);
         }
+
+        // ===== Shadow diagnostic (ledger shadow mode only) =====
+        runShadowDiagnostic(context);
+
         return NodeResult.next(AgentNodeNames.MODEL_CALL,
                 compactResult.isCompacted() ? List.of(compactEvent(context, compactResult)) : List.of());
     }
@@ -241,6 +256,27 @@ public class RenderPromptNode extends AbstractAgentNode {
             prompt.append(String.format(StablePrefixBuilder.PATH_SCOPE_FMT, context.getPathScope()));
         }
         prompt.append(StablePrefixBuilder.SUB_AGENT_FINAL_ANSWER_FMT);
+    }
+
+    /**
+     * Run the ledger shadow diagnostic when configured.
+     *
+     * <p>This builds canonical messages from the ledger, compares them against
+     * the current (old) prompt, logs the result, and retains the canonical text
+     * for LCP computation on the next call. Failures are caught and logged;
+     * the agent main loop is never affected.
+     */
+    private void runShadowDiagnostic(AgentContext context) {
+        if (shadowDiagnostic == null || !context.isLedgerActive()) {
+            return;
+        }
+        try {
+            shadowDiagnostic.compareAndLog(context, context.getCurrentPrompt());
+        } catch (Exception e) {
+            // Bounded failure — shadow diagnostic must not affect main flow.
+            // The diagnostic itself already catches exceptions internally;
+            // this outer catch is a defense-in-depth safety net.
+        }
     }
 
 }

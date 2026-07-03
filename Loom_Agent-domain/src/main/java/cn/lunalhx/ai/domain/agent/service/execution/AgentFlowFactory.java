@@ -29,6 +29,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -135,13 +136,21 @@ public class AgentFlowFactory {
         BudgetGuard budgetGuard = runtime.budgetGuard();
         ContextWindowManager contextWindowManager = runtime.contextWindowManager();
 
+        // Create shadow diagnostic only when shadow mode is active (no-op when null)
+        LedgerShadowDiagnostic shadowDiagnostic = null;
+        if (ledgerAppendService != null && ledgerAppendService.isActive()
+                && Boolean.TRUE.equals(properties.getConversationLedger().getShadowEnabled())
+                && !Boolean.TRUE.equals(properties.getConversationLedger().getEnabled())) {
+            shadowDiagnostic = new LedgerShadowDiagnostic();
+        }
+
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new SkillBootstrapNode(skillRepository, state.approvalStore(),
                         contextArtifactRepository, contextBlobStore, properties),
                 new StartNode(),
                 new PlannerNode(),
                 new RenderPromptNode(contextWindowManager, skillRepository,
-                        contextArtifactRepository, contextBlobStore),
+                        contextArtifactRepository, contextBlobStore, shadowDiagnostic),
                 new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard,
                         contextWindowManager, ledgerAppendService),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
