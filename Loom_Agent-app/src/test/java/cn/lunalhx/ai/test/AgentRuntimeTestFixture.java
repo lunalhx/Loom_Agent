@@ -16,6 +16,9 @@ import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerWatermark;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
@@ -35,6 +38,8 @@ import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
 import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
+import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
@@ -244,17 +249,24 @@ public final class AgentRuntimeTestFixture {
 
     private ContextWindowManager resolveContextWindowManager(AgentRuntimeProperties props) {
         if (contextWindowManager != null) {
+            ensureContextStorage();
             return contextWindowManager;
         }
-        ContextArtifactRepository artifactRepo = contextArtifactRepository != null
-                ? contextArtifactRepository : new InMemoryContextArtifactRepository();
-        ContextBlobStore blobStore = contextBlobStore != null
-                ? contextBlobStore : new InMemoryContextBlobStore();
+        ensureContextStorage();
         ContextWindowManager manager = deepContextSummaryService != null
-                ? new ContextWindowManager(props, artifactRepo, blobStore, deepContextSummaryService)
-                : new ContextWindowManager(props, artifactRepo, blobStore);
+                ? new ContextWindowManager(props, contextArtifactRepository, contextBlobStore, deepContextSummaryService)
+                : new ContextWindowManager(props, contextArtifactRepository, contextBlobStore);
         builtContextWindowManager.set(manager);
         return manager;
+    }
+
+    private void ensureContextStorage() {
+        if (contextArtifactRepository == null) {
+            contextArtifactRepository = new InMemoryContextArtifactRepository();
+        }
+        if (contextBlobStore == null) {
+            contextBlobStore = new InMemoryContextBlobStore();
+        }
     }
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
@@ -271,8 +283,12 @@ public final class AgentRuntimeTestFixture {
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
                 effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
+        ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
-                standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo), null);
+                standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
+                null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
+                new LedgerCompactionService(
+                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore));
     }
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
@@ -290,8 +306,12 @@ public final class AgentRuntimeTestFixture {
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
                 effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
+        ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
-                standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo), null);
+                standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
+                null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
+                new LedgerCompactionService(
+                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore));
     }
 
     private AgentHookRegistry standardHookRegistry(AgentRuntimeProperties props,
@@ -405,5 +425,23 @@ public final class AgentRuntimeTestFixture {
         properties.setObservationMaxChars(8000);
         properties.setMaxSteps(6);
         return properties;
+    }
+
+    public static String modelVisibleText(ChatPrompt prompt) {
+        StringBuilder text = new StringBuilder();
+        if (prompt.getSystemPrompt() != null) {
+            text.append(prompt.getSystemPrompt()).append('\n');
+        }
+        if (prompt.getMessage() != null) {
+            text.append(prompt.getMessage()).append('\n');
+        }
+        if (prompt.getMessages() != null) {
+            for (ChatMessage message : prompt.getMessages()) {
+                if (message != null && message.getContent() != null) {
+                    text.append(message.getContent()).append('\n');
+                }
+            }
+        }
+        return text.toString();
     }
 }

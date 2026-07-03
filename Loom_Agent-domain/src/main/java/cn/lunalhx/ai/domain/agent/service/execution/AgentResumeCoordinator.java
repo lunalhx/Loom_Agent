@@ -264,7 +264,7 @@ public final class AgentResumeCoordinator {
     }
 
     private void appendUserInputToLedger(AgentContext context, String message) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderUserInput(message);
@@ -275,7 +275,7 @@ public final class AgentResumeCoordinator {
 
     private void appendApprovalToLedger(AgentContext context, String decision,
                                          String toolName, String reason) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderApprovalDecision(decision, toolName, reason);
@@ -286,7 +286,7 @@ public final class AgentResumeCoordinator {
     }
 
     private void appendApprovalExpiredToLedger(AgentContext context, String approvalId) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderApprovalExpired(approvalId);

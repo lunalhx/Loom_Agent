@@ -55,15 +55,11 @@ public class ConversationLedgerC5Test {
     @Before
     public void setUp() {
         enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        enabledConfig.setEnabled(true);
-        enabledConfig.setShadowEnabled(false);
 
         disabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        disabledConfig.setEnabled(false);
-        disabledConfig.setShadowEnabled(false);
 
-        enabledService = new ConversationLedgerAppendService(enabledConfig);
-        disabledService = new ConversationLedgerAppendService(disabledConfig);
+        enabledService = new ConversationLedgerAppendService();
+        disabledService = new ConversationLedgerAppendService();
     }
 
     // ================================================================
@@ -197,20 +193,6 @@ public class ConversationLedgerC5Test {
 
         // No ledger created
         assertNull(ctx.getConversationLedger());
-    }
-
-    @Test
-    public void observationNodeDisabledLedgerDoesNotAppend() {
-        ObservationNode node = observationNode(disabledService);
-        AgentContext ctx = basicContext("r-off-1");
-        ctx.ensureLedgerActive();
-        ctx.setDecision(AgentDecision.builder().tool("read_file").build());
-        ctx.setToolResult(ToolResult.success("content", false, 1L));
-
-        node.apply(ctx);
-
-        // Ledger is not modified (append service is disabled)
-        assertEquals(0, ctx.getConversationLedger().size());
     }
 
     // ================================================================
@@ -399,28 +381,6 @@ public class ConversationLedgerC5Test {
         assertThat(entry.content()).contains("invalid_tool_input");
     }
 
-    @Test
-    public void approvalGateValidationFailureDisabledLedgerDoesNotAppend() {
-        AgentRuntimeProperties props = standardApprovalProps();
-        AgentTool tool = validationFailureTool("bad_off");
-        ToolRegistry registry = new ToolRegistry(List.of(tool),
-                new ToolSchemaValidator(new ObjectMapper()));
-        ApprovalGateNode node = new ApprovalGateNode(registry,
-                new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, disabledService);
-
-        AgentContext ctx = basicContext("r-val-off-1");
-        ctx.ensureLedgerActive();
-        ctx.setDecision(AgentDecision.builder()
-                .tool("bad_off")
-                .input(new ObjectMapper().createObjectNode().put("x", "y"))
-                .build());
-
-        node.apply(ctx);
-
-        assertEquals(0, ctx.getConversationLedger().size());
-    }
-
     // ================================================================
     // 7. Event key convention
     // ================================================================
@@ -489,7 +449,7 @@ public class ConversationLedgerC5Test {
         AgentContext ctx = basicContext("r-char-2");
         ctx.ensureLedgerActive();
 
-        String original = "unicode: éàü\nemoji: 😀\ntabs: \t\t\nbackslash: \\\\\nquotes: \"'\ncontrol chars:  ";
+        String original = "unicode: éàü\nemoji: 😀\ntabs: \t\t\nbackslash: \\\\\nquotes: \"'\ncontrol chars: ";
 
         svc.appendAssistant(ctx, original,
                 ConversationLedgerInitializer.eventKey("r-char-2", "1", "assistant"));
@@ -622,32 +582,6 @@ public class ConversationLedgerC5Test {
         List<ConversationLedgerEntry> entries = ctx.getConversationLedger().entries();
         assertEquals(1, entries.size());
         assertNotNull(entries.get(0).content());
-    }
-
-    // ================================================================
-    // 12. Disabled mode complete no-op
-    // ================================================================
-
-    @Test
-    public void disabledModeNoLedgerChangesFromAnyNode() {
-        // Verify disabled service is truly a no-op
-        assertFalse(disabledService.isActive());
-
-        AgentContext ctx = basicContext("r-complete-off");
-        // Don't activate ledger — simulate disabled mode
-        assertNull(ctx.getConversationLedger());
-
-        // All append operations must return empty and not create ledger
-        assertTrue(disabledService.appendAssistant(ctx, "msg",
-                ConversationLedgerInitializer.eventKey("r", "1", "assistant")).isEmpty());
-        assertTrue(disabledService.appendToolResult(ctx, "out",
-                ConversationLedgerInitializer.eventKey("r", "1", "tool_result")).isEmpty());
-        assertTrue(disabledService.appendUserInput(ctx, "in",
-                ConversationLedgerInitializer.eventKey("r", "1", "user_input")).isEmpty());
-        assertTrue(disabledService.appendControlUpdate(ctx, "ctrl",
-                ConversationLedgerInitializer.eventKey("r", "1", "control_update")).isEmpty());
-
-        assertNull(ctx.getConversationLedger());
     }
 
     // ================================================================

@@ -5,6 +5,8 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 
+import java.util.Objects;
+
 /**
  * Services consumed by {@code ModelCallNode}: tracing, budget, context window, and ledger append.
  *
@@ -25,7 +27,8 @@ public final class ModelCallServices {
         this.traceRecorder = traceRecorder;
         this.budgetGuard = budgetGuard;
         this.contextWindowManager = contextWindowManager;
-        this.ledgerAppendService = ledgerAppendService;
+        this.ledgerAppendService = Objects.requireNonNull(
+                ledgerAppendService, "ledgerAppendService must not be null");
     }
 
     public TraceRecorder traceRecorder() { return traceRecorder; }

@@ -50,8 +50,6 @@ public class ConversationLedgerCompactionAssemblyTest {
         properties.getContext().setEnabled(false);
 
         ledgerConfig = properties.getConversationLedger();
-        ledgerConfig.setEnabled(true);
-        ledgerConfig.setShadowEnabled(false);
         // 低水位 2, 高水位 3 → 超过 3 条触发压缩到 ≤2
         ledgerConfig.setCompactionHighWatermark(3);
         ledgerConfig.setCompactionLowWatermark(2);
@@ -60,14 +58,14 @@ public class ConversationLedgerCompactionAssemblyTest {
         blobStore = new InMemoryContextBlobStore();
         cwm = new ContextWindowManager(properties, artifactRepository, blobStore);
 
-        appendService = new ConversationLedgerAppendService(ledgerConfig);
-        ConversationLedgerInitializer initializer = new ConversationLedgerInitializer(ledgerConfig);
+        appendService = new ConversationLedgerAppendService();
+        ConversationLedgerInitializer initializer = new ConversationLedgerInitializer();
         bootstrapService = new LedgerBootstrapService(appendService, initializer);
 
         LedgerWatermark watermark = LedgerWatermark.fromConfig(
                 ledgerConfig.getCompactionHighWatermark(),
                 ledgerConfig.getCompactionLowWatermark());
-        compactionService = new LedgerCompactionService(watermark, ledgerConfig,
+        compactionService = new LedgerCompactionService(watermark,
                 artifactRepository, blobStore);
     }
 
@@ -147,30 +145,6 @@ public class ConversationLedgerCompactionAssemblyTest {
     }
 
     @Test
-    public void disabledLedgerNoCompaction() {
-        // 使用 disabled 配置
-        ledgerConfig.setEnabled(false);
-        appendService = new ConversationLedgerAppendService(ledgerConfig);
-        ConversationLedgerInitializer initializer = new ConversationLedgerInitializer(ledgerConfig);
-        bootstrapService = new LedgerBootstrapService(appendService, initializer);
-        LedgerWatermark watermark = LedgerWatermark.fromConfig(3, 2);
-        compactionService = new LedgerCompactionService(watermark, ledgerConfig,
-                artifactRepository, blobStore);
-
-        RenderPromptNode node = createNode();
-        AgentContext ctx = ledgedContext();
-        stableBootstrap(ctx);
-        addEntries(ctx, 5);
-
-        int genBefore = ctx.getGeneration();
-        node.apply(ctx);
-
-        // ledger disabled → 不压缩
-        assertThat(ctx.getGeneration()).isEqualTo(genBefore);
-        assertThat(ctx.getLedgerBaselineArtifactId()).isNull();
-    }
-
-    @Test
     public void compactionServiceNotNullInProductionNode() {
         RenderPromptNode node = createNode();
         AgentContext ctx = ledgedContext();
@@ -207,8 +181,7 @@ public class ConversationLedgerCompactionAssemblyTest {
     private RenderPromptNode createNode() {
         RenderPromptResources resources = RenderPromptResources.withStorage(
                 artifactRepository, blobStore);
-        LedgerPromptServices ledgerServices = new LedgerPromptServices(
-                null, bootstrapService, new StablePrefixBuilder(), compactionService);
+        LedgerPromptServices ledgerServices = new LedgerPromptServices(bootstrapService, new StablePrefixBuilder(), compactionService);
         return new RenderPromptNode(cwm, resources, ledgerServices);
     }
 
@@ -227,7 +200,7 @@ public class ConversationLedgerCompactionAssemblyTest {
     }
 
     private void stableBootstrap(AgentContext ctx) {
-        ConversationLedgerInitializer initializer = new ConversationLedgerInitializer(ledgerConfig);
+        ConversationLedgerInitializer initializer = new ConversationLedgerInitializer();
         StablePrefixBuilder prefixBuilder = new StablePrefixBuilder();
         var stablePrefix = prefixBuilder.build(null, false, null,
                 ctx.getToolSpecs(), null, null, null);

@@ -45,45 +45,6 @@ public class AgentLoopFactory {
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null, null);
-    }
-
-    public AgentLoopFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null, null);
-    }
-
-    public AgentLoopFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator,
-                           SkillRepository skillRepository,
-                           ContextArtifactRepository contextArtifactRepository,
-                           ContextBlobStore contextBlobStore) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, null, null);
-    }
-
-    public AgentLoopFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator,
-                           SkillRepository skillRepository,
-                           ContextArtifactRepository contextArtifactRepository,
-                           ContextBlobStore contextBlobStore,
-                           ConversationLedgerAppendService ledgerAppendService) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, ledgerAppendService, null);
-    }
-
-    public AgentLoopFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator,
@@ -96,15 +57,11 @@ public class AgentLoopFactory {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
-        this.ledgerAppendService = ledgerAppendService;
-
-        // Create bootstrap service when ledger is active
-        LedgerBootstrapService bs = null;
-        if (ledgerAppendService != null && ledgerAppendService.isActive()) {
-            ConversationLedgerInitializer initializer = new ConversationLedgerInitializer(
-                    runtime.properties().getConversationLedger());
-            bs = new LedgerBootstrapService(ledgerAppendService, initializer);
-        }
+        this.ledgerAppendService = Objects.requireNonNull(
+                ledgerAppendService, "ledgerAppendService must not be null");
+        Objects.requireNonNull(ledgerCompactionService, "ledgerCompactionService must not be null");
+        LedgerBootstrapService bs = new LedgerBootstrapService(
+                ledgerAppendService, new ConversationLedgerInitializer());
 
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
                 skillRepository, contextArtifactRepository, contextBlobStore,

@@ -46,7 +46,6 @@ public class InstructionGateNode extends AbstractAgentNode {
         String hash = sha256(instructions);
         if (!Objects.equals(hash, context.getInstructionsHash())) {
             context.setInstructionsHash(hash);
-            context.setPromptRenderCacheKey(null);
             return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of());
         }
 

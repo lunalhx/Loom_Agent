@@ -36,9 +36,7 @@ public class ConversationLedgerC6Test {
     @Before
     public void setUp() {
         enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        enabledConfig.setEnabled(true);
-        enabledConfig.setShadowEnabled(false);
-        svc = new ConversationLedgerAppendService(enabledConfig);
+        svc = new ConversationLedgerAppendService();
         objectMapper = new ObjectMapper();
     }
 
@@ -529,30 +527,6 @@ public class ConversationLedgerC6Test {
     public void userInputEventKeyFormat() {
         String key = ConversationLedgerInitializer.eventKey("run-1", "6", "user_input");
         assertEquals("run-1:6:user_input", key);
-    }
-
-    // ================================================================
-    // 10. Disabled mode no-op
-    // ================================================================
-
-    @Test
-    public void disabledModePlanSnapshotNotAppended() {
-        AgentRuntimeProperties.ConversationLedgerProperties disabledConfig =
-                new AgentRuntimeProperties.ConversationLedgerProperties();
-        disabledConfig.setEnabled(false);
-        disabledConfig.setShadowEnabled(false);
-        ConversationLedgerAppendService disabledSvc =
-                new ConversationLedgerAppendService(disabledConfig);
-
-        AgentContext ctx = basicContext("r-off-plan");
-        ctx.ensureLedgerActive();
-
-        AgentPlan plan = AgentPlan.forQuestion("test");
-        String text = ControlUpdateTexts.renderPlanSnapshot(plan);
-        String key = ConversationLedgerInitializer.eventKey(ctx.getRunId(), "plan", "v1");
-        List<ConversationLedgerEntry> result = disabledSvc.appendControlUpdate(ctx, text, key);
-
-        assertTrue("disabled service returns empty list", result.isEmpty());
     }
 
     @Test

@@ -253,7 +253,7 @@ public class SubAgentCoordinatorContractTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                if (prompt.getMessage().contains("fail-me")) {
+                if (AgentRuntimeTestFixture.modelVisibleText(prompt).contains("fail-me")) {
                     return Mono.error(new RuntimeException("boom"));
                 }
                 return Mono.just(ModelChatResult.builder().content(finalAnswerJson("ok")).finishReason("stop").build());
@@ -309,7 +309,7 @@ public class SubAgentCoordinatorContractTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                String message = prompt.getMessage();
+                String message = AgentRuntimeTestFixture.modelVisibleText(prompt);
                 // renderChildTask 会写入 "你的子任务：<question>"，question 为 "搜索使用点 N"
                 String tag = message.contains("搜索使用点 1") ? "s1"
                         : message.contains("搜索使用点 2") ? "s2" : "s3";
@@ -859,7 +859,7 @@ public class SubAgentCoordinatorContractTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                prompts.add(prompt.getMessage());
+                prompts.add(AgentRuntimeTestFixture.modelVisibleText(prompt));
                 return Mono.just(ModelChatResult.builder()
                         .content(finalAnswerJson(summary))
                         .finishReason("stop")

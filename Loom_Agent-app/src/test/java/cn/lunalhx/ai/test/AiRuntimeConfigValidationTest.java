@@ -13,6 +13,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class AiRuntimeConfigValidationTest {
 
@@ -65,6 +66,33 @@ public class AiRuntimeConfigValidationTest {
 
         try {
             assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void removedLedgerEnabledPropertyMustFailStartup() {
+        assertRemovedLedgerPropertyRejected("loom.agent.conversation-ledger.enabled");
+    }
+
+    @Test
+    public void removedLedgerShadowPropertyMustFailStartup() {
+        assertRemovedLedgerPropertyRejected("loom.agent.conversation-ledger.shadow-enabled");
+    }
+
+    private void assertRemovedLedgerPropertyRejected(String property) {
+        ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
+        AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
+        ThreadPoolExecutor executor = executor();
+        MockEnvironment environment = environment().withProperty(property, "false");
+        InitializingBean validator = new AgentLoopAutoConfig()
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment, executor);
+
+        try {
+            IllegalStateException error = assertThrows(
+                    IllegalStateException.class, validator::afterPropertiesSet);
+            assertTrue(error.getMessage().contains("配置已删除"));
         } finally {
             executor.shutdownNow();
         }

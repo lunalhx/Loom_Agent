@@ -4,14 +4,13 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
 
 import java.util.Objects;
 
 /**
  * Initializes or migrates the {@link ConversationLedger} for a new or resumed
- * agent run according to the configured {@code conversationLedger} mode.
+ * agent run.
  *
  * <h3>New conversation</h3>
  * <ol>
@@ -22,9 +21,8 @@ import java.util.Objects;
  * </ol>
  *
  * <h3>V2 snapshot migration</h3>
- * <p>When an existing v2 snapshot (no ledger state) is resumed with
- * shadow or enabled mode, we do NOT claim the old history satisfies
- * append-only. Instead:
+ * <p>When an existing v2 snapshot has no ledger state, we do not claim the old
+ * history satisfies append-only. Instead:
  * <ol>
  *   <li>A new generation is created from the current durable state.</li>
  *   <li>A {@code SYSTEM_NOTE} migration marker entry is appended to the
@@ -34,29 +32,13 @@ import java.util.Objects;
  *   <li>The current question is appended as a {@code USER_TASK} entry.</li>
  * </ol>
  *
- * <h3>Mode gating</h3>
- * <p>When both {@code enabled} and {@code shadowEnabled} are false,
- * initialization is a no-op — no ledger state is created.
- *
  * <h3>Idempotency</h3>
  * <p>Uses deterministic event keys so that checkpoint resume or retry
  * does not produce duplicate entries.
  */
 public final class ConversationLedgerInitializer {
 
-    private final AgentRuntimeProperties.ConversationLedgerProperties config;
-
-    public ConversationLedgerInitializer(
-            AgentRuntimeProperties.ConversationLedgerProperties config) {
-        this.config = Objects.requireNonNull(config, "config must not be null");
-    }
-
-    /**
-     * Returns {@code true} if either ledger mode is active.
-     */
-    public boolean isActive() {
-        return Boolean.TRUE.equals(config.getEnabled())
-                || Boolean.TRUE.equals(config.getShadowEnabled());
+    public ConversationLedgerInitializer() {
     }
 
     /**
@@ -69,10 +51,6 @@ public final class ConversationLedgerInitializer {
     public void initializeNewConversation(AgentContext context, StablePrefix stablePrefix) {
         Objects.requireNonNull(context, "context must not be null");
         Objects.requireNonNull(stablePrefix, "stablePrefix must not be null");
-
-        if (!isActive()) {
-            return;
-        }
 
         String runId = context.getRunId();
         String question = context.getQuestion();
@@ -106,10 +84,6 @@ public final class ConversationLedgerInitializer {
         Objects.requireNonNull(context, "context must not be null");
         Objects.requireNonNull(stablePrefix, "stablePrefix must not be null");
         Objects.requireNonNull(v2Snapshot, "v2Snapshot must not be null");
-
-        if (!isActive()) {
-            return;
-        }
 
         String runId = context.getRunId();
 

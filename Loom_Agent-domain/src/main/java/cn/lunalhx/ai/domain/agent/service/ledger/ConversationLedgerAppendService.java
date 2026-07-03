@@ -3,7 +3,6 @@ package cn.lunalhx.ai.domain.agent.service.ledger;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
 
 import java.util.List;
@@ -36,28 +35,13 @@ import java.util.Objects;
  * and event type. The ledger silently ignores duplicate keys, making
  * checkpoint resume, retry, and node re-entry safe.
  *
- * <h3>Mode gating</h3>
- * <p>A no-op when both {@code enabled} and {@code shadowEnabled} are off.
- *
  * <h3>Immutability</h3>
  * <p>Every append call returns an immutable snapshot of the ledger at that
  * point. Entries are never modified after creation.
  */
 public final class ConversationLedgerAppendService {
 
-    private final AgentRuntimeProperties.ConversationLedgerProperties config;
-
-    public ConversationLedgerAppendService(
-            AgentRuntimeProperties.ConversationLedgerProperties config) {
-        this.config = Objects.requireNonNull(config, "config must not be null");
-    }
-
-    /**
-     * Returns {@code true} if at least one ledger mode is active.
-     */
-    public boolean isActive() {
-        return Boolean.TRUE.equals(config.getEnabled())
-                || Boolean.TRUE.equals(config.getShadowEnabled());
+    public ConversationLedgerAppendService() {
     }
 
     // ================================================================
@@ -70,7 +54,7 @@ public final class ConversationLedgerAppendService {
      * @param context  the agent context with an active ledger
      * @param content  the assistant message content
      * @param eventKey deterministic idempotency key
-     * @return immutable snapshot of the ledger after append, or empty list if inactive
+     * @return immutable snapshot of the ledger after append
      */
     public List<ConversationLedgerEntry> appendAssistant(
             AgentContext context, String content, String eventKey) {
@@ -87,7 +71,7 @@ public final class ConversationLedgerAppendService {
      * @param context   the agent context with an active ledger
      * @param rawOutput the raw tool output (text)
      * @param eventKey  deterministic idempotency key
-     * @return immutable snapshot of the ledger after append, or empty list if inactive
+     * @return immutable snapshot of the ledger after append
      */
     public List<ConversationLedgerEntry> appendToolResult(
             AgentContext context, String rawOutput, String eventKey) {
@@ -105,7 +89,7 @@ public final class ConversationLedgerAppendService {
      * @param context  the agent context with an active ledger
      * @param content  the user input text
      * @param eventKey deterministic idempotency key
-     * @return immutable snapshot of the ledger after append, or empty list if inactive
+     * @return immutable snapshot of the ledger after append
      */
     public List<ConversationLedgerEntry> appendUserInput(
             AgentContext context, String content, String eventKey) {
@@ -122,7 +106,7 @@ public final class ConversationLedgerAppendService {
      * @param context  the agent context with an active ledger
      * @param content  the control update text
      * @param eventKey deterministic idempotency key
-     * @return immutable snapshot of the ledger after append, or empty list if inactive
+     * @return immutable snapshot of the ledger after append
      */
     public List<ConversationLedgerEntry> appendControlUpdate(
             AgentContext context, String content, String eventKey) {
@@ -139,14 +123,8 @@ public final class ConversationLedgerAppendService {
             LedgerStableType stableType, String eventKey) {
         Objects.requireNonNull(context, "context must not be null");
 
-        if (!isActive()) {
-            return List.of();
-        }
-
+        context.ensureLedgerActive();
         ConversationLedger ledger = context.getConversationLedger();
-        if (ledger == null) {
-            return List.of();
-        }
 
         ledger.appendWithEventKey(role, content, stableType, eventKey);
         return ledger.entries();

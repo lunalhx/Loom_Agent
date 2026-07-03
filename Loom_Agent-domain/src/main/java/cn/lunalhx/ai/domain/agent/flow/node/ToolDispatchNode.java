@@ -158,7 +158,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
     }
 
     private void appendPlanSnapshotIfChanged(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         if (context.getPlan() == null) {

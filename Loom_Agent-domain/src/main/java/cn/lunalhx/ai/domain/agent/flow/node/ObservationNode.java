@@ -58,7 +58,7 @@ public class ObservationNode extends AbstractAgentNode {
                 result,
                 toDynamicObservation(context, result, toolName, sanitization));
 
-        if (ledgerAppendService != null && ledgerAppendService.isActive()) {
+        if (ledgerAppendService != null) {
             String eventKey = ConversationLedgerInitializer.eventKey(
                     context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
             ledgerAppendService.appendToolResult(context, sanitization.getOutput(), eventKey);

@@ -163,8 +163,8 @@ loom:
       same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
       no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
     conversation-ledger:
-      enabled: false
-      shadow-enabled: false
+      compaction-high-watermark: 200
+      compaction-low-watermark: 50
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

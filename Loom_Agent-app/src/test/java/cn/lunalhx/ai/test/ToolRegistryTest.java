@@ -1,25 +1,15 @@
 package cn.lunalhx.ai.test;
 
-import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
-import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
-import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
-import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
+import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
-import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -287,9 +277,9 @@ public class ToolRegistryTest {
 
         // Expected: sorted by name → list, read, search
         String expected =
-                "- list: List directory input={\"type\":\"object\",\"properties\":{\"dir\":{\"type\":\"string\"}}}\n" +
-                "- read: Read a file input={\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}\n" +
-                "- search: Search the codebase input={\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}}}";
+                "- list: List directory input={\"properties\":{\"dir\":{\"type\":\"string\"}},\"type\":\"object\"}\n" +
+                "- read: Read a file input={\"properties\":{\"path\":{\"type\":\"string\"}},\"type\":\"object\"}\n" +
+                "- search: Search the codebase input={\"properties\":{\"q\":{\"type\":\"string\"}},\"type\":\"object\"}";
 
         assertEquals(expected, toolSection);
     }
@@ -330,27 +320,9 @@ public class ToolRegistryTest {
 
     private String renderWithToolSpecs(List<AgentTool> tools) {
         ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
-
-        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        properties.getContext().setEnabled(false);
-        ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
-        ContextBlobStore blobStore = new InMemoryContextBlobStore();
-        ContextWindowManager cwm = new ContextWindowManager(properties, artifactRepository, blobStore);
-        RenderPromptNode node = new RenderPromptNode(cwm,
-                RenderPromptResources.withStorage(artifactRepository, blobStore),
-                LedgerPromptServices.disabled());
-
-        AgentContext context = new AgentContext();
-        context.setRunId("ordering-test");
-        context.setRootRunId("ordering-test");
-        context.setQuestion("test");
-        context.setMaxSteps(5);
-        context.setStep(0);
-        context.setStartedAt(Instant.now());
-        context.setToolSpecs(registry.specs());
-
-        node.apply(context);
-        return context.getCurrentPrompt();
+        return new StablePrefixBuilder().build(
+                null, false, null, registry.specs(), null, List.of(), java.util.Map.of())
+                .frozenContent();
     }
 
     private static String extractToolSection(String prompt) {

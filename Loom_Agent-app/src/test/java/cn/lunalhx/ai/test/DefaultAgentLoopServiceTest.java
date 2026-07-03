@@ -35,7 +35,6 @@ import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
-import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -54,7 +53,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.tool.TodoWriteTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.commons.lang3.StringUtils;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -117,12 +115,11 @@ public class DefaultAgentLoopServiceTest {
                 .anyMatch(event -> event.getType() == AgentEventType.NODE_START && "model_call".equals(event.getNode())));
         assertTrue(events.stream()
                 .anyMatch(event -> event.getType() == AgentEventType.NODE_START && "decision".equals(event.getNode())));
-        assertTrue(prompts.get(1).contains("动态上下文"));
-        assertTrue(prompts.get(1).contains("assistant_action"));
-        assertTrue(prompts.get(1).contains("tool_result"));
+        assertTrue(prompts.get(1).contains("\"thought\":\"搜索函数\""));
+        assertTrue(prompts.get(1).contains("<untrusted_tool_output>"));
         assertTrue(prompts.get(1).contains("AgentLoopService.java:42"));
-        assertTrue(prompts.get(2).contains("Step 2 - assistant_action"));
-        assertTrue(prompts.get(2).contains("Step 2 - tool_result"));
+        assertTrue(prompts.get(2), prompts.get(2).contains("\"thought\":\"读取文件\""));
+        assertTrue(prompts.get(2).contains("42: public Flux<AgentEvent> ask"));
         assertEquals("AgentLoopService.ask 定义在 AgentLoopService.java，负责驱动 Agent Loop 并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
@@ -414,30 +411,23 @@ public class DefaultAgentLoopServiceTest {
                 .collectList()
                 .block(Duration.ofSeconds(3));
 
-        // 前两轮未达到阈值：单消息请求，没有独立 reminder message。
+        // 前两轮未达到阈值：ledger 中没有 reminder entry。
         ChatPrompt roundZero = prompts.get(0);
-        assertNotNull(roundZero.getMessage());
-        assertTrue(StringUtils.isNotBlank(roundZero.getMessage()));
-        assertNull(roundZero.getMessages());
-        assertFalse(containsReminder(roundZero.getMessage()));
+        assertNull(roundZero.getMessage());
+        assertNotNull(roundZero.getMessages());
+        assertEquals(0, reminderCount(roundZero));
         ChatPrompt roundOne = prompts.get(1);
-        assertNotNull(roundOne.getMessage());
-        assertNull(roundOne.getMessages());
-        assertFalse(containsReminder(roundOne.getMessage()));
+        assertNull(roundOne.getMessage());
+        assertNotNull(roundOne.getMessages());
+        assertEquals(0, reminderCount(roundOne));
 
-        // 达到阈值的轮次：主提示词与 reminder 拆成两条独立 user message。
+        // 达到阈值的轮次：reminder 作为独立 ledger entry 追加。
         ChatPrompt reminded = prompts.get(3);
-        assertNull("主提示词不应再通过 message 承载", reminded.getMessage());
+        assertNull(reminded.getMessage());
         assertNotNull(reminded.getMessages());
-        assertEquals(2, reminded.getMessages().size());
-        ChatMessage first = reminded.getMessages().get(0);
-        ChatMessage second = reminded.getMessages().get(1);
-        assertEquals("user", first.getRole());
-        assertEquals("user", second.getRole());
-        assertTrue(first.getContent().contains("用户问题：给某模块加缓存并补单测"));
-        assertTrue(first.getContent().contains("当前计划："));
-        assertFalse("主提示词不得包含 reminder 文本", containsReminder(first.getContent()));
-        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, second.getContent());
+        assertTrue(reminded.getMessages().stream()
+                .anyMatch(message -> message.getContent().contains("给某模块加缓存并补单测")));
+        assertEquals(1, reminderCount(reminded));
     }
 
     @Test
@@ -460,17 +450,13 @@ public class DefaultAgentLoopServiceTest {
                 .collectList()
                 .block(Duration.ofSeconds(3));
 
-        // 第 4 轮被提醒，该轮执行 todo_write 后 roundsSinceUpdate 归零，下一轮恢复单消息。
+        // 阈值期间每个 step 最多追加一次；todo_write 后不再追加，既有 entry 继续保留。
         ChatPrompt reminded = prompts.get(3);
-        assertNotNull(reminded.getMessages());
-        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, reminded.getMessages().get(1).getContent());
+        assertEquals(1, reminderCount(reminded));
         ChatPrompt todoWriteRound = prompts.get(4);
-        assertNotNull("todo_write 轮仍处于阈值之上，应继续提醒", todoWriteRound.getMessages());
-        assertEquals(TODO_UPDATE_REMINDER_CONSTANT, todoWriteRound.getMessages().get(1).getContent());
+        assertEquals(2, reminderCount(todoWriteRound));
         ChatPrompt afterTodoWrite = prompts.get(5);
-        assertNotNull(afterTodoWrite.getMessage());
-        assertNull(afterTodoWrite.getMessages());
-        assertFalse(containsReminder(afterTodoWrite.getMessage()));
+        assertEquals(2, reminderCount(afterTodoWrite));
     }
 
     @Test
@@ -494,10 +480,9 @@ public class DefaultAgentLoopServiceTest {
 
         // 没有计划时，无论运行多少轮都不注入 reminder。
         for (ChatPrompt prompt : prompts) {
-            assertNull(prompt.getMessages());
-            if (prompt.getMessage() != null) {
-                assertFalse(containsReminder(prompt.getMessage()));
-            }
+            assertNull(prompt.getMessage());
+            assertNotNull(prompt.getMessages());
+            assertEquals(0, reminderCount(prompt));
         }
     }
 
@@ -1504,7 +1489,7 @@ public class DefaultAgentLoopServiceTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                prompts.add(prompt.getMessage());
+                prompts.add(AgentRuntimeTestFixture.modelVisibleText(prompt));
                 int current = Math.min(index.getAndIncrement(), outputs.length - 1);
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());
             }
@@ -1530,6 +1515,15 @@ public class DefaultAgentLoopServiceTest {
 
     private boolean containsReminder(String text) {
         return text != null && text.contains("<reminder>Update your todos with todo_write");
+    }
+
+    private long reminderCount(ChatPrompt prompt) {
+        if (prompt.getMessages() == null) {
+            return 0;
+        }
+        return prompt.getMessages().stream()
+                .filter(message -> TODO_UPDATE_REMINDER_CONSTANT.equals(message.getContent()))
+                .count();
     }
 
     private ModelGateway usageGateway(String output, int promptTokens, int completionTokens, int totalTokens) {
@@ -1606,8 +1600,8 @@ public class DefaultAgentLoopServiceTest {
 
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                prompts.add(prompt.getMessage());
-                String message = prompt.getMessage();
+                String message = AgentRuntimeTestFixture.modelVisibleText(prompt);
+                prompts.add(message);
                 if (message.contains("你是主 Agent 派生出的隔离子 Agent")) {
                     String taskId = message.contains("Loom_Agent-domain") ? "domain" : "app";
                     return Mono.just(ModelChatResult.builder()

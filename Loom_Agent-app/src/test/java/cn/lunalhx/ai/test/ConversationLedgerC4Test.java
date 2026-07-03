@@ -36,16 +36,10 @@ public class ConversationLedgerC4Test {
     @Before
     public void setUp() {
         enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        enabledConfig.setEnabled(true);
-        enabledConfig.setShadowEnabled(false);
 
         shadowConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        shadowConfig.setEnabled(false);
-        shadowConfig.setShadowEnabled(true);
 
         disabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        disabledConfig.setEnabled(false);
-        disabledConfig.setShadowEnabled(false);
 
         stablePrefix = new StablePrefix("frozen-content-for-tests",
                 "sha256-" + System.currentTimeMillis());
@@ -64,7 +58,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void newConversationInitFreezesStablePrefix() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-init-1", "hello world");
 
         init.initializeNewConversation(ctx, stablePrefix);
@@ -76,7 +70,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void newConversationInitCreatesLedgerWithUserTask() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-init-2", "do something");
 
         init.initializeNewConversation(ctx, stablePrefix);
@@ -97,7 +91,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void newConversationInitIsIdempotent() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-init-3", "task");
 
         init.initializeNewConversation(ctx, stablePrefix);
@@ -112,7 +106,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void newConversationInitWithNullQuestion() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-init-4", null);
 
         init.initializeNewConversation(ctx, stablePrefix);
@@ -127,7 +121,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void newConversationInitWithEmptyQuestion() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-init-5", "");
 
         init.initializeNewConversation(ctx, stablePrefix);
@@ -143,7 +137,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendAssistantDedupByEventKey() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-dedup-1", "task");
         ctx.ensureLedgerActive();
 
@@ -161,7 +155,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendToolResultDedupByEventKey() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-dedup-2", "task");
         ctx.ensureLedgerActive();
 
@@ -178,7 +172,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void differentEventKeysProduceDifferentEntries() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-dedup-3", "task");
         ctx.ensureLedgerActive();
 
@@ -208,7 +202,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendAssistantUsesAssistantRole() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-types-1", "task");
         ctx.ensureLedgerActive();
 
@@ -221,7 +215,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendToolResultUsesUserRoleAndWrapsUntrusted() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-types-2", "task");
         ctx.ensureLedgerActive();
 
@@ -239,7 +233,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendUserInputUsesUserRole() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-types-3", "task");
         ctx.ensureLedgerActive();
 
@@ -252,7 +246,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendControlUpdateUsesUserRole() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-types-4", "task");
         ctx.ensureLedgerActive();
 
@@ -265,7 +259,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void allFourTypesAppendInSequence() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-types-all", "task");
         ctx.ensureLedgerActive();
 
@@ -294,7 +288,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void toolResultContentIsWrappedInUntrustedTags() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-untrusted-1", "task");
         ctx.ensureLedgerActive();
 
@@ -314,7 +308,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void v2MigrationCreatesNewGeneration() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-migrate-1", "resumed question");
         // Simulate v2 restore: no ledger, generation 0
         ctx.setGeneration(0);
@@ -355,7 +349,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void v2MigrationIsIdempotent() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-migrate-2", "resumed question");
         ctx.setGeneration(0);
 
@@ -378,7 +372,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void v2MigrationDoesNotClaimOldHistoryIsAppendOnly() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-migrate-3", "resumed");
         ctx.setGeneration(0);
 
@@ -400,7 +394,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void v2MigrationWithoutQuestion() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-migrate-4", null);
         ctx.setGeneration(0);
 
@@ -421,7 +415,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void v2MigrationBumpsGenerationFromExistingValue() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         AgentContext ctx = newContext("r-migrate-5", "question");
         ctx.setGeneration(5);
 
@@ -445,7 +439,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void ledgerEntriesReturnsImmutableList() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-immut-1", "task");
         ctx.ensureLedgerActive();
 
@@ -499,93 +493,16 @@ public class ConversationLedgerC4Test {
         assertEquals("key-1", entry.eventKey());
     }
 
-    // ================================================================
-    // 7. Mode gating: both off → no state
-    // ================================================================
-
     @Test
-    public void disabledModeProducesNoLedgerOnInit() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(disabledConfig);
-        AgentContext ctx = newContext("r-off-1", "task");
-
-        init.initializeNewConversation(ctx, stablePrefix);
-        assertNull(ctx.getConversationLedger());
-        assertNull(ctx.getStablePrefix());
-        assertEquals(0, ctx.getGeneration());
-    }
-
-    @Test
-    public void disabledModeProducesNoMigrationState() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(disabledConfig);
-        AgentContext ctx = newContext("r-off-2", "question");
-        AgentContextSnapshot v2Snapshot = AgentContextSnapshot.from(ctx);
-        v2Snapshot.setLedgerEntries(null);
-        v2Snapshot.setLedgerNextSequence(0);
-        v2Snapshot.setSchemaVersion(2);
-
-        init.migrateFromV2(ctx, stablePrefix, v2Snapshot);
-
-        assertNull(ctx.getConversationLedger());
-        assertNull(ctx.getStablePrefix());
-        assertEquals(0, ctx.getGeneration());
-    }
-
-    @Test
-    public void disabledAppendServiceReturnsEmptyList() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(disabledConfig);
-        AgentContext ctx = newContext("r-off-3", "task");
-        ctx.ensureLedgerActive();
-
-        List<ConversationLedgerEntry> result = svc.appendAssistant(
-                ctx, "msg", "r-off-3:1:assistant");
-        assertTrue(result.isEmpty());
-        // Ledger in context is NOT mutated
-        assertEquals(0, ctx.getConversationLedger().size());
-    }
-
-    @Test
-    public void disabledAppendServiceWithNullLedgerDoesNotNPE() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(disabledConfig);
-        AgentContext ctx = newContext("r-off-4", "task");
-        // ledger not activated
-
-        List<ConversationLedgerEntry> result = svc.appendAssistant(
-                ctx, "msg", "r-off-4:1:assistant");
-        assertTrue(result.isEmpty());
-        assertNull(ctx.getConversationLedger());
-    }
-
-    // ================================================================
-    // 8. Shadow mode still initializes but append service checks mode
-    // ================================================================
-
-    @Test
-    public void shadowModeInitCreatesLedgerState() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(shadowConfig);
-        AgentContext ctx = newContext("r-shadow-1", "task in shadow mode");
+    public void mandatoryInitializerCreatesLedgerState() {
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
+        AgentContext ctx = newContext("r-mandatory-1", "task");
 
         init.initializeNewConversation(ctx, stablePrefix);
 
-        assertNotNull("shadow mode must create ledger", ctx.getConversationLedger());
-        assertNotNull("shadow mode must set stable prefix", ctx.getStablePrefix());
+        assertNotNull("mandatory mode must create ledger", ctx.getConversationLedger());
+        assertNotNull("mandatory mode must set stable prefix", ctx.getStablePrefix());
         assertEquals(1, ctx.getConversationLedger().size());
-    }
-
-    @Test
-    public void shadowModeAppendServiceIsActive() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(shadowConfig);
-        assertTrue("shadow mode must be active", svc.isActive());
-    }
-
-    @Test
-    public void isActiveCorrectForEachConfig() {
-        assertTrue(new ConversationLedgerInitializer(enabledConfig).isActive());
-        assertTrue(new ConversationLedgerInitializer(shadowConfig).isActive());
-        assertFalse(new ConversationLedgerInitializer(disabledConfig).isActive());
-
-        assertTrue(new ConversationLedgerAppendService(enabledConfig).isActive());
-        assertTrue(new ConversationLedgerAppendService(shadowConfig).isActive());
-        assertFalse(new ConversationLedgerAppendService(disabledConfig).isActive());
     }
 
     // ================================================================
@@ -660,7 +577,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendServiceReturnIsImmutable() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-snapshot-1", "task");
         ctx.ensureLedgerActive();
 
@@ -681,7 +598,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void appendServiceSnapshotIndependentOfLaterAppends() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-snapshot-2", "task");
         ctx.ensureLedgerActive();
 
@@ -723,7 +640,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void checkpointResumeDoesNotDuplicateEntries() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-checkpoint-1", "task");
         ctx.ensureLedgerActive();
 
@@ -751,7 +668,7 @@ public class ConversationLedgerC4Test {
 
     @Test
     public void sequencesAreMonotonicAcrossAllTypes() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-seq-1", "task");
         ctx.ensureLedgerActive();
 
@@ -775,13 +692,13 @@ public class ConversationLedgerC4Test {
 
     @Test(expected = NullPointerException.class)
     public void appendServiceNullContextThrows() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         svc.appendAssistant(null, "msg", "key");
     }
 
     @Test(expected = NullPointerException.class)
     public void appendToolResultNullContentThrows() {
-        ConversationLedgerAppendService svc = new ConversationLedgerAppendService(enabledConfig);
+        ConversationLedgerAppendService svc = new ConversationLedgerAppendService();
         AgentContext ctx = newContext("r-null-1", "task");
         ctx.ensureLedgerActive();
         svc.appendToolResult(ctx, null, "key");
@@ -789,19 +706,19 @@ public class ConversationLedgerC4Test {
 
     @Test(expected = NullPointerException.class)
     public void initializerNullContextThrows() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         init.initializeNewConversation(null, stablePrefix);
     }
 
     @Test(expected = NullPointerException.class)
     public void initializerNullStablePrefixThrows() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         init.initializeNewConversation(newContext("r", "q"), null);
     }
 
     @Test(expected = NullPointerException.class)
     public void migrateNullV2SnapshotThrows() {
-        ConversationLedgerInitializer init = new ConversationLedgerInitializer(enabledConfig);
+        ConversationLedgerInitializer init = new ConversationLedgerInitializer();
         init.migrateFromV2(newContext("r", "q"), stablePrefix, null);
     }
 

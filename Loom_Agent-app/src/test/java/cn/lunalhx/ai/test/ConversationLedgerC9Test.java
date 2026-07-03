@@ -57,11 +57,9 @@ public class ConversationLedgerC9Test {
     @Before
     public void setUp() {
         enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        enabledConfig.setEnabled(true);
-        enabledConfig.setShadowEnabled(false);
 
-        appendSvc = new ConversationLedgerAppendService(enabledConfig);
-        initializer = new ConversationLedgerInitializer(enabledConfig);
+        appendSvc = new ConversationLedgerAppendService();
+        initializer = new ConversationLedgerInitializer();
         bootstrapService = new LedgerBootstrapService(appendSvc, initializer);
         prefixBuilder = new StablePrefixBuilder();
 

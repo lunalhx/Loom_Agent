@@ -210,7 +210,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
     }
 
     private void appendToolResultToLedger(AgentContext context, ToolResult result) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String eventKey = ConversationLedgerInitializer.eventKey(

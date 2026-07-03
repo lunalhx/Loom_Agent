@@ -32,7 +32,6 @@ import cn.lunalhx.ai.domain.agent.service.prompt.ModelCallServices;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
-import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
@@ -71,59 +70,6 @@ public class AgentFlowFactory {
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null, null, null);
-    }
-
-    public AgentFlowFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null, null, null);
-    }
-
-    public AgentFlowFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator,
-                           SkillRepository skillRepository,
-                           ContextArtifactRepository contextArtifactRepository,
-                           ContextBlobStore contextBlobStore) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, null, null, null);
-    }
-
-    public AgentFlowFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator,
-                           SkillRepository skillRepository,
-                           ContextArtifactRepository contextArtifactRepository,
-                           ContextBlobStore contextBlobStore,
-                           ConversationLedgerAppendService ledgerAppendService) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, ledgerAppendService, null, null);
-    }
-
-    public AgentFlowFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
-                           AgentLoopRuntimeDependencies runtime,
-                           AgentHookRegistry hookRegistry,
-                           UndoSessionCoordinator undoCoordinator,
-                           SkillRepository skillRepository,
-                           ContextArtifactRepository contextArtifactRepository,
-                           ContextBlobStore contextBlobStore,
-                           ConversationLedgerAppendService ledgerAppendService,
-                           LedgerBootstrapService bootstrapService) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, ledgerAppendService, bootstrapService, null);
-    }
-
-    public AgentFlowFactory(ModelGateway modelGateway,
-                           AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator,
@@ -142,9 +88,10 @@ public class AgentFlowFactory {
         this.skillRepository = skillRepository;
         this.contextArtifactRepository = contextArtifactRepository;
         this.contextBlobStore = contextBlobStore;
-        this.ledgerAppendService = ledgerAppendService;
-        this.bootstrapService = bootstrapService;
-        this.ledgerCompactionService = ledgerCompactionService;
+        this.ledgerAppendService = Objects.requireNonNull(ledgerAppendService, "ledgerAppendService must not be null");
+        this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService must not be null");
+        this.ledgerCompactionService = Objects.requireNonNull(
+                ledgerCompactionService, "ledgerCompactionService must not be null");
     }
 
     /**
@@ -174,14 +121,6 @@ public class AgentFlowFactory {
         BudgetGuard budgetGuard = runtime.budgetGuard();
         ContextWindowManager contextWindowManager = runtime.contextWindowManager();
 
-        // Create shadow diagnostic only when shadow mode is active (no-op when null)
-        LedgerShadowDiagnostic shadowDiagnostic = null;
-        if (ledgerAppendService != null && ledgerAppendService.isActive()
-                && Boolean.TRUE.equals(properties.getConversationLedger().getShadowEnabled())
-                && !Boolean.TRUE.equals(properties.getConversationLedger().getEnabled())) {
-            shadowDiagnostic = new LedgerShadowDiagnostic();
-        }
-
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new SkillBootstrapNode(skillRepository, state.approvalStore(),
                         contextArtifactRepository, contextBlobStore, properties),
@@ -190,11 +129,9 @@ public class AgentFlowFactory {
                 new RenderPromptNode(contextWindowManager,
                         new RenderPromptResources(skillRepository,
                                 contextArtifactRepository, contextBlobStore),
-                        bootstrapService != null
-                                ? new LedgerPromptServices(shadowDiagnostic, bootstrapService,
-                                        new cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder(),
-                                        ledgerCompactionService)
-                                : LedgerPromptServices.disabled()),
+                        new LedgerPromptServices(bootstrapService,
+                                new cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder(),
+                                ledgerCompactionService)),
                 new ModelCallNode(modelGateway, properties,
                         new ModelCallServices(traceRecorder, budgetGuard,
                                 contextWindowManager, ledgerAppendService)),

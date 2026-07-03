@@ -22,12 +22,12 @@ public class ConversationLedgerTest {
     // ==================== configuration defaults ====================
 
     @Test
-    public void configDefaultsFalse() {
+    public void configDefaultsContainOnlyCompactionWatermarks() {
         AgentRuntimeProperties.ConversationLedgerProperties props =
                 new AgentRuntimeProperties.ConversationLedgerProperties();
 
-        assertThat(props.getEnabled()).isFalse();
-        assertThat(props.getShadowEnabled()).isFalse();
+        assertThat(props.getCompactionHighWatermark()).isEqualTo(200);
+        assertThat(props.getCompactionLowWatermark()).isEqualTo(50);
     }
 
     @Test

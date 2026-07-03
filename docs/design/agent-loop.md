@@ -52,7 +52,7 @@ flowchart TD
 - `ToolDispatchNode` 将模型决定调用的工具写成 `assistant_action`。
 - `ObservationNode` 将工具执行结果写成 `tool_result`。
 - `DecisionNode` 将模型 JSON 解析错误写成 `system_note`。
-- `RenderPromptNode` 将 `question + toolSpecs + dynamicText` 渲染为下一轮 `currentPrompt`。
+- `RenderPromptNode` 构建稳定前缀并初始化会话 ledger；模型输入只由稳定前缀和 ledger messages 组成。
 
 这样工具执行结果仍保留在结构化字段里，同时模型看到的是经过节点整理后的文本上下文。`assistant_action` 和 `tool_result` 会成对出现：前者表示“模型想调用什么工具”，后者表示“Java 程序实际执行工具后观察到了什么”。如果 Agent 调用了两次工具，就会出现两组这样的记录，这不是重复，而是多轮 ReAct 循环的历史。
 

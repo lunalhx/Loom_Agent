@@ -166,26 +166,10 @@ public class AgentContext {
 
     public DynamicText getDynamicText() { return prompt.dynamicText(); }
     public void setDynamicText(DynamicText v) { prompt.setDynamicText(v); }
-    public String getCurrentPrompt() { return prompt.currentPrompt(); }
-    public void setCurrentPrompt(String v) { prompt.setCurrentPrompt(v); }
-    public String getPromptRenderCacheKey() { return prompt.promptRenderCacheKey(); }
-    public void setPromptRenderCacheKey(String v) { prompt.setPromptRenderCacheKey(v); }
     public String getInstructionsHash() { return prompt.instructionsHash(); }
     public void setInstructionsHash(String v) { prompt.setInstructionsHash(v); }
     public String getModelOutput() { return prompt.modelOutput(); }
     public void setModelOutput(String v) { prompt.setModelOutput(v); }
-
-    // ---- legacy prompt/memory delegates pending removal ----
-    public String getCurrentSystemPrompt() { return prompt.currentSystemPrompt(); }
-    public void setCurrentSystemPrompt(String v) { prompt.setCurrentSystemPrompt(v); }
-    public String getCurrentUserPrompt() { return prompt.currentUserPrompt(); }
-    public void setCurrentUserPrompt(String v) { prompt.setCurrentUserPrompt(v); }
-    public String getMemoryContext() { return prompt.memoryContext(); }
-    public void setMemoryContext(String v) { prompt.setMemoryContext(v); }
-    public List<String> getSelectedMemoryIds() { return prompt.selectedMemoryIds(); }
-    public void setSelectedMemoryIds(List<String> v) { prompt.setSelectedMemoryIds(v); }
-    public long getSelectedMemoryVersion() { return prompt.selectedMemoryVersion(); }
-    public void setSelectedMemoryVersion(long v) { prompt.setSelectedMemoryVersion(v); }
 
     // ---- conversation ledger delegates (C1) ----
     public ConversationLedger getConversationLedger() { return prompt.conversationLedger(); }

@@ -68,7 +68,6 @@ public class ModelPromptFactoryC8Test {
         ctx.setMaxTotalSteps(30);
         ctx.setSegmentIndex(0);
         ctx.setSegmentStartStep(0);
-        ctx.setCurrentPrompt("rendered old prompt content for testing");
         ctx.setStablePrefix(stablePrefix);
 
         if (withLedger) {
@@ -100,14 +99,14 @@ public class ModelPromptFactoryC8Test {
     }
 
     /** Reflectively invoke ModelPromptFactory.build(). */
-    private ChatPrompt invokeFactoryBuild(boolean ledgerEnabled, AgentContext ctx,
+    private ChatPrompt invokeFactoryBuild(AgentContext ctx,
                                            String model, int maxTokens,
                                            long deadlineMs) throws Exception {
         Class<?> factoryClass = Class.forName(
                 "cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory");
-        Constructor<?> ctor = factoryClass.getDeclaredConstructor(boolean.class);
+        Constructor<?> ctor = factoryClass.getDeclaredConstructor();
         ctor.setAccessible(true);
-        Object factory = ctor.newInstance(ledgerEnabled);
+        Object factory = ctor.newInstance();
         Method buildMethod = factoryClass.getDeclaredMethod(
                 "build", AgentContext.class, String.class, int.class, long.class);
         buildMethod.setAccessible(true);
@@ -115,13 +114,13 @@ public class ModelPromptFactoryC8Test {
     }
 
     /** Reflectively invoke ModelPromptFactory.budgetInput(). */
-    private String invokeFactoryBudgetInput(boolean ledgerEnabled, AgentContext ctx)
+    private String invokeFactoryBudgetInput(AgentContext ctx)
             throws Exception {
         Class<?> factoryClass = Class.forName(
                 "cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory");
-        Constructor<?> ctor = factoryClass.getDeclaredConstructor(boolean.class);
+        Constructor<?> ctor = factoryClass.getDeclaredConstructor();
         ctor.setAccessible(true);
-        Object factory = ctor.newInstance(ledgerEnabled);
+        Object factory = ctor.newInstance();
         Method method = factoryClass.getDeclaredMethod(
                 "budgetInput", AgentContext.class);
         method.setAccessible(true);
@@ -163,55 +162,14 @@ public class ModelPromptFactoryC8Test {
     }
 
     // ================================================================
-    // 1. flag=false produces old golden (character-for-character identical)
-    // ================================================================
-
-    @Test
-    public void ledgerDisabledPreservesOldGoldenNoReminder() throws Exception {
-        AgentContext ctx = buildBaseContext("r-c8-golden-1", true);
-        // Plan with low roundsSinceUpdate → no reminder
-        AgentPlan plan = AgentPlan.forQuestion("test");
-        ctx.setPlan(plan);
-        plan.setRoundsSinceUpdate(0);
-
-        ChatPrompt prompt = invokeFactoryBuild(false, ctx, "deepseek-v4", 4096, 0);
-
-        // Old golden: systemPrompt = SECURITY_SYSTEM_PROMPT, single message
-        assertNotNull("systemPrompt must be populated", prompt.getSystemPrompt());
-        assertThat(prompt.getSystemPrompt()).contains("untrusted_tool_output");
-        assertEquals("rendered old prompt content for testing", prompt.getMessage());
-        assertNull("messages list must be null for single-message path", prompt.getMessages());
-        assertEquals(OutputFormat.JSON_OBJECT, prompt.getOutputFormat());
-    }
-
-    @Test
-    public void ledgerDisabledPreservesOldGoldenWithReminder() throws Exception {
-        AgentContext ctx = buildBaseContext("r-c8-golden-2", true);
-        AgentPlan plan = AgentPlan.forQuestion("test");
-        ctx.setPlan(plan);
-        plan.setRoundsSinceUpdate(5);
-
-        ChatPrompt prompt = invokeFactoryBuild(false, ctx, "deepseek-v4", 4096, 0);
-
-        // Old golden with reminder: 2 user messages
-        assertNotNull("messages must be populated for reminder path", prompt.getMessages());
-        assertEquals(2, prompt.getMessages().size());
-        assertEquals("user", prompt.getMessages().get(0).getRole());
-        assertEquals("user", prompt.getMessages().get(1).getRole());
-        assertThat(prompt.getMessages().get(1).getContent())
-                .contains("Update your todos with todo_write");
-        assertNull("message field must be null when messages list is used", prompt.getMessage());
-    }
-
-    // ================================================================
     // 2. flag=true produces correct message roles and order
     // ================================================================
 
     @Test
-    public void ledgerEnabledProducesCorrectRolesAndOrder() throws Exception {
+    public void ledgerOnlyProducesCorrectRolesAndOrder() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-order", true);
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // System prompt is from StablePrefix, NOT the old SECURITY_SYSTEM_PROMPT
         assertEquals(stablePrefix.frozenContent(), prompt.getSystemPrompt());
@@ -247,14 +205,14 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledNoReminderDuplication() throws Exception {
+    public void ledgerOnlyNoReminderDuplication() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-nodup", true);
         // Set high roundsSinceUpdate — in legacy mode this would trigger reminder
         AgentPlan plan = AgentPlan.forQuestion("test");
         ctx.setPlan(plan);
         plan.setRoundsSinceUpdate(5);
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // Count reminder occurrences across ALL messages
         long reminderCount = prompt.getMessages().stream()
@@ -271,7 +229,7 @@ public class ModelPromptFactoryC8Test {
     }
 
     @Test
-    public void ledgerEnabledNoReminderWhenNotTriggered() throws Exception {
+    public void ledgerOnlyNoReminderWhenNotTriggered() throws Exception {
         // When roundsSinceUpdate is low, neither ledger NOR factory should have reminder
         AgentContext ctx = buildBaseContext("r-c8-norem", false);
         AgentPlan plan = AgentPlan.forQuestion("test");
@@ -288,7 +246,7 @@ public class ModelPromptFactoryC8Test {
         ctx.setStablePrefix(stablePrefix);
         ctx.setLedgerReady(true); // C9R
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // No reminder anywhere
         long reminderCount = prompt.getMessages().stream()
@@ -305,11 +263,11 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledBudgetInputMatchesCanonicalMessages() throws Exception {
+    public void ledgerOnlyBudgetInputMatchesCanonicalMessages() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-budget", true);
 
         // Get the actual messages that will be sent
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // Build expected canonical text from system + all message contents
         StringBuilder expected = new StringBuilder(prompt.getSystemPrompt());
@@ -318,15 +276,15 @@ public class ModelPromptFactoryC8Test {
         }
 
         // budgetInput should match (used by budget guard to estimate tokens)
-        String budgetInput = invokeFactoryBudgetInput(true, ctx);
+        String budgetInput = invokeFactoryBudgetInput(ctx);
         assertEquals(expected.toString(), budgetInput);
     }
 
     @Test
-    public void ledgerEnabledBudgetInputMatchesCanonicalMessagesText() throws Exception {
+    public void ledgerOnlyBudgetInputMatchesCanonicalMessagesText() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-budget2", true);
 
-        String budgetInput = invokeFactoryBudgetInput(true, ctx);
+        String budgetInput = invokeFactoryBudgetInput(ctx);
         String canonical = canonicalMessagesText(ctx);
 
         // budgetInput must match the canonical text built from StablePrefix + ledger
@@ -338,11 +296,11 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledRetryPayloadConsistent() throws Exception {
+    public void ledgerOnlyRetryPayloadConsistent() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-retry", true);
 
-        ChatPrompt prompt1 = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
-        ChatPrompt prompt2 = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt1 = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt2 = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // Same input → same output (idempotent)
         assertEquals("systemPrompt must be identical on retry",
@@ -360,8 +318,8 @@ public class ModelPromptFactoryC8Test {
         }
 
         // Budget input is also idempotent
-        String budget1 = invokeFactoryBudgetInput(true, ctx);
-        String budget2 = invokeFactoryBudgetInput(true, ctx);
+        String budget1 = invokeFactoryBudgetInput(ctx);
+        String budget2 = invokeFactoryBudgetInput(ctx);
         assertEquals("budgetInput must be identical on retry", budget1, budget2);
     }
 
@@ -370,10 +328,10 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledJsonConstraintNotDuplicatedInSystemPrompt() throws Exception {
+    public void ledgerOnlyJsonConstraintNotDuplicatedInSystemPrompt() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-json", true);
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         // The JSON instruction should NOT be in the system prompt (it's added by the gateway)
         // ModelPromptFactory must not embed it
@@ -401,35 +359,15 @@ public class ModelPromptFactoryC8Test {
         }
     }
 
-    @Test
-    public void ledgerDisabledJsonConstraintStillWorks() throws Exception {
-        // Verify old path also has exactly one JSON instruction (regression check)
-        AgentContext ctx = buildBaseContext("r-c8-json-old", false);
-        AgentPlan plan = AgentPlan.forQuestion("test");
-        ctx.setPlan(plan);
-        plan.setRoundsSinceUpdate(0);
-
-        ChatPrompt prompt = invokeFactoryBuild(false, ctx, "deepseek-v4", 4096, 0);
-        String requestBody = invokeGatewayToRequestBody(prompt, false);
-        JsonNode body = objectMapper.readTree(requestBody);
-        JsonNode messages = body.get("messages");
-
-        String systemContent = messages.get(0).get("content").asText();
-        String jsonInstruction = "请只输出一个合法 JSON 对象";
-        long jsonInstrCount = countOccurrences(systemContent, jsonInstruction);
-        assertEquals("JSON instruction must appear exactly once in legacy mode too",
-                1, jsonInstrCount);
-    }
-
     // ================================================================
     // 7. Gateway serialization: ledger messages flow through correctly
     // ================================================================
 
     @Test
-    public void ledgerEnabledGatewaySerializationPreservesAllMessages() throws Exception {
+    public void ledgerOnlyGatewaySerializationPreservesAllMessages() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-gw", true);
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
         String requestBody = invokeGatewayToRequestBody(prompt, false);
         JsonNode body = objectMapper.readTree(requestBody);
         JsonNode messages = body.get("messages");
@@ -457,12 +395,12 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledEmptyLedgerProducesValidPrompt() throws Exception {
+    public void ledgerOnlyEmptyLedgerProducesValidPrompt() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-empty", false);
         ctx.setConversationLedger(new ConversationLedger());
         ctx.setLedgerReady(true); // C9R
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
 
         assertEquals(stablePrefix.frozenContent(), prompt.getSystemPrompt());
         assertNull("message must be null", prompt.getMessage());
@@ -470,7 +408,7 @@ public class ModelPromptFactoryC8Test {
         assertTrue("messages must be empty", prompt.getMessages().isEmpty());
 
         // Budget input should just be the stable prefix
-        String budgetInput = invokeFactoryBudgetInput(true, ctx);
+        String budgetInput = invokeFactoryBudgetInput(ctx);
         assertEquals(stablePrefix.frozenContent(), budgetInput);
     }
 
@@ -479,45 +417,29 @@ public class ModelPromptFactoryC8Test {
     // ================================================================
 
     @Test
-    public void ledgerEnabledNullStablePrefixProducesEmptySystemPrompt() throws Exception {
+    public void nullStablePrefixIsRejected() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-nosp", true);
         ctx.setStablePrefix(null);
 
-        ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
-
-        assertEquals("systemPrompt must be empty string when stablePrefix is null",
-                "", prompt.getSystemPrompt());
-        // Messages should still be populated from ledger
-        assertNotNull("messages must still be populated", prompt.getMessages());
-        assertEquals(5, prompt.getMessages().size());
+        try {
+            invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
+            fail("missing stable prefix must be rejected");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertThat(e.getCause()).isInstanceOf(IllegalStateException.class);
+        }
     }
 
-    // ================================================================
-    // 10. Default constructor still works (backward compatibility)
-    // ================================================================
-
     @Test
-    public void defaultConstructorProducesLegacyBehavior() throws Exception {
-        AgentContext ctx = buildBaseContext("r-c8-default", true);
-        AgentPlan plan = AgentPlan.forQuestion("test");
-        ctx.setPlan(plan);
-        plan.setRoundsSinceUpdate(0);
+    public void ledgerNotReadyIsRejected() throws Exception {
+        AgentContext ctx = buildBaseContext("r-c8-not-ready", true);
+        ctx.setLedgerReady(false);
 
-        // Use no-arg constructor (ledgerEnabled=false)
-        Class<?> factoryClass = Class.forName(
-                "cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory");
-        Constructor<?> ctor = factoryClass.getDeclaredConstructor();
-        ctor.setAccessible(true);
-        Object factory = ctor.newInstance();
-        Method buildMethod = factoryClass.getDeclaredMethod(
-                "build", AgentContext.class, String.class, int.class, long.class);
-        buildMethod.setAccessible(true);
-        ChatPrompt prompt = (ChatPrompt) buildMethod.invoke(factory, ctx, "deepseek-v4", 4096, 0);
-
-        // Should use legacy path
-        assertThat(prompt.getSystemPrompt()).contains("untrusted_tool_output");
-        assertEquals("rendered old prompt content for testing", prompt.getMessage());
-        assertNull(prompt.getMessages());
+        try {
+            invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
+            fail("unready ledger must be rejected");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertThat(e.getCause()).isInstanceOf(IllegalStateException.class);
+        }
     }
 
     // ================================================================

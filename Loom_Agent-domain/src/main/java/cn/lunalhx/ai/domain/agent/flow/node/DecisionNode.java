@@ -221,7 +221,7 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private void appendParseErrorToLedger(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderParseErrorNote(

@@ -265,7 +265,7 @@ public class ReplanNode extends AbstractAgentNode {
     }
 
     private void appendPlanSnapshotIfChanged(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         if (context.getPlan() == null) {
@@ -283,7 +283,7 @@ public class ReplanNode extends AbstractAgentNode {
     }
 
     private void appendReplanNote(AgentContext context, ReplanReason reason, boolean modelUpdated) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+        if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderReplanNote(reason, modelUpdated,

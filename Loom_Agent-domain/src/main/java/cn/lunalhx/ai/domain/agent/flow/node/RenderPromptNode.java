@@ -14,18 +14,16 @@ import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionResult;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
-import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,16 +37,23 @@ public class RenderPromptNode extends AbstractAgentNode {
     public RenderPromptNode(ContextWindowManager contextWindowManager,
                             RenderPromptResources resources,
                             LedgerPromptServices ledgerServices) {
-        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
+        super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "conversationLedger",
+                "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
-        this.resources = resources;
-        this.ledgerServices = ledgerServices;
+        this.resources = Objects.requireNonNull(resources, "resources must not be null");
+        this.ledgerServices = Objects.requireNonNull(ledgerServices, "ledgerServices must not be null");
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
-        // ---- C9R: Ledger bootstrap (before model call) ----
-        runBootstrap(context);
+        try {
+            runBootstrap(context);
+        } catch (RuntimeException e) {
+            fail(context, AgentStopReason.MODEL_ERROR,
+                    AgentErrorCode.LEDGER_BOOTSTRAP_FAILED.code(),
+                    AgentErrorCode.LEDGER_BOOTSTRAP_FAILED.defaultMessage());
+            return NodeResult.next(AgentNodeNames.FAIL, List.of());
+        }
 
         if (context.getMaxTotalSteps() > 0 && context.getStep() >= context.getMaxTotalSteps()) {
             fail(context, AgentStopReason.MAX_STEPS, "max_steps_total", "达到全局最大步骤数，已停止");
@@ -74,140 +79,8 @@ public class RenderPromptNode extends AbstractAgentNode {
             compactEvents.add(ledgerCompactEvent(context, ledgerResult));
         }
 
-        String cacheKey = computeCacheKey(context);
-        if (!cacheKey.equals(context.getPromptRenderCacheKey()) || context.getCurrentPrompt() == null) {
-            context.setCurrentPrompt(renderPromptText(context));
-            context.setPromptRenderCacheKey(cacheKey);
-        }
-
-        // ===== Shadow diagnostic (ledger shadow mode only) =====
-        runShadowDiagnostic(context);
-
         return NodeResult.next(AgentNodeNames.MODEL_CALL,
                 compactEvents.isEmpty() ? List.of() : compactEvents);
-    }
-
-    private String renderPromptText(AgentContext context) {
-        StringBuilder prompt = new StringBuilder();
-
-        // ===== 1. 固定角色/协议/安全规则 =====
-        if (context.getAgentRole() == null) {
-            prompt.append(StablePrefixBuilder.MAIN_AGENT_ROLE);
-            if (context.isSubAgentSpawnAllowed()) {
-                prompt.append(StablePrefixBuilder.SPAWN_ALLOWED_TEXT);
-            }
-        } else {
-            appendSubAgentRoleInstructions(prompt, context);
-        }
-        prompt.append(StablePrefixBuilder.COMMON_PROTOCOL_RULES);
-        prompt.append('\n');
-
-        // ===== 2. 固定 Action/Final JSON 示例 =====
-        prompt.append(StablePrefixBuilder.ACTION_JSON_EXAMPLE);
-        if (context.getAgentRole() == null) {
-            prompt.append(StablePrefixBuilder.FINAL_JSON_EXAMPLE_MAIN);
-        } else {
-            prompt.append(StablePrefixBuilder.FINAL_JSON_EXAMPLE_SUB);
-        }
-        prompt.append('\n');
-
-        // ===== 3. active skills、available skills、已确定排序的工具目录 =====
-        List<SkillActivation> activatedSkills = context.getActivatedSkills();
-        if (activatedSkills != null && !activatedSkills.isEmpty()) {
-            prompt.append("<active_skills>\n");
-            for (SkillActivation activation : activatedSkills) {
-                prompt.append("[skill:").append(activation.name()).append("]\n");
-                if (this.resources.skillRepository() != null) {
-                    String content = readSkillContentCached(context, activation);
-                    if (StringUtils.isNotBlank(content)) {
-                        prompt.append(content).append('\n');
-                    }
-                }
-                prompt.append("[/skill:").append(activation.name()).append("]\n");
-            }
-            prompt.append("</active_skills>\n\n");
-        }
-
-        if (context.getSkillCatalogText() != null && !context.getSkillCatalogText().isEmpty()) {
-            prompt.append("<available_skills>\n");
-            prompt.append(context.getSkillCatalogText());
-            prompt.append("</available_skills>\n\n");
-        }
-
-        prompt.append("可用工具：\n");
-        for (ToolSpec spec : context.getToolSpecs()) {
-            prompt.append("- ").append(spec.getName()).append(": ").append(spec.getDescription())
-                    .append(" input=").append(spec.getInputSchema()).append("\n");
-        }
-
-        // ===== 4. 当前用户任务等 run 内稳定内容 =====
-        prompt.append("\n用户问题：").append(context.getQuestion()).append("\n\n");
-
-        // ===== 5. DynamicText 历史 =====
-        if (!context.getDynamicText().isEmpty()) {
-            prompt.append("动态上下文：\n");
-            prompt.append("上下文按 user_task / assistant_action / tool_result / system_note 组织。");
-            prompt.append("assistant_action 是你上一轮请求的工具调用，tool_result 是后端实际执行工具后的观察结果。\n");
-            prompt.append(context.getDynamicText().render()).append('\n');
-        }
-
-        // ===== 6. 动态尾部：步数预算、当前计划、memoryContext =====
-        prompt.append('\n');
-        if (context.getMaxSegments() > 1) {
-            prompt.append("执行预算：第 ").append(context.getSegmentIndex() + 1).append("/")
-                    .append(context.getMaxSegments()).append(" 段，全局步数 ")
-                    .append(context.getStep() + 1).append("/").append(context.getMaxTotalSteps())
-                    .append("（当前段 ").append(context.getMaxSteps()).append(" 步预算）\n\n");
-        }
-        if (context.getPlan() != null) {
-            prompt.append("当前计划：\n");
-            prompt.append(context.getPlan().render()).append("\n\n");
-        }
-        if (context.getMemoryContext() != null && !context.getMemoryContext().isEmpty()) {
-            prompt.append("<memory_context>\n");
-            prompt.append(context.getMemoryContext());
-            prompt.append("\n</memory_context>\n\n");
-        }
-
-        return prompt.toString();
-    }
-
-    private String computeCacheKey(AgentContext context) {
-        StringBuilder key = new StringBuilder();
-        key.append("role=").append(context.getAgentRole()).append('|');
-        key.append("spawn=").append(context.isSubAgentSpawnAllowed()).append('|');
-        key.append("pathScope=").append(context.getPathScope()).append('|');
-        key.append("question=").append(context.getQuestion()).append('|');
-        key.append("plan@").append(System.identityHashCode(context.getPlan()))
-                .append(":v").append(context.getPlan() == null ? 0 : context.getPlan().getVersion()).append('|');
-        key.append("dynamicText@").append(System.identityHashCode(context.getDynamicText()))
-                .append(":v").append(context.getDynamicText().getVersion()).append('|');
-        key.append("instrHash=").append(context.getInstructionsHash()).append('|');
-        key.append("memIds=").append(context.getSelectedMemoryIds()).append('|');
-        key.append("memVer=").append(context.getSelectedMemoryVersion()).append('|');
-        key.append("skillCatalogText=").append(context.getSkillCatalogText()).append('|');
-        key.append("activatedSkills=");
-        List<SkillActivation> activated = context.getActivatedSkills();
-        if (activated != null) {
-            for (SkillActivation a : activated) {
-                key.append(a.name()).append(':').append(a.manifestSha256()).append(';');
-            }
-        }
-        key.append('|');
-        key.append("toolSpecs=");
-        for (ToolSpec spec : context.getToolSpecs()) {
-            key.append(spec.getName()).append(':')
-                    .append(spec.getDescription()).append(':')
-                    .append(spec.getInputSchema()).append(';');
-        }
-        key.append('|');
-        key.append("maxSteps=").append(context.getMaxSteps()).append('|');
-        key.append("maxTotalSteps=").append(context.getMaxTotalSteps()).append('|');
-        key.append("step=").append(context.getStep()).append('|');
-        key.append("segmentStartStep=").append(context.getSegmentStartStep()).append('|');
-        key.append("segmentIndex=").append(context.getSegmentIndex()).append('|');
-        key.append("maxSegments=").append(context.getMaxSegments());
-        return key.toString();
     }
 
     private String readSkillContentCached(AgentContext context, SkillActivation activation) {
@@ -259,11 +132,6 @@ public class RenderPromptNode extends AbstractAgentNode {
      * <p>Returns a non-null result; caller checks {@code compacted()}.
      */
     private LedgerCompactionResult compactLedgerIfNeeded(AgentContext context) {
-        if (ledgerServices.compactionService() == null) {
-            return LedgerCompactionResult.notNeeded(
-                    context.getConversationLedger() != null ? context.getConversationLedger().size() : 0,
-                    context.getGeneration());
-        }
         try {
             return this.ledgerServices.compactionService().compactIfNeeded(context);
         } catch (Exception e) {
@@ -288,42 +156,6 @@ public class RenderPromptNode extends AbstractAgentNode {
                 .build();
     }
 
-    private void appendSubAgentRoleInstructions(StringBuilder prompt, AgentContext context) {
-        AgentRole role = context.getAgentRole();
-        prompt.append(StablePrefixBuilder.SUB_AGENT_INTRO);
-        prompt.append(String.format(StablePrefixBuilder.SUB_AGENT_ROLE_LABEL, role.name()));
-        switch (role) {
-            case EXPLORER -> prompt.append(StablePrefixBuilder.EXPLORER_INSTRUCTIONS);
-            case REVIEWER -> prompt.append(StablePrefixBuilder.REVIEWER_INSTRUCTIONS);
-            case EDITOR -> prompt.append(StablePrefixBuilder.EDITOR_INSTRUCTIONS);
-        }
-        if (context.getPathScope() != null && !context.getPathScope().isBlank()) {
-            prompt.append(String.format(StablePrefixBuilder.PATH_SCOPE_FMT, context.getPathScope()));
-        }
-        prompt.append(StablePrefixBuilder.SUB_AGENT_FINAL_ANSWER_FMT);
-    }
-
-    /**
-     * Run the ledger shadow diagnostic when configured.
-     *
-     * <p>This builds canonical messages from the ledger, compares them against
-     * the current (old) prompt, logs the result, and retains the canonical text
-     * for LCP computation on the next call. Failures are caught and logged;
-     * the agent main loop is never affected.
-     */
-    private void runShadowDiagnostic(AgentContext context) {
-        if (ledgerServices.shadowDiagnostic() == null || !context.isLedgerActive()) {
-            return;
-        }
-        try {
-            this.ledgerServices.shadowDiagnostic().compareAndLog(context, context.getCurrentPrompt());
-        } catch (Exception e) {
-            // Bounded failure — shadow diagnostic must not affect main flow.
-            // The diagnostic itself already catches exceptions internally;
-            // this outer catch is a defense-in-depth safety net.
-        }
-    }
-
     // ================================================================
     // C9R: Ledger bootstrap
     // ================================================================
@@ -335,22 +167,11 @@ public class RenderPromptNode extends AbstractAgentNode {
      * (tools, skills, role, path scope, spawn capability) and delegates to
      * {@link LedgerBootstrapService} for generation switching and initialization.
      *
-     * <p>On failure, {@code ledgerReady} stays {@code false} and
-     * {@code ModelPromptFactory} will safely fall back to the legacy renderer.
+     * <p>On failure, the caller routes directly to FAIL before any model call.
      */
     private void runBootstrap(AgentContext context) {
-        if (ledgerServices.bootstrapService() == null) {
-            return;
-        }
-        try {
-            StablePrefix candidate = buildCandidatePrefix(context);
-            if (candidate != null) {
-                this.ledgerServices.bootstrapService().bootstrap(context, candidate);
-            }
-        } catch (Exception e) {
-            // Bootstrap failure: ledgerReady stays false.
-            // ModelPromptFactory falls back to legacy renderer.
-        }
+        StablePrefix candidate = buildCandidatePrefix(context);
+        this.ledgerServices.bootstrapService().bootstrap(context, candidate);
     }
 
     /**

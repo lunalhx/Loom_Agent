@@ -28,7 +28,7 @@ import java.util.List;
 /**
  * Checkpoint snapshot v3 — only durable state needed for recovery.
  *
- * <p>Excluded from persistence: currentPrompt, render cache, modelOutput, current span,
+ * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *

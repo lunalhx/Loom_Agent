@@ -65,11 +65,9 @@ public class ConversationLedgerC10Test {
     @Before
     public void setUp() {
         enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
-        enabledConfig.setEnabled(true);
-        enabledConfig.setShadowEnabled(false);
 
-        appendSvc = new ConversationLedgerAppendService(enabledConfig);
-        initializer = new ConversationLedgerInitializer(enabledConfig);
+        appendSvc = new ConversationLedgerAppendService();
+        initializer = new ConversationLedgerInitializer();
         bootstrapService = new LedgerBootstrapService(appendSvc, initializer);
         prefixBuilder = new StablePrefixBuilder();
 
@@ -126,12 +124,12 @@ public class ConversationLedgerC10Test {
     }
 
     private LedgerCompactionService compactionService(LedgerWatermark watermark) {
-        return new LedgerCompactionService(watermark, enabledConfig, artifactRepository, blobStore);
+        return new LedgerCompactionService(watermark, artifactRepository, blobStore);
     }
 
     private LedgerCompactionService compactionService(LedgerWatermark watermark,
                                                       DeepContextSummaryService deepService) {
-        return new LedgerCompactionService(watermark, enabledConfig, artifactRepository, blobStore, deepService);
+        return new LedgerCompactionService(watermark, artifactRepository, blobStore, deepService);
     }
 
     /** Append N dummy assistant/tool_result pairs to fill the ledger. */

@@ -7,6 +7,7 @@ public enum AgentErrorCode implements ErrorCode {
 
     AGENT_DISABLED("agent_disabled", "Agent 功能未启用", ErrorCategory.UNAVAILABLE),
     AGENT_ERROR("agent_error", "Agent 执行失败", ErrorCategory.INTERNAL),
+    LEDGER_BOOTSTRAP_FAILED("ledger_bootstrap_failed", "Ledger 初始化失败，模型调用已阻止", ErrorCategory.INTERNAL),
     AGENT_TIMEOUT("agent_timeout", "Agent 执行超时", ErrorCategory.TIMEOUT),
     REPLAY_FAILED("replay_failed", "Replay 失败", ErrorCategory.INTERNAL),
     CONVERSATION_DELETED("1004", "会话已删除", ErrorCategory.GONE, true),

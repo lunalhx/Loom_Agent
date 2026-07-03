@@ -39,12 +39,11 @@ public class ModelCallNode extends AbstractAgentNode {
     public ModelCallNode(ModelGateway modelGateway,
                          AgentRuntimeProperties properties,
                          ModelCallServices services) {
-        super(AgentNodeNames.MODEL_CALL, List.of("currentPrompt", "requestId", "conversationId"));
+        super(AgentNodeNames.MODEL_CALL, List.of("stablePrefix", "conversationLedger", "requestId", "conversationId"));
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
 
-        this.promptFactory = new ModelPromptFactory(
-                Boolean.TRUE.equals(properties.getConversationLedger().getEnabled()));
+        this.promptFactory = new ModelPromptFactory();
         this.budgetCoordinator = new ModelCallBudgetCoordinator(
                 services.budgetGuard(), services.traceRecorder(), promptFactory);
         this.failureClassifier = new ModelCallFailureClassifier();
@@ -79,12 +78,10 @@ public class ModelCallNode extends AbstractAgentNode {
             context.setFallbackReason(StringUtils.defaultIfBlank(
                     result.chatResult().getFallbackReason(), context.getFallbackReason()));
             resetContextRecovery(context);
-            if (ledgerAppendService != null && ledgerAppendService.isActive()) {
-                String eventKey = ConversationLedgerInitializer.eventKey(
-                        context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "assistant");
-                ledgerAppendService.appendAssistant(
-                        context, result.chatResult().getContent(), eventKey);
-            }
+            String eventKey = ConversationLedgerInitializer.eventKey(
+                    context.getRunId(), String.valueOf(context.getStep() + 1), "assistant");
+            ledgerAppendService.appendAssistant(
+                    context, result.chatResult().getContent(), eventKey);
             return NodeResult.next(AgentNodeNames.DECISION, List.of());
         }
 
@@ -158,28 +155,22 @@ public class ModelCallNode extends AbstractAgentNode {
     }
 
     private void appendBudgetSnapshotIfApplicable(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
-            return;
-        }
         String text = ControlUpdateTexts.renderBudgetSnapshot(context);
         if (text.isEmpty()) {
             return;
         }
         String eventKey = ConversationLedgerInitializer.eventKey(
-                context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "budget");
+                context.getRunId(), String.valueOf(context.getStep() + 1), "budget");
         ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 
     private void appendTodoReminderIfTriggered(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
-            return;
-        }
         if (context.getPlan() == null || context.getPlan().getRoundsSinceUpdate() < 3) {
             return;
         }
         String text = ControlUpdateTexts.renderTodoReminder();
         String eventKey = ConversationLedgerInitializer.eventKey(
-                context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "todo_reminder");
+                context.getRunId(), String.valueOf(context.getStep() + 1), "todo_reminder");
         ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 }

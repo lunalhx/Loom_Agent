@@ -6,7 +6,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
 import cn.lunalhx.ai.domain.agent.model.valobj.context.ContextArtifactKind;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
@@ -50,7 +49,6 @@ import java.util.UUID;
 public final class LedgerCompactionService {
 
     private final LedgerWatermark watermark;
-    private final ConversationLedgerAppendService appendService;
     private final ContextArtifactRepository artifactRepository;
     private final ContextBlobStore blobStore;
     private final DeepContextSummaryService deepSummaryService;
@@ -60,19 +58,15 @@ public final class LedgerCompactionService {
      * Full constructor with optional deep-summary support.
      *
      * @param watermark           the high/low entry count thresholds
-     * @param config              ledger configuration (for mode gating)
      * @param artifactRepository  artifact storage
      * @param blobStore           blob storage for transcript content
      * @param deepSummaryService  optional; if null, only deterministic summaries are used
      */
     public LedgerCompactionService(LedgerWatermark watermark,
-                                   AgentRuntimeProperties.ConversationLedgerProperties config,
                                    ContextArtifactRepository artifactRepository,
                                    ContextBlobStore blobStore,
                                    DeepContextSummaryService deepSummaryService) {
         this.watermark = Objects.requireNonNull(watermark, "watermark must not be null");
-        Objects.requireNonNull(config, "config must not be null");
-        this.appendService = new ConversationLedgerAppendService(config);
         this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository must not be null");
         this.blobStore = Objects.requireNonNull(blobStore, "blobStore must not be null");
         this.deepSummaryService = deepSummaryService;
@@ -81,10 +75,9 @@ public final class LedgerCompactionService {
 
     /** Convenience constructor without deep-summary support. */
     public LedgerCompactionService(LedgerWatermark watermark,
-                                   AgentRuntimeProperties.ConversationLedgerProperties config,
                                    ContextArtifactRepository artifactRepository,
                                    ContextBlobStore blobStore) {
-        this(watermark, config, artifactRepository, blobStore, null);
+        this(watermark, artifactRepository, blobStore, null);
     }
 
     // ================================================================
@@ -100,7 +93,7 @@ public final class LedgerCompactionService {
     public LedgerCompactionResult compactIfNeeded(AgentContext context) {
         Objects.requireNonNull(context, "context must not be null");
 
-        if (!appendService.isActive() || !context.isLedgerReady()) {
+        if (!context.isLedgerReady()) {
             ConversationLedger ledger = context.getConversationLedger();
             int count = ledger != null ? ledger.size() : 0;
             return LedgerCompactionResult.notNeeded(count, context.getGeneration());

@@ -1116,7 +1116,7 @@ public class AgentLoopContractTest {
             @Override
             public Mono<ModelChatResult> complete(ChatPrompt prompt) {
                 if (prompts != null) {
-                    prompts.add(prompt.getMessage());
+                    prompts.add(AgentRuntimeTestFixture.modelVisibleText(prompt));
                 }
                 int current = Math.min(index.getAndIncrement(), outputs.length - 1);
                 return Mono.just(ModelChatResult.builder().content(outputs[current]).finishReason("stop").build());

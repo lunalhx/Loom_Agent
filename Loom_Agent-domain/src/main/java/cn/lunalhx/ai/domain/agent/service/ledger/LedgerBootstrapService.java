@@ -31,8 +31,8 @@ import java.util.Objects;
  * </ol>
  *
  * <h3>Error handling</h3>
- * <p>On any exception, {@code ledgerReady} is left {@code false} so
- * {@code ModelPromptFactory} safely falls back to the legacy renderer.
+ * <p>On any exception, {@code ledgerReady} remains false and the exception
+ * propagates so the caller can stop before invoking the model.
  */
 public final class LedgerBootstrapService {
 
@@ -56,20 +56,10 @@ public final class LedgerBootstrapService {
         Objects.requireNonNull(context, "context must not be null");
         Objects.requireNonNull(candidate, "candidate must not be null");
 
-        if (!appendService.isActive()) {
-            return; // ledger not active — ModelPromptFactory uses legacy renderer
-        }
-
-        try {
-            doBootstrap(context, candidate);
-            // Success: mark ready and sync configFingerprint for snapshot compat
-            context.setLedgerReady(true);
-            context.setConfigFingerprint(candidate.fingerprint());
-        } catch (Exception e) {
-            // Bootstrap failure: leave ledgerReady=false, ModelPromptFactory
-            // will safely fall back to legacy renderer.
-            // The exception is intentionally swallowed — agent must continue.
-        }
+        context.setLedgerReady(false);
+        doBootstrap(context, candidate);
+        context.setLedgerReady(true);
+        context.setConfigFingerprint(candidate.fingerprint());
     }
 
     private void doBootstrap(AgentContext context, StablePrefix candidate) {

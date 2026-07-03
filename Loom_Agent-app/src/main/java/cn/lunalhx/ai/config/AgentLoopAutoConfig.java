@@ -179,9 +179,8 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
-    public ConversationLedgerAppendService conversationLedgerAppendService(
-            AgentRuntimeProperties agentRuntimeProperties) {
-        return new ConversationLedgerAppendService(agentRuntimeProperties.getConversationLedger());
+    public ConversationLedgerAppendService conversationLedgerAppendService() {
+        return new ConversationLedgerAppendService();
     }
 
     @Bean
@@ -195,7 +194,7 @@ public class AgentLoopAutoConfig {
         LedgerWatermark watermark = LedgerWatermark.fromConfig(
                 config.getCompactionHighWatermark(),
                 config.getCompactionLowWatermark());
-        return new LedgerCompactionService(watermark, config,
+        return new LedgerCompactionService(watermark,
                 contextArtifactRepository, contextBlobStore,
                 deepContextSummaryService);
     }
@@ -263,6 +262,11 @@ public class AgentLoopAutoConfig {
                                              Environment environment,
                                              ThreadPoolExecutor threadPoolExecutor) {
         return () -> {
+            if (environment.containsProperty("loom.agent.conversation-ledger.enabled")
+                    || environment.containsProperty("loom.agent.conversation-ledger.shadow-enabled")) {
+                throw new IllegalStateException(
+                        "ledger 已是唯一提示词路径，conversation-ledger.enabled/shadow-enabled 配置已删除");
+            }
             String chatProvider = environment.getProperty("spring.ai.model.chat", "deepseek");
             if ("none".equalsIgnoreCase(chatProvider)) {
                 return;

@@ -5,21 +5,15 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
-import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
-import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
-import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
+import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
-import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
 
 import io.micrometer.core.instrument.MeterRegistry;
@@ -29,6 +23,7 @@ import org.junit.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -250,24 +245,10 @@ public class PromptInjectionIntegrationTest {
 
     @Test
     public void renderPromptShouldContainSecurityDeclarations() {
-        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        properties.getContext().setEnabled(false);
-        ContextWindowManager cwm = new ContextWindowManager(properties,
-                new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm,
-                RenderPromptResources.withStorage(
-                        new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore()),
-                LedgerPromptServices.disabled());
-
-        AgentContext context = basicContext();
-        context.getDynamicText().appendUserTask("test");
-        context.setToolSpecs(List.of(
-                new ToolSpec("read", "Read a file", "{\"path\":\"string\"}")));
-
-        node.apply(context);
-
-        String prompt = context.getCurrentPrompt();
-        assertNotNull(prompt);
+        String prompt = new StablePrefixBuilder().build(
+                null, false, null,
+                List.of(new ToolSpec("read", "Read a file", "{\"path\":\"string\"}")),
+                null, List.of(), Map.of()).frozenContent();
         assertTrue("prompt 应包含 untrusted_tool_output 安全声明",
                 prompt.contains("<untrusted_tool_output"));
         assertTrue("prompt 应包含 security_note 说明",
@@ -277,31 +258,15 @@ public class PromptInjectionIntegrationTest {
     }
 
     @Test
-    public void renderPromptSecurityDeclarationsSurviveCache() {
-        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        properties.getContext().setEnabled(false);
-        ContextWindowManager cwm = new ContextWindowManager(properties,
-                new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm,
-                RenderPromptResources.withStorage(
-                        new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore()),
-                LedgerPromptServices.disabled());
+    public void stablePrefixSecurityDeclarationsAreDeterministic() {
+        StablePrefixBuilder builder = new StablePrefixBuilder();
+        String prompt1 = builder.build(null, false, null, List.of(), null, List.of(), Map.of())
+                .frozenContent();
+        String prompt2 = builder.build(null, false, null, List.of(), null, List.of(), Map.of())
+                .frozenContent();
 
-        AgentContext context = basicContext();
-        context.getDynamicText().appendUserTask("test");
-        context.setToolSpecs(List.of(
-                new ToolSpec("read", "Read a file", "{\"path\":\"string\"}")));
-
-        node.apply(context);
-        String prompt1 = context.getCurrentPrompt();
-
-        // Second call should use cache
-        node.apply(context);
-        String prompt2 = context.getCurrentPrompt();
-
-        assertEquals("缓存命中时安全声明应一致", prompt1, prompt2);
-        assertTrue("缓存后的prompt仍应包含安全声明",
-                prompt2.contains("<untrusted_tool_output"));
+        assertEquals(prompt1, prompt2);
+        assertTrue(prompt2.contains("<untrusted_tool_output"));
     }
 
     // ===== Tool name escaping =====
