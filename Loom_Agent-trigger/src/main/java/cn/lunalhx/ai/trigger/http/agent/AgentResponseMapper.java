@@ -12,6 +12,7 @@ import cn.lunalhx.ai.api.dto.DiffPayload;
 import cn.lunalhx.ai.api.dto.DiffStatsPayload;
 import cn.lunalhx.ai.api.dto.InlineDiffPartPayload;
 import cn.lunalhx.ai.api.dto.TokenUsageDTO;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
@@ -33,6 +34,10 @@ import java.util.Map;
 public class AgentResponseMapper {
 
     public AgentStreamEvent toStreamEvent(AgentEvent event) {
+        return toStreamEvent(event, null);
+    }
+
+    public AgentStreamEvent toStreamEvent(AgentEvent event, AgentUsageSummaryDTO usage) {
         return AgentStreamEvent.builder()
                 .type(event.getType().eventName())
                 .runId(event.getRunId())
@@ -67,6 +72,7 @@ public class AgentResponseMapper {
                 .plan(event.getPlan())
                 .checkpointVersion(event.getCheckpointVersion())
                 .metadata(event.getMetadata())
+                .usage(usage)
                 .build();
     }
 

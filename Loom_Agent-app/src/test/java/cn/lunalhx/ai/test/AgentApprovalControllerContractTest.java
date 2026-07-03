@@ -18,6 +18,7 @@ import cn.lunalhx.ai.trigger.http.agent.AgentApprovalHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
+import cn.lunalhx.ai.trigger.http.agent.AgentUsageSummaryService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validation;
@@ -67,7 +68,8 @@ public class AgentApprovalControllerContractTest {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         AgentResponseMapper responseMapper = new AgentResponseMapper();
         AgentRequestMapper requestMapper = new AgentRequestMapper(properties, validator);
-        AgentSseResponder sseResponder = new AgentSseResponder(properties, syncExecutor(), responseMapper);
+        AgentSseResponder sseResponder = new AgentSseResponder(
+                properties, syncExecutor(), responseMapper, mock(AgentUsageSummaryService.class));
         AgentApprovalHttpQueryService approvalHttpQueryService =
                 new AgentApprovalHttpQueryService(approvalStore, responseMapper);
         AgentApprovalController controller = new AgentApprovalController(

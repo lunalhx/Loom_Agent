@@ -40,7 +40,10 @@ public class AgentRunHttpQueryServiceTest {
         traceRecorder = mock(TraceRecorder.class);
         replayService = mock(ReplayService.class);
         AgentResponseMapper responseMapper = new AgentResponseMapper();
-        queryService = new AgentRunHttpQueryService(agentRunRepository, traceRecorder, replayService, responseMapper);
+        AgentUsageSummaryService usageSummaryService =
+                new AgentUsageSummaryService(agentRunRepository, traceRecorder);
+        queryService = new AgentRunHttpQueryService(
+                agentRunRepository, traceRecorder, replayService, responseMapper, usageSummaryService);
     }
 
     // ===== trace =====

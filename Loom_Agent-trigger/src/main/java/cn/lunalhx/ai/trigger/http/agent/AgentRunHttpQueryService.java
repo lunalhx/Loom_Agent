@@ -2,6 +2,7 @@ package cn.lunalhx.ai.trigger.http.agent;
 
 import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
@@ -26,6 +27,7 @@ public class AgentRunHttpQueryService {
     private final TraceRecorder traceRecorder;
     private final ReplayService replayService;
     private final AgentResponseMapper responseMapper;
+    private final AgentUsageSummaryService usageSummaryService;
 
     public Response<AgentTraceTimelineResponse> trace(String runId) {
         if (runId == null || runId.isBlank()) {
@@ -55,5 +57,9 @@ public class AgentRunHttpQueryService {
 
     public AgentReplayTimeline replayTimeline(String runId, boolean includeChildren) {
         return replayService.replayRun(runId, includeChildren);
+    }
+
+    public Response<AgentUsageSummaryDTO> usage(String runId) {
+        return Response.success(usageSummaryService.summarize(runId));
     }
 }

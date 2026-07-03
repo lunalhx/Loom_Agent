@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.agent.service.replay.ReplayService;
 import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
 import cn.lunalhx.ai.domain.common.CommonErrorCode;
@@ -17,6 +18,7 @@ import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentRunHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
+import cn.lunalhx.ai.trigger.http.agent.AgentUsageSummaryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentUndoHttpService;
 import cn.lunalhx.ai.types.enums.ResponseCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,9 +68,13 @@ public class AgentRunControllerContractTest {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         AgentResponseMapper responseMapper = new AgentResponseMapper();
         AgentRequestMapper requestMapper = new AgentRequestMapper(properties, validator);
-        AgentSseResponder sseResponder = new AgentSseResponder(properties, syncExecutor(), responseMapper);
+        AgentUsageSummaryService usageSummaryService =
+                new AgentUsageSummaryService(runRepo, traceRecorder);
+        AgentSseResponder sseResponder =
+                new AgentSseResponder(properties, syncExecutor(), responseMapper, usageSummaryService);
         AgentRunHttpQueryService runHttpQueryService =
-                new AgentRunHttpQueryService(runRepo, traceRecorder, replayService, responseMapper);
+                new AgentRunHttpQueryService(
+                        runRepo, traceRecorder, replayService, responseMapper, usageSummaryService);
         AgentUndoHttpService undoHttpService = new AgentUndoHttpService(undoService);
         AgentRunController controller = new AgentRunController(
                 requestMapper, sseResponder, runHttpQueryService, undoHttpService);
@@ -122,7 +128,67 @@ public class AgentRunControllerContractTest {
                 .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
     }
 
-    // ===== 2. GET /runs/{id}/replay =====
+    // ===== 2. GET /runs/{id}/usage =====
+
+    @Test
+    public void usageSuccessShouldReturnWholeTraceSummary() throws Exception {
+        AgentRunRepository runRepo = mock(AgentRunRepository.class);
+        when(runRepo.find("r-1")).thenReturn(Optional.of(AgentRun.builder().runId("r-1").build()));
+        TraceRecorder traceRecorder = mock(TraceRecorder.class);
+        AgentTraceEvent seed = AgentTraceEvent.builder()
+                .traceId("trace-1").runId("r-1").eventType("node_start").build();
+        when(traceRecorder.timeline("r-1")).thenReturn(List.of(seed));
+        when(traceRecorder.timelineByTraceId("trace-1")).thenReturn(List.of(
+                usageEvent("r-1", 100, 20, 80, 20),
+                usageEvent("child-1", 50, 10, 40, 10)));
+
+        MockMvc mvc = buildMockMvc(
+                runRepo, traceRecorder, mock(ReplayService.class), mock(WorkspaceUndoService.class));
+
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/r-1/usage"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(ResponseCode.SUCCESS.getCode()))
+                .andExpect(jsonPath("$.data.runId").value("r-1"))
+                .andExpect(jsonPath("$.data.traceId").value("trace-1"))
+                .andExpect(jsonPath("$.data.inputTokens").value(150))
+                .andExpect(jsonPath("$.data.outputTokens").value(30))
+                .andExpect(jsonPath("$.data.totalTokens").value(180))
+                .andExpect(jsonPath("$.data.cacheHitTokens").value(120))
+                .andExpect(jsonPath("$.data.cacheMissTokens").value(30))
+                .andExpect(jsonPath("$.data.cacheHitRate").value(0.8));
+    }
+
+    @Test
+    public void usageRunMissingShouldReturnBadRequest() throws Exception {
+        AgentRunRepository runRepo = mock(AgentRunRepository.class);
+        when(runRepo.find("missing")).thenReturn(Optional.empty());
+
+        MockMvc mvc = buildMockMvc(
+                runRepo, mock(TraceRecorder.class), mock(ReplayService.class),
+                mock(WorkspaceUndoService.class));
+
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/missing/usage"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
+    }
+
+    @Test
+    public void usageTraceMissingShouldReturnBadRequest() throws Exception {
+        AgentRunRepository runRepo = mock(AgentRunRepository.class);
+        when(runRepo.find("r-empty")).thenReturn(Optional.of(
+                AgentRun.builder().runId("r-empty").build()));
+        TraceRecorder traceRecorder = mock(TraceRecorder.class);
+        when(traceRecorder.timeline("r-empty")).thenReturn(List.of());
+
+        MockMvc mvc = buildMockMvc(
+                runRepo, traceRecorder, mock(ReplayService.class), mock(WorkspaceUndoService.class));
+
+        mvc.perform(MockMvcRequestBuilders.get("/api/v1/agent/code/runs/r-empty/usage"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(CommonErrorCode.INVALID_REQUEST.code()));
+    }
+
+    // ===== 3. GET /runs/{id}/replay =====
 
     @Test
     public void replayDefaultShouldIncludeChildren() throws Exception {
@@ -166,7 +232,7 @@ public class AgentRunControllerContractTest {
         verify(replayService).replayRun("r-1", false);
     }
 
-    // ===== 3. POST /runs/{id}/replay/stream =====
+    // ===== 4. POST /runs/{id}/replay/stream =====
 
     @Test
     public void replayStreamShouldEmitStartedEventsThenDoneWithZeroCost() throws Exception {
@@ -217,5 +283,19 @@ public class AgentRunControllerContractTest {
                 .andExpect(status().isOk()).andReturn();
         String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
         assertTrue(content.contains("\"code\":\"replay_failed\""));
+    }
+
+    private AgentTraceEvent usageEvent(String runId, int input, int output, int hit, int miss) {
+        return AgentTraceEvent.builder()
+                .runId(runId)
+                .eventType("model_usage")
+                .node("model_call")
+                .tokenUsage(TokenUsage.builder()
+                        .promptTokens(input)
+                        .completionTokens(output)
+                        .promptCacheHitTokens(hit)
+                        .promptCacheMissTokens(miss)
+                        .build())
+                .build();
     }
 }

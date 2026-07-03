@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.api.dto.AgentStreamEvent;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.trigger.http.sse.SseResponder;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class AgentSseResponder {
     private final AgentRuntimeProperties agentRuntimeProperties;
     private final ThreadPoolExecutor threadPoolExecutor;
     private final AgentResponseMapper responseMapper;
+    private final AgentUsageSummaryService usageSummaryService;
 
     private final SseResponder sseResponder = new SseResponder();
 
@@ -119,7 +122,7 @@ public class AgentSseResponder {
                     .subscribe(
                             event -> withMdc(event, () ->
                                     session.send(event.getType().eventName(),
-                                            responseMapper.toStreamEvent(event))),
+                                            toStreamEvent(event))),
                             throwable -> session.sendAndComplete(
                                     AgentEventType.ERROR.eventName(),
                                     responseMapper.toStreamEvent(fallbackAgentEvent())),
@@ -131,6 +134,19 @@ public class AgentSseResponder {
         }
 
         return session.emitter();
+    }
+
+    private AgentStreamEvent toStreamEvent(AgentEvent event) {
+        AgentUsageSummaryDTO usage = null;
+        if (event.getType() == AgentEventType.DONE && event.getRunId() != null) {
+            try {
+                usage = usageSummaryService.summarize(event.getRunId());
+            } catch (RuntimeException e) {
+                log.warn("Agent usage summary unavailable for runId={}: {}",
+                        event.getRunId(), e.getMessage());
+            }
+        }
+        return responseMapper.toStreamEvent(event, usage);
     }
 
     public SseEmitter completedReplayError(AgentRequestMapper.Problem problem) {

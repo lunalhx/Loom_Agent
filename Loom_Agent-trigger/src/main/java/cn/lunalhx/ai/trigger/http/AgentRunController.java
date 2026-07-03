@@ -2,6 +2,7 @@ package cn.lunalhx.ai.trigger.http;
 
 import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
 import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
@@ -37,6 +38,11 @@ public class AgentRunController {
     @GetMapping("/runs/{runId}/trace")
     public Response<AgentTraceTimelineResponse> trace(@PathVariable String runId) {
         return runHttpQueryService.trace(runId);
+    }
+
+    @GetMapping("/runs/{runId}/usage")
+    public Response<AgentUsageSummaryDTO> usage(@PathVariable String runId) {
+        return runHttpQueryService.usage(runId);
     }
 
     @GetMapping("/runs/{runId}/replay")

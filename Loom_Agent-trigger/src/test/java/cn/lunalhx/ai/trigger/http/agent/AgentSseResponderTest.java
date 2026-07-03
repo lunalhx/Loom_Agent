@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -20,6 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * AgentSseResponder 单元测试。
@@ -41,7 +45,10 @@ public class AgentSseResponderTest {
         properties.setTotalTimeoutMs(3000L);
         executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
         AgentResponseMapper responseMapper = new AgentResponseMapper();
-        responder = new AgentSseResponder(properties, executor, responseMapper);
+        AgentUsageSummaryService usageSummaryService = mock(AgentUsageSummaryService.class);
+        when(usageSummaryService.summarize(anyString())).thenReturn(
+                AgentUsageSummaryDTO.builder().runId("r").totalTokens(0L).build());
+        responder = new AgentSseResponder(properties, executor, responseMapper, usageSummaryService);
     }
 
     @After
@@ -89,6 +96,20 @@ public class AgentSseResponderTest {
         );
         SseEmitter emitter = responder.streamAgentEvents("resume", "req-1", () -> flux,
                 AgentSseResponder.StreamProfile.WITHOUT_CHECKPOINT);
+        assertNotNull(emitter);
+    }
+
+    @Test
+    public void usageSummaryFailureShouldNotBreakDoneEvent() {
+        AgentUsageSummaryService usageSummaryService = mock(AgentUsageSummaryService.class);
+        when(usageSummaryService.summarize("r")).thenThrow(new RuntimeException("usage unavailable"));
+        responder = new AgentSseResponder(
+                properties, executor, new AgentResponseMapper(), usageSummaryService);
+
+        SseEmitter emitter = responder.streamAgentEvents("ask", "req-1",
+                () -> Flux.just(AgentEvent.builder().type(AgentEventType.DONE).runId("r").build()),
+                AgentSseResponder.StreamProfile.PUBLIC_ASK);
+
         assertNotNull(emitter);
     }
 

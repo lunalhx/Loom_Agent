@@ -6,6 +6,7 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentStreamEvent;
 import cn.lunalhx.ai.api.dto.AgentTraceEventDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.api.dto.TokenUsageDTO;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
@@ -123,6 +124,22 @@ public class AgentResponseMapperTest {
         AgentEvent event = AgentEvent.builder().type(AgentEventType.DONE).build();
         AgentStreamEvent dto = mapper.toStreamEvent(event);
         assertNull(dto.getExpiresAt());
+    }
+
+    @Test
+    public void toStreamEventShouldMapUsageSummary() {
+        AgentUsageSummaryDTO usage = AgentUsageSummaryDTO.builder()
+                .runId("r-1")
+                .inputTokens(100L)
+                .outputTokens(20L)
+                .totalTokens(120L)
+                .cacheHitRate(new BigDecimal("0.8000"))
+                .build();
+
+        AgentStreamEvent dto = mapper.toStreamEvent(
+                AgentEvent.builder().type(AgentEventType.DONE).runId("r-1").build(), usage);
+
+        assertEquals(usage, dto.getUsage());
     }
 
     // ===== toApprovalResponse =====

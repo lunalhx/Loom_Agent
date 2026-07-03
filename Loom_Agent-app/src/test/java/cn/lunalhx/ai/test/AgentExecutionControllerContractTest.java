@@ -13,6 +13,8 @@ import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentResponseMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
+import cn.lunalhx.ai.trigger.http.agent.AgentUsageSummaryService;
+import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -27,6 +29,7 @@ import reactor.core.publisher.Flux;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.math.BigDecimal;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -61,13 +64,39 @@ public class AgentExecutionControllerContractTest {
                                  ThreadPoolExecutor executor,
                                  StreamRequestLimiter limiter,
                                  ConversationDeletionService deletionService) {
+        return buildMockMvc(agentLoopService, properties, executor, limiter, deletionService,
+                defaultUsageSummaryService());
+    }
+
+    private MockMvc buildMockMvc(AgentLoopService agentLoopService,
+                                 AgentRuntimeProperties properties,
+                                 ThreadPoolExecutor executor,
+                                 StreamRequestLimiter limiter,
+                                 ConversationDeletionService deletionService,
+                                 AgentUsageSummaryService usageSummaryService) {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         AgentResponseMapper responseMapper = new AgentResponseMapper();
         AgentRequestMapper requestMapper = new AgentRequestMapper(properties, validator);
-        AgentSseResponder sseResponder = new AgentSseResponder(properties, executor, responseMapper);
+        AgentSseResponder sseResponder =
+                new AgentSseResponder(properties, executor, responseMapper, usageSummaryService);
         AgentExecutionController controller = new AgentExecutionController(
                 agentLoopService, requestMapper, sseResponder, limiter, deletionService);
         return MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    private AgentUsageSummaryService defaultUsageSummaryService() {
+        AgentUsageSummaryService usageSummaryService = mock(AgentUsageSummaryService.class);
+        when(usageSummaryService.summarize(any())).thenReturn(AgentUsageSummaryDTO.builder()
+                .runId("r")
+                .traceId("t")
+                .inputTokens(100L)
+                .outputTokens(20L)
+                .totalTokens(120L)
+                .cacheHitTokens(80L)
+                .cacheMissTokens(20L)
+                .cacheHitRate(new BigDecimal("0.8000"))
+                .build());
+        return usageSummaryService;
     }
 
     private StreamRequestLimiter noopLimiter() {
@@ -139,6 +168,8 @@ public class AgentExecutionControllerContractTest {
         assertTrue(content.contains("event:answer"));
         assertTrue(content.contains("event:done"));
         assertTrue(content.contains("\"answer\":\"final-answer\""));
+        assertTrue(content.contains("\"totalTokens\":120"));
+        assertTrue(content.contains("\"cacheHitRate\":0.8000"));
     }
 
     @Test
@@ -156,6 +187,45 @@ public class AgentExecutionControllerContractTest {
         assertTrue(content.contains("event:node_start"));
         assertTrue(content.contains("event:answer"));
         assertTrue(content.contains("event:done"));
+    }
+
+    @Test
+    public void failedRunDoneShouldContainUsage() throws Exception {
+        AgentLoopService svc = mock(AgentLoopService.class);
+        when(svc.ask(any())).thenReturn(Flux.just(
+                AgentEvent.builder().type(AgentEventType.ERROR).runId("r").code("model_error").build(),
+                AgentEvent.builder().type(AgentEventType.DONE).runId("r").build()));
+        MockMvc mvc = buildMockMvc(
+                svc, enabledProperties(), syncExecutor(), noopLimiter(), noopDeletionService());
+
+        MvcResult r = mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/ask/stream")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"hi\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r))
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(content.contains("event:done"));
+        assertTrue(content.contains("\"totalTokens\":120"));
+    }
+
+    @Test
+    public void usageSummaryFailureShouldNotInterruptDone() throws Exception {
+        AgentLoopService svc = mock(AgentLoopService.class);
+        when(svc.ask(any())).thenReturn(Flux.just(
+                AgentEvent.builder().type(AgentEventType.DONE).runId("r").build()));
+        AgentUsageSummaryService usageSummaryService = mock(AgentUsageSummaryService.class);
+        when(usageSummaryService.summarize("r")).thenThrow(new RuntimeException("usage unavailable"));
+        MockMvc mvc = buildMockMvc(svc, enabledProperties(), syncExecutor(), noopLimiter(),
+                noopDeletionService(), usageSummaryService);
+
+        MvcResult r = mvc.perform(MockMvcRequestBuilders.post("/api/v1/agent/code/ask/stream")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"hi\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r))
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(content.contains("event:done"));
+        assertTrue(content.contains("\"usage\":null"));
     }
 
     // ===== 2. /runs/{id}/resume/stream =====
