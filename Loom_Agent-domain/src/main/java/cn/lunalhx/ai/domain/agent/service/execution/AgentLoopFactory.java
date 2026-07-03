@@ -16,6 +16,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 
@@ -41,7 +42,7 @@ public class AgentLoopFactory {
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null);
     }
 
     public AgentLoopFactory(ModelGateway modelGateway,
@@ -49,7 +50,7 @@ public class AgentLoopFactory {
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null);
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null);
     }
 
     public AgentLoopFactory(ModelGateway modelGateway,
@@ -60,12 +61,25 @@ public class AgentLoopFactory {
                            SkillRepository skillRepository,
                            ContextArtifactRepository contextArtifactRepository,
                            ContextBlobStore contextBlobStore) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
+                contextArtifactRepository, contextBlobStore, null);
+    }
+
+    public AgentLoopFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator,
+                           SkillRepository skillRepository,
+                           ContextArtifactRepository contextArtifactRepository,
+                           ContextBlobStore contextBlobStore,
+                           ConversationLedgerAppendService ledgerAppendService) {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
-                skillRepository, contextArtifactRepository, contextBlobStore);
+                skillRepository, contextArtifactRepository, contextBlobStore, ledgerAppendService);
     }
 
     /**

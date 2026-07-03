@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -22,30 +24,24 @@ public class ObservationNode extends AbstractAgentNode {
     private final ToolOutputSanitizer sanitizer;
     private final TraceRecorder traceRecorder;
     private final AgentMetrics agentMetrics;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ObservationNode(ToolOutputSanitizer sanitizer,
                            TraceRecorder traceRecorder,
-                           AgentMetrics agentMetrics) {
+                           AgentMetrics agentMetrics,
+                           ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "step", "dynamicText"));
         this.sanitizer = sanitizer;
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
         ToolResult result = context.getToolResult();
         appendStep(context, result != null && result.isSuccess());
-        context.getDynamicText().appendToolResult(
-                Math.max(1, context.getStep()),
-                name(),
-                context.getDecision(),
-                result,
-                toDynamicObservation(context, result));
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
-    }
 
-    private String toDynamicObservation(AgentContext context, ToolResult result) {
         String toolName = context.getDecision() != null && context.getDecision().getTool() != null
                 ? context.getDecision().getTool() : "unknown";
         String rawObservation = result != null ? result.getObservation() : "";
@@ -53,6 +49,26 @@ public class ObservationNode extends AbstractAgentNode {
             rawObservation = "";
         }
 
+        ToolOutputSanitization sanitization = sanitizeObservation(context, toolName, rawObservation);
+
+        context.getDynamicText().appendToolResult(
+                Math.max(1, context.getStep()),
+                name(),
+                context.getDecision(),
+                result,
+                toDynamicObservation(context, result, toolName, sanitization));
+
+        if (ledgerAppendService != null && ledgerAppendService.isActive()) {
+            String eventKey = ConversationLedgerInitializer.eventKey(
+                    context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
+            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), eventKey);
+        }
+
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
+    }
+
+    private ToolOutputSanitization sanitizeObservation(AgentContext context, String toolName,
+                                                        String rawObservation) {
         ToolOutputSanitization sanitization;
         try {
             sanitization = sanitizer.sanitize(toolName, rawObservation);
@@ -81,6 +97,12 @@ public class ObservationNode extends AbstractAgentNode {
                                 "outputChars", sanitization.getOutput().length()));
             }
         }
+
+        return sanitization;
+    }
+
+    private String toDynamicObservation(AgentContext context, ToolResult result,
+                                        String toolName, ToolOutputSanitization sanitization) {
 
         String escapedToolName = escapeXmlAttr(toolName);
 

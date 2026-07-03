@@ -28,6 +28,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,11 +59,12 @@ public class AgentFlowFactory {
     private final SkillRepository skillRepository;
     private final ContextArtifactRepository contextArtifactRepository;
     private final ContextBlobStore contextBlobStore;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -70,7 +72,7 @@ public class AgentFlowFactory {
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null);
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -81,6 +83,19 @@ public class AgentFlowFactory {
                            SkillRepository skillRepository,
                            ContextArtifactRepository contextArtifactRepository,
                            ContextBlobStore contextBlobStore) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
+                contextArtifactRepository, contextBlobStore, null);
+    }
+
+    public AgentFlowFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator,
+                           SkillRepository skillRepository,
+                           ContextArtifactRepository contextArtifactRepository,
+                           ContextBlobStore contextBlobStore,
+                           ConversationLedgerAppendService ledgerAppendService) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -90,6 +105,7 @@ public class AgentFlowFactory {
         this.skillRepository = skillRepository;
         this.contextArtifactRepository = contextArtifactRepository;
         this.contextBlobStore = contextBlobStore;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     /**
@@ -126,12 +142,14 @@ public class AgentFlowFactory {
                 new PlannerNode(),
                 new RenderPromptNode(contextWindowManager, skillRepository,
                         contextArtifactRepository, contextBlobStore),
-                new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard, contextWindowManager),
+                new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard,
+                        contextWindowManager, ledgerAppendService),
                 new DecisionNode(objectMapper, toolRegistry, properties),
                 new InstructionGateNode(),
-                new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
+                new ApprovalGateNode(toolRegistry, state.approvalStore(), properties, ledgerAppendService),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry, contextWindowManager),
-                new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder, runtime.agentMetrics()),
+                new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
+                        runtime.agentMetrics(), ledgerAppendService),
                 new ReplanGuardNode(new ProgressGuard(properties)),
                 new ReplanNode(modelGateway, properties, objectMapper, traceRecorder, budgetGuard),
                 new FinalAnswerNode(),

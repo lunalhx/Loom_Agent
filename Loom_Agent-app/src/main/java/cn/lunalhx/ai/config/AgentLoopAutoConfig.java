@@ -21,6 +21,7 @@ import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
@@ -176,6 +177,12 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
+    public ConversationLedgerAppendService conversationLedgerAppendService(
+            AgentRuntimeProperties agentRuntimeProperties) {
+        return new ConversationLedgerAppendService(agentRuntimeProperties.getConversationLedger());
+    }
+
+    @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
@@ -183,9 +190,10 @@ public class AgentLoopAutoConfig {
                                              UndoSessionCoordinator undoSessionCoordinator,
                                              SkillRepository skillRepository,
                                              ContextArtifactRepository contextArtifactRepository,
-                                             ContextBlobStore contextBlobStore) {
+                                             ContextBlobStore contextBlobStore,
+                                             ConversationLedgerAppendService conversationLedgerAppendService) {
         return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator,
-                skillRepository, contextArtifactRepository, contextBlobStore);
+                skillRepository, contextArtifactRepository, contextBlobStore, conversationLedgerAppendService);
     }
 
     @Bean

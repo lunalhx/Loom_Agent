@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -29,12 +31,16 @@ public class ApprovalGateNode extends AbstractAgentNode {
     private final ToolRegistry toolRegistry;
     private final ApprovalStore approvalStore;
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
-    public ApprovalGateNode(ToolRegistry toolRegistry, ApprovalStore approvalStore, AgentRuntimeProperties properties) {
+    public ApprovalGateNode(ToolRegistry toolRegistry, ApprovalStore approvalStore,
+                            AgentRuntimeProperties properties,
+                            ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.APPROVAL_GATE, List.of("decision.tool", "decision.input", "toolPolicy"));
         this.toolRegistry = toolRegistry;
         this.approvalStore = approvalStore;
         this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -88,6 +94,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 context.getDecision(),
                 "Success: false\nObservation:\n" + result.getObservation());
         appendStep(context, false);
+        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)
@@ -185,6 +192,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 context.getDecision(),
                 "Success: false\nObservation:\n" + result.getObservation());
         appendStep(context, false);
+        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.POLICY_DENIED)
@@ -199,6 +207,19 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .build());
         events.addAll(observationEvents(context));
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
+    }
+
+    private void appendToolResultToLedger(AgentContext context, ToolResult result) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(context.getStep()), "tool_result");
+        String rawOutput = result != null ? result.getObservation() : "";
+        if (rawOutput == null) {
+            rawOutput = "";
+        }
+        ledgerAppendService.appendToolResult(context, rawOutput, eventKey);
     }
 
 }

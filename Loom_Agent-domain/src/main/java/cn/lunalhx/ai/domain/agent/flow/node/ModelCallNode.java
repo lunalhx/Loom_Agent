@@ -10,6 +10,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
@@ -30,12 +32,14 @@ public class ModelCallNode extends AbstractAgentNode {
     private final ModelCallFailureClassifier failureClassifier;
     private final ModelCallExecutor executor;
     private final ContextRecoveryChain recoveryChain;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ModelCallNode(ModelGateway modelGateway,
                          AgentRuntimeProperties properties,
                          TraceRecorder traceRecorder,
                          BudgetGuard budgetGuard,
-                         ContextWindowManager contextWindowManager) {
+                         ContextWindowManager contextWindowManager,
+                         ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.MODEL_CALL, List.of("currentPrompt", "requestId", "conversationId"));
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
@@ -50,6 +54,7 @@ public class ModelCallNode extends AbstractAgentNode {
                 new DeepSummaryStep(properties, contextWindowManager, modelGateway),
                 new ExhaustedStep()
         ));
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -70,6 +75,12 @@ public class ModelCallNode extends AbstractAgentNode {
             context.setFallbackReason(StringUtils.defaultIfBlank(
                     result.chatResult().getFallbackReason(), context.getFallbackReason()));
             resetContextRecovery(context);
+            if (ledgerAppendService != null && ledgerAppendService.isActive()) {
+                String eventKey = ConversationLedgerInitializer.eventKey(
+                        context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "assistant");
+                ledgerAppendService.appendAssistant(
+                        context, result.chatResult().getContent(), eventKey);
+            }
             return NodeResult.next(AgentNodeNames.DECISION, List.of());
         }
 

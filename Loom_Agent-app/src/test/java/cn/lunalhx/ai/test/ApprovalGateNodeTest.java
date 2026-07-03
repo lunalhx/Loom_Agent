@@ -217,7 +217,7 @@ public class ApprovalGateNodeTest {
 
     private ApprovalGateNode gateNode(AgentTool tool, AgentRuntimeProperties props) {
         ToolRegistry registry = new ToolRegistry(List.of(tool), new ToolSchemaValidator(new ObjectMapper()));
-        return new ApprovalGateNode(registry, new InMemoryApprovalStore(), props);
+        return new ApprovalGateNode(registry, new InMemoryApprovalStore(), props, null);
     }
 
     private AgentTool fixedPolicy(ToolPermissionLevel level) {
