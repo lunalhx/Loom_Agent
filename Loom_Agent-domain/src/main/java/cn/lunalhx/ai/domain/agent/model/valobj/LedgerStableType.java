@@ -10,6 +10,7 @@ public enum LedgerStableType {
     USER_INPUT("user_input"),
     ASSISTANT_ACTION("assistant_action"),
     TOOL_RESULT("tool_result"),
+    CONTROL_UPDATE("control_update"),
     SYSTEM_NOTE("system_note");
 
     private final String code;

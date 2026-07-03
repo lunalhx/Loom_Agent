@@ -14,6 +14,10 @@ import java.util.UUID;
  * <p>Each entry carries at least a role, content, and stable type suitable for
  * idempotency checks and diagnostics. The sequence is assigned by the ledger
  * on append.
+ *
+ * <p>The optional {@code eventKey} is a deterministic, caller-supplied key
+ * (e.g. {@code "{runId}:{step}:{type}"}) used by the ledger to prevent
+ * duplicate entries on checkpoint resume, retry, or node re-entry.
  */
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public final class ConversationLedgerEntry {
@@ -23,6 +27,7 @@ public final class ConversationLedgerEntry {
     private final String role;
     private final String content;
     private final LedgerStableType stableType;
+    private final String eventKey;
 
     private ConversationLedgerEntry(Builder builder) {
         this.entryId = builder.entryId;
@@ -30,6 +35,7 @@ public final class ConversationLedgerEntry {
         this.role = Objects.requireNonNull(builder.role, "role must not be null");
         this.content = Objects.requireNonNull(builder.content, "content must not be null");
         this.stableType = Objects.requireNonNull(builder.stableType, "stableType must not be null");
+        this.eventKey = builder.eventKey;
     }
 
     @JsonCreator
@@ -38,12 +44,14 @@ public final class ConversationLedgerEntry {
             @JsonProperty("sequence") long sequence,
             @JsonProperty("role") String role,
             @JsonProperty("content") String content,
-            @JsonProperty("stableType") LedgerStableType stableType) {
+            @JsonProperty("stableType") LedgerStableType stableType,
+            @JsonProperty("eventKey") String eventKey) {
         this.entryId = entryId != null ? entryId : UUID.randomUUID().toString();
         this.sequence = sequence;
         this.role = Objects.requireNonNull(role, "role must not be null");
         this.content = Objects.requireNonNull(content, "content must not be null");
         this.stableType = Objects.requireNonNull(stableType, "stableType must not be null");
+        this.eventKey = eventKey;
     }
 
     public static Builder builder() {
@@ -55,6 +63,7 @@ public final class ConversationLedgerEntry {
     public String role() { return role; }
     public String content() { return content; }
     public LedgerStableType stableType() { return stableType; }
+    public String eventKey() { return eventKey; }
 
     @Override
     public boolean equals(Object o) {
@@ -64,18 +73,21 @@ public final class ConversationLedgerEntry {
                 && entryId.equals(that.entryId)
                 && role.equals(that.role)
                 && content.equals(that.content)
-                && stableType == that.stableType;
+                && stableType == that.stableType
+                && Objects.equals(eventKey, that.eventKey);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(entryId, sequence, role, content, stableType);
+        return Objects.hash(entryId, sequence, role, content, stableType, eventKey);
     }
 
     @Override
     public String toString() {
         return "ConversationLedgerEntry{entryId='" + entryId + "', seq=" + sequence
-                + ", role='" + role + "', stableType=" + stableType + '}';
+                + ", role='" + role + "', stableType=" + stableType
+                + (eventKey != null ? ", eventKey='" + eventKey + '\'' : "")
+                + '}';
     }
 
     public static final class Builder {
@@ -84,12 +96,14 @@ public final class ConversationLedgerEntry {
         private String role;
         private String content;
         private LedgerStableType stableType;
+        private String eventKey;
 
         public Builder entryId(String v) { this.entryId = v; return this; }
         public Builder sequence(long v) { this.sequence = v; return this; }
         public Builder role(String v) { this.role = v; return this; }
         public Builder content(String v) { this.content = v; return this; }
         public Builder stableType(LedgerStableType v) { this.stableType = v; return this; }
+        public Builder eventKey(String v) { this.eventKey = v; return this; }
 
         public ConversationLedgerEntry build() {
             if (entryId == null) {
