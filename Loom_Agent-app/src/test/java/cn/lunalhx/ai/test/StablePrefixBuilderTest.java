@@ -4,7 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillSource;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
-import cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder;
+import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.junit.Test;
 

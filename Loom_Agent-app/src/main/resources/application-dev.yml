@@ -209,7 +209,7 @@ loom:
       same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
       no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
     conversation-ledger:
-      enabled: false
+      enabled: true
       shadow-enabled: false
   http:
     stream-limit:

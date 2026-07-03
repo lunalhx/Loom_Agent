@@ -1,4 +1,4 @@
-package cn.lunalhx.ai.domain.agent.service;
+package cn.lunalhx.ai.domain.agent.service.prompt;
 
 import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;

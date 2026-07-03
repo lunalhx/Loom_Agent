@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
+import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -334,7 +336,9 @@ public class ToolRegistryTest {
         ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
         ContextBlobStore blobStore = new InMemoryContextBlobStore();
         ContextWindowManager cwm = new ContextWindowManager(properties, artifactRepository, blobStore);
-        RenderPromptNode node = new RenderPromptNode(cwm, null, artifactRepository, blobStore);
+        RenderPromptNode node = new RenderPromptNode(cwm,
+                RenderPromptResources.withStorage(artifactRepository, blobStore),
+                LedgerPromptServices.disabled());
 
         AgentContext context = new AgentContext();
         context.setRunId("ordering-test");

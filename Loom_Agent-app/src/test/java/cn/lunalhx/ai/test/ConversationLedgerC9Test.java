@@ -2,7 +2,7 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.entity.*;
 import cn.lunalhx.ai.domain.agent.model.valobj.*;
-import cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder;
+import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
 import cn.lunalhx.ai.domain.agent.service.ledger.*;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;

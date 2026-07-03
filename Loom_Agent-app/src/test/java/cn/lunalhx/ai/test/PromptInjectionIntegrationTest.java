@@ -12,6 +12,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
+import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
+import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -252,8 +254,10 @@ public class PromptInjectionIntegrationTest {
         properties.getContext().setEnabled(false);
         ContextWindowManager cwm = new ContextWindowManager(properties,
                 new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm, null,
-                new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
+        RenderPromptNode node = new RenderPromptNode(cwm,
+                RenderPromptResources.withStorage(
+                        new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore()),
+                LedgerPromptServices.disabled());
 
         AgentContext context = basicContext();
         context.getDynamicText().appendUserTask("test");
@@ -278,8 +282,10 @@ public class PromptInjectionIntegrationTest {
         properties.getContext().setEnabled(false);
         ContextWindowManager cwm = new ContextWindowManager(properties,
                 new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
-        RenderPromptNode node = new RenderPromptNode(cwm, null,
-                new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore());
+        RenderPromptNode node = new RenderPromptNode(cwm,
+                RenderPromptResources.withStorage(
+                        new InMemoryContextArtifactRepository(), new InMemoryContextBlobStore()),
+                LedgerPromptServices.disabled());
 
         AgentContext context = basicContext();
         context.getDynamicText().appendUserTask("test");

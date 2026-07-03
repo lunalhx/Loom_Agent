@@ -22,6 +22,8 @@ import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerWatermark;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
@@ -183,6 +185,22 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
+    public LedgerCompactionService ledgerCompactionService(
+            AgentRuntimeProperties agentRuntimeProperties,
+            ContextArtifactRepository contextArtifactRepository,
+            ContextBlobStore contextBlobStore,
+            DeepContextSummaryService deepContextSummaryService) {
+        AgentRuntimeProperties.ConversationLedgerProperties config =
+                agentRuntimeProperties.getConversationLedger();
+        LedgerWatermark watermark = LedgerWatermark.fromConfig(
+                config.getCompactionHighWatermark(),
+                config.getCompactionLowWatermark());
+        return new LedgerCompactionService(watermark, config,
+                contextArtifactRepository, contextBlobStore,
+                deepContextSummaryService);
+    }
+
+    @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
@@ -191,9 +209,11 @@ public class AgentLoopAutoConfig {
                                              SkillRepository skillRepository,
                                              ContextArtifactRepository contextArtifactRepository,
                                              ContextBlobStore contextBlobStore,
-                                             ConversationLedgerAppendService conversationLedgerAppendService) {
+                                             ConversationLedgerAppendService conversationLedgerAppendService,
+                                             LedgerCompactionService ledgerCompactionService) {
         return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator,
-                skillRepository, contextArtifactRepository, contextBlobStore, conversationLedgerAppendService);
+                skillRepository, contextArtifactRepository, contextBlobStore,
+                conversationLedgerAppendService, ledgerCompactionService);
     }
 
     @Bean

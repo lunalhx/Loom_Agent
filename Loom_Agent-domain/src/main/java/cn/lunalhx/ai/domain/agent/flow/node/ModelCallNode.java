@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
+import cn.lunalhx.ai.domain.agent.service.prompt.ModelCallServices;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
@@ -37,26 +38,24 @@ public class ModelCallNode extends AbstractAgentNode {
 
     public ModelCallNode(ModelGateway modelGateway,
                          AgentRuntimeProperties properties,
-                         TraceRecorder traceRecorder,
-                         BudgetGuard budgetGuard,
-                         ContextWindowManager contextWindowManager,
-                         ConversationLedgerAppendService ledgerAppendService) {
+                         ModelCallServices services) {
         super(AgentNodeNames.MODEL_CALL, List.of("currentPrompt", "requestId", "conversationId"));
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
 
         this.promptFactory = new ModelPromptFactory(
                 Boolean.TRUE.equals(properties.getConversationLedger().getEnabled()));
-        this.budgetCoordinator = new ModelCallBudgetCoordinator(budgetGuard, traceRecorder, promptFactory);
+        this.budgetCoordinator = new ModelCallBudgetCoordinator(
+                services.budgetGuard(), services.traceRecorder(), promptFactory);
         this.failureClassifier = new ModelCallFailureClassifier();
         this.executor = new ModelCallExecutor(modelGateway, promptFactory, budgetCoordinator);
         this.recoveryChain = new ContextRecoveryChain(List.of(
-                new ReactiveCompactStep(properties, contextWindowManager, modelGateway),
+                new ReactiveCompactStep(properties, services.contextWindowManager(), modelGateway),
                 new FallbackModelStep(properties, modelGateway, budgetCoordinator),
-                new DeepSummaryStep(properties, contextWindowManager, modelGateway),
+                new DeepSummaryStep(properties, services.contextWindowManager(), modelGateway),
                 new ExhaustedStep()
         ));
-        this.ledgerAppendService = ledgerAppendService;
+        this.ledgerAppendService = services.ledgerAppendService();
     }
 
     @Override

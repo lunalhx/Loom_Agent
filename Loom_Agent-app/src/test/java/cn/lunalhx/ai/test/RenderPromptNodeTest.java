@@ -10,6 +10,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
+import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
@@ -33,7 +35,9 @@ public class RenderPromptNodeTest {
         ContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
         ContextBlobStore blobStore = new InMemoryContextBlobStore();
         ContextWindowManager cwm = new ContextWindowManager(properties, artifactRepository, blobStore);
-        return new RenderPromptNode(cwm, null, artifactRepository, blobStore);
+        return new RenderPromptNode(cwm,
+                RenderPromptResources.withStorage(artifactRepository, blobStore),
+                LedgerPromptServices.disabled());
     }
 
     private AgentContext basicContext() {

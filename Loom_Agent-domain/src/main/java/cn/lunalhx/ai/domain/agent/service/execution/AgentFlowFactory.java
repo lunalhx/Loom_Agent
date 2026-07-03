@@ -28,9 +28,13 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.prompt.ModelCallServices;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
+import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
+import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,11 +67,12 @@ public class AgentFlowFactory {
     private final ContextBlobStore contextBlobStore;
     private final ConversationLedgerAppendService ledgerAppendService;
     private final LedgerBootstrapService bootstrapService;
+    private final LedgerCompactionService ledgerCompactionService;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
                            AgentLoopRuntimeDependencies runtime) {
-        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null, null);
+        this(modelGateway, state, runtime, AgentHookRegistry.empty(), null, null, null, null, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -75,7 +80,7 @@ public class AgentFlowFactory {
                            AgentLoopRuntimeDependencies runtime,
                            AgentHookRegistry hookRegistry,
                            UndoSessionCoordinator undoCoordinator) {
-        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null, null);
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, null, null, null, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -87,7 +92,7 @@ public class AgentFlowFactory {
                            ContextArtifactRepository contextArtifactRepository,
                            ContextBlobStore contextBlobStore) {
         this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, null, null);
+                contextArtifactRepository, contextBlobStore, null, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -100,7 +105,7 @@ public class AgentFlowFactory {
                            ContextBlobStore contextBlobStore,
                            ConversationLedgerAppendService ledgerAppendService) {
         this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
-                contextArtifactRepository, contextBlobStore, ledgerAppendService, null);
+                contextArtifactRepository, contextBlobStore, ledgerAppendService, null, null);
     }
 
     public AgentFlowFactory(ModelGateway modelGateway,
@@ -113,6 +118,21 @@ public class AgentFlowFactory {
                            ContextBlobStore contextBlobStore,
                            ConversationLedgerAppendService ledgerAppendService,
                            LedgerBootstrapService bootstrapService) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
+                contextArtifactRepository, contextBlobStore, ledgerAppendService, bootstrapService, null);
+    }
+
+    public AgentFlowFactory(ModelGateway modelGateway,
+                           AgentLoopStateDependencies state,
+                           AgentLoopRuntimeDependencies runtime,
+                           AgentHookRegistry hookRegistry,
+                           UndoSessionCoordinator undoCoordinator,
+                           SkillRepository skillRepository,
+                           ContextArtifactRepository contextArtifactRepository,
+                           ContextBlobStore contextBlobStore,
+                           ConversationLedgerAppendService ledgerAppendService,
+                           LedgerBootstrapService bootstrapService,
+                           LedgerCompactionService ledgerCompactionService) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -124,6 +144,7 @@ public class AgentFlowFactory {
         this.contextBlobStore = contextBlobStore;
         this.ledgerAppendService = ledgerAppendService;
         this.bootstrapService = bootstrapService;
+        this.ledgerCompactionService = ledgerCompactionService;
     }
 
     /**
@@ -166,11 +187,17 @@ public class AgentFlowFactory {
                         contextArtifactRepository, contextBlobStore, properties),
                 new StartNode(),
                 new PlannerNode(),
-                new RenderPromptNode(contextWindowManager, skillRepository,
-                        contextArtifactRepository, contextBlobStore, shadowDiagnostic,
-                        bootstrapService, bootstrapService != null ? new cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder() : null),
-                new ModelCallNode(modelGateway, properties, traceRecorder, budgetGuard,
-                        contextWindowManager, ledgerAppendService),
+                new RenderPromptNode(contextWindowManager,
+                        new RenderPromptResources(skillRepository,
+                                contextArtifactRepository, contextBlobStore),
+                        bootstrapService != null
+                                ? new LedgerPromptServices(shadowDiagnostic, bootstrapService,
+                                        new cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder(),
+                                        ledgerCompactionService)
+                                : LedgerPromptServices.disabled()),
+                new ModelCallNode(modelGateway, properties,
+                        new ModelCallServices(traceRecorder, budgetGuard,
+                                contextWindowManager, ledgerAppendService)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
                 new InstructionGateNode(),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties, ledgerAppendService),
