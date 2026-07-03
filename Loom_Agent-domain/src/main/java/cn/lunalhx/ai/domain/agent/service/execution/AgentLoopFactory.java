@@ -38,6 +38,7 @@ public class AgentLoopFactory {
     private final AgentLoopStateDependencies state;
     private final AgentLoopRuntimeDependencies runtime;
     private final UndoSessionCoordinator undoCoordinator;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -78,6 +79,7 @@ public class AgentLoopFactory {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
+        this.ledgerAppendService = ledgerAppendService;
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
                 skillRepository, contextArtifactRepository, contextBlobStore, ledgerAppendService);
     }
@@ -130,11 +132,14 @@ public class AgentLoopFactory {
     private AgentLoopComponents buildComponents(AgentFlowDefinition flow) {
         AgentEventFactory eventFactory = new AgentEventFactory();
         AgentContextFactory contextFactory = new AgentContextFactory(
-                runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable());
+                runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable(),
+                ledgerAppendService);
         AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
-                state.approvalStore(), state.checkpointRepository(), state.runRepository(), contextFactory, eventFactory);
+                state.approvalStore(), state.checkpointRepository(), state.runRepository(),
+                contextFactory, eventFactory, ledgerAppendService);
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory);
-        return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory, state.runRepository(), state.checkpointRepository());
+        return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory,
+                state.runRepository(), state.checkpointRepository());
     }
 }

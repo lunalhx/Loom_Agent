@@ -9,6 +9,9 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
@@ -24,15 +27,25 @@ public final class AgentContextFactory {
     private final AgentWorkspaceResolver workspaceResolver;
     private final List<ToolSpec> toolSpecs;
     private final boolean subAgentAvailable;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
                                List<ToolSpec> toolSpecs,
                                boolean subAgentAvailable) {
+        this(properties, workspaceResolver, toolSpecs, subAgentAvailable, null);
+    }
+
+    public AgentContextFactory(AgentRuntimeProperties properties,
+                               AgentWorkspaceResolver workspaceResolver,
+                               List<ToolSpec> toolSpecs,
+                               boolean subAgentAvailable,
+                               ConversationLedgerAppendService ledgerAppendService) {
         this.properties = properties;
         this.workspaceResolver = workspaceResolver;
         this.toolSpecs = List.copyOf(toolSpecs);
         this.subAgentAvailable = subAgentAvailable;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     public AgentContext create(AgentQuestion question) {
@@ -88,6 +101,7 @@ public final class AgentContextFactory {
             context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
         }
         context.getDynamicText().appendUserTask(context.getQuestion());
+        appendContinuationToLedgerIfActive(context);
         context.setRequestedSkills(question.getSkills());
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
@@ -190,5 +204,25 @@ public final class AgentContextFactory {
         context.setResolvedWorkspace(resolved.getRoot());
         context.setWorkspace(resolved.getWorkspace());
         context.setWorkspaceDisplayName(resolved.getDisplayName());
+    }
+
+    /**
+     * Append a continuation marker to the ledger when resuming an existing
+     * conversation (the ledger is restored from the previous checkpoint).
+     *
+     * <p>The initial user task from the first run is never overwritten.
+     */
+    private void appendContinuationToLedgerIfActive(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        if (context.getConversationLedger() == null || context.getConversationLedger().isEmpty()) {
+            // Fresh ledger — initializer will handle the first user task entry
+            return;
+        }
+        String text = ControlUpdateTexts.renderContinuation(context.getQuestion());
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), "continuation", "user_input");
+        ledgerAppendService.appendUserInput(context, text, eventKey);
     }
 }

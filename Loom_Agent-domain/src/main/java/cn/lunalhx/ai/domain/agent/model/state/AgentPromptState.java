@@ -23,6 +23,7 @@ public final class AgentPromptState {
     private ConversationLedger conversationLedger;
     private StablePrefix stablePrefix;
     private int generation;
+    private int lastLedgerPlanVersion;
 
     // ---- legacy fields pending removal ----
     private String currentSystemPrompt;
@@ -41,6 +42,7 @@ public final class AgentPromptState {
     public ConversationLedger conversationLedger() { return conversationLedger; }
     public StablePrefix stablePrefix() { return stablePrefix; }
     public int generation() { return generation; }
+    public int lastLedgerPlanVersion() { return lastLedgerPlanVersion; }
 
     /** Whether any ledger state is active (either flag is true). */
     public boolean isLedgerActive() {
@@ -59,6 +61,7 @@ public final class AgentPromptState {
     public void setConversationLedger(ConversationLedger v) { this.conversationLedger = v; }
     public void setStablePrefix(StablePrefix v) { this.stablePrefix = v; }
     public void setGeneration(int v) { this.generation = v; }
+    public void setLastLedgerPlanVersion(int v) { this.lastLedgerPlanVersion = v; }
 
     /** Ensures ledger state is initialized. Safe to call repeatedly. */
     public void ensureLedgerActive() {

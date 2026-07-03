@@ -12,6 +12,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
@@ -30,16 +33,19 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private final AgentRuntimeProperties properties;
     private final AgentHookRegistry hookRegistry;
     private final ContextWindowManager contextWindowManager;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ToolDispatchNode(ToolRegistry toolRegistry,
                             AgentRuntimeProperties properties,
                             AgentHookRegistry hookRegistry,
-                            ContextWindowManager contextWindowManager) {
+                            ContextWindowManager contextWindowManager,
+                            ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input", "step"));
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -97,6 +103,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
         }
         if ("todo_write".equals(decision.getTool()) && result.isSuccess()) {
             result = applyTodoWrite(context, result);
+            appendPlanSnapshotIfChanged(context);
         }
         context.setToolResult(result);
         context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
@@ -148,6 +155,24 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
     private boolean contextEnabled() {
         return properties.getContext() != null && Boolean.TRUE.equals(properties.getContext().getEnabled());
+    }
+
+    private void appendPlanSnapshotIfChanged(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        if (context.getPlan() == null) {
+            return;
+        }
+        int currentVersion = context.getPlan().getVersion();
+        if (currentVersion <= context.getLastLedgerPlanVersion()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderPlanSnapshot(context.getPlan());
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), "plan", "v" + currentVersion);
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
+        context.setLastLedgerPlanVersion(currentVersion);
     }
 
 }

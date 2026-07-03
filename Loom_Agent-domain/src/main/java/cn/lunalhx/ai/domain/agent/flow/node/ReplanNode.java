@@ -23,6 +23,9 @@ import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceContext;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -40,9 +43,10 @@ public class ReplanNode extends AbstractAgentNode {
     private final ObjectMapper objectMapper;
     private final TraceRecorder traceRecorder;
     private final BudgetGuard budgetGuard;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ReplanNode(ModelGateway modelGateway, AgentRuntimeProperties properties, ObjectMapper objectMapper) {
-        this(modelGateway, properties, objectMapper, null, null);
+        this(modelGateway, properties, objectMapper, null, null, null);
     }
 
     public ReplanNode(ModelGateway modelGateway,
@@ -50,12 +54,22 @@ public class ReplanNode extends AbstractAgentNode {
                       ObjectMapper objectMapper,
                       TraceRecorder traceRecorder,
                       BudgetGuard budgetGuard) {
+        this(modelGateway, properties, objectMapper, traceRecorder, budgetGuard, null);
+    }
+
+    public ReplanNode(ModelGateway modelGateway,
+                      AgentRuntimeProperties properties,
+                      ObjectMapper objectMapper,
+                      TraceRecorder traceRecorder,
+                      BudgetGuard budgetGuard,
+                      ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.REPLAN, List.of("plan", "replanReason", "history"));
         this.modelGateway = modelGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.traceRecorder = traceRecorder;
         this.budgetGuard = budgetGuard;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -76,6 +90,8 @@ public class ReplanNode extends AbstractAgentNode {
         if (!modelUpdated) {
             context.getPlan().addReplanItem(fallbackItem(reason), "replan:" + reason.name());
         }
+        appendPlanSnapshotIfChanged(context);
+        appendReplanNote(context, reason, modelUpdated);
         context.getDynamicText().appendSystemNote(
                 Math.max(1, context.getStep()),
                 name(),
@@ -246,6 +262,35 @@ public class ReplanNode extends AbstractAgentNode {
                 + ", maxTotalTokens=" + check.getMaxTotalTokens();
         context.setBudgetBlockedReason(reason);
         fail(context, AgentStopReason.BUDGET_EXCEEDED, "budget_exceeded", reason);
+    }
+
+    private void appendPlanSnapshotIfChanged(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        if (context.getPlan() == null) {
+            return;
+        }
+        int currentVersion = context.getPlan().getVersion();
+        if (currentVersion <= context.getLastLedgerPlanVersion()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderPlanSnapshot(context.getPlan());
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), "plan", "v" + currentVersion);
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
+        context.setLastLedgerPlanVersion(currentVersion);
+    }
+
+    private void appendReplanNote(AgentContext context, ReplanReason reason, boolean modelUpdated) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderReplanNote(reason, modelUpdated,
+                context.getReplanMessage());
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "replan");
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 
 }

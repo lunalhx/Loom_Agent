@@ -7,6 +7,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
@@ -28,13 +31,21 @@ public class DecisionNode extends AbstractAgentNode {
     private final ObjectMapper objectMapper;
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
     private volatile Schema spawnAgentsSchema;
 
     public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
+        this(objectMapper, toolRegistry, properties, null);
+    }
+
+    public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry,
+                       AgentRuntimeProperties properties,
+                       ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.DECISION, List.of("modelOutput", "parseErrors", "registeredTools", "decision"));
         this.objectMapper = objectMapper;
         this.toolRegistry = toolRegistry;
         this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -82,6 +93,7 @@ public class DecisionNode extends AbstractAgentNode {
                     name(),
                     "Model Output Parse Error",
                     "模型输出无法解析为 action/final JSON。\nRawOutput:\n" + context.getModelOutput());
+            appendParseErrorToLedger(context);
             return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
         }
     }
@@ -206,6 +218,23 @@ public class DecisionNode extends AbstractAgentNode {
             text = text.replaceFirst("\\s*```$", "");
         }
         return text;
+    }
+
+    private void appendParseErrorToLedger(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderParseErrorNote(
+                context.getModelOutput(),
+                context.getParseErrors(),
+                properties.getParseErrorMaxAttempts());
+        // Each parse error within the same step uses a distinct event key
+        // (the attempt counter makes it unique)
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(),
+                String.valueOf(Math.max(1, context.getStep())),
+                "parse_error:" + context.getParseErrors());
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 
 }

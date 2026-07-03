@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
@@ -65,6 +66,9 @@ public class ModelCallNode extends AbstractAgentNode {
                 context.getCurrentModel());
         int requestedMaxTokens = 0;
         int escalatedMaxTokens = escalatedMaxTokens();
+
+        appendBudgetSnapshotIfApplicable(context);
+        appendTodoReminderIfTriggered(context);
 
         ModelCallResult result = executor.execute(context, requestedModel, requestedMaxTokens,
                 deadlineEpochMs, escalatedMaxTokens);
@@ -146,5 +150,31 @@ public class ModelCallNode extends AbstractAgentNode {
         context.setRecoveryModelOverride(null);
         context.setContextTranscriptArtifactId(null);
         context.setContextBlockedReason(null);
+    }
+
+    private void appendBudgetSnapshotIfApplicable(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderBudgetSnapshot(context);
+        if (text.isEmpty()) {
+            return;
+        }
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "budget");
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
+    }
+
+    private void appendTodoReminderIfTriggered(AgentContext context) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        if (context.getPlan() == null || context.getPlan().getRoundsSinceUpdate() < 3) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderTodoReminder();
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "todo_reminder");
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 }

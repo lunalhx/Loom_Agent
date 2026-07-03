@@ -194,6 +194,8 @@ public class AgentContext {
     public void setStablePrefix(StablePrefix v) { prompt.setStablePrefix(v); }
     public int getGeneration() { return prompt.generation(); }
     public void setGeneration(int v) { prompt.setGeneration(v); }
+    public int getLastLedgerPlanVersion() { return prompt.lastLedgerPlanVersion(); }
+    public void setLastLedgerPlanVersion(int v) { prompt.setLastLedgerPlanVersion(v); }
     public boolean isLedgerActive() { return prompt.isLedgerActive(); }
     public void ensureLedgerActive() { prompt.ensureLedgerActive(); }
     public int incrementGeneration() { return prompt.incrementGeneration(); }

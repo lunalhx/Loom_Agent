@@ -20,6 +20,9 @@ import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -33,17 +36,28 @@ public final class AgentResumeCoordinator {
     private final AgentRunRepository runRepository;
     private final AgentContextFactory contextFactory;
     private final AgentEventFactory eventFactory;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public AgentResumeCoordinator(ApprovalStore approvalStore,
                                   AgentCheckpointRepository checkpointRepository,
                                   AgentRunRepository runRepository,
                                   AgentContextFactory contextFactory,
                                   AgentEventFactory eventFactory) {
+        this(approvalStore, checkpointRepository, runRepository, contextFactory, eventFactory, null);
+    }
+
+    public AgentResumeCoordinator(ApprovalStore approvalStore,
+                                  AgentCheckpointRepository checkpointRepository,
+                                  AgentRunRepository runRepository,
+                                  AgentContextFactory contextFactory,
+                                  AgentEventFactory eventFactory,
+                                  ConversationLedgerAppendService ledgerAppendService) {
         this.approvalStore = approvalStore;
         this.checkpointRepository = checkpointRepository;
         this.runRepository = runRepository;
         this.contextFactory = contextFactory;
         this.eventFactory = eventFactory;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     public AgentResumePlan prepareApprovalResume(String approvalId, ApprovalDecision decision, String reason) {
@@ -199,6 +213,7 @@ public final class AgentResumeCoordinator {
         }
 
         context.getDynamicText().appendUserInput(runtime.step(), StringUtils.trim(message));
+        appendUserInputToLedger(context, StringUtils.trim(message));
         context.recovery().reset();
         runtime.clearOutcomeForContinuation();
         return AgentResumePlan.continueAt(context, AgentNodeNames.RENDER_PROMPT, events);
@@ -237,5 +252,15 @@ public final class AgentResumeCoordinator {
             }
         }
         return names;
+    }
+
+    private void appendUserInputToLedger(AgentContext context, String message) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderUserInput(message);
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())), "user_input");
+        ledgerAppendService.appendUserInput(context, text, eventKey);
     }
 }
