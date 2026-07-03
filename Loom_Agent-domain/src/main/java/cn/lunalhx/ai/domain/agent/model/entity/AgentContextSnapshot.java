@@ -131,6 +131,11 @@ public class AgentContextSnapshot {
     private StablePrefix stablePrefix;
     private int generation;
 
+    // -- config fingerprint (v3.1, C9) --
+    /** Deterministic fingerprint of the tool/skills config when this snapshot was taken.
+     *  Used on continuation/resume to detect config drift and trigger generation bumps. */
+    private String configFingerprint;
+
     // ---- factory methods ----
 
     /** Defensive copy of ledger entries for snapshot isolation. */
@@ -232,6 +237,8 @@ public class AgentContextSnapshot {
                         ? context.prompt().conversationLedger().nextSequence() : 0)
                 .stablePrefix(context.prompt().stablePrefix())
                 .generation(context.prompt().generation())
+                // config fingerprint (C9)
+                .configFingerprint(context.prompt().configFingerprint())
                 .build();
     }
 
@@ -329,6 +336,7 @@ public class AgentContextSnapshot {
         // stablePrefix is immutable — safe to share
         context.setStablePrefix(stablePrefix);
         context.setGeneration(generation);
+        context.setConfigFingerprint(configFingerprint);
 
         return context;
     }

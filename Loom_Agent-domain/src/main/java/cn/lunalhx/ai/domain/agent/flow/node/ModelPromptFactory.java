@@ -34,14 +34,14 @@ final class ModelPromptFactory {
     }
 
     ChatPrompt build(AgentContext context, String requestedModel, int requestedMaxTokens, long deadlineEpochMs) {
-        if (ledgerEnabled) {
+        if (ledgerEnabled && context.isLedgerReady()) {
             return buildLedgerPrompt(context, requestedModel, requestedMaxTokens, deadlineEpochMs);
         }
         return buildLegacyPrompt(context, requestedModel, requestedMaxTokens, deadlineEpochMs);
     }
 
     String budgetInput(AgentContext context) {
-        if (ledgerEnabled) {
+        if (ledgerEnabled && context.isLedgerReady()) {
             return buildLedgerBudgetInput(context);
         }
         String currentPrompt = context.getCurrentPrompt();

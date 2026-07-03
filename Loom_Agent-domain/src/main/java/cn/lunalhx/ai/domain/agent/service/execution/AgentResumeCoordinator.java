@@ -80,6 +80,9 @@ public final class AgentResumeCoordinator {
 
         if (decision == ApprovalDecision.APPROVE) {
             context.approval().approve(approval.getTool(), approval.getPolicyFingerprint());
+            // C9: Append approval decision to ledger
+            appendApprovalToLedger(context, "approved",
+                    approval.getTool(), reason);
             if (isSkillActivation(approval)) {
                 List<String> skillNames = extractSkillNames(approval);
                 context.setApprovedSkillNames(skillNames);
@@ -90,6 +93,10 @@ public final class AgentResumeCoordinator {
 
         // REJECT
         context.approval().reject();
+
+        // C9: Append rejection decision to ledger
+        appendApprovalToLedger(context, "rejected",
+                approval.getTool(), reason);
 
         if (isSkillActivation(approval)) {
             List<String> rejectedNames = extractSkillNames(approval);
@@ -158,6 +165,8 @@ public final class AgentResumeCoordinator {
                     "审批已过期或不可用，写操作未执行",
                     0L));
             context.getDynamicText().appendAssistantAction(runtime.step(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
+            // C9: Append expiration to ledger
+            appendApprovalExpiredToLedger(context, expiredId);
             return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
         }
 
@@ -262,5 +271,28 @@ public final class AgentResumeCoordinator {
         String eventKey = ConversationLedgerInitializer.eventKey(
                 context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())), "user_input");
         ledgerAppendService.appendUserInput(context, text, eventKey);
+    }
+
+    private void appendApprovalToLedger(AgentContext context, String decision,
+                                         String toolName, String reason) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderApprovalDecision(decision, toolName, reason);
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())),
+                "approval_" + decision);
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
+    }
+
+    private void appendApprovalExpiredToLedger(AgentContext context, String approvalId) {
+        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
+            return;
+        }
+        String text = ControlUpdateTexts.renderApprovalExpired(approvalId);
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())),
+                "approval_expired");
+        ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
 }

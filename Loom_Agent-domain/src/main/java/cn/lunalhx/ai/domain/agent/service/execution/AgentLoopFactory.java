@@ -17,6 +17,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 
@@ -80,8 +82,17 @@ public class AgentLoopFactory {
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.undoCoordinator = undoCoordinator;
         this.ledgerAppendService = ledgerAppendService;
+
+        // Create bootstrap service when ledger is active
+        LedgerBootstrapService bs = null;
+        if (ledgerAppendService != null && ledgerAppendService.isActive()) {
+            ConversationLedgerInitializer initializer = new ConversationLedgerInitializer(
+                    runtime.properties().getConversationLedger());
+            bs = new LedgerBootstrapService(ledgerAppendService, initializer);
+        }
+
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
-                skillRepository, contextArtifactRepository, contextBlobStore, ledgerAppendService);
+                skillRepository, contextArtifactRepository, contextBlobStore, ledgerAppendService, bs);
     }
 
     /**

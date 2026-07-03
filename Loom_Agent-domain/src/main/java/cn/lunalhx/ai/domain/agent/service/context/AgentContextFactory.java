@@ -3,18 +3,15 @@ package cn.lunalhx.ai.domain.agent.service.context;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
-import cn.lunalhx.ai.domain.agent.model.state.AgentEnvironmentState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
-import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
-import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
-import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -97,11 +94,32 @@ public final class AgentContextFactory {
 
         initStepBudget(context, question);
 
-        if (previous != null && previous.getDynamicTextEntries() != null) {
-            context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
+        // ---- C9R: Restore ledger/prefix/generation, defer bootstrap to RenderPromptNode ----
+        if (previous != null) {
+            // Inherit dynamic text entries from previous run
+            if (previous.getDynamicTextEntries() != null) {
+                context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
+            }
+
+            // Restore ledger from previous snapshot
+            if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
+                context.setConversationLedger(ConversationLedger.fromPersisted(
+                        new java.util.ArrayList<>(previous.getLedgerEntries()),
+                        previous.getLedgerNextSequence()));
+            }
+
+            // Restore stable prefix and generation
+            if (previous.getStablePrefix() != null) {
+                context.setStablePrefix(previous.getStablePrefix());
+                context.setGeneration(Math.max(0, previous.getGeneration()));
+            }
         }
+
+        // Append the new question to dynamic text; defer ledger append to bootstrap
         context.getDynamicText().appendUserTask(context.getQuestion());
-        appendContinuationToLedgerIfActive(context);
+        // Store as pending — bootstrap will append after any config change marker
+        context.setPendingContinuation(context.getQuestion());
+
         context.setRequestedSkills(question.getSkills());
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
@@ -173,6 +191,7 @@ public final class AgentContextFactory {
             specs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
         context.setToolSpecs(specs);
+        // C9R: Config fingerprint check moved to LedgerBootstrapService in RenderPromptNode
         return context;
     }
 
@@ -188,6 +207,7 @@ public final class AgentContextFactory {
             specs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
         context.setToolSpecs(specs);
+        // C9R: Config fingerprint check moved to LedgerBootstrapService
         return context;
     }
 
@@ -206,23 +226,48 @@ public final class AgentContextFactory {
         context.setWorkspaceDisplayName(resolved.getDisplayName());
     }
 
+    // ================================================================
+    // Deprecated: computeConfigFingerprint kept only for test compat.
+    // Generation decisions now use StablePrefix.fingerprint().
+    // ================================================================
+
     /**
-     * Append a continuation marker to the ledger when resuming an existing
-     * conversation (the ledger is restored from the previous checkpoint).
-     *
-     * <p>The initial user task from the first run is never overwritten.
+     * @deprecated Use {@code StablePrefix.fingerprint()} for generation decisions.
      */
-    private void appendContinuationToLedgerIfActive(AgentContext context) {
-        if (ledgerAppendService == null || !ledgerAppendService.isActive()) {
-            return;
+    @Deprecated
+    public String computeConfigFingerprint() {
+        StringBuilder sb = new StringBuilder();
+        List<ToolSpec> allSpecs = new java.util.ArrayList<>(toolSpecs);
+        if (subAgentAvailable) {
+            allSpecs.add(SubAgentToolSpecs.spawnAgentsSpec());
         }
-        if (context.getConversationLedger() == null || context.getConversationLedger().isEmpty()) {
-            // Fresh ledger — initializer will handle the first user task entry
-            return;
+        allSpecs.sort(java.util.Comparator.comparing(ToolSpec::getName));
+        for (ToolSpec spec : allSpecs) {
+            sb.append(spec.getName()).append(':')
+                    .append(spec.getDescription()).append(':')
+                    .append(spec.getInputSchema() == null ? "{}" : spec.getInputSchema())
+                    .append(';');
         }
-        String text = ControlUpdateTexts.renderContinuation(context.getQuestion());
-        String eventKey = ConversationLedgerInitializer.eventKey(
-                context.getRunId(), "continuation", "user_input");
-        ledgerAppendService.appendUserInput(context, text, eventKey);
+        return DigestUtils.sha256Hex(sb.toString());
+    }
+
+    /**
+     * @deprecated Use {@code StablePrefix.fingerprint()} for generation decisions.
+     */
+    @Deprecated
+    public String computeConfigFingerprint(List<ToolSpec> overrideSpecs, boolean subAgentAvail) {
+        StringBuilder sb = new StringBuilder();
+        List<ToolSpec> allSpecs = new java.util.ArrayList<>(overrideSpecs);
+        if (subAgentAvail) {
+            allSpecs.add(SubAgentToolSpecs.spawnAgentsSpec());
+        }
+        allSpecs.sort(java.util.Comparator.comparing(ToolSpec::getName));
+        for (ToolSpec spec : allSpecs) {
+            sb.append(spec.getName()).append(':')
+                    .append(spec.getDescription()).append(':')
+                    .append(spec.getInputSchema() == null ? "{}" : spec.getInputSchema())
+                    .append(';');
+        }
+        return DigestUtils.sha256Hex(sb.toString());
     }
 }

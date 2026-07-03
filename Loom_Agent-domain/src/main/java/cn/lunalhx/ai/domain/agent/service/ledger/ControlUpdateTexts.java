@@ -195,4 +195,64 @@ public final class ControlUpdateTexts {
     public static String renderContinuation(String question) {
         return "[Conversation Continued] " + StringUtils.defaultString(question);
     }
+
+    // ================================================================
+    // Config change migration note (C9)
+    // ================================================================
+
+    /**
+     * Render a deterministic note when the tool/skills configuration fingerprint
+     * has changed between runs, causing a generation bump.
+     *
+     * <p>Format:
+     * <pre>{@code
+     * [Config Change] Tool/skills configuration has changed. Previous config fingerprint no longer matches current config. New generation {gen} started with inherited stable prefix; old messages remain as-is. Previous fingerprint: {oldFp}. Current fingerprint: {newFp}.
+     * }</pre>
+     *
+     * <p>This is deterministic and free of volatile fields (runId, time, etc.).
+     */
+    public static String renderConfigChangeNote(String oldFingerprint, String newFingerprint, int newGeneration) {
+        return "[Config Change] Tool/skills configuration has changed between runs. "
+                + "New generation " + newGeneration
+                + " started. Previous config fingerprint: "
+                + StringUtils.defaultString(oldFingerprint, "none")
+                + ". Current config fingerprint: "
+                + StringUtils.defaultString(newFingerprint, "none")
+                + ".";
+    }
+
+    // ================================================================
+    // Approval decision note (C9)
+    // ================================================================
+
+    /**
+     * Render a deterministic note when an approval is resolved.
+     *
+     * <p>Format:
+     * <pre>{@code
+     * [Approval] {decision}: {toolName}{reason}
+     * }</pre>
+     */
+    public static String renderApprovalDecision(String decision, String toolName, String reason) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[Approval] ").append(decision)
+                .append(": ").append(StringUtils.defaultString(toolName, "unknown"));
+        if (StringUtils.isNotBlank(reason)) {
+            sb.append(" reason=").append(reason);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Render a note for approval expiration.
+     *
+     * <p>Format:
+     * <pre>{@code
+     * [Approval Expired] {approvalId}
+     * }</pre>
+     */
+    public static String renderApprovalExpired(String approvalId) {
+        return "[Approval Expired] Approval " + StringUtils.defaultString(approvalId, "unknown")
+                + " has expired or is no longer available.";
+    }
 }

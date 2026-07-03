@@ -24,6 +24,11 @@ public final class AgentPromptState {
     private StablePrefix stablePrefix;
     private int generation;
     private int lastLedgerPlanVersion;
+    private String configFingerprint;
+
+    // ---- bootstrap state (C9R, transient) ----
+    private transient boolean ledgerReady;
+    private transient String pendingContinuation;
 
     // ---- legacy fields pending removal ----
     private String currentSystemPrompt;
@@ -44,6 +49,15 @@ public final class AgentPromptState {
     public int generation() { return generation; }
     public int lastLedgerPlanVersion() { return lastLedgerPlanVersion; }
 
+    /** Config fingerprint set by the factory. */
+    public String configFingerprint() { return configFingerprint; }
+
+    /** Whether bootstrap has completed and the ledger is ready for model input. */
+    public boolean ledgerReady() { return ledgerReady; }
+
+    /** Pending continuation question set by createContinuation, consumed by bootstrap. */
+    public String pendingContinuation() { return pendingContinuation; }
+
     /** Whether any ledger state is active (either flag is true). */
     public boolean isLedgerActive() {
         return conversationLedger != null;
@@ -62,6 +76,9 @@ public final class AgentPromptState {
     public void setStablePrefix(StablePrefix v) { this.stablePrefix = v; }
     public void setGeneration(int v) { this.generation = v; }
     public void setLastLedgerPlanVersion(int v) { this.lastLedgerPlanVersion = v; }
+    public void setConfigFingerprint(String v) { this.configFingerprint = v; }
+    public void setLedgerReady(boolean v) { this.ledgerReady = v; }
+    public void setPendingContinuation(String v) { this.pendingContinuation = v; }
 
     /** Ensures ledger state is initialized. Safe to call repeatedly. */
     public void ensureLedgerActive() {

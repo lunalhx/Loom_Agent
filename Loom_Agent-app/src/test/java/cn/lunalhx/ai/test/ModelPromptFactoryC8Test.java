@@ -93,6 +93,7 @@ public class ModelPromptFactoryC8Test {
                     "<reminder>Update your todos with todo_write before continuing.</reminder>",
                     LedgerStableType.CONTROL_UPDATE, runId + ":3:todo_reminder");
             ctx.setConversationLedger(ledger);
+            ctx.setLedgerReady(true); // C9R: ledger must be bootstrapped for model input
         }
 
         return ctx;
@@ -285,6 +286,7 @@ public class ModelPromptFactoryC8Test {
                 LedgerStableType.ASSISTANT_ACTION, "r-c8-norem:1:assistant");
         ctx.setConversationLedger(ledger);
         ctx.setStablePrefix(stablePrefix);
+        ctx.setLedgerReady(true); // C9R
 
         ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
 
@@ -458,6 +460,7 @@ public class ModelPromptFactoryC8Test {
     public void ledgerEnabledEmptyLedgerProducesValidPrompt() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-empty", false);
         ctx.setConversationLedger(new ConversationLedger());
+        ctx.setLedgerReady(true); // C9R
 
         ChatPrompt prompt = invokeFactoryBuild(true, ctx, "deepseek-v4", 4096, 0);
 

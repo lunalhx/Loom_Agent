@@ -196,7 +196,13 @@ public class AgentContext {
     public void setGeneration(int v) { prompt.setGeneration(v); }
     public int getLastLedgerPlanVersion() { return prompt.lastLedgerPlanVersion(); }
     public void setLastLedgerPlanVersion(int v) { prompt.setLastLedgerPlanVersion(v); }
+    public String getConfigFingerprint() { return prompt.configFingerprint(); }
+    public void setConfigFingerprint(String v) { prompt.setConfigFingerprint(v); }
     public boolean isLedgerActive() { return prompt.isLedgerActive(); }
+    public boolean isLedgerReady() { return prompt.ledgerReady(); }
+    public void setLedgerReady(boolean v) { prompt.setLedgerReady(v); }
+    public String getPendingContinuation() { return prompt.pendingContinuation(); }
+    public void setPendingContinuation(String v) { prompt.setPendingContinuation(v); }
     public void ensureLedgerActive() { prompt.ensureLedgerActive(); }
     public int incrementGeneration() { return prompt.incrementGeneration(); }
 

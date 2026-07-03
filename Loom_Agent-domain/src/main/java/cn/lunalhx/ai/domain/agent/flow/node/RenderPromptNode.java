@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
+import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
@@ -17,10 +18,12 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerShadowDiagnostic;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,12 +35,14 @@ public class RenderPromptNode extends AbstractAgentNode {
     private final ContextArtifactRepository artifactRepository;
     private final ContextBlobStore blobStore;
     private final LedgerShadowDiagnostic shadowDiagnostic;
+    private final LedgerBootstrapService bootstrapService;
+    private final StablePrefixBuilder prefixBuilder;
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
                             SkillRepository skillRepository,
                             ContextArtifactRepository artifactRepository,
                             ContextBlobStore blobStore) {
-        this(contextWindowManager, skillRepository, artifactRepository, blobStore, null);
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore, null, null, null);
     }
 
     public RenderPromptNode(ContextWindowManager contextWindowManager,
@@ -45,16 +50,31 @@ public class RenderPromptNode extends AbstractAgentNode {
                             ContextArtifactRepository artifactRepository,
                             ContextBlobStore blobStore,
                             LedgerShadowDiagnostic shadowDiagnostic) {
+        this(contextWindowManager, skillRepository, artifactRepository, blobStore, shadowDiagnostic, null, null);
+    }
+
+    public RenderPromptNode(ContextWindowManager contextWindowManager,
+                            SkillRepository skillRepository,
+                            ContextArtifactRepository artifactRepository,
+                            ContextBlobStore blobStore,
+                            LedgerShadowDiagnostic shadowDiagnostic,
+                            LedgerBootstrapService bootstrapService,
+                            StablePrefixBuilder prefixBuilder) {
         super(AgentNodeNames.RENDER_PROMPT, List.of("question", "toolSpecs", "dynamicText", "step", "maxSteps", "maxTotalSteps", "segmentIndex", "maxSegments"));
         this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         this.skillRepository = skillRepository;
         this.artifactRepository = artifactRepository;
         this.blobStore = blobStore;
         this.shadowDiagnostic = shadowDiagnostic;
+        this.bootstrapService = bootstrapService;
+        this.prefixBuilder = prefixBuilder != null ? prefixBuilder : new StablePrefixBuilder();
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
+        // ---- C9R: Ledger bootstrap (before model call) ----
+        runBootstrap(context);
+
         if (context.getMaxTotalSteps() > 0 && context.getStep() >= context.getMaxTotalSteps()) {
             fail(context, AgentStopReason.MAX_STEPS, "max_steps_total", "达到全局最大步骤数，已停止");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
@@ -277,6 +297,71 @@ public class RenderPromptNode extends AbstractAgentNode {
             // The diagnostic itself already catches exceptions internally;
             // this outer catch is a defense-in-depth safety net.
         }
+    }
+
+    // ================================================================
+    // C9R: Ledger bootstrap
+    // ================================================================
+
+    /**
+     * Bootstrap the conversation ledger before model call.
+     *
+     * <p>Builds a candidate {@link StablePrefix} from the current configuration
+     * (tools, skills, role, path scope, spawn capability) and delegates to
+     * {@link LedgerBootstrapService} for generation switching and initialization.
+     *
+     * <p>On failure, {@code ledgerReady} stays {@code false} and
+     * {@code ModelPromptFactory} will safely fall back to the legacy renderer.
+     */
+    private void runBootstrap(AgentContext context) {
+        if (bootstrapService == null) {
+            return;
+        }
+        try {
+            StablePrefix candidate = buildCandidatePrefix(context);
+            if (candidate != null) {
+                bootstrapService.bootstrap(context, candidate);
+            }
+        } catch (Exception e) {
+            // Bootstrap failure: ledgerReady stays false.
+            // ModelPromptFactory falls back to legacy renderer.
+        }
+    }
+
+    /**
+     * Build a {@link StablePrefix} from the current configuration.
+     *
+     * <p>Collects active skills contents from the skill repository (same code
+     * path as {@link #readSkillContentCached}) and builds a deterministic
+     * prefix whose fingerprint covers tools, skills/catalog, role, path scope,
+     * and spawn capability.
+     */
+    private StablePrefix buildCandidatePrefix(AgentContext context) {
+        // Build skill contents map from activated skills
+        Map<String, String> skillContents = new java.util.HashMap<>();
+        List<SkillActivation> activatedSkills = context.getActivatedSkills();
+        if (activatedSkills != null) {
+            for (SkillActivation activation : activatedSkills) {
+                String content = readSkillContentCached(context, activation);
+                if (StringUtils.isNotBlank(content)) {
+                    skillContents.put(activation.name(), content);
+                }
+            }
+        }
+
+        String pathScope = context.getPathScope();
+        if (StringUtils.isBlank(pathScope)) {
+            pathScope = null;
+        }
+
+        return prefixBuilder.build(
+                context.getAgentRole(),
+                context.isSubAgentSpawnAllowed(),
+                pathScope,
+                context.getToolSpecs(),
+                context.getSkillCatalogText(),
+                activatedSkills,
+                skillContents);
     }
 
 }
