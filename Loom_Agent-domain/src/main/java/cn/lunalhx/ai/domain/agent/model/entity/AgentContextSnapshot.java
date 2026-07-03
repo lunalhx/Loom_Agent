@@ -26,11 +26,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v2 — only durable state needed for recovery.
+ * Checkpoint snapshot v3 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: currentPrompt, render cache, modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
+ *
+ * <p>v3 adds conversation ledger, stable prefix, and generation persistence.
+ * v2 snapshots (missing these fields) restore with empty ledger state and
+ * are re-initialized by the appropriate initializer node.
  */
 @Data
 @Builder
@@ -38,7 +42,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 2;
+    private int schemaVersion = 3;
 
     // -- identity (durable) --
     private String runId;
@@ -121,7 +125,22 @@ public class AgentContextSnapshot {
     private String traceId;
     private Long traceSequenceNo;
 
+    // -- conversation ledger (v3) --
+    private List<ConversationLedgerEntry> ledgerEntries;
+    private long ledgerNextSequence;
+    private StablePrefix stablePrefix;
+    private int generation;
+
     // ---- factory methods ----
+
+    /** Defensive copy of ledger entries for snapshot isolation. */
+    private static List<ConversationLedgerEntry> captureLedgerEntries(AgentContext context) {
+        ConversationLedger ledger = context.prompt().conversationLedger();
+        if (ledger == null || ledger.isEmpty()) {
+            return null;
+        }
+        return new ArrayList<>(ledger.entries());
+    }
 
     public static AgentContextSnapshot from(AgentContext context) {
         AgentIdentity id = context.identity();
@@ -135,7 +154,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(2)
+                .schemaVersion(3)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
@@ -207,6 +226,12 @@ public class AgentContextSnapshot {
                 // trace
                 .traceId(trace.traceId())
                 .traceSequenceNo(trace.traceSequenceNo())
+                // conversation ledger (v3)
+                .ledgerEntries(captureLedgerEntries(context))
+                .ledgerNextSequence(context.prompt().conversationLedger() != null
+                        ? context.prompt().conversationLedger().nextSequence() : 0)
+                .stablePrefix(context.prompt().stablePrefix())
+                .generation(context.prompt().generation())
                 .build();
     }
 
@@ -295,6 +320,15 @@ public class AgentContextSnapshot {
         // trace
         context.setTraceId(traceId);
         context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
+
+        // conversation ledger (v3) — defensive reconstruct
+        if (ledgerEntries != null && !ledgerEntries.isEmpty()) {
+            context.setConversationLedger(ConversationLedger.fromPersisted(
+                    new ArrayList<>(ledgerEntries), ledgerNextSequence));
+        }
+        // stablePrefix is immutable — safe to share
+        context.setStablePrefix(stablePrefix);
+        context.setGeneration(generation);
 
         return context;
     }

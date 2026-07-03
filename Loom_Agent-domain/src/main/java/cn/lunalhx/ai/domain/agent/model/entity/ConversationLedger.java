@@ -59,6 +59,23 @@ public final class ConversationLedger {
         return List.copyOf(entries);
     }
 
+    /**
+     * Reconstruct a ledger from persisted state.
+     *
+     * <p>This bypasses {@link #append} so that original sequence numbers and
+     * ordering are preserved exactly. Callers are responsible for ensuring the
+     * entry list and nextSequence are consistent.
+     */
+    public static ConversationLedger fromPersisted(List<ConversationLedgerEntry> persistedEntries,
+                                                    long persistedNextSequence) {
+        ConversationLedger ledger = new ConversationLedger();
+        if (persistedEntries != null) {
+            ledger.entries.addAll(persistedEntries);
+        }
+        ledger.nextSequence = persistedNextSequence;
+        return ledger;
+    }
+
     public boolean isEmpty() {
         return entries.isEmpty();
     }

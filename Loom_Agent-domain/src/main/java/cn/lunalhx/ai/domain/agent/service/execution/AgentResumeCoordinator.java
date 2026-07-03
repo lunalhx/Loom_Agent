@@ -111,7 +111,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() != 2) {
+        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 3) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
@@ -168,7 +168,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() != 2) {
+        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 3) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 

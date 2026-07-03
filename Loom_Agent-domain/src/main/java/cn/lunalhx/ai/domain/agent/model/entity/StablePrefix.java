@@ -1,5 +1,9 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Objects;
 
 /**
@@ -8,12 +12,15 @@ import java.util.Objects;
  *
  * <p>This is an immutable snapshot — every rebuild produces a new instance.
  */
+@JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public final class StablePrefix {
 
     private final String frozenContent;
     private final String fingerprint;
 
-    public StablePrefix(String frozenContent, String fingerprint) {
+    @JsonCreator
+    public StablePrefix(@JsonProperty("frozenContent") String frozenContent,
+                        @JsonProperty("fingerprint") String fingerprint) {
         this.frozenContent = Objects.requireNonNull(frozenContent, "frozenContent must not be null");
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
     }

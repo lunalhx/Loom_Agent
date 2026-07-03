@@ -1,6 +1,9 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -12,6 +15,7 @@ import java.util.UUID;
  * idempotency checks and diagnostics. The sequence is assigned by the ledger
  * on append.
  */
+@JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public final class ConversationLedgerEntry {
 
     private final String entryId;
@@ -26,6 +30,20 @@ public final class ConversationLedgerEntry {
         this.role = Objects.requireNonNull(builder.role, "role must not be null");
         this.content = Objects.requireNonNull(builder.content, "content must not be null");
         this.stableType = Objects.requireNonNull(builder.stableType, "stableType must not be null");
+    }
+
+    @JsonCreator
+    public ConversationLedgerEntry(
+            @JsonProperty("entryId") String entryId,
+            @JsonProperty("sequence") long sequence,
+            @JsonProperty("role") String role,
+            @JsonProperty("content") String content,
+            @JsonProperty("stableType") LedgerStableType stableType) {
+        this.entryId = entryId != null ? entryId : UUID.randomUUID().toString();
+        this.sequence = sequence;
+        this.role = Objects.requireNonNull(role, "role must not be null");
+        this.content = Objects.requireNonNull(content, "content must not be null");
+        this.stableType = Objects.requireNonNull(stableType, "stableType must not be null");
     }
 
     public static Builder builder() {
