@@ -24,9 +24,9 @@ import static org.junit.Assert.assertTrue;
 public class LedgerOnlyPromptGoldenTest {
 
     private static final String EXPECTED_PREFIX_HASH =
-            "dc5eec386a38ed22f8060c5b4248f3801166d214aec99aa57fb061117b04b0e3";
+            "eb0619a4952125fdef37992f9d82c2c9be7705b2fa85de4e0d7d03509b87acc5";
     private static final String EXPECTED_PAYLOAD_HASH =
-            "aaeab43d25beed9f3089e628015fdf017d7206bde54bc321c7658e98995c21e3";
+            "68151d21cc9271c0818297c95df900cf087abcd092e6ba566a34cfb89294834e";
 
     @Test
     public void mainAgentLedgerPromptGolden() throws Exception {

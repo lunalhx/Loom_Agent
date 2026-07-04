@@ -34,10 +34,13 @@ class MicroCompactionStrategy implements ContextCompactionStrategy {
             if (StringUtils.isBlank(entry.getArtifactId())) {
                 continue;
             }
-            String content = "[compacted_tool_result]\n"
-                    + "artifactId=" + entry.getArtifactId() + "\n"
-                    + "originalChars=" + nullToZero(entry.getOriginalChars()) + "\n"
-                    + "Use context_recall get with this artifactId when exact output is needed.";
+            String content = "<persisted-output"
+                    + " artifactId=\"" + entry.getArtifactId() + "\""
+                    + " kind=\"tool_result\""
+                    + " originalChars=\"" + nullToZero(entry.getOriginalChars()) + "\""
+                    + " />\n"
+                    + "This tool result was compacted."
+                    + " Use context_recall get with this artifactId when exact output is needed.";
             entry.setSummary(content);
             entry.setContent(content);
             entry.setRenderChars(content.length());

@@ -70,15 +70,19 @@ class ContextArtifactService {
     }
 
     String renderArtifactReference(ContextArtifact artifact) {
-        return "[context_artifact]\n"
-                + "artifactId=" + artifact.getArtifactId() + "\n"
-                + "kind=" + artifact.getKind().name() + "\n"
-                + "originalChars=" + artifact.getOriginalChars() + "\n"
-                + "sha256=" + artifact.getSha256() + "\n"
-                + "preview:\n" + artifact.getPreview() + "\n"
-                + "[/context_artifact]\n"
-                + "Need full content: call context_recall with action=get, artifactId="
-                + artifact.getArtifactId() + ", offset=0, maxChars=<needed>.";
+        return "<persisted-output"
+                + " artifactId=\"" + artifact.getArtifactId() + "\""
+                + " kind=\"" + artifact.getKind().name() + "\""
+                + " originalChars=\"" + artifact.getOriginalChars() + "\""
+                + " retainedChars=\"" + artifact.getRetainedChars() + "\""
+                + " sha256=\"" + artifact.getSha256() + "\""
+                + " />\n"
+                + "Preview (first " + artifact.getRetainedChars() + " chars):\n"
+                + "<persisted_content>\n"
+                + artifact.getPreview() + "\n"
+                + "</persisted_content>\n"
+                + "Full content: context_recall(action=get, artifactId="
+                + artifact.getArtifactId() + ", offset=0, maxChars=<needed>)";
     }
 
     int artifactCount(AgentContext context) {
@@ -94,9 +98,29 @@ class ContextArtifactService {
 
     // --- helpers ---
 
+    /**
+     * Computes a pure prefix preview without abbreviation ellipsis.
+     * Length = min(previewChars, 2000, persistThreshold, content.length()).
+     * Does not split Unicode surrogate pairs.
+     */
+    static String previewPrefix(String content, int previewChars, int persistThreshold) {
+        String safe = StringUtils.defaultString(content);
+        int maxLen = Math.min(previewChars,
+                Math.min(2000,
+                        Math.min(persistThreshold, safe.length())));
+        while (maxLen > 0 && maxLen < safe.length()
+                && Character.isHighSurrogate(safe.charAt(maxLen - 1))) {
+            maxLen--;
+        }
+        return safe.substring(0, maxLen);
+    }
+
     private ContextArtifact persist(AgentContext context, ContextArtifactKind kind, String content, int previewChars) {
         String artifactId = "ctx-" + UUID.randomUUID();
-        String storageUri = blobStore.write(context.getRootRunId(), artifactId, StringUtils.defaultString(content));
+        String safeContent = StringUtils.defaultString(content);
+        String storageUri = blobStore.write(context.getRootRunId(), artifactId, safeContent);
+        int persistThreshold = positive(contextProperties().getPersistToolResultChars(), 12000);
+        String preview = previewPrefix(content, previewChars, persistThreshold);
         ContextArtifact artifact = ContextArtifact.builder()
                 .artifactId(artifactId)
                 .runId(context.getRunId())
@@ -104,10 +128,10 @@ class ContextArtifactService {
                 .conversationId(context.getConversationId())
                 .kind(kind)
                 .storageUri(storageUri)
-                .preview(StringUtils.abbreviate(StringUtils.defaultString(content), Math.max(64, previewChars)))
-                .sha256(DigestUtils.sha256Hex(StringUtils.defaultString(content)))
+                .preview(preview)
+                .sha256(DigestUtils.sha256Hex(safeContent))
                 .originalChars(StringUtils.length(content))
-                .retainedChars(Math.min(StringUtils.length(content), Math.max(64, previewChars)))
+                .retainedChars(preview.length())
                 .createdAt(Instant.now())
                 .build();
         return artifactRepository.save(artifact);

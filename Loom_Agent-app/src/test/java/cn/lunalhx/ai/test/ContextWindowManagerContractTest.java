@@ -95,7 +95,7 @@ public class ContextWindowManagerContractTest {
         ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
 
         // observation 被替换为 artifact 引用，原始内容不在 observation 中
-        assertTrue(prepared.getObservation().contains("[context_artifact]"));
+        assertTrue(prepared.getObservation().contains("<persisted-output"));
         assertTrue(prepared.getObservation().contains("context_recall"));
         assertFalse(prepared.getObservation().contains("omega-tail"));
         assertTrue(prepared.isTruncated());
@@ -176,10 +176,10 @@ public class ContextWindowManagerContractTest {
 
         assertTrue(result.isCompacted());
         assertTrue(result.getStrategies().contains("micro"));
-        // 旧的（有 artifact）被压缩为 [compacted_tool_result]；最近的保持原样
+        // 旧的（有 artifact）被压缩为 persisted-output 引用；最近的保持原样
         List<cn.lunalhx.ai.domain.agent.model.entity.DynamicTextEntry> entries = context.getDynamicText().entries();
         assertTrue(entries.stream().anyMatch(entry -> entry.getContent() != null
-                && entry.getContent().contains("[compacted_tool_result]")
+                && entry.getContent().contains("<persisted-output")
                 && Boolean.TRUE.equals(entry.getCompacted())));
         // 最近的未压缩
         assertTrue(entries.stream().anyMatch(entry -> "recent content 3".equals(entry.getContent())));
@@ -399,6 +399,286 @@ public class ContextWindowManagerContractTest {
                 .conversationId("conversation-b")
                 .build());
         assertTrue(allowed.isSuccess());
+    }
+
+    // ===== 11. persisted-output 字段完整性 =====
+
+    @Test
+    public void persistedOutputTagContainsAllFields() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(50);
+        properties.getContext().setToolPreviewChars(20);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("fields-run");
+        String large = "ABCDEFGHIJ-" + "y".repeat(100);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        assertTrue(obs.contains("<persisted-output"));
+        assertTrue(obs.contains("artifactId=\""));
+        assertTrue(obs.contains("kind=\"TOOL_RESULT\""));
+        assertTrue(obs.contains("originalChars=\""));
+        assertTrue(obs.contains("retainedChars=\""));
+        assertTrue(obs.contains("sha256=\""));
+        assertTrue(obs.contains(" />"));
+        assertTrue(obs.contains("<persisted_content>"));
+        assertTrue(obs.contains("</persisted_content>"));
+        assertTrue(obs.contains("context_recall(action=get, artifactId="));
+    }
+
+    // ===== 12. 预览是纯前缀，无省略号 =====
+
+    @Test
+    public void previewIsPurePrefixWithoutEllipsis() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(50);
+        properties.getContext().setToolPreviewChars(20);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("prefix-run");
+        String large = "ABCDEFGHIJ-" + "y".repeat(100);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        // 预览中不应包含省略号 "..."
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+        assertFalse("预览不应包含省略号 ...", previewContent.contains("..."));
+    }
+
+    // ===== 13. Unicode 代理对边界 =====
+
+    @Test
+    public void previewDoesNotSplitSurrogatePairs() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(100);
+        // 设置截断点为 11，正好在高代理字符位置（emoji 占据 index 10-11）
+        properties.getContext().setToolPreviewChars(11);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("unicode-run");
+        // 10 个 ASCII + 1 个 emoji（2 个 char） = 12 个 char，截断到 11 会切到高代理
+        String prefix = "0123456789";  // 10 chars
+        String emoji = "😀"; // 😀 = 2 chars (surrogate pair)
+        String large = prefix + emoji + "-" + "z".repeat(200);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+
+        // 预览回退到安全边界（10），不拆分 surrogate pair
+        assertEquals(10, previewContent.length());
+        assertEquals(prefix, previewContent);
+    }
+
+    // ===== 14. 2000 字符硬上限 =====
+
+    @Test
+    public void previewCappedAt2000() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(3000);
+        // 配置超过 2000，但预览不应超过 2000
+        properties.getContext().setToolPreviewChars(2500);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("cap-run");
+        String large = "A-" + "x".repeat(5000);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+
+        assertTrue("预览不应超过 2000，实际=" + previewContent.length(),
+                previewContent.length() <= 2000);
+        ContextArtifact saved = artifactRepository.listByRootRunId("cap-run").get(0);
+        assertTrue("retainedChars 不应超过 2000，实际=" + saved.getRetainedChars(),
+                saved.getRetainedChars() <= 2000);
+    }
+
+    // ===== 15. 预览不超过原始内容长度 =====
+
+    @Test
+    public void previewCappedByContentLength() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(30);
+        properties.getContext().setToolPreviewChars(2000);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("short-run");
+        // content 虽然超过阈值但较短（35 chars），预览不能超过实际长度
+        String large = "A-" + "x".repeat(33);  // 35 chars total
+        assertTrue(large.length() > 30);  // 超过阈值
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+
+        // 预览为完整内容前缀（实际 35 字符，但会被 persistToolResultChars 限制在 30）
+        assertTrue("预览不应超过 persistToolResultChars(30)，实际=" + previewContent.length(),
+                previewContent.length() <= 30);
+        // 因为是前缀，无省略号
+        assertFalse(previewContent.contains("..."));
+    }
+
+    // ===== 16. 小预览配置 =====
+
+    @Test
+    public void smallPreviewConfig() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(50);
+        properties.getContext().setToolPreviewChars(5);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("small-preview-run");
+        String large = "ABCDEFGHIJ-" + "z".repeat(200);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+
+        assertEquals(5, previewContent.length());
+        assertEquals("ABCDE", previewContent);
+    }
+
+    // ===== 17. 多行内容预览保留换行 =====
+
+    @Test
+    public void multiLineContentInPreview() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(60);
+        properties.getContext().setToolPreviewChars(40);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("multiline-run");
+        String large = "line1\nline2\nline3\n" + "z".repeat(200);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        int contentStart = obs.indexOf("<persisted_content>");
+        int contentEnd = obs.indexOf("</persisted_content>");
+        String previewContent = obs.substring(contentStart + "<persisted_content>\n".length(), contentEnd - 1);
+
+        // 预览应保留换行符
+        assertTrue(previewContent.contains("\n"));
+        // 预览是原内容的纯前缀
+        assertTrue(large.startsWith(previewContent));
+    }
+
+    // ===== 18. 压缩条目使用统一 persisted-output 标签 =====
+
+    @Test
+    public void compactedEntriesUseUnifiedTag() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getBudget().setEstimatedCharsPerToken(1000);
+        properties.getContext().setKeepRecentToolResults(1);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("unified-compact-run");
+        context.getDynamicText().appendToolResult(1, "tool_dispatch", null,
+                toolResultWithArtifact("art-1"), "old content 1");
+        context.getDynamicText().appendToolResult(2, "tool_dispatch", null,
+                toolResultWithArtifact("art-2"), "old content 2");
+        context.getDynamicText().appendToolResult(3, "tool_dispatch", null, null, "recent content 3");
+        manager.compactBeforePrompt(context);
+
+        List<cn.lunalhx.ai.domain.agent.model.entity.DynamicTextEntry> entries = context.getDynamicText().entries();
+        // 压缩条目使用 persisted-output，不含旧标签
+        assertTrue(entries.stream().anyMatch(entry -> entry.getContent() != null
+                && entry.getContent().contains("<persisted-output")));
+        assertFalse("不应包含旧 [compacted_tool_result] 标签",
+                entries.stream().anyMatch(entry -> entry.getContent() != null
+                        && entry.getContent().contains("[compacted_tool_result]")));
+    }
+
+    // ===== 19. Observation 不含旧标签 =====
+
+    @Test
+    public void observationDoesNotContainOldTags() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getContext().setPersistToolResultChars(50);
+        properties.getContext().setToolPreviewChars(20);
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("no-old-tags-run");
+        String large = "A-" + "y".repeat(200);
+        ToolResult prepared = manager.prepareToolResult(context, ToolResult.success(large, false, 1L));
+
+        String obs = prepared.getObservation();
+        assertFalse("不应包含 [context_artifact]", obs.contains("[context_artifact]"));
+        assertFalse("不应包含 [compacted_tool_result]", obs.contains("[compacted_tool_result]"));
+    }
+
+    // ===== 20. 旧格式后向兼容：不迁移仍可构造提示词 =====
+
+    @Test
+    public void backwardCompatOldArtifactFormatInLedgerDoesNotBreak() {
+        // 模拟旧格式 [context_artifact] 的 artifact 记录仍可通过 context_recall 取回
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        InMemoryContextArtifactRepository artifactRepository = new InMemoryContextArtifactRepository();
+        InMemoryContextBlobStore blobStore = new InMemoryContextBlobStore();
+        ContextWindowManager manager = new ContextWindowManager(properties, artifactRepository, blobStore);
+
+        AgentContext context = contextForRoot("backward-compat");
+        // 手动插入一个记录，模拟旧格式场景
+        String artifactId = "ctx-old-format";
+        String fullContent = "historical data that was stored with old format";
+        blobStore.write("backward-compat", artifactId, fullContent);
+        ContextArtifact oldArtifact = ContextArtifact.builder()
+                .artifactId(artifactId)
+                .runId("backward-compat")
+                .rootRunId("backward-compat")
+                .kind(ContextArtifactKind.TOOL_RESULT)
+                .storageUri("memory://backward-compat/" + artifactId)
+                .preview("historical dat")
+                .sha256(org.apache.commons.codec.digest.DigestUtils.sha256Hex(fullContent))
+                .originalChars(fullContent.length())
+                .retainedChars(14)
+                .createdAt(java.time.Instant.now())
+                .build();
+        artifactRepository.save(oldArtifact);
+
+        // context_recall 仍能正常取回
+        ContextRecallTool recallTool = new ContextRecallTool(artifactRepository, blobStore);
+        ObjectNode input = new ObjectMapper().createObjectNode()
+                .put("action", "get")
+                .put("artifactId", artifactId);
+        ToolResult recall = recallTool.call(ToolCall.builder()
+                .name(ContextRecallTool.NAME)
+                .input(input)
+                .runId("backward-compat")
+                .rootRunId("backward-compat")
+                .conversationId("conv-backward")
+                .build());
+        assertTrue("旧格式 artifact 应仍可通过 context_recall 取回", recall.isSuccess());
+        assertTrue(recall.getObservation().contains("historical data"));
     }
 
     // ===== 辅助 =====

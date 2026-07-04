@@ -98,6 +98,38 @@ public class AiRuntimeConfigValidationTest {
         }
     }
 
+    @Test
+    public void toolPreviewCharsAbove2000MustFailStartup() {
+        ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
+        AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
+        agentProperties.getContext().setToolPreviewChars(2001);
+        ThreadPoolExecutor executor = executor();
+        InitializingBean validator = new AgentLoopAutoConfig()
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
+
+        try {
+            assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void toolPreviewCharsZeroMustFailStartup() {
+        ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
+        AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
+        agentProperties.getContext().setToolPreviewChars(0);
+        ThreadPoolExecutor executor = executor();
+        InitializingBean validator = new AgentLoopAutoConfig()
+                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
+
+        try {
+            assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private ThreadPoolExecutor executor() {
         return new ThreadPoolExecutor(2, 10, 1L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
     }

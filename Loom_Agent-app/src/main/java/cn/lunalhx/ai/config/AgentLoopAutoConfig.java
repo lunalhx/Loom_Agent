@@ -343,7 +343,10 @@ public class AgentLoopAutoConfig {
                 throw new IllegalStateException("AGENT_SUB_AGENT_SUMMARY_MAX_CHARS 必须大于等于 1000");
             }
             requirePositive(agentRuntimeProperties.getContext().getPersistToolResultChars(), "AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS");
-            requirePositive(agentRuntimeProperties.getContext().getToolPreviewChars(), "AGENT_CONTEXT_TOOL_PREVIEW_CHARS");
+            Integer toolPreviewChars = agentRuntimeProperties.getContext().getToolPreviewChars();
+            if (toolPreviewChars == null || toolPreviewChars < 1 || toolPreviewChars > 2000) {
+                throw new IllegalStateException("AGENT_CONTEXT_TOOL_PREVIEW_CHARS 必须在 1..2000 之间");
+            }
             requirePositive(agentRuntimeProperties.getContext().getKeepRecentToolResults(), "AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS");
             requirePositive(agentRuntimeProperties.getContext().getMaxDynamicEntries(), "AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES");
             requirePositive(agentRuntimeProperties.getContext().getAutoCompactTokenLimit(), "AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT");

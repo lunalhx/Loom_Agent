@@ -896,7 +896,7 @@ public class DefaultAgentLoopServiceTest {
                         && !event.getObservation().contains("omega-tail")));
         assertTrue(blobStore.read(artifactRepository.listByRootRunId("artifact-run").getFirst().getStorageUri())
                 .contains("omega-tail"));
-        assertTrue(prompts.get(1).contains("context_artifact"));
+        assertTrue(prompts.get(1).contains("<persisted-output"));
         assertTrue(prompts.get(1).contains("需要完整细节时先调用 context_recall"));
     }
 
