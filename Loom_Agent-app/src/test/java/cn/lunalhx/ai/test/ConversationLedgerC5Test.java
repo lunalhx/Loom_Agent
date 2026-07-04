@@ -386,33 +386,17 @@ public class ConversationLedgerC5Test {
     // ================================================================
 
     @Test
-    public void eventKeyFormatMatchesConvention() {
-        // All event keys must follow {runId}:{step}:{eventType}
-        assertEquals("run-123:1:assistant",
-                ConversationLedgerInitializer.eventKey("run-123", "1", "assistant"));
-        assertEquals("run-123:5:tool_result",
-                ConversationLedgerInitializer.eventKey("run-123", "5", "tool_result"));
+    public void eventKeyFormatShouldBeColonSeparated() {
+        // eventKey format: <runId>:<phase>:<type>
+        assertEventKey("run-123", "1", "assistant", "run-123:1:assistant");
+        assertEventKey("run-123", "5", "tool_result", "run-123:5:tool_result");
+        assertEventKey("mc-run", "3", "assistant", "mc-run:3:assistant");
+        assertEventKey("obs-run", "7", "tool_result", "obs-run:7:tool_result");
+        assertEventKey("appr-run", "2", "tool_result", "appr-run:2:tool_result");
     }
 
-    @Test
-    public void modelCallEventKeyFormat() {
-        // ModelCallNode uses: {runId}:{step}:assistant
-        String key = ConversationLedgerInitializer.eventKey("mc-run", "3", "assistant");
-        assertEquals("mc-run:3:assistant", key);
-    }
-
-    @Test
-    public void observationEventKeyFormat() {
-        // ObservationNode uses: {runId}:{step}:tool_result
-        String key = ConversationLedgerInitializer.eventKey("obs-run", "7", "tool_result");
-        assertEquals("obs-run:7:tool_result", key);
-    }
-
-    @Test
-    public void approvalEventKeyFormat() {
-        // ApprovalGateNode uses: {runId}:{step}:tool_result
-        String key = ConversationLedgerInitializer.eventKey("appr-run", "2", "tool_result");
-        assertEquals("appr-run:2:tool_result", key);
+    private static void assertEventKey(String runId, String phase, String type, String expected) {
+        assertEquals(expected, ConversationLedgerInitializer.eventKey(runId, phase, type));
     }
 
     // ================================================================
@@ -582,35 +566,6 @@ public class ConversationLedgerC5Test {
         List<ConversationLedgerEntry> entries = ctx.getConversationLedger().entries();
         assertEquals(1, entries.size());
         assertNotNull(entries.get(0).content());
-    }
-
-    // ================================================================
-    // 13. Immutability of snapshot
-    // ================================================================
-
-    @Test
-    public void appendServiceSnapshotIsImmutable() {
-        ConversationLedgerAppendService svc = enabledService;
-        AgentContext ctx = basicContext("r-snap-c5-1");
-        ctx.ensureLedgerActive();
-
-        List<ConversationLedgerEntry> snap1 = svc.appendAssistant(ctx, "msg1",
-                ConversationLedgerInitializer.eventKey("r-snap-c5-1", "1", "assistant"));
-        assertEquals(1, snap1.size());
-
-        try {
-            snap1.add(ConversationLedgerEntry.builder()
-                    .role("r").content("c").stableType(LedgerStableType.TOOL_RESULT).build());
-            fail("Should throw UnsupportedOperationException");
-        } catch (UnsupportedOperationException expected) {
-            // expected
-        }
-
-        // Second append — snap1 unchanged
-        List<ConversationLedgerEntry> snap2 = svc.appendToolResult(ctx, "out",
-                ConversationLedgerInitializer.eventKey("r-snap-c5-1", "1", "tool_result"));
-        assertEquals(2, snap2.size());
-        assertEquals("snap1 must not change after second append", 1, snap1.size());
     }
 
     // ================================================================

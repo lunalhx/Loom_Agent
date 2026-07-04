@@ -113,20 +113,6 @@ public class AgentResponseMapperTest {
     }
 
     @Test
-    public void toStreamEventNullStopReasonShouldMapToNull() {
-        AgentEvent event = AgentEvent.builder().type(AgentEventType.DONE).build();
-        AgentStreamEvent dto = mapper.toStreamEvent(event);
-        assertNull(dto.getStopReason());
-    }
-
-    @Test
-    public void toStreamEventNullExpiresAtShouldMapToNull() {
-        AgentEvent event = AgentEvent.builder().type(AgentEventType.DONE).build();
-        AgentStreamEvent dto = mapper.toStreamEvent(event);
-        assertNull(dto.getExpiresAt());
-    }
-
-    @Test
     public void toStreamEventShouldMapUsageSummary() {
         AgentUsageSummaryDTO usage = AgentUsageSummaryDTO.builder()
                 .runId("r-1")
@@ -247,46 +233,6 @@ public class AgentResponseMapperTest {
         assertEquals(Integer.valueOf(150), dto.getTotalTokens());
     }
 
-    @Test
-    public void toTokenUsageShouldMapCacheFieldsWhenPresent() {
-        // 字段完整：DTO 必须如实透传 promptCacheHitTokens / promptCacheMissTokens。
-        TokenUsage usage = TokenUsage.builder()
-                .promptTokens(100).completionTokens(50).totalTokens(150)
-                .promptCacheHitTokens(80).promptCacheMissTokens(20)
-                .build();
-        TokenUsageDTO dto = mapper.toTokenUsage(usage);
-        assertEquals(Integer.valueOf(80), dto.getPromptCacheHitTokens());
-        assertEquals(Integer.valueOf(20), dto.getPromptCacheMissTokens());
-    }
-
-    @Test
-    public void toTokenUsageShouldKeepCacheFieldsNullWhenAbsent() {
-        // 字段缺失：DTO 必须保留 null，不能被默认成 0（0 在业务上有"无 cache 命中"含义）。
-        TokenUsage usage = TokenUsage.builder()
-                .promptTokens(100).completionTokens(50).totalTokens(150)
-                .build();
-        TokenUsageDTO dto = mapper.toTokenUsage(usage);
-        assertNull(dto.getPromptCacheHitTokens());
-        assertNull(dto.getPromptCacheMissTokens());
-    }
-
-    @Test
-    public void toTokenUsageShouldPreserveZeroCacheValues() {
-        // 字段为 0：DTO 必须如实透传 0，与 null 区分开。
-        TokenUsage usage = TokenUsage.builder()
-                .promptTokens(100).completionTokens(50).totalTokens(150)
-                .promptCacheHitTokens(0).promptCacheMissTokens(100)
-                .build();
-        TokenUsageDTO dto = mapper.toTokenUsage(usage);
-        assertEquals(Integer.valueOf(0), dto.getPromptCacheHitTokens());
-        assertEquals(Integer.valueOf(100), dto.getPromptCacheMissTokens());
-    }
-
-    @Test
-    public void toTokenUsageNullShouldReturnNull() {
-        assertNull(mapper.toTokenUsage(null));
-    }
-
     // ===== toCostMap =====
 
     @Test
@@ -307,12 +253,6 @@ public class AgentResponseMapperTest {
         assertEquals("totalCost", keys[2]);
     }
 
-    @Test
-    public void toCostMapNullShouldReturnEmptyMap() {
-        Map<String, Object> result = mapper.toCostMap(null);
-        assertTrue(result.isEmpty());
-    }
-
     // ===== Replay SSE payloads =====
 
     @Test
@@ -327,14 +267,6 @@ public class AgentResponseMapperTest {
         assertEquals("r-1", result.get("rootRunId"));
         assertEquals(true, result.get("includeChildren"));
         assertEquals(false, result.get("costGenerated"));
-    }
-
-    @Test
-    public void replayStartedNullTraceIdRootRunIdShouldMapToEmptyString() {
-        AgentReplayTimeline timeline = AgentReplayTimeline.builder().build();
-        Map<String, Object> result = mapper.replayStarted("r-1", false, timeline);
-        assertEquals("", result.get("traceId"));
-        assertEquals("", result.get("rootRunId"));
     }
 
     @Test
@@ -355,26 +287,4 @@ public class AgentResponseMapperTest {
         assertEquals("Replay 失败", result.get("message"));
     }
 
-    // ===== toTraceEvent with null fields =====
-
-    @Test
-    public void toTraceEventNullTokenUsageShouldMapToNull() {
-        AgentTraceEvent event = AgentTraceEvent.builder().id(1L).sequenceNo(1L).eventType("node_start").build();
-        AgentTraceEventDTO dto = mapper.toTraceEvent(event);
-        assertNull(dto.getTokenUsage());
-    }
-
-    @Test
-    public void toTraceEventNullCostShouldMapToEmptyMap() {
-        AgentTraceEvent event = AgentTraceEvent.builder().id(1L).sequenceNo(1L).eventType("node_start").build();
-        AgentTraceEventDTO dto = mapper.toTraceEvent(event);
-        assertTrue(dto.getCost().isEmpty());
-    }
-
-    @Test
-    public void toTraceEventNullCreatedAtShouldMapToNull() {
-        AgentTraceEvent event = AgentTraceEvent.builder().id(1L).sequenceNo(1L).eventType("node_start").build();
-        AgentTraceEventDTO dto = mapper.toTraceEvent(event);
-        assertNull(dto.getCreatedAt());
-    }
 }

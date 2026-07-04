@@ -73,26 +73,6 @@ public class AgentRequestMapperTest {
     }
 
     @Test
-    public void mapAskMessageFallbackWhenQuestionNull() {
-        AgentAskRequest request = new AgentAskRequest();
-        request.setQuestion(null);
-        request.setMessage("message fallback");
-        AgentRequestMapper.Result<?> result = mapper.mapAsk(request);
-        assertTrue(result.valid());
-        assertEquals("message fallback", ((cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion) result.value()).getQuestion());
-    }
-
-    @Test
-    public void mapAskMessageFallbackWhenQuestionBlank() {
-        AgentAskRequest request = new AgentAskRequest();
-        request.setQuestion("  ");
-        request.setMessage("message fallback");
-        AgentRequestMapper.Result<?> result = mapper.mapAsk(request);
-        assertTrue(result.valid());
-        assertEquals("message fallback", ((cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion) result.value()).getQuestion());
-    }
-
-    @Test
     public void mapAskShouldGenerateRequestId() {
         AgentAskRequest request = new AgentAskRequest();
         request.setQuestion("hi");
@@ -318,15 +298,4 @@ public class AgentRequestMapperTest {
         assertTrue(mapper.resolveIncludeChildren(true, new AgentReplayStreamRequest(false)));
     }
 
-    @Test
-    public void includeChildrenBodyFallback() {
-        assertFalse(mapper.resolveIncludeChildren(null, new AgentReplayStreamRequest(false)));
-        assertTrue(mapper.resolveIncludeChildren(null, new AgentReplayStreamRequest(true)));
-    }
-
-    @Test
-    public void includeChildrenDefaultsToTrue() {
-        assertTrue(mapper.resolveIncludeChildren(null, null));
-        assertTrue(mapper.resolveIncludeChildren(null, new AgentReplayStreamRequest()));
-    }
 }

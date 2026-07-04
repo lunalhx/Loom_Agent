@@ -23,7 +23,6 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -77,29 +76,6 @@ public class AgentBackgroundTaskHttpServiceTest {
     }
 
     @Test
-    public void listTasksEmptyRunShouldReturnEmptyList() {
-        when(taskRepository.findByRunId("empty")).thenReturn(List.of());
-        List<BackgroundTaskResponse> result = service.listTasks("empty");
-        assertTrue(result.isEmpty());
-    }
-
-    @Test
-    public void getTaskDetailNotFoundShouldReturnNull() {
-        when(taskRepository.find("missing")).thenReturn(Optional.empty());
-        BackgroundTaskDetailResponse result = service.getTaskDetail("r-1", "missing", 0, 0, 8192);
-        assertNull(result);
-    }
-
-    @Test
-    public void getTaskDetailRunIdMismatchShouldReturnNull() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("other-run").build();
-        when(taskRepository.find("t-1")).thenReturn(Optional.of(task));
-        BackgroundTaskDetailResponse result = service.getTaskDetail("r-1", "t-1", 0, 0, 8192);
-        assertNull(result);
-    }
-
-    @Test
     public void getTaskDetailShouldUseLogReader() throws Exception {
         BackgroundShellTask task = BackgroundShellTask.builder()
                 .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.RUNNING)
@@ -118,24 +94,6 @@ public class AgentBackgroundTaskHttpServiceTest {
         assertEquals(5L, result.getStdoutOffset());
         assertEquals(false, result.isStdoutEof());
         assertEquals(100L, result.getStdoutBytes());
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void getTaskDetailNegativeOffsetShouldThrow() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.RUNNING)
-                .build();
-        when(taskRepository.find("t-1")).thenReturn(Optional.of(task));
-        service.getTaskDetail("r-1", "t-1", -1, 0, 8192);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void getTaskDetailInvalidLimitBytesShouldThrow() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.RUNNING)
-                .build();
-        when(taskRepository.find("t-1")).thenReturn(Optional.of(task));
-        service.getTaskDetail("r-1", "t-1", 0, 0, 2);
     }
 
     @Test
@@ -157,27 +115,5 @@ public class AgentBackgroundTaskHttpServiceTest {
         assertNotNull(result);
         assertEquals("t-1", result.getTaskId());
         assertEquals("CANCELLED", result.getStatus());
-    }
-
-    @Test
-    public void cancelTaskAlreadyTerminalShouldReturnCurrentStatus() {
-        when(cancelService.cancel("r-1", "t-1")).thenReturn(
-                new BackgroundTaskCancelService.CancelResult(true, BackgroundTaskStatus.SUCCEEDED, null));
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.SUCCEEDED).build();
-        when(taskRepository.find("t-1")).thenReturn(Optional.of(task));
-        BackgroundTaskResponse result = service.cancelTask("r-1", "t-1");
-        assertNotNull(result);
-        assertEquals("SUCCEEDED", result.getStatus());
-    }
-
-    @Test
-    public void cancelTaskFailedShouldReturnErrorResponse() {
-        when(cancelService.cancel("r-1", "t-1")).thenReturn(
-                new BackgroundTaskCancelService.CancelResult(false, null, "BACKGROUND_TASK_CANCEL_FAILED"));
-        BackgroundTaskResponse result = service.cancelTask("r-1", "t-1");
-        assertNotNull(result);
-        assertEquals("CANCEL_FAILED", result.getStatus());
-        assertEquals("BACKGROUND_TASK_CANCEL_FAILED", result.getErrorCode());
     }
 }

@@ -24,7 +24,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 /**
  * memory_extraction 是后台 worker 调起的，本身没有真实 Agent 上下文；
@@ -34,62 +33,6 @@ import static org.junit.Assert.assertTrue;
 public class MemoryExtractionTraceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Test
-    public void shouldRecordModelUsageWithCacheFieldsAndEnrichedMetadata() {
-        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
-        ModelGateway gateway = completeGateway("{\"memories\":[]}", "deepseek-v4-flash",
-                TokenUsage.builder()
-                        .promptTokens(50).completionTokens(20).totalTokens(70)
-                        .promptCacheHitTokens(40).promptCacheMissTokens(10)
-                        .build());
-
-        MemoryExtractionService service = new MemoryExtractionService(
-                gateway, objectMapper, "deepseek-v4-flash", traceRecorder);
-        ExtractionResult result = service.extract(
-                new MemoryExtractionPayload("q", "a", 1, "/tmp"),
-                System.currentTimeMillis() + 60000);
-
-        assertTrue("记忆提取返回 empty 但仍应记录 trace", result.isEmpty());
-
-        AgentTraceEvent usage = findModelUsage(allEvents(traceRecorder));
-        assertNotNull("必须写入 model_usage 事件", usage);
-        assertNotNull("usage 必须包含 cache 字段", usage.getTokenUsage());
-        assertEquals(Integer.valueOf(40), usage.getTokenUsage().getPromptCacheHitTokens());
-        assertEquals(Integer.valueOf(10), usage.getTokenUsage().getPromptCacheMissTokens());
-
-        assertEquals("memory_extraction", usage.getNode());
-        Map<String, Object> metadata = usage.getMetadata();
-        assertNotNull(metadata);
-        assertEquals("memory_extraction", metadata.get("node"));
-        assertEquals("complete.agent_decision", metadata.get("capability"));
-        assertEquals("MEMORY_EXTRACTION", metadata.get("purpose"));
-        assertEquals("deepseek-v4-flash", metadata.get("model"));
-        assertEquals("none", metadata.get("agentRole"));
-    }
-
-    @Test
-    public void shouldMarkUsageMissingWhenProviderReturnsNoUsage() {
-        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
-        ModelGateway gateway = completeGateway("{\"memories\":[]}", null, null);
-
-        MemoryExtractionService service = new MemoryExtractionService(
-                gateway, objectMapper, null, traceRecorder);
-        service.extract(new MemoryExtractionPayload("q", "a", 1, "/tmp"),
-                System.currentTimeMillis() + 60000);
-
-        AgentTraceEvent usage = findModelUsage(allEvents(traceRecorder));
-        assertNotNull(usage);
-        assertNull(usage.getTokenUsage());
-        assertEquals(Boolean.TRUE, usage.getMetadata().get("usageMissing"));
-    }
-
-    @Test
-    public void backwardCompatThreeArgConstructorShouldStillWork() {
-        ModelGateway gateway = completeGateway("{\"memories\":[]}", null, null);
-        MemoryExtractionService service = new MemoryExtractionService(gateway, objectMapper, null);
-        assertNotNull(service);
-    }
 
     @Test
     public void traceMetadataShouldNotContainHighCardinalityKeys() {

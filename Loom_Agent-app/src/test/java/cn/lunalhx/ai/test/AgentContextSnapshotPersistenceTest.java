@@ -400,42 +400,20 @@ public class AgentContextSnapshotPersistenceTest {
     // ==================== schema version boundaries ====================
 
     @Test
-    public void newSnapshotHasSchemaVersion3() {
+    public void snapshotSchemaVersionShouldBe3() {
+        assertEquals(3, new AgentContextSnapshot().getSchemaVersion());
         AgentContext ctx = new AgentContext();
         ctx.setRunId("v3-check");
-        AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(3, snapshot.getSchemaVersion());
+        assertEquals(3, AgentContextSnapshot.from(ctx).getSchemaVersion());
     }
 
     @Test
-    public void defaultConstructedSnapshotHasSchemaVersion3() {
-        AgentContextSnapshot snapshot = new AgentContextSnapshot();
-        assertEquals(3, snapshot.getSchemaVersion());
-    }
-
-    @Test
-    public void v1SchemaVersionRejectedByCoordinatorLogic() {
-        // Simulate what the coordinator does: schemaVersion < 2 || > 3 is rejected
-        int v1Version = 1;
-        assertThat(v1Version < 2 || v1Version > 3).isTrue();
-    }
-
-    @Test
-    public void v2SchemaVersionAcceptedByCoordinatorLogic() {
-        int v2Version = 2;
-        assertThat(v2Version < 2 || v2Version > 3).isFalse();
-    }
-
-    @Test
-    public void v3SchemaVersionAcceptedByCoordinatorLogic() {
-        int v3Version = 3;
-        assertThat(v3Version < 2 || v3Version > 3).isFalse();
-    }
-
-    @Test
-    public void v4SchemaVersionRejectedByCoordinatorLogic() {
-        int v4Version = 4;
-        assertThat(v4Version < 2 || v4Version > 3).isTrue();
+    public void schemaVersionShouldBeAcceptedOnlyInRange2To3() {
+        // schemaVersion < 2 || > 3 is rejected; only 2 and 3 are accepted
+        assertThat(1 < 2 || 1 > 3).as("v1 rejected").isTrue();
+        assertThat(2 < 2 || 2 > 3).as("v2 accepted").isFalse();
+        assertThat(3 < 2 || 3 > 3).as("v3 accepted").isFalse();
+        assertThat(4 < 2 || 4 > 3).as("v4 rejected").isTrue();
     }
 
     // ==================== defensive: restore does not corrupt snapshot ====================

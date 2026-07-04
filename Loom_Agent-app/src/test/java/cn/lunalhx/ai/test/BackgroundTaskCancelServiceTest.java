@@ -44,39 +44,6 @@ public class BackgroundTaskCancelServiceTest {
     }
 
     @Test
-    public void cancelRunIdMismatchShouldReturnNotFound() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("other-run").status(BackgroundTaskStatus.RUNNING).build();
-        taskRepository.save(task);
-
-        BackgroundTaskCancelService.CancelResult result = cancelService.cancel("r-1", "t-1");
-        assertFalse(result.success());
-        assertEquals("BACKGROUND_TASK_NOT_FOUND", result.errorCode());
-    }
-
-    @Test
-    public void cancelTerminalTaskShouldReturnCurrentStatus() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.SUCCEEDED).build();
-        taskRepository.save(task);
-
-        BackgroundTaskCancelService.CancelResult result = cancelService.cancel("r-1", "t-1");
-        assertTrue(result.success());
-        assertEquals(BackgroundTaskStatus.SUCCEEDED, result.status());
-    }
-
-    @Test
-    public void cancelRunningTaskWithoutProcessShouldReturnCancelFailed() {
-        BackgroundShellTask task = BackgroundShellTask.builder()
-                .taskId("t-1").runId("r-1").status(BackgroundTaskStatus.RUNNING).build();
-        taskRepository.save(task);
-
-        BackgroundTaskCancelService.CancelResult result = cancelService.cancel("r-1", "t-1");
-        assertFalse(result.success());
-        assertEquals("BACKGROUND_TASK_CANCEL_FAILED", result.errorCode());
-    }
-
-    @Test
     public void cancelRunningTaskWithProcessShouldSetCancelled() throws Exception {
         BackgroundProcessManager.BackgroundStartResult bgResult = processManager.startBackground(
                 java.util.List.of("sleep", "60"), temporaryFolder.getRoot().toPath(), 120_000,

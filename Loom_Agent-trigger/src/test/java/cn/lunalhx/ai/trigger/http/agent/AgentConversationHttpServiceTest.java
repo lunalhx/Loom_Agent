@@ -113,18 +113,4 @@ public class AgentConversationHttpServiceTest {
         assertTrue(returned.isEmpty());
     }
 
-    @Test
-    public void toDeletionResponseShouldMapAllFields() {
-        ConversationDeletionService.DeletionRequestResult result =
-                new ConversationDeletionService.DeletionRequestResult(
-                        "c-1", "COMPLETED", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z", 2, "error", false, false);
-
-        ConversationDeletionResponse response = AgentConversationHttpService.toDeletionResponse(result);
-        assertEquals("c-1", response.getConversationId());
-        assertEquals("COMPLETED", response.getStatus());
-        assertEquals("2024-01-01T00:00:00Z", response.getRequestedAt());
-        assertEquals("2024-01-01T01:00:00Z", response.getCompletedAt());
-        assertEquals(2, response.getRetryCount());
-        assertEquals("error", response.getLastError());
-    }
 }

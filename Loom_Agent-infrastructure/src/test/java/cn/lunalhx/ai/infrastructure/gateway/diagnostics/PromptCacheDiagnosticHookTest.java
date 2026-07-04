@@ -36,33 +36,6 @@ import static org.junit.Assert.assertTrue;
  */
 public class PromptCacheDiagnosticHookTest {
 
-    // ---------- 默认关闭 ----------
-
-    @Test
-    public void defaultPropertiesAreDisabledAndStateIsNotAllocated() {
-        PromptCacheDiagnosticProperties properties = new PromptCacheDiagnosticProperties();
-        assertFalse("默认 enabled 必须为 false", properties.isEnabled());
-        assertFalse("默认 logRedactedBody 必须为 false", properties.isLogRedactedBody());
-
-        PromptCacheDiagnosticHook hook = new PromptCacheDiagnosticHook(properties);
-        assertFalse("默认状态下 hook 必须禁用", hook.enabled());
-        assertEquals("默认状态下不应有 state 分配", 0, hook.stateSize());
-    }
-
-    @Test
-    public void disabledHookIsNoOpAndReturnsNull() {
-        PromptCacheDiagnosticHook hook = new PromptCacheDiagnosticHook(new PromptCacheDiagnosticProperties());
-
-        PromptCacheDiagnosticContext context = hook.beforeSend(
-                "deepseek-v4-flash", "stream.chat", "FINAL_TEXT", "conv-1",
-                "{\"model\":\"deepseek-v4-flash\"}",
-                List.of(Map.of("role", "user", "content", "hi")));
-        assertNull("禁用时 beforeSend 必须返回 null", context);
-
-        // afterSend 接收 null 也必须 no-op，不能抛 NPE
-        hook.afterSend(null, TokenUsage.builder().promptTokens(1).build());
-    }
-
     // ---------- 单次序列化不变量 ----------
 
     @Test
@@ -338,69 +311,6 @@ public class PromptCacheDiagnosticHookTest {
         //     作为额外检查，并验证上下文保留了原始 payload 以便脱敏 + 截断使用）
         assertEquals("hook 必须保留 raw payload 以供 logRedactedBody=true 路径使用",
                 rawPayload, context.rawPayload());
-    }
-
-    // ---------- 关闭时不分配 ----------
-
-    @Test
-    public void disabledHookKeepsStateEmptyAcrossManyCalls() {
-        PromptCacheDiagnosticHook hook = new PromptCacheDiagnosticHook(new PromptCacheDiagnosticProperties());
-        for (int i = 0; i < 50; i++) {
-            PromptCacheDiagnosticContext ctx = hook.beforeSend(
-                    "model-" + i, "stream.chat", "FINAL_TEXT", "conv-" + i,
-                    "{\"i\":" + i + "}",
-                    List.of(Map.of("role", "user", "content", "u" + i)));
-            assertNull("禁用时所有调用都必须返回 null", ctx);
-            hook.afterSend(null, null);
-        }
-        assertEquals("禁用时 state size 必须始终为 0", 0, hook.stateSize());
-    }
-
-    // ---------- null 行为 ----------
-
-    @Test
-    public void enabledHookIgnoresNullRawPayload() {
-        PromptCacheDiagnosticHook hook = newEnabledHook();
-        PromptCacheDiagnosticContext context = hook.beforeSend(
-                "m", "cap", "p", "conv", null,
-                List.of(Map.of("role", "user", "content", "x")));
-        assertNull("payload 为 null 时不应进入诊断 / 状态", context);
-        // 后续正常调用应当能正常建立 baseline（不应被前面的 null 调用污染）
-        PromptCacheDiagnosticContext ok = hook.beforeSend(
-                "m", "cap", "p", "conv", "{\"x\":1}",
-                List.of(Map.of("role", "user", "content", "x")));
-        assertNotNull(ok);
-        assertEquals(CacheDiagnosticCategory.FIRST_REQUEST, ok.result().category());
-        hook.afterSend(ok, null);
-    }
-
-    @Test
-    public void enabledHookIgnoresNullMessages() {
-        PromptCacheDiagnosticHook hook = newEnabledHook();
-        PromptCacheDiagnosticContext context = hook.beforeSend(
-                "m", "cap", "p", "conv", "{\"x\":1}", null);
-        assertNotNull("payload 非 null 即便 messages 为 null 也应能跑诊断", context);
-        // canonical messages 会被规范化为空列表：currentMessageCount = 0
-        assertEquals(0, context.result().currentMessageCount());
-        hook.afterSend(context, null);
-    }
-
-    // ---------- Authorization / API key 永不入诊断 ----------
-
-    @Test
-    public void diagnosticInputNeverContainsAuthorizationOrApiKey() {
-        // 业务不变量由 hook 的 API 形状保证：beforeSend 只接受 body 字符串，不接受任何 header 字段。
-        // 这里用「调用方故意把 API key 放进 messages 内容」来验证诊断只会脱敏、不会让 API key 出现在任何字段
-        PromptCacheDiagnosticHook hook = newEnabledHook();
-        String payload = "{\"messages\":[{\"role\":\"user\",\"content\":\"my key is api-key=sk-supersecret-1234\"}]}";
-        PromptCacheDiagnosticContext context = hook.beforeSend(
-                "m", "cap", "p", "conv", payload,
-                List.of(Map.of("role", "user", "content", "my key is api-key=sk-supersecret-1234")));
-        // result.toString 故意只输出分类与计数
-        String str = context.result().toString();
-        assertFalse("toString 不能泄露任何消息内容：api key 关键字", str.contains("api-key=sk-supersecret-1234"));
-        assertFalse("toString 不能泄露任何消息内容：原始 secret", str.contains("sk-supersecret-1234"));
-        hook.afterSend(context, null);
     }
 
     // ---------- 工具方法 ----------

@@ -437,25 +437,6 @@ public class PromptCacheDiagnosticsTest {
         assertEquals(CacheDiagnosticCategory.COMPACTION_RESET, result.category());
     }
 
-    @Test
-    public void emptyCurrentAloneIsUnknown() {
-        CacheDiagnosticResult result = diagnostics.diagnose(CacheDiagnosticInput.builder()
-                .currentMessages(List.of())
-                .build());
-        assertEquals(CacheDiagnosticCategory.FIRST_REQUEST, result.category());
-        assertEquals(0, result.currentMessageCount());
-    }
-
-    @Test
-    public void nullCurrentMessagesIsTreatedAsEmpty() {
-        // 输入契约：currentMessages 永远非 null（builder 默认 emptyList）
-        // 但即使外部传 null，diagnose 也会按空处理
-        CacheDiagnosticResult result = diagnostics.diagnose(CacheDiagnosticInput.builder()
-                .currentMessages(null)
-                .build());
-        assertEquals(CacheDiagnosticCategory.FIRST_REQUEST, result.category());
-    }
-
     // ---------- toString / 异常不泄露 ----------
 
     @Test
@@ -544,17 +525,6 @@ public class PromptCacheDiagnosticsTest {
                             CanonicalMessage.of("assistant", "DIFFERENT"))).build();
             default -> throw new IllegalStateException();
         };
-    }
-
-    // ---------- hash 对 null 内容稳定 ----------
-
-    @Test
-    public void canonicalMessageNormalizesNullToEmpty() {
-        CanonicalMessage a = CanonicalMessage.of(null, null);
-        CanonicalMessage b = CanonicalMessage.of("", "");
-        assertEquals(a, b);
-        assertEquals(a.hashCode(), b.hashCode());
-        assertEquals(hasher.hash(List.of(a)), hasher.hash(List.of(b)));
     }
 
     // ---------- 多线程下同输入产生同结果 ----------

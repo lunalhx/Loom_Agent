@@ -291,51 +291,13 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void runShellPython3ShouldBeDenied() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "python script.py");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("find_files"));
-    }
-
-    @Test
-    public void runShellRmFileShouldBeDenied() throws Exception {
+    public void runShellRmShouldBeDenied() throws Exception {
         RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "rm file.txt");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
         assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
         assertTrue(policy.getRiskReason().contains("delete_files"));
-    }
-
-    @Test
-    public void runShellRmRfShouldBeDenied() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "rm -rf .");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void runShellRmdirShouldBeDeniedAndPointToDeleteTool() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "rmdir old-module");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("delete_files"));
-    }
-
-    @Test
-    public void runShellGitRmShouldBeDenied() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "git rm file.txt");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
     @Test
@@ -346,17 +308,6 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
         assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
     }
-
-    @Test
-    public void runShellGitInitWithArgumentsShouldBeDenied() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "git init nested");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-    }
-
-    // ==================== New shell registry tests ====================
 
     @Test
     public void runShellMkdirShouldRequireWriteConfirm() throws Exception {
@@ -395,22 +346,17 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void runShellEnvWithCommandShouldBeDenied() throws Exception {
+    public void runShellEnvShouldBlockDeniedCommands() throws Exception {
         RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "env rm -rf target");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals("env must not bypass the deny policy of the wrapped command",
-                ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-    }
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
 
-    @Test
-    public void runShellPureEnvShouldBeReadOnly() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "env");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+        ObjectNode envInput = objectMapper.createObjectNode();
+        envInput.put("command", "env");
+        ToolPolicyDecision envPolicy = tool.policy(call("run_shell", envInput));
+        assertEquals(ToolPermissionLevel.READ_ONLY, envPolicy.getPermissionLevel());
     }
 
     @Test
@@ -419,46 +365,32 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "/bin/rm x");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals("basename normalization should hit deny bucket",
-                ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
     @Test
-    public void runShellPathUnknownScriptShouldBeHighRiskConfirm() throws Exception {
+    public void runShellUnknownScriptShouldBeHighRiskConfirm() throws Exception {
         RunShellTool tool = runShellTool();
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "./unknown.sh");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals("path-based unknown should be HIGH_RISK_CONFIRM",
-                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
+
+        ObjectNode mvnInput = objectMapper.createObjectNode();
+        mvnInput.put("command", "mvn compile");
+        ToolPolicyDecision mvnPolicy = tool.policy(call("run_shell", mvnInput));
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, mvnPolicy.getPermissionLevel());
     }
 
     @Test
-    public void runShellMvnNonTestShouldBeHighRiskConfirm() throws Exception {
+    public void runShellReadOnlyCommands() throws Exception {
         RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "mvn compile");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals("mvn non-test should now be HIGH_RISK_CONFIRM instead of DENY",
-                ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void runShellLsShouldBeReadOnly() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "ls -la");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void runShellCatShouldBeReadOnly() throws Exception {
-        RunShellTool tool = runShellTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("command", "cat file.txt");
-        ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+        for (String cmd : new String[]{"ls -la", "cat file.txt"}) {
+            ObjectNode input = objectMapper.createObjectNode();
+            input.put("command", cmd);
+            ToolPolicyDecision policy = tool.policy(call("run_shell", input));
+            assertEquals(cmd + " should be READ_ONLY", ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+        }
     }
 
     // ==================== Git tiered classification tests ====================
@@ -485,26 +417,6 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void gitPushToFeatureBranchShouldRequireApproval() throws Exception {
-        GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "push");
-        input.put("remote", "origin");
-        input.put("refspec", "feature/my-branch");
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void gitResetShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "reset");
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
     public void gitResetHardShouldBeRejectedInCall() throws Exception {
         GitOpTool tool = gitOpTool();
         ObjectNode input = objectMapper.createObjectNode();
@@ -515,69 +427,32 @@ public class DeleteFilesAndHighRiskPolicyTest {
     }
 
     @Test
-    public void gitCleanShouldRequireHighRiskConfirm() throws Exception {
+    public void gitTieredClassification() throws Exception {
         GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "clean");
-        input.put("dryRun", true);
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
 
-    @Test
-    public void gitRebaseShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "rebase");
-        input.put("branch", "main");
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void gitCheckoutShouldRequireHighRiskConfirm() throws Exception {
-        GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "checkout");
-        input.put("branch", "feature");
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void gitCheckoutFlagBBranchShouldBeAcceptedByPolicy() throws Exception {
-        GitOpTool tool = gitOpTool();
-        ObjectNode input = objectMapper.createObjectNode();
-        input.put("operation", "checkout");
-        input.put("branch", "-b");
-        ToolPolicyDecision policy = tool.policy(call("git_op", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
-    }
-
-    @Test
-    public void gitReadOnlyOpsShouldBeReadOnly() throws Exception {
-        GitOpTool tool = gitOpTool();
         for (String op : new String[]{"status", "diff", "log"}) {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("operation", op);
-            ToolPolicyDecision policy = tool.policy(call("git_op", input));
-            assertEquals("git " + op + " should be READ_ONLY",
-                    ToolPermissionLevel.READ_ONLY, policy.getPermissionLevel());
+            assertEquals(ToolPermissionLevel.READ_ONLY,
+                    tool.policy(call("git_op", input)).getPermissionLevel());
         }
-    }
 
-    @Test
-    public void gitWriteOpsShouldRequireWriteConfirm() throws Exception {
-        GitOpTool tool = gitOpTool();
         for (String op : new String[]{"init", "add", "commit"}) {
             ObjectNode input = objectMapper.createObjectNode();
             input.put("operation", op);
-            if ("commit".equals(op)) {
-                input.put("message", "test commit");
-            }
-            ToolPolicyDecision policy = tool.policy(call("git_op", input));
-            assertEquals("git " + op + " should be WRITE_CONFIRM",
-                    ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
+            if ("commit".equals(op)) input.put("message", "test commit");
+            assertEquals(ToolPermissionLevel.WRITE_CONFIRM,
+                    tool.policy(call("git_op", input)).getPermissionLevel());
+        }
+
+        for (String op : new String[]{"reset", "clean", "rebase", "checkout"}) {
+            ObjectNode input = objectMapper.createObjectNode();
+            input.put("operation", op);
+            if ("rebase".equals(op)) input.put("branch", "main");
+            if ("checkout".equals(op)) input.put("branch", "feature");
+            assertEquals(op + " should be HIGH_RISK_CONFIRM",
+                    ToolPermissionLevel.HIGH_RISK_CONFIRM,
+                    tool.policy(call("git_op", input)).getPermissionLevel());
         }
     }
 

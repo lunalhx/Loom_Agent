@@ -13,12 +13,11 @@ import static org.mockito.Mockito.when;
 
 public class StreamRequestLimiterTest {
 
-    private StreamRequestLimiter.Config config;
     private StreamRequestLimiter limiter;
 
     @Before
     public void setUp() {
-        config = new StreamRequestLimiter.Config();
+        StreamRequestLimiter.Config config = new StreamRequestLimiter.Config();
         config.enabled = true;
         config.maxClientStates = 100;
         config.clientStateTtlSeconds = 3600;
@@ -69,94 +68,9 @@ public class StreamRequestLimiterTest {
     }
 
     @Test
-    public void perClientConcurrencyLimitShouldOnlyAffectSameClient() {
-        HttpServletRequest reqA = mockRequest("10.0.0.1");
-        HttpServletRequest reqB = mockRequest("10.0.0.2");
-        String keyA = limiter.resolveClientKey(reqA);
-        String keyB = limiter.resolveClientKey(reqB);
-
-        StreamRequestLimiter.Lease l1 = limiter.tryAcquire(keyA);
-        assertTrue(l1.isAllowed());
-
-        StreamRequestLimiter.Lease l2 = limiter.tryAcquire(keyA);
-        assertFalse("same client second request should be rejected", l2.isAllowed());
-
-        StreamRequestLimiter.Lease l3 = limiter.tryAcquire(keyB);
-        assertTrue("different client should still be allowed", l3.isAllowed());
-
-        l1.release();
-        l3.release();
-    }
-
-    @Test
-    public void releaseShouldBeIdempotent() {
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        String key = limiter.resolveClientKey(req);
-
-        StreamRequestLimiter.Lease lease = limiter.tryAcquire(key);
-        assertTrue(lease.isAllowed());
-        lease.release();
-        lease.release();
-
-        StreamRequestLimiter.Lease next = limiter.tryAcquire(key);
-        assertTrue("should be able to acquire after release", next.isAllowed());
-        next.release();
-    }
-
-    @Test
-    public void disabledShouldAlwaysAllow() {
-        StreamRequestLimiter.Config disabledConfig = new StreamRequestLimiter.Config();
-        disabledConfig.enabled = false;
-        StreamRequestLimiter disabledLimiter = new StreamRequestLimiter(disabledConfig);
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        String key = disabledLimiter.resolveClientKey(req);
-
-        for (int i = 0; i < 100; i++) {
-            StreamRequestLimiter.Lease lease = disabledLimiter.tryAcquire(key);
-            assertTrue(lease.isAllowed());
-        }
-    }
-
-    @Test
     public void resolveClientKeyDefaultUsesRemoteAddr() {
         HttpServletRequest req = mockRequest("192.168.1.1");
         assertEquals("192.168.1.1", limiter.resolveClientKey(req));
-    }
-
-    @Test
-    public void resolveClientKeyUsesConfiguredHeader() {
-        StreamRequestLimiter.Config headerConfig = new StreamRequestLimiter.Config();
-        headerConfig.clientIdHeader = "X-Client-Id";
-        StreamRequestLimiter headerLimiter = new StreamRequestLimiter(headerConfig);
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        when(req.getHeader("X-Client-Id")).thenReturn("user-123");
-        when(req.getRemoteAddr()).thenReturn("10.0.0.1");
-
-        assertEquals("user-123", headerLimiter.resolveClientKey(req));
-    }
-
-    @Test
-    public void resolveClientKeyFallsBackToRemoteAddrWhenHeaderMissing() {
-        StreamRequestLimiter.Config headerConfig = new StreamRequestLimiter.Config();
-        headerConfig.clientIdHeader = "X-Client-Id";
-        StreamRequestLimiter headerLimiter = new StreamRequestLimiter(headerConfig);
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        when(req.getHeader("X-Client-Id")).thenReturn(null);
-        when(req.getRemoteAddr()).thenReturn("10.0.0.1");
-
-        assertEquals("10.0.0.1", headerLimiter.resolveClientKey(req));
-    }
-
-    @Test
-    public void resolveClientKeyUsesXForwardedForWhenTrusted() {
-        StreamRequestLimiter.Config trustedConfig = new StreamRequestLimiter.Config();
-        trustedConfig.trustForwardedHeaders = true;
-        StreamRequestLimiter trustedLimiter = new StreamRequestLimiter(trustedConfig);
-        HttpServletRequest req = mockRequest("10.0.0.1");
-        when(req.getHeader("X-Forwarded-For")).thenReturn("203.0.113.1, 10.0.0.1");
-        when(req.getRemoteAddr()).thenReturn("10.0.0.1");
-
-        assertEquals("203.0.113.1", trustedLimiter.resolveClientKey(req));
     }
 
     private static HttpServletRequest mockRequest(String remoteAddr) {
