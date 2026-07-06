@@ -19,6 +19,18 @@ import java.util.UUID;
 
 public final class AgentEventFactory {
 
+    public AgentEvent runStarted(AgentContext context) {
+        return AgentEvent.builder()
+                .type(AgentEventType.RUN_STARTED)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .checkpointVersion(context.getCheckpointVersion())
+                .build();
+    }
+
     public AgentEvent nodeStarted(AgentContext context, AgentNode node) {
         return AgentEvent.builder()
                 .type(AgentEventType.NODE_START)
@@ -86,6 +98,20 @@ public final class AgentEventFactory {
                 .build();
     }
 
+    public AgentEvent pausedForApproval(AgentContext context) {
+        return AgentEvent.builder()
+                .type(AgentEventType.PAUSED_FOR_APPROVAL)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .approvalId(context.getPendingApprovalId())
+                .checkpointVersion(context.getCheckpointVersion())
+                .recoverable(true)
+                .build();
+    }
+
     public AgentEvent userInputRequired(AgentContext context) {
         return AgentEvent.builder()
                 .type(AgentEventType.USER_INPUT_REQUIRED)
@@ -115,8 +141,17 @@ public final class AgentEventFactory {
     }
 
     public AgentEvent agentError() {
+        return agentError(null);
+    }
+
+    public AgentEvent agentError(AgentContext context) {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
+                .runId(context == null ? null : context.getRunId())
+                .requestId(context == null ? null : context.getRequestId())
+                .conversationId(context == null ? null : context.getConversationId())
+                .checkpointVersion(context == null ? null : context.getCheckpointVersion())
+                .recoverable(context != null && context.getCheckpointVersion() != null)
                 .code(AgentErrorCode.AGENT_ERROR.code())
                 .message(AgentErrorCode.AGENT_ERROR.defaultMessage())
                 .build();
@@ -131,10 +166,33 @@ public final class AgentEventFactory {
                 .build();
     }
 
+    public AgentEvent approvalAlreadyDecided(PendingApproval approval) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .approvalId(approval == null ? null : approval.getApprovalId())
+                .runId(approval == null ? null : approval.getRunId())
+                .recoverable(true)
+                .code("approval_already_decided")
+                .message("该审批已按相同决定处理；不会重复执行工具")
+                .build();
+    }
+
+    public AgentEvent approvalDecisionConflict(PendingApproval approval) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .approvalId(approval == null ? null : approval.getApprovalId())
+                .runId(approval == null ? null : approval.getRunId())
+                .recoverable(false)
+                .code(AgentErrorCode.APPROVAL_DECISION_CONFLICT.code())
+                .message(AgentErrorCode.APPROVAL_DECISION_CONFLICT.defaultMessage())
+                .build();
+    }
+
     public AgentEvent checkpointNotFound(String runId) {
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .runId(runId)
+                .recoverable(false)
                 .code(AgentErrorCode.CHECKPOINT_NOT_FOUND.code())
                 .message(AgentErrorCode.CHECKPOINT_NOT_FOUND.defaultMessage())
                 .build();
@@ -166,6 +224,7 @@ public final class AgentEventFactory {
                 .conversationId(run.getConversationId())
                 .workspace(run.getWorkspace())
                 .parentRunId(run.getParentRunId())
+                .recoverable(false)
                 .code(AgentErrorCode.RUN_ALREADY_TERMINAL.code())
                 .message(AgentErrorCode.RUN_ALREADY_TERMINAL.defaultMessage())
                 .metadata(Map.of("status", run.getStatus().name()))

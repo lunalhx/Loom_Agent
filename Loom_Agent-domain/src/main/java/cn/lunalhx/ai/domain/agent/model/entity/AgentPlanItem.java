@@ -9,6 +9,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -23,7 +24,13 @@ public class AgentPlanItem {
     private AgentPlanItemStatus status;
     private String evidence;
     private String blocker;
+    private String kind;
+    private List<String> targets;
     private Instant updateTime;
+
+    public void setTargets(List<String> targets) {
+        this.targets = targets == null ? List.of() : List.copyOf(targets);
+    }
 
     public boolean incomplete() {
         return status == null || !status.terminal();
@@ -41,6 +48,12 @@ public class AgentPlanItem {
         }
         if (StringUtils.isNotBlank(blocker)) {
             view.put("blocker", blocker);
+        }
+        if (StringUtils.isNotBlank(kind)) {
+            view.put("kind", kind);
+        }
+        if (targets != null && !targets.isEmpty()) {
+            view.put("targets", targets);
         }
         return view;
     }

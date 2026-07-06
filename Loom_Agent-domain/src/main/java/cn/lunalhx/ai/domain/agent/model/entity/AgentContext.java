@@ -23,6 +23,7 @@ import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Set;
 import java.util.List;
 
 /**
@@ -161,7 +162,24 @@ public class AgentContext {
     public void setSameFailureRepeats(int v) { runtime.setSameFailureRepeats(v); }
     public int getNoProgressRounds() { return runtime.noProgressRounds(); }
     public void setNoProgressRounds(int v) { runtime.setNoProgressRounds(v); }
-
+    public boolean isCodeReadObserved() { return runtime.codeReadObserved(); }
+    public void setCodeReadObserved(boolean v) { runtime.setCodeReadObserved(v); }
+    public int getLastWriteStep() { return runtime.lastWriteStep(); }
+    public void setLastWriteStep(int v) { runtime.setLastWriteStep(v); }
+    public int getLastTestStep() { return runtime.lastTestStep(); }
+    public void setLastTestStep(int v) { runtime.setLastTestStep(v); }
+    public Boolean getLastTestPassed() { return runtime.lastTestPassed(); }
+    public void setLastTestPassed(Boolean v) { runtime.setLastTestPassed(v); }
+    public boolean isChangedSincePassingTest() { return runtime.changedSincePassingTest(); }
+    public void setChangedSincePassingTest(boolean v) { runtime.setChangedSincePassingTest(v); }
+    public int getVerificationContinuationCount() { return runtime.verificationContinuationCount(); }
+    public void setVerificationContinuationCount(int v) { runtime.setVerificationContinuationCount(v); }
+    public Set<String> getTouchedFiles() { return runtime.touchedFiles(); }
+    public void setTouchedFiles(Set<String> v) { runtime.setTouchedFiles(v); }
+    public Set<String> getReadFiles() { return runtime.readFiles(); }
+    public void setReadFiles(Set<String> v) { runtime.setReadFiles(v); }
+    public Integer getLastTestExitCode() { return runtime.lastTestExitCode(); }
+    public void setLastTestExitCode(Integer v) { runtime.setLastTestExitCode(v); }
     // ==================== prompt delegates ====================
 
     public DynamicText getDynamicText() { return prompt.dynamicText(); }

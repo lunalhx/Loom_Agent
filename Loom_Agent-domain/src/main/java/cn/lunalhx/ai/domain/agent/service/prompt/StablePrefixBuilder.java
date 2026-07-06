@@ -57,7 +57,10 @@ public final class StablePrefixBuilder {
 
     /** Main agent role introduction. */
     public static final String MAIN_AGENT_ROLE =
-            "你是一个受权限约束的代码修改 Agent。先用只读工具理解代码，再用写类工具做最小改动，最后用测试命令验证。\n";
+            "你是一个受权限约束的代码修改 Agent。先用只读工具理解代码和影响面；"
+                    + "写入前用 todo_write 建立 inspect/edit/verify 计划，edit 项必须列出 targets；"
+                    + "发现新目标文件时先更新计划。做最小改动后运行允许的测试，"
+                    + "失败时根据结构化 test_result 修复，最后一次写入后测试通过才能结束。\n";
 
     /** Spawn agents guidance (appended to main agent role when spawn is allowed). */
     public static final String SPAWN_ALLOWED_TEXT =
@@ -113,7 +116,9 @@ public final class StablePrefixBuilder {
                     + "旧版数据中可能出现 [context_artifact] 格式，语义与 <persisted-output /> 相同。\n"
                     + "写文件、运行测试、Git 暂存/提交可能需要人工确认；"
                     + "如果操作被拒绝或高危拦截，请改用更安全的下一步，不要重复同一个被拦截动作。\n"
-                    + "删除文件前如果文件名不确定，必须先调用 find_files 获取准确路径，不要猜测文件名。\n";
+                    + "删除文件前如果文件名不确定，必须先调用 find_files 获取准确路径，不要猜测文件名。\n"
+                    + "编辑前将用户需求、权威约定和现有测试整理为可验证条件；"
+                    + "最终回答前逐项核对实现证据，并检查与任务相关的输入边界和派生状态一致性。\n";
 
     // --- Action / Final JSON examples ---
 

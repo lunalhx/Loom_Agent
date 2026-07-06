@@ -17,6 +17,7 @@ public class AgentTraceTimelineResponse implements Serializable {
     private static final long serialVersionUID = -4787424146180313698L;
 
     private String runId;
+    private String status;
     private String traceId;
     private String rootRunId;
     private List<AgentTraceEventDTO> events;

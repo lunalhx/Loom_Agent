@@ -41,6 +41,7 @@ public class AgentRuntimeProperties {
     private BudgetProperties budget = new BudgetProperties();
     private ContextProperties context = new ContextProperties();
     private StopHooksProperties stopHooks = new StopHooksProperties();
+    private ExecutionGuardProperties executionGuards = new ExecutionGuardProperties();
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
     private StepBudgetProperties stepBudget = new StepBudgetProperties();
     private UndoProperties undo = new UndoProperties();
@@ -105,6 +106,15 @@ public class AgentRuntimeProperties {
             private Boolean rootOnly = true;
 
         }
+
+    }
+
+    @Data
+    public static class ExecutionGuardProperties {
+
+        private Boolean planBeforeWrite = false;
+        private Boolean verificationAfterWrite = false;
+        private Integer maxVerificationContinuations = 2;
 
     }
 

@@ -20,6 +20,7 @@ public class AgentReplayResponse implements Serializable {
     private String traceId;
     private String rootRunId;
     private String runId;
+    private String status;
     private Boolean includeChildren;
     private List<AgentReplayEventDTO> events;
     private Boolean costGenerated;

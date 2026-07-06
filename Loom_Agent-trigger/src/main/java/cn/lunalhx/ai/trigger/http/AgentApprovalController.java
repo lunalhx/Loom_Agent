@@ -38,11 +38,15 @@ public class AgentApprovalController {
         if (!result.valid()) {
             return sseResponder.completedAgentError(result.problem());
         }
-
         return sseResponder.streamAgentEvents(
                 "decide",
                 UUID.randomUUID().toString(),
-                () -> agentLoopService.resume(approvalId, result.value().decision(), result.value().reason()),
+                () -> agentLoopService.resume(
+                        approvalId,
+                        result.value().decision(),
+                        result.value().reason(),
+                        result.value().reasonCode(),
+                        result.value().allowedAlternatives()),
                 AgentSseResponder.StreamProfile.ALL_EVENTS
         );
     }

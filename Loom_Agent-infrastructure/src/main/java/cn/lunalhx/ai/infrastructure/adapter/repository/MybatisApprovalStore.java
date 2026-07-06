@@ -1,8 +1,11 @@
 package cn.lunalhx.ai.infrastructure.adapter.repository;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.PersistentApprovalStore;
+import cn.lunalhx.ai.domain.agent.model.entity.ApprovalDecisionResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalRecordState;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
@@ -34,11 +37,13 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
     @Override
     public Optional<PendingApproval> find(String approvalId) {
         AgentPendingApprovalPO po = approvalDao.selectByApprovalId(approvalId);
-        if (po == null || Integer.valueOf(1).equals(po.getConsumed())) {
+        if (po == null || (Integer.valueOf(1).equals(po.getConsumed())
+                && (po.getState() == null || "PENDING".equals(po.getState())))) {
             return Optional.empty();
         }
         PendingApproval approval = toEntity(po);
-        if (approval.expired(Instant.now())) {
+        if (approval.getState() == ApprovalRecordState.PENDING
+                && approval.expired(Instant.now())) {
             approvalDao.markConsumed(approvalId);
             return Optional.empty();
         }
@@ -48,8 +53,38 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
     @Override
     public Optional<PendingApproval> consume(String approvalId) {
         Optional<PendingApproval> approval = find(approvalId);
-        approval.ifPresent(value -> approvalDao.markConsumed(approvalId));
-        return approval;
+        if (approval.isEmpty()) {
+            return Optional.empty();
+        }
+        return approvalDao.markConsumed(approvalId) == 1
+                ? approval : Optional.empty();
+    }
+
+    @Override
+    public ApprovalDecisionResult decide(
+            String approvalId, ApprovalDecision decision, String reason) {
+        PendingApproval current = find(approvalId).orElse(null);
+        if (current == null) {
+            return ApprovalDecisionResult.of(
+                    ApprovalDecisionResult.Outcome.NOT_FOUND, null);
+        }
+        if (approvalDao.markDecided(approvalId, decision.name(), reason) == 1) {
+            PendingApproval accepted = find(approvalId).orElse(current);
+            return ApprovalDecisionResult.of(
+                    ApprovalDecisionResult.Outcome.ACCEPTED, accepted);
+        }
+        PendingApproval existing = find(approvalId).orElse(null);
+        if (existing != null && existing.getDecision() == decision) {
+            return ApprovalDecisionResult.of(
+                    ApprovalDecisionResult.Outcome.IDEMPOTENT, existing);
+        }
+        return ApprovalDecisionResult.of(
+                ApprovalDecisionResult.Outcome.CONFLICT, existing);
+    }
+
+    @Override
+    public void markResumed(String approvalId) {
+        approvalDao.markResumed(approvalId);
     }
 
     private AgentPendingApprovalPO toPo(PendingApproval approval) {
@@ -72,6 +107,11 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         po.setCreatedAt(approval.getCreatedAt());
         po.setExpiresAt(approval.getExpiresAt());
         po.setConsumed(0);
+        po.setState(approval.getState() == null
+                ? ApprovalRecordState.PENDING.name() : approval.getState().name());
+        po.setDecision(approval.getDecision() == null
+                ? null : approval.getDecision().name());
+        po.setDecisionReason(approval.getDecisionReason());
         return po;
     }
 
@@ -97,6 +137,12 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
                 .createdAt(po.getCreatedAt())
                 .expiresAt(po.getExpiresAt())
                 .context(snapshot == null ? null : snapshot.restore())
+                .state(po.getState() == null
+                        ? ApprovalRecordState.PENDING
+                        : ApprovalRecordState.valueOf(po.getState()))
+                .decision(po.getDecision() == null
+                        ? null : ApprovalDecision.valueOf(po.getDecision()))
+                .decisionReason(po.getDecisionReason())
                 .build();
     }
 

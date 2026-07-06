@@ -18,7 +18,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 /**
- * C2: AgentContextSnapshot schema v3 persistence — unit and JSON-compat tests.
+ * AgentContextSnapshot schema v4 persistence and backward compatibility tests.
  */
 public class AgentContextSnapshotPersistenceTest {
 
@@ -38,7 +38,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.setGeneration(1);
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(3, snapshot.getSchemaVersion());
+        assertEquals(4, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         assertEquals("v3-roundtrip", restored.getRunId());
@@ -65,7 +65,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.ensureLedgerActive(); // creates empty ledger
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(3, snapshot.getSchemaVersion());
+        assertEquals(4, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         // Empty ledger: no entries, so not reconstructed
@@ -357,7 +357,7 @@ public class AgentContextSnapshotPersistenceTest {
         String json = objectMapper.writeValueAsString(original);
         AgentContextSnapshot reloaded = objectMapper.readValue(json, AgentContextSnapshot.class);
 
-        assertEquals(3, reloaded.getSchemaVersion());
+        assertEquals(4, reloaded.getSchemaVersion());
         assertEquals(1, reloaded.getLedgerEntries().size());
         assertEquals("json-test", reloaded.getLedgerEntries().get(0).content());
         assertEquals("fp-json", reloaded.getStablePrefix().fingerprint());
@@ -400,20 +400,54 @@ public class AgentContextSnapshotPersistenceTest {
     // ==================== schema version boundaries ====================
 
     @Test
-    public void snapshotSchemaVersionShouldBe3() {
-        assertEquals(3, new AgentContextSnapshot().getSchemaVersion());
+    public void snapshotSchemaVersionShouldBe4() {
+        assertEquals(4, new AgentContextSnapshot().getSchemaVersion());
         AgentContext ctx = new AgentContext();
-        ctx.setRunId("v3-check");
-        assertEquals(3, AgentContextSnapshot.from(ctx).getSchemaVersion());
+        ctx.setRunId("v4-check");
+        assertEquals(4, AgentContextSnapshot.from(ctx).getSchemaVersion());
     }
 
     @Test
-    public void schemaVersionShouldBeAcceptedOnlyInRange2To3() {
-        // schemaVersion < 2 || > 3 is rejected; only 2 and 3 are accepted
-        assertThat(1 < 2 || 1 > 3).as("v1 rejected").isTrue();
-        assertThat(2 < 2 || 2 > 3).as("v2 accepted").isFalse();
-        assertThat(3 < 2 || 3 > 3).as("v3 accepted").isFalse();
-        assertThat(4 < 2 || 4 > 3).as("v4 rejected").isTrue();
+    public void olderSnapshotsShouldRestoreVerificationStateWithSafeDefaults() {
+        AgentContextSnapshot v2 = new AgentContextSnapshot();
+        v2.setSchemaVersion(2);
+        v2.setRunId("v2");
+        AgentContextSnapshot v3 = new AgentContextSnapshot();
+        v3.setSchemaVersion(3);
+        v3.setRunId("v3");
+
+        AgentContext restoredV2 = v2.restore();
+        AgentContext restoredV3 = v3.restore();
+
+        assertFalse(restoredV2.isCodeReadObserved());
+        assertFalse(restoredV3.isCodeReadObserved());
+        assertEquals(0, restoredV2.getLastWriteStep());
+        assertEquals(0, restoredV3.getLastTestStep());
+        assertNull(restoredV2.getLastTestPassed());
+        assertThat(restoredV3.getTouchedFiles()).isEmpty();
+    }
+
+    @Test
+    public void v4VerificationStateSurvivesRoundTrip() {
+        AgentContext context = new AgentContext();
+        context.setRunId("v4-verification");
+        context.setCodeReadObserved(true);
+        context.setLastWriteStep(7);
+        context.setLastTestStep(9);
+        context.setLastTestPassed(true);
+        context.setChangedSincePassingTest(true);
+        context.setVerificationContinuationCount(1);
+        context.setTouchedFiles(java.util.Set.of("src/main/java/Demo.java"));
+
+        AgentContext restored = AgentContextSnapshot.from(context).restore();
+
+        assertThat(restored.isCodeReadObserved()).isTrue();
+        assertEquals(7, restored.getLastWriteStep());
+        assertEquals(9, restored.getLastTestStep());
+        assertThat(restored.getLastTestPassed()).isTrue();
+        assertThat(restored.isChangedSincePassingTest()).isTrue();
+        assertEquals(1, restored.getVerificationContinuationCount());
+        assertThat(restored.getTouchedFiles()).containsExactly("src/main/java/Demo.java");
     }
 
     // ==================== defensive: restore does not corrupt snapshot ====================

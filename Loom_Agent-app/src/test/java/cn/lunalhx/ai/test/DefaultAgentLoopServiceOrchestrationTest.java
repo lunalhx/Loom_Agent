@@ -122,7 +122,7 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         // the Service's executeAsync wrapper ensures Flux always completes.
         assertNotNull(events);
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR));
-        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
     }
 
     @Test

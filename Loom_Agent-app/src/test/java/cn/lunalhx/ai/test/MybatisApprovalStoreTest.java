@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.test;
 
+import cn.lunalhx.ai.domain.agent.model.entity.ApprovalDecisionResult;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisApprovalStore;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
@@ -37,6 +39,28 @@ public class MybatisApprovalStoreTest {
             }
 
             @Override
+            public int markDecided(String approvalId, String decision, String decisionReason) {
+                AgentPendingApprovalPO current = stored.get();
+                if (current == null || !"PENDING".equals(current.getState())) {
+                    return 0;
+                }
+                current.setState("DECIDED");
+                current.setDecision(decision);
+                current.setDecisionReason(decisionReason);
+                return 1;
+            }
+
+            @Override
+            public int markResumed(String approvalId) {
+                AgentPendingApprovalPO current = stored.get();
+                if (current == null || !"DECIDED".equals(current.getState())) {
+                    return 0;
+                }
+                current.setState("RESUMED");
+                return 1;
+            }
+
+            @Override
             public int deleteByConversationId(String conversationId) {
                 return 0;
             }
@@ -58,5 +82,15 @@ public class MybatisApprovalStoreTest {
         assertEquals("manifest-sha256", restored.getPolicyFingerprint());
         assertEquals(2, ((Map<?, ?>) restored.getMetadata().get("deletePreview")).get("fileCount"));
         assertEquals("manifest-sha256", stored.get().getPolicyFingerprint());
+
+        assertEquals(ApprovalDecisionResult.Outcome.ACCEPTED,
+                store.decide("approval-1", ApprovalDecision.APPROVE, "ok").outcome());
+        assertEquals(ApprovalDecisionResult.Outcome.IDEMPOTENT,
+                store.decide("approval-1", ApprovalDecision.APPROVE, "retry").outcome());
+        assertEquals(ApprovalDecisionResult.Outcome.CONFLICT,
+                store.decide("approval-1", ApprovalDecision.REJECT, "no").outcome());
+        store.markResumed("approval-1");
+        assertEquals("RESUMED",
+                store.find("approval-1").orElseThrow().getState().name());
     }
 }

@@ -135,8 +135,6 @@ public final class AgentNodeLifecycle {
             return AgentNodeExecution.stopContinued(action.getNextNode(), action);
         }
 
-        emitter.accept(terminalEvents);
-
         traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
         agentMetrics.recordRun(runKind(context), stopStatus(context), context.runtime().errorCode());
         emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
@@ -144,6 +142,11 @@ public final class AgentNodeLifecycle {
                 .node(terminalNode.name())
                 .reason("after_stop:" + terminalNode.name())
                 .build()));
+        emitter.accept(terminalEvents);
+        if (AgentNodeNames.APPROVAL_GATE.equals(terminalNode.name())
+                && StringUtils.isNotBlank(context.getPendingApprovalId())) {
+            emitter.accept(List.of(eventFactory.pausedForApproval(context)));
+        }
         MDC.clear();
         return new AgentNodeExecution(NodeResult.terminal(List.of()), terminalNode.name());
     }

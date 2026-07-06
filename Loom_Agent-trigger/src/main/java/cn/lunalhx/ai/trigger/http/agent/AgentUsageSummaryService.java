@@ -4,6 +4,8 @@ import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.common.CommonErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.types.error.ApplicationException;
@@ -29,9 +31,11 @@ public class AgentUsageSummaryService {
         if (StringUtils.isBlank(runId)) {
             throw new ApplicationException(CommonErrorCode.INVALID_PARAMETER, "runId 不能为空");
         }
-        if (agentRunRepository.find(runId).isEmpty()) {
-            throw new ApplicationException(CommonErrorCode.INVALID_REQUEST, "未找到 run");
+        AgentRun run = agentRunRepository.find(runId).orElse(null);
+        if (run == null) {
+            throw new ApplicationException(AgentErrorCode.RUN_NOT_FOUND);
         }
+        String status = run.getStatus() == null ? null : run.getStatus().name();
 
         List<AgentTraceEvent> runEvents = traceRecorder.timeline(runId);
         String traceId = runEvents.stream()
@@ -40,17 +44,33 @@ public class AgentUsageSummaryService {
                 .findFirst()
                 .orElse(null);
         if (traceId == null) {
-            throw new ApplicationException(CommonErrorCode.INVALID_REQUEST, "未找到 trace");
+            return AgentUsageSummaryDTO.builder()
+                    .runId(runId)
+                    .status(status)
+                    .inputTokens(0L)
+                    .outputTokens(0L)
+                    .totalTokens(0L)
+                    .cacheHitTokens(0L)
+                    .cacheMissTokens(0L)
+                    .build();
         }
 
         List<AgentTraceEvent> traceEvents = traceRecorder.timelineByTraceId(traceId);
         if (traceEvents.isEmpty()) {
             traceEvents = runEvents;
         }
-        return aggregate(runId, traceId, traceEvents);
+        return aggregate(runId, traceId, traceEvents, status);
     }
 
     AgentUsageSummaryDTO aggregate(String runId, String traceId, List<AgentTraceEvent> events) {
+        return aggregate(runId, traceId, events, null);
+    }
+
+    private AgentUsageSummaryDTO aggregate(
+            String runId,
+            String traceId,
+            List<AgentTraceEvent> events,
+            String status) {
         long inputTokens = 0;
         long outputTokens = 0;
         long cacheHitTokens = 0;
@@ -82,6 +102,7 @@ public class AgentUsageSummaryService {
 
         return AgentUsageSummaryDTO.builder()
                 .runId(runId)
+                .status(status)
                 .traceId(traceId)
                 .inputTokens(inputTokens)
                 .outputTokens(outputTokens)

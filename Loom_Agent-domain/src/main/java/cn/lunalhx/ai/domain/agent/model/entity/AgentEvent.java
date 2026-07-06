@@ -35,6 +35,7 @@ public class AgentEvent {
     private String thought;
     private String reason;
     private String tool;
+    private String toolCallId;
     private Map<String, Object> input;
     private String approvalId;
     private String permissionLevel;
@@ -51,6 +52,7 @@ public class AgentEvent {
     private String message;
     private Map<String, Object> plan;
     private Long checkpointVersion;
+    private Boolean recoverable;
     private Map<String, Object> metadata;
 
 }

@@ -26,6 +26,9 @@ public class AgentPendingApprovalPO {
     private Instant createdAt;
     private Instant expiresAt;
     private Integer consumed;
+    private String state;
+    private String decision;
+    private String decisionReason;
     private Instant createTime;
     private Instant updateTime;
 

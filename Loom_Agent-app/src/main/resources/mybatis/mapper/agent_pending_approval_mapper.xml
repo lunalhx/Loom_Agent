@@ -22,6 +22,9 @@
         <result column="created_at" property="createdAt"/>
         <result column="expires_at" property="expiresAt"/>
         <result column="consumed" property="consumed"/>
+        <result column="state" property="state"/>
+        <result column="decision" property="decision"/>
+        <result column="decision_reason" property="decisionReason"/>
         <result column="create_time" property="createTime"/>
         <result column="update_time" property="updateTime"/>
     </resultMap>
@@ -30,30 +33,13 @@
         INSERT INTO agent_pending_approval
         (approval_id, run_id, request_id, conversation_id, resolved_workspace, workspace_display_name,
          tool, input_json, permission_level, risk_reason, operation_preview, diff_json, policy_fingerprint, metadata_json,
-         context_json, created_at, expires_at, consumed)
+         context_json, created_at, expires_at, consumed, state, decision, decision_reason)
         VALUES
         (#{approvalId}, #{runId}, #{requestId}, #{conversationId}, #{resolvedWorkspace}, #{workspaceDisplayName},
          #{tool}, #{inputJson}, #{permissionLevel}, #{riskReason}, #{operationPreview}, #{diffJson}, #{policyFingerprint},
-         #{metadataJson}, #{contextJson}, #{createdAt}, #{expiresAt}, #{consumed})
-        ON CONFLICT(approval_id) DO UPDATE SET
-        run_id = excluded.run_id,
-        request_id = excluded.request_id,
-        conversation_id = excluded.conversation_id,
-        resolved_workspace = excluded.resolved_workspace,
-        workspace_display_name = excluded.workspace_display_name,
-        tool = excluded.tool,
-        input_json = excluded.input_json,
-        permission_level = excluded.permission_level,
-        risk_reason = excluded.risk_reason,
-        operation_preview = excluded.operation_preview,
-        diff_json = excluded.diff_json,
-        policy_fingerprint = excluded.policy_fingerprint,
-        metadata_json = excluded.metadata_json,
-        context_json = excluded.context_json,
-        created_at = excluded.created_at,
-        expires_at = excluded.expires_at,
-        consumed = excluded.consumed,
-        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         #{metadataJson}, #{contextJson}, #{createdAt}, #{expiresAt}, #{consumed},
+         COALESCE(#{state}, 'PENDING'), #{decision}, #{decisionReason})
+        ON CONFLICT(approval_id) DO NOTHING
     </insert>
 
     <select id="selectByApprovalId" resultMap="AgentPendingApprovalMap">
@@ -63,7 +49,23 @@
     <update id="markConsumed">
         UPDATE agent_pending_approval
         SET consumed = 1, update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE approval_id = #{approvalId}
+        WHERE approval_id = #{approvalId} AND consumed = 0
+    </update>
+
+    <update id="markDecided">
+        UPDATE agent_pending_approval
+        SET state = 'DECIDED',
+            decision = #{decision},
+            decision_reason = #{decisionReason},
+            update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE approval_id = #{approvalId} AND state = 'PENDING'
+    </update>
+
+    <update id="markResumed">
+        UPDATE agent_pending_approval
+        SET state = 'RESUMED',
+            update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE approval_id = #{approvalId} AND state = 'DECIDED'
     </update>
 
     <delete id="deleteByConversationId">

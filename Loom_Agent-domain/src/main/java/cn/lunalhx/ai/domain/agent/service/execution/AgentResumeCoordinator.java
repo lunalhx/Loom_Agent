@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.entity.ApprovalDecisionResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -13,9 +14,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalRecordState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -61,11 +62,39 @@ public final class AgentResumeCoordinator {
     }
 
     public AgentResumePlan prepareApprovalResume(String approvalId, ApprovalDecision decision, String reason) {
-        PendingApproval approval = approvalStore.consume(approvalId).orElse(null);
-        if (approval == null) {
+        return prepareApprovalResume(approvalId, decision, reason, null, List.of());
+    }
+
+    public AgentResumePlan prepareApprovalResume(
+            String approvalId,
+            ApprovalDecision decision,
+            String reason,
+            String reasonCode,
+            List<String> allowedAlternatives) {
+        ApprovalDecisionResult claim = approvalStore.decide(
+                approvalId, decision, reason);
+        if (claim.outcome() == ApprovalDecisionResult.Outcome.NOT_FOUND) {
             return AgentResumePlan.complete(List.of(eventFactory.approvalNotFound(approvalId)));
         }
+        PendingApproval approval = claim.approval();
+        boolean recoverDecidedApproval =
+                claim.outcome() == ApprovalDecisionResult.Outcome.IDEMPOTENT
+                        && approval != null
+                        && approval.getState() == ApprovalRecordState.DECIDED;
+        if (claim.outcome() == ApprovalDecisionResult.Outcome.IDEMPOTENT
+                && !recoverDecidedApproval) {
+            return AgentResumePlan.complete(
+                    List.of(eventFactory.approvalAlreadyDecided(approval)));
+        }
+        if (claim.outcome() == ApprovalDecisionResult.Outcome.CONFLICT) {
+            return AgentResumePlan.complete(
+                    List.of(eventFactory.approvalDecisionConflict(approval)));
+        }
 
+        ApprovalDecision effectiveDecision = recoverDecidedApproval
+                ? approval.getDecision() : decision;
+        String effectiveReason = recoverDecidedApproval
+                ? approval.getDecisionReason() : reason;
         AgentContext context = approval.getContext();
         if (StringUtils.isNotBlank(approval.getRunId())) {
             AgentCheckpoint checkpoint = checkpointRepository.latest(approval.getRunId()).orElse(null);
@@ -78,25 +107,24 @@ public final class AgentResumeCoordinator {
         List<AgentEvent> events = new ArrayList<>();
         events.add(eventFactory.resumeStarted(context));
 
-        if (decision == ApprovalDecision.APPROVE) {
+        if (effectiveDecision == ApprovalDecision.APPROVE) {
             context.approval().approve(approval.getTool(), approval.getPolicyFingerprint());
-            // C9: Append approval decision to ledger
             appendApprovalToLedger(context, "approved",
-                    approval.getTool(), reason);
+                    approval.getTool(), effectiveReason);
             if (isSkillActivation(approval)) {
                 List<String> skillNames = extractSkillNames(approval);
                 context.setApprovedSkillNames(skillNames);
-                return AgentResumePlan.continueAt(context, AgentNodeNames.SKILL_BOOTSTRAP, events);
+                return durableApprovalResume(
+                        approvalId, context, AgentNodeNames.SKILL_BOOTSTRAP, events);
             }
-            return AgentResumePlan.continueAt(context, AgentNodeNames.TOOL_DISPATCH, events);
+            return durableApprovalResume(
+                    approvalId, context, AgentNodeNames.TOOL_DISPATCH, events);
         }
 
-        // REJECT
         context.approval().reject();
 
-        // C9: Append rejection decision to ledger
         appendApprovalToLedger(context, "rejected",
-                approval.getTool(), reason);
+                approval.getTool(), effectiveReason);
 
         if (isSkillActivation(approval)) {
             List<String> rejectedNames = extractSkillNames(approval);
@@ -108,21 +136,47 @@ public final class AgentResumeCoordinator {
             }
             context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.SKILL_BOOTSTRAP, context.getDecision());
             context.runtime().advanceStep();
-            return AgentResumePlan.continueAt(context, AgentNodeNames.START, events);
+            return durableApprovalResume(
+                    approvalId, context, AgentNodeNames.START, events);
         }
 
         context.runtime().advanceStep();
-        context.setToolResult(ToolResult.failure(
+        ToolResult rejection = ToolResult.failure(
                 "approval_rejected",
-                StringUtils.defaultIfBlank(reason, "用户拒绝执行该写操作"),
-                0L));
+                StringUtils.defaultIfBlank(effectiveReason, "用户拒绝执行该写操作"),
+                0L);
+        rejection.setDetails(Map.of(
+                "reasonCode", StringUtils.defaultIfBlank(
+                        reasonCode, "approval_rejected"),
+                "allowedAlternatives",
+                allowedAlternatives == null ? List.of() : allowedAlternatives));
+        context.setToolResult(rejection);
         context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
-        return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
+        return durableApprovalResume(
+                approvalId, context, AgentNodeNames.OBSERVATION, events);
+    }
+
+    private AgentResumePlan durableApprovalResume(
+            String approvalId,
+            AgentContext context,
+            String nextNode,
+            List<AgentEvent> events) {
+        AgentCheckpoint checkpoint = checkpointRepository.save(
+                AgentCheckpoint.builder()
+                        .runId(context.getRunId())
+                        .currentNode(nextNode)
+                        .contextSnapshot(AgentContextSnapshot.from(context))
+                        .plan(context.getPlan())
+                        .reason("approval_decided:" + approvalId)
+                        .build());
+        context.setCheckpointVersion(checkpoint.getVersion());
+        approvalStore.markResumed(approvalId);
+        return AgentResumePlan.continueAt(context, nextNode, events);
     }
 
     public AgentResumePlan prepareRunResume(String runId) {
         AgentRun run = runRepository.find(runId).orElse(null);
-        if (run != null && isTerminalStatus(run.getStatus())) {
+        if (run != null && run.getStatus() != null && run.getStatus().terminal()) {
             return AgentResumePlan.complete(List.of(eventFactory.runAlreadyTerminal(run)));
         }
 
@@ -132,7 +186,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 3) {
+        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 4) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
@@ -191,7 +245,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 3) {
+        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 4) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
@@ -231,12 +285,6 @@ public final class AgentResumeCoordinator {
     private boolean requiresResumeReplan(String currentNode) {
         return AgentNodeNames.APPROVAL_GATE.equals(currentNode)
                 || AgentNodeNames.TOOL_DISPATCH.equals(currentNode);
-    }
-
-    private boolean isTerminalStatus(AgentRunStatus status) {
-        return status == AgentRunStatus.COMPLETED
-                || status == AgentRunStatus.FAILED
-                || status == AgentRunStatus.BUDGET_EXCEEDED;
     }
 
     private boolean isSkillActivation(PendingApproval approval) {

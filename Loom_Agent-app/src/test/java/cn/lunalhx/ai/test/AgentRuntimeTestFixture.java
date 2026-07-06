@@ -29,6 +29,7 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.runtime.hook.CheckpointAgentHook;
+import cn.lunalhx.ai.runtime.hook.CodeChangeVerificationStopHook;
 import cn.lunalhx.ai.runtime.hook.IncompletePlanStopHook;
 import cn.lunalhx.ai.runtime.hook.MaxStepContinuationStopHook;
 import cn.lunalhx.ai.runtime.hook.PendingApprovalConsistencyStopHook;
@@ -322,6 +323,7 @@ public final class AgentRuntimeTestFixture {
         SubAgentPartialSummaryGenerator summaryGenerator = new SubAgentPartialSummaryGenerator(objectMapper);
         return new AgentHookRegistry(List.of(
                 new MaxStepContinuationStopHook(props),
+                new CodeChangeVerificationStopHook(props),
                 new IncompletePlanStopHook(props),
                 new PendingApprovalConsistencyStopHook(approvalStore),
                 new CheckpointAgentHook(runRepo, checkpointRepo, objectMapper),

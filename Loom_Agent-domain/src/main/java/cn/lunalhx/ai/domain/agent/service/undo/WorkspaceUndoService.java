@@ -293,9 +293,7 @@ public class WorkspaceUndoService {
     }
 
     private boolean isTerminal(AgentRunStatus status) {
-        return status == AgentRunStatus.COMPLETED
-                || status == AgentRunStatus.FAILED
-                || status == AgentRunStatus.BUDGET_EXCEEDED;
+        return status != null && status.terminal();
     }
 
     public record ChangedFileEntry(String path, String changeType) {}

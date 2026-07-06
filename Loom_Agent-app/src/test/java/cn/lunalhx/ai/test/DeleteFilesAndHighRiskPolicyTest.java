@@ -379,7 +379,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ObjectNode mvnInput = objectMapper.createObjectNode();
         mvnInput.put("command", "mvn compile");
         ToolPolicyDecision mvnPolicy = tool.policy(call("run_shell", mvnInput));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, mvnPolicy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, mvnPolicy.getPermissionLevel());
     }
 
     @Test

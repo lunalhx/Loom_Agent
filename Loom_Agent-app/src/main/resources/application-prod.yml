@@ -209,6 +209,10 @@ loom:
       same-action-max-repeats: ${AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS:2}
       same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
       no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
+    execution-guards:
+      plan-before-write: ${AGENT_PLAN_BEFORE_WRITE:true}
+      verification-after-write: ${AGENT_VERIFICATION_AFTER_WRITE:true}
+      max-verification-continuations: ${AGENT_VERIFICATION_MAX_CONTINUATIONS:2}
     conversation-ledger:
       compaction-high-watermark: 200
       compaction-low-watermark: 50

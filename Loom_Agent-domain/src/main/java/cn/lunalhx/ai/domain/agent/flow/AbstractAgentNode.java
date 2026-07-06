@@ -79,6 +79,7 @@ public abstract class AbstractAgentNode implements AgentNode {
                 .tool(action.decision() == null ? null : action.decision().getTool())
                 .observation(result == null ? null : result.getObservation())
                 .truncated(result != null && result.isTruncated())
+                .metadata(result == null ? null : result.getDetails())
                 .build());
     }
 }

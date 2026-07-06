@@ -39,6 +39,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -88,7 +90,9 @@ public class AgentApprovalControllerContractTest {
     @Test
     public void decideApproveShouldMapToEnumAndCallService() throws Exception {
         AgentLoopService svc = mock(AgentLoopService.class);
-        when(svc.resume(any(), eq(ApprovalDecision.APPROVE), any())).thenReturn(Flux.just(
+        when(svc.resume(
+                any(), eq(ApprovalDecision.APPROVE), any(), isNull(), anyList()))
+                .thenReturn(Flux.just(
                 AgentEvent.builder().type(AgentEventType.RESUME_STARTED).runId("r").build(),
                 AgentEvent.builder().type(AgentEventType.DONE).runId("r").build()));
         MockMvc mvc = buildMockMvc(svc, mock(ApprovalStore.class));
@@ -97,7 +101,9 @@ public class AgentApprovalControllerContractTest {
                         .content(json(new AgentApprovalDecisionRequest("APPROVE", "ok"))))
                 .andExpect(status().isOk()).andReturn();
         String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
-        verify(svc).resume(eq("ap-1"), eq(ApprovalDecision.APPROVE), eq("ok"));
+        verify(svc).resume(
+                eq("ap-1"), eq(ApprovalDecision.APPROVE), eq("ok"),
+                isNull(), eq(java.util.List.of()));
         assertTrue(content.contains("event:resume_started"));
         assertTrue(content.contains("event:done"));
     }
@@ -113,6 +119,35 @@ public class AgentApprovalControllerContractTest {
         String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(r)).andReturn().getResponse().getContentAsString();
         assertTrue(content.contains("\"code\":\"invalid_request\""));
         verify(svc, never()).resume(any(), any(), any());
+    }
+
+    @Test
+    public void conflictingSecondDecisionShouldBeDelegatedToAtomicStoreDecision() throws Exception {
+        AgentLoopService service = mock(AgentLoopService.class);
+        ApprovalStore store = mock(ApprovalStore.class);
+        when(service.resume(
+                eq("ap-conflict"), eq(ApprovalDecision.REJECT),
+                eq("changed mind"), isNull(), anyList()))
+                .thenReturn(Flux.just(AgentEvent.builder()
+                        .type(AgentEventType.ERROR)
+                        .code("approval_decision_conflict")
+                        .build()));
+        MockMvc mvc = buildMockMvc(service, store);
+
+        MvcResult result = mvc.perform(MockMvcRequestBuilders.post(
+                                "/api/v1/agent/code/approvals/ap-conflict/decide/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new AgentApprovalDecisionRequest(
+                                "REJECT", "changed mind"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String content = mvc.perform(MockMvcRequestBuilders.asyncDispatch(result))
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(content.contains("approval_decision_conflict"));
+        verify(service).resume(
+                eq("ap-conflict"), eq(ApprovalDecision.REJECT),
+                eq("changed mind"), isNull(), eq(java.util.List.of()));
     }
 
     // ===== 2. GET /approvals/{id} =====

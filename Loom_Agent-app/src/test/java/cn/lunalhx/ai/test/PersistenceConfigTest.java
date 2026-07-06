@@ -342,6 +342,8 @@ public class PersistenceConfigTest {
         @Override public int upsert(cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO approval) { return 1; }
         @Override public cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO selectByApprovalId(String approvalId) { return null; }
         @Override public int markConsumed(String approvalId) { return 1; }
+        @Override public int markDecided(String approvalId, String decision, String decisionReason) { return 1; }
+        @Override public int markResumed(String approvalId) { return 1; }
         @Override public int deleteByConversationId(String conversationId) { return 0; }
     }
     private static class MockAgentTraceEventDao implements AgentTraceEventDao {

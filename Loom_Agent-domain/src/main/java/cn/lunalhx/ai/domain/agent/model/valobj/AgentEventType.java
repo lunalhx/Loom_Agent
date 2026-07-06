@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.valobj;
 
 public enum AgentEventType {
 
+    RUN_STARTED("run_started"),
     META("meta"),
     NODE_START("node_start"),
     PLAN_UPDATED("plan_updated"),
@@ -18,6 +19,7 @@ public enum AgentEventType {
     TOOL_CALL("tool_call"),
     APPROVAL_REQUIRED("approval_required"),
     HIGH_RISK_APPROVAL_REQUIRED("high_risk_approval_required"),
+    PAUSED_FOR_APPROVAL("paused_for_approval"),
     USER_INPUT_REQUIRED("user_input_required"),
     POLICY_DENIED("policy_denied"),
     OBSERVATION("observation"),

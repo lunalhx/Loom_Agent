@@ -18,11 +18,14 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.codec.digest.DigestUtils;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -53,6 +56,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
         AgentDecision decision = context.getDecision();
         ToolCall toolCall = ToolCall.builder()
                 .name(decision.getTool())
+                .toolCallId(toolCallId(context, decision))
                 .input(decision.getInput())
                 .workspace(context.getWorkspace())
                 .workspaceRoot(context.getResolvedWorkspace())
@@ -105,6 +109,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
             result = applyTodoWrite(context, result);
             appendPlanSnapshotIfChanged(context);
         }
+        trackExecutionState(context, decision, result);
         context.setToolResult(result);
         context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
 
@@ -116,6 +121,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .step(context.getStep())
                 .thought(decision.getThought())
                 .tool(decision.getTool())
+                .toolCallId(toolCall.getToolCallId())
                 .input(decision.getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
@@ -140,6 +146,14 @@ public class ToolDispatchNode extends AbstractAgentNode {
         context.setApprovedPolicyFingerprint(null);
     }
 
+    private String toolCallId(AgentContext context, AgentDecision decision) {
+        String input = decision.getInput() == null ? "" : decision.getInput().toString();
+        return DigestUtils.sha256Hex(
+                context.getRunId() + "|" + (context.getStep() + 1)
+                        + "|" + decision.getTool() + "|" + input)
+                .substring(0, 24);
+    }
+
     private ToolResult applyTodoWrite(AgentContext context, ToolResult original) {
         try {
             if (context.getPlan() == null) {
@@ -155,6 +169,40 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
     private boolean contextEnabled() {
         return properties.getContext() != null && Boolean.TRUE.equals(properties.getContext().getEnabled());
+    }
+
+    private void trackExecutionState(AgentContext context, AgentDecision decision,
+                                     ToolResult result) {
+        String tool = decision == null ? null : decision.getTool();
+        if (result != null && result.isSuccess() && ToolOperation.isRead(tool)) {
+            context.setCodeReadObserved(true);
+            LinkedHashSet<String> read = new LinkedHashSet<>(context.getReadFiles());
+            read.addAll(ToolOperation.inputPaths(decision.getInput()));
+            context.setReadFiles(read);
+        }
+        if (result != null && result.isSuccess()
+                && ToolOperation.isWorkspaceWrite(tool)) {
+            context.setLastWriteStep(context.getStep());
+            context.setLastTestPassed(null);
+            context.setLastTestExitCode(null);
+            context.setChangedSincePassingTest(true);
+            LinkedHashSet<String> touched = new LinkedHashSet<>(context.getTouchedFiles());
+            touched.addAll(ToolOperation.inputPaths(decision.getInput()));
+            context.setTouchedFiles(touched);
+        }
+        if (result != null && result.getDetails() != null
+                && "TEST".equals(result.getDetails().get("operationKind"))) {
+            context.setLastTestStep(context.getStep());
+            context.setLastTestPassed(result.isSuccess());
+            if (result.isSuccess()) {
+                context.setChangedSincePassingTest(false);
+            }
+            Number exitCode = result.getDetails().get("exitCode") instanceof Number n ? n : null;
+            if (exitCode == null) {
+                exitCode = result.isSuccess() ? 0 : 1;
+            }
+            context.setLastTestExitCode(exitCode.intValue());
+        }
     }
 
     private void appendPlanSnapshotIfChanged(AgentContext context) {

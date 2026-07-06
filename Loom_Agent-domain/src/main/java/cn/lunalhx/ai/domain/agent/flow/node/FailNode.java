@@ -20,10 +20,8 @@ public class FailNode extends AbstractAgentNode {
                 event(context, AgentEventType.ERROR)
                         .code(context.getErrorCode())
                         .message(context.getErrorMessage())
-                        .build(),
-                event(context, AgentEventType.DONE)
-                        .stopReason(context.getStopReason())
-                        .stepCount(context.getStep())
+                        .checkpointVersion(context.getCheckpointVersion())
+                        .recoverable(context.getCheckpointVersion() != null)
                         .build()));
     }
 

@@ -20,7 +20,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class RunShellTool extends FileSystemToolSupport implements AgentTool {
@@ -43,7 +47,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
-                .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。")
+                .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。Maven 测试请直接使用 `mvn -q -o test`，或使用 `mvn test -Dtest=TestClass` 选择测试；不要用 cd、管道或 && 包装。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。")
                 .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"minLength\":1,\"description\":\"要执行的 shell 命令\"},\"cwd\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对工作目录\"},\"timeoutMs\":{\"type\":\"integer\",\"minimum\":1,\"default\":120000,\"description\":\"超时毫秒，受系统配置上限限制\"},\"runInBackground\":{\"type\":\"boolean\",\"default\":false,\"description\":\"是否显式要求后台执行，不等待 yield 窗口\"},\"foregroundYieldMs\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":30000,\"default\":10000,\"description\":\"前台等待毫秒，超时未完成自动转后台\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
                 .build();
     }
@@ -106,11 +110,9 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return gitPolicy(tokens, command);
         }
 
-        if ("mvn".equals(executable) || "./mvnw".equals(executable)) {
-            if (isMavenTestCommand(tokens)) {
-                return ToolPolicyDecision.writeConfirm("Maven 测试会写入 target 等构建目录，需要人工确认", command);
-            }
-            return ToolPolicyDecision.highRiskConfirm("构建会执行插件代码并写入 target，属高危操作", command);
+        if ("mvn".equals(executable) || "./mvnw".equals(executable)
+                || "mvnw".equals(executable)) {
+            return mavenPolicy(tokens, command);
         }
 
         if (shellCommands().getReadOnly().contains(executable)) {
@@ -163,17 +165,28 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                     : call.getInput().path("foregroundYieldMs").asLong(DEFAULT_FOREGROUND_YIELD_MS);
             yieldMs = Math.min(Math.max(0L, yieldMs), MAX_FOREGROUND_YIELD_MS);
 
-            if (runInBackground && backgroundProcessManager != null) {
-                return startBackgroundTask(tokens, cwd, timeoutMs, call, startedAt);
-            }
-
-            if (yieldMs <= 0 || backgroundProcessManager == null) {
-                return commandExecutor.run(tokens, cwd, timeoutMs,
+            if (isMavenTestCommand(tokens)) {
+                ToolResult result = commandExecutor.run(tokens, cwd, timeoutMs,
                         ShellOutputLimits.builder()
                                 .maxStdoutChars(properties.getShellMaxOutputChars())
                                 .maxStderrChars(properties.getShellMaxStderrChars())
                                 .build(),
                         startedAt);
+                return enrichTestResult(result, tokens, cwd, startedAt);
+            }
+
+            if (runInBackground && backgroundProcessManager != null) {
+                return startBackgroundTask(tokens, cwd, timeoutMs, call, startedAt);
+            }
+
+            if (yieldMs <= 0 || backgroundProcessManager == null) {
+                ToolResult result = commandExecutor.run(tokens, cwd, timeoutMs,
+                        ShellOutputLimits.builder()
+                                .maxStdoutChars(properties.getShellMaxOutputChars())
+                                .maxStderrChars(properties.getShellMaxStderrChars())
+                                .build(),
+                        startedAt);
+                return enrichTestResult(result, tokens, cwd, startedAt);
             }
 
             // Try sync with yield
@@ -190,7 +203,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             if ("command_timeout".equals(result.getErrorCode())) {
                 return startBackgroundTask(tokens, cwd, requestedTimeoutMs, call, startedAt);
             }
-            return result;
+            return enrichTestResult(result, tokens, cwd, startedAt);
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }
@@ -238,11 +251,93 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     }
 
     private boolean isMavenTestCommand(List<String> tokens) {
-        return tokens.stream().anyMatch(token ->
+        return tokens.stream().skip(1).anyMatch(token ->
                 "test".equals(token)
                         || "verify".equals(token)
-                        || token.endsWith(":test")
-                        || token.startsWith("-Dtest="));
+                        || token.endsWith(":test"));
+    }
+
+    private ToolPolicyDecision mavenPolicy(List<String> tokens, String command) {
+        List<String> invalid = new ArrayList<>();
+        boolean hasTestGoal = false;
+        for (int i = 1; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+            if ("test".equals(token) || "verify".equals(token)
+                    || token.endsWith(":test")) {
+                hasTestGoal = true;
+                continue;
+            }
+            if (Set.of("-q", "-o", "--offline", "-B", "--batch-mode")
+                    .contains(token)) {
+                continue;
+            }
+            if (token.startsWith("-Dtest=") && token.length() > "-Dtest=".length()) {
+                continue;
+            }
+            invalid.add(token);
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("reasonCode",
+                hasTestGoal && invalid.isEmpty()
+                        ? "maven_test_allowed" : "maven_command_not_allowed");
+        metadata.put("allowedAlternatives", List.of(
+                "mvn -q -o test",
+                "mvn test -Dtest=TestClass"));
+        if (hasTestGoal && invalid.isEmpty()) {
+            return ToolPolicyDecision.builder()
+                    .permissionLevel(ToolPermissionLevel.WRITE_CONFIRM)
+                    .riskReason("Maven 测试会写入 target 等构建目录，需要人工确认")
+                    .operationPreview(command)
+                    .metadata(metadata)
+                    .build();
+        }
+        metadata.put("rejectedArguments", invalid);
+        return ToolPolicyDecision.builder()
+                .permissionLevel(ToolPermissionLevel.HIGH_RISK_DENY)
+                .riskReason("Maven 命令仅允许 test、verify、*:test 目标及安全测试参数；"
+                        + "可改用 mvn -q -o test")
+                .operationPreview(command)
+                .metadata(metadata)
+                .build();
+    }
+
+    private ToolResult enrichTestResult(
+            ToolResult result, List<String> tokens, Path cwd, long startedAt) {
+        if (!isMavenTestCommand(tokens)) {
+            return result;
+        }
+        Map<String, Object> summary =
+                SurefireTestSummary.readForExecution(cwd, startedAt);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("operationKind", "TEST");
+        details.put("command", String.join(" ", tokens));
+        details.put("exitCode", extractExitCode(result.getObservation()));
+        details.put("passed", result.isSuccess());
+        details.put("reportsAvailable", summary.get("available"));
+        copySummaryCount(summary, details, "tests");
+        copySummaryCount(summary, details, "failures");
+        copySummaryCount(summary, details, "errors");
+        copySummaryCount(summary, details, "skipped");
+        result.setDetails(details);
+        result.setObservation(SurefireTestSummary.render(summary)
+                + "\n" + StringUtils.defaultString(result.getObservation()));
+        return result;
+    }
+
+    private Integer extractExitCode(String observation) {
+        if (observation == null) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("(?m)^ExitCode:\\s*(-?\\d+)\\s*$")
+                .matcher(observation);
+        return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
+    }
+
+    private void copySummaryCount(
+            Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source.get(key) instanceof Number value) {
+            target.put(key, value);
+        }
     }
 
     private boolean isShellInterpreter(String executable) {

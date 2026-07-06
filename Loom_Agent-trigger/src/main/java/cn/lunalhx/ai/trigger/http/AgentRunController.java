@@ -4,6 +4,8 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentReplayStreamRequest;
 import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
+import cn.lunalhx.ai.api.dto.AgentRunStatusResponse;
+import cn.lunalhx.ai.api.dto.AgentRuntimeInfoResponse;
 import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
 import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
 import cn.lunalhx.ai.api.dto.UndoStatusResponse;
@@ -24,16 +26,34 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/agent/code")
 public class AgentRunController {
 
+    private final String runtimeInstanceId = UUID.randomUUID().toString();
+    private final Instant runtimeStartedAt = Instant.now();
     private final AgentRequestMapper requestMapper;
     private final AgentSseResponder sseResponder;
     private final AgentRunHttpQueryService runHttpQueryService;
     private final AgentUndoHttpService undoHttpService;
+
+    @GetMapping("/runtime")
+    public Response<AgentRuntimeInfoResponse> runtime() {
+        return Response.success(AgentRuntimeInfoResponse.builder()
+                .instanceId(runtimeInstanceId)
+                .startedAt(runtimeStartedAt)
+                .build());
+    }
+
+    @GetMapping("/runs/{runId}/status")
+    public Response<AgentRunStatusResponse> status(@PathVariable String runId) {
+        return runHttpQueryService.status(runId);
+    }
 
     @GetMapping("/runs/{runId}/trace")
     public Response<AgentTraceTimelineResponse> trace(@PathVariable String runId) {

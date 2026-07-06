@@ -194,10 +194,11 @@ public class ReplanNode extends AbstractAgentNode {
 
     private String renderReplanPrompt(AgentContext context, ReplanReason reason) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象，格式为 "
-                + "{\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"evidence\":\"可选\",\"blocker\":\"可选\"}]}。\n");
+        prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象。\n");
         prompt.append("不要删除历史任务；只能更新状态或追加任务。\n");
-        prompt.append("用户任务：").append(context.getQuestion()).append("\n");
+        prompt.append("保留现有任务的 kind 和 targets 字段。\n");
+        prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\"}]}\n");
+        prompt.append("\n用户任务：").append(context.getQuestion()).append("\n");
         prompt.append("重规划原因：").append(reason).append("\n");
         if (reason == ReplanReason.STEP_BUDGET_CONTINUATION) {
             prompt.append("当前是第 ").append(context.getSegmentIndex() + 1).append("/")
@@ -205,7 +206,7 @@ public class ReplanNode extends AbstractAgentNode {
                     + "不要重复上一段最后的动作。\n");
         }
         prompt.append("失败信息：").append(StringUtils.defaultString(context.getReplanMessage())).append("\n");
-        prompt.append("当前计划：\n").append(context.getPlan().render()).append("\n");
+        prompt.append("当前计划：\n").append(context.getPlan().renderFull()).append("\n");
         return prompt.toString();
     }
 

@@ -30,6 +30,7 @@ public class AgentStreamEvent {
     private List<String> nodeInputs;
     private String thought;
     private String tool;
+    private String toolCallId;
     private Map<String, Object> input;
     private String approvalId;
     private String permissionLevel;
@@ -46,6 +47,7 @@ public class AgentStreamEvent {
     private String message;
     private Map<String, Object> plan;
     private Long checkpointVersion;
+    private Boolean recoverable;
     private Map<String, Object> metadata;
     private AgentUsageSummaryDTO usage;
 

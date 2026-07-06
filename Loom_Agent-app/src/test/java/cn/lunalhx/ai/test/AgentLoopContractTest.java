@@ -95,11 +95,12 @@ public class AgentLoopContractTest {
         assertTrue("ANSWER 必须在 DONE 之前",
                 types.indexOf(AgentEventType.ANSWER) < types.indexOf(AgentEventType.DONE));
 
-        // DONE 后不再产生业务事件（持久化副作用 CHECKPOINT_SAVED 除外）
+        // DONE 是终态持久化完成后的最后一个事件。
         int doneIndex = types.indexOf(AgentEventType.DONE);
         List<AgentEventType> afterDone = types.subList(doneIndex + 1, types.size());
-        assertTrue("DONE 后只允许 CHECKPOINT_SAVED 持久化副作用，实际：" + afterDone,
-                afterDone.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+        assertTrue("DONE 后不得再有事件，实际：" + afterDone, afterDone.isEmpty());
+        assertEquals(AgentEventType.RUN_STARTED, types.get(0));
+        assertEquals(1L, types.stream().filter(type -> type == AgentEventType.DONE).count());
 
         // run/request/conversation 标识在整个流中持续一致
         assertTrue(events.stream().allMatch(event -> "contract-run".equals(event.getRunId())));
@@ -155,7 +156,7 @@ public class AgentLoopContractTest {
 
         // 写操作在审批前不得执行
         assertEquals(0, calls.get());
-        // 暂停流以 APPROVAL_REQUIRED 结束（其后只允许 CHECKPOINT_SAVED 持久化副作用）
+        // 审批内容之后必须明确发送已持久化的暂停事件。
         AgentEvent approval = paused.stream()
                 .filter(event -> event.getType() == AgentEventType.APPROVAL_REQUIRED)
                 .findFirst()
@@ -166,8 +167,8 @@ public class AgentLoopContractTest {
                 .skip(approvalIndex + 1L)
                 .map(AgentEvent::getType)
                 .collect(Collectors.toList());
-        assertTrue("APPROVAL_REQUIRED 后只允许 CHECKPOINT_SAVED，实际：" + afterApproval,
-                afterApproval.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+        assertEquals(List.of(AgentEventType.PAUSED_FOR_APPROVAL), afterApproval);
+        assertNotNull(paused.get(paused.size() - 1).getCheckpointVersion());
         // DONE 不应出现在暂停流中
         assertFalse(paused.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
@@ -449,11 +450,10 @@ public class AgentLoopContractTest {
                 .collectList()
                 .block(TIMEOUT);
 
-        // ABORT 保持 CONTEXT_OVERFLOW 终止语义：ERROR code=context_length_exceeded + DONE stopReason=CONTEXT_OVERFLOW
+        // 失败流以结构化 ERROR 终止，不再混发成功语义的 DONE。
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && cn.lunalhx.ai.domain.model.valobj.ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     // ===== 5. 错误和超时 =====
@@ -480,8 +480,7 @@ public class AgentLoopContractTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("parse_error", error.getCode());
-        // 进入终态且 Flux 完成
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -506,11 +505,10 @@ public class AgentLoopContractTest {
                 .collectList()
                 .block(TIMEOUT);
 
-        // 总超时最终进入 ERROR + DONE 终态且 stopReason=TIMEOUT，Flux 正常完成
+        // 总超时以 ERROR 终止且 Flux 正常完成。
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && "agent_timeout".equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.TIMEOUT));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     // ===== 6. Stop hook 行为契约 =====
@@ -522,7 +520,7 @@ public class AgentLoopContractTest {
 
         AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
                 .modelGateway(completeGateway(new ArrayList<>(),
-                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"in_progress\"},{\"id\":\"task-3\",\"content\":\"编写测试\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\",\"kind\":\"inspect\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"in_progress\",\"kind\":\"edit\",\"targets\":[\"src/Demo.java\"]},{\"id\":\"task-3\",\"content\":\"编写测试\",\"status\":\"pending\",\"kind\":\"verify\"}]}}",
                         "{\"type\":\"final\",\"answer\":\"完成了！\",\"evidence\":[]}",
                         "{\"type\":\"final\",\"answer\":\"现在真的完成了。\",\"evidence\":[]}"))
                 .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
@@ -544,7 +542,8 @@ public class AgentLoopContractTest {
 
         assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
         assertTrue("应包含 REPLAN_STARTED", types.contains(AgentEventType.REPLAN_STARTED));
-        assertTrue("应只有一次 DONE", types.stream().filter(t -> t == AgentEventType.DONE).count() == 1);
+        assertFalse("未完成计划不得 DONE", types.contains(AgentEventType.DONE));
+        assertTrue("达到续跑上限后应失败", types.contains(AgentEventType.ERROR));
 
         AgentEvent hookResult = events.stream()
                 .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
@@ -552,21 +551,19 @@ public class AgentLoopContractTest {
         assertEquals("continued", hookResult.getMetadata().get("decision"));
         assertEquals("replan", hookResult.getMetadata().get("nextNode"));
 
-        // DONE 后只允许 CHECKPOINT_SAVED
-        int doneIndex = types.lastIndexOf(AgentEventType.DONE);
-        List<AgentEventType> afterDone = types.subList(doneIndex + 1, types.size());
-        assertTrue("DONE 后只允许 CHECKPOINT_SAVED，实际：" + afterDone,
-                afterDone.stream().allMatch(type -> type == AgentEventType.CHECKPOINT_SAVED));
+        assertEquals("incomplete_plan", events.stream()
+                .filter(event -> event.getType() == AgentEventType.ERROR)
+                .findFirst().orElseThrow().getCode());
     }
 
     @Test
-    public void incompletePlanStopHookShouldBypassWhenMaxContinuationsExceeded() {
+    public void incompletePlanStopHookShouldFailWhenMaxContinuationsExceeded() {
         AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
         properties.getStopHooks().getIncompletePlan().setMaxContinuations(0);
 
         AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
                 .modelGateway(completeGateway(new ArrayList<>(),
-                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"completed\",\"kind\":\"inspect\"},{\"id\":\"task-2\",\"content\":\"实现代码\",\"status\":\"pending\",\"kind\":\"edit\",\"targets\":[\"src/Demo.java\"]}]}}",
                         "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"))
                 .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
                 .properties(properties);
@@ -586,13 +583,17 @@ public class AgentLoopContractTest {
         List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
 
         assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
-        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
-        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+        assertFalse("未完成计划不得产生 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertFalse("未完成计划不得产生 DONE", types.contains(AgentEventType.DONE));
+        assertTrue("应包含 ERROR", types.contains(AgentEventType.ERROR));
 
         AgentEvent hookResult = events.stream()
                 .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
                 .findFirst().orElseThrow();
-        assertEquals("bypassed", hookResult.getMetadata().get("decision"));
+        assertEquals("failed", hookResult.getMetadata().get("decision"));
+        assertEquals("incomplete_plan", events.stream()
+                .filter(event -> event.getType() == AgentEventType.ERROR)
+                .findFirst().orElseThrow().getCode());
     }
 
     @Test
@@ -619,7 +620,7 @@ public class AgentLoopContractTest {
         List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
 
         assertFalse("无计划时不应触发 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
-        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 ANSWER，实际：" + types, types.contains(AgentEventType.ANSWER));
         assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
     }
 
@@ -650,6 +651,38 @@ public class AgentLoopContractTest {
 
         assertFalse("计划已完成时不应触发 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
         assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+    }
+
+    @Test
+    public void completedEditItemWithoutTouchedTargetShouldFailPlanCheck() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+        properties.getStopHooks().getIncompletePlan().setMaxContinuations(0);
+
+        List<AgentEvent> events = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"计划\",\"tool\":\"todo_write\","
+                                + "\"input\":{\"todos\":["
+                                + "{\"id\":\"edit\",\"content\":\"修改 Demo\","
+                                + "\"status\":\"completed\",\"kind\":\"edit\","
+                                + "\"targets\":[\"src/main/java/Demo.java\"]},"
+                                + "{\"id\":\"verify\",\"content\":\"测试\","
+                                + "\"status\":\"completed\",\"kind\":\"verify\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties)
+                .buildAgentLoop()
+                .ask(AgentQuestion.builder()
+                        .question("修改 Demo")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertTrue(events.stream().anyMatch(event ->
+                event.getType() == AgentEventType.ERROR
+                        && "incomplete_plan".equals(event.getCode())));
+        assertFalse(events.stream().anyMatch(event ->
+                event.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -748,7 +781,7 @@ public class AgentLoopContractTest {
                 .findFirst().orElseThrow();
         assertEquals(cn.lunalhx.ai.domain.model.valobj.ModelErrorCode.APPROVAL_STATE_MISSING.code(), error.getCode());
 
-        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+        assertFalse("失败流不应包含 DONE", types.contains(AgentEventType.DONE));
         assertFalse("不应包含 APPROVAL_REQUIRED", types.contains(AgentEventType.APPROVAL_REQUIRED));
     }
 
@@ -774,6 +807,7 @@ public class AgentLoopContractTest {
         properties.getStepBudget().setMaxTotalSteps(20);
         properties.getStepBudget().setSameActionMaxRepeats(10);
         properties.getStepBudget().setSameFailureMaxRepeats(10);
+        properties.getStopHooks().getIncompletePlan().setEnabled(false);
 
         AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
                 .modelGateway(completeGateway(new ArrayList<>(),
@@ -798,7 +832,7 @@ public class AgentLoopContractTest {
         List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
 
         assertTrue("应包含 STOP_HOOK_RESULT", types.contains(AgentEventType.STOP_HOOK_RESULT));
-        assertTrue("应包含 ANSWER", types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 ANSWER，实际：" + types, types.contains(AgentEventType.ANSWER));
         assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
         assertFalse("不应以 ERROR 结束",
                 events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR));
@@ -835,8 +869,7 @@ public class AgentLoopContractTest {
 
         assertNotNull(events);
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR));
-        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
-                && e.getStopReason() == AgentStopReason.MAX_STEPS));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -871,8 +904,7 @@ public class AgentLoopContractTest {
         assertNotNull(events);
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR
                 && "max_steps_total".equals(e.getCode())));
-        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
-                && e.getStopReason() == AgentStopReason.MAX_STEPS));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -906,8 +938,7 @@ public class AgentLoopContractTest {
         assertNotNull(events);
         assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.ERROR
                 && "repeated_action".equals(e.getCode())));
-        assertTrue(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE
-                && e.getStopReason() == AgentStopReason.NO_PROGRESS));
+        assertFalse(events.stream().anyMatch(e -> e.getType() == AgentEventType.DONE));
     }
 
     @Test

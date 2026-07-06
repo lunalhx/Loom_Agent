@@ -5,7 +5,9 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Mutable runtime state: step counter, node, checkpoint, history, progress, and termination.
@@ -32,6 +34,15 @@ public final class AgentRuntimeState {
     private String lastFailureFingerprint;
     private int sameFailureRepeats;
     private int noProgressRounds;
+    private boolean codeReadObserved;
+    private int lastWriteStep;
+    private int lastTestStep;
+    private Boolean lastTestPassed;
+    private boolean changedSincePassingTest;
+    private int verificationContinuationCount;
+    private Set<String> touchedFiles = new LinkedHashSet<>();
+    private Set<String> readFiles = new LinkedHashSet<>();
+    private Integer lastTestExitCode;
 
     // -- getters --
 
@@ -53,6 +64,15 @@ public final class AgentRuntimeState {
     public String lastFailureFingerprint() { return lastFailureFingerprint; }
     public int sameFailureRepeats() { return sameFailureRepeats; }
     public int noProgressRounds() { return noProgressRounds; }
+    public boolean codeReadObserved() { return codeReadObserved; }
+    public int lastWriteStep() { return lastWriteStep; }
+    public int lastTestStep() { return lastTestStep; }
+    public Boolean lastTestPassed() { return lastTestPassed; }
+    public boolean changedSincePassingTest() { return changedSincePassingTest; }
+    public int verificationContinuationCount() { return verificationContinuationCount; }
+    public Set<String> touchedFiles() { return touchedFiles; }
+    public Set<String> readFiles() { return readFiles; }
+    public Integer lastTestExitCode() { return lastTestExitCode; }
 
     // -- package-private mutators for AgentContext delegation --
 
@@ -74,6 +94,19 @@ public final class AgentRuntimeState {
     public void setLastFailureFingerprint(String v) { this.lastFailureFingerprint = v; }
     public void setSameFailureRepeats(int v) { this.sameFailureRepeats = v; }
     public void setNoProgressRounds(int v) { this.noProgressRounds = v; }
+    public void setCodeReadObserved(boolean v) { this.codeReadObserved = v; }
+    public void setLastWriteStep(int v) { this.lastWriteStep = v; }
+    public void setLastTestStep(int v) { this.lastTestStep = v; }
+    public void setLastTestPassed(Boolean v) { this.lastTestPassed = v; }
+    public void setChangedSincePassingTest(boolean v) { this.changedSincePassingTest = v; }
+    public void setVerificationContinuationCount(int v) { this.verificationContinuationCount = v; }
+    public void setTouchedFiles(Set<String> v) {
+        this.touchedFiles = v == null ? new LinkedHashSet<>() : new LinkedHashSet<>(v);
+    }
+    public void setReadFiles(Set<String> v) {
+        this.readFiles = v == null ? new LinkedHashSet<>() : new LinkedHashSet<>(v);
+    }
+    public void setLastTestExitCode(Integer v) { this.lastTestExitCode = v; }
 
     // -- behavior methods (final API, usable now) --
 

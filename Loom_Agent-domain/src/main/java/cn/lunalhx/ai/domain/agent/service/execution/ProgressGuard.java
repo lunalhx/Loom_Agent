@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -51,7 +52,7 @@ public class ProgressGuard {
         if ("todo_write".equals(tool)) {
             return true;
         }
-        if (isWriteTool(tool)) {
+        if (ToolOperation.isWorkspaceWrite(tool)) {
             return true;
         }
         if ("run_shell".equals(tool) && action.toolResult() != null
@@ -62,12 +63,6 @@ public class ProgressGuard {
             return true;
         }
         return false;
-    }
-
-    private boolean isWriteTool(String tool) {
-        return "write_to_file".equals(tool)
-                || "replace_in_file".equals(tool)
-                || "delete_files".equals(tool);
     }
 
     private ProgressResult evaluateAction(AgentContext context) {

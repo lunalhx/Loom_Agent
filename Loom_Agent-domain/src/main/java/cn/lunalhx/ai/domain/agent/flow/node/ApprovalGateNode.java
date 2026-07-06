@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
@@ -45,6 +46,10 @@ public class ApprovalGateNode extends AbstractAgentNode {
 
     @Override
     protected NodeResult doApply(AgentContext context) {
+        ToolResult planGuardFailure = planGuardFailure(context);
+        if (planGuardFailure != null) {
+            return validationFailure(context, planGuardFailure);
+        }
         ToolPolicyDecision policy = toolRegistry.policy(ToolCall.builder()
                 .name(context.getDecision().getTool())
                 .input(context.getDecision().getInput())
@@ -84,8 +89,12 @@ public class ApprovalGateNode extends AbstractAgentNode {
     }
 
     private NodeResult validationFailure(AgentContext context, ToolPolicyDecision policy) {
+        return validationFailure(context, ToolResult.failure(
+                policy.getValidationErrorCode(), policy.getValidationMessage(), 0L));
+    }
+
+    private NodeResult validationFailure(AgentContext context, ToolResult result) {
         context.setStep(context.getStep() + 1);
-        ToolResult result = ToolResult.failure(policy.getValidationErrorCode(), policy.getValidationMessage(), 0L);
         context.setToolResult(result);
         context.getDynamicText().appendAssistantAction(context.getStep(), name(), context.getDecision());
         context.getDynamicText().appendToolResult(
@@ -115,6 +124,38 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .observation(result.getObservation())
                 .build());
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
+    }
+
+    private ToolResult planGuardFailure(AgentContext context) {
+        AgentRuntimeProperties.ExecutionGuardProperties guards =
+                properties.getExecutionGuards();
+        if (guards == null || !Boolean.TRUE.equals(guards.getPlanBeforeWrite())) {
+            return null;
+        }
+        if (StringUtils.isNotBlank(context.getParentRunId())
+                || !ToolOperation.isWorkspaceWrite(context.getDecision().getTool())) {
+            return null;
+        }
+        if (!context.isCodeReadObserved()) {
+            return ToolResult.failure(
+                    "plan_required_before_write",
+                    "写入前必须先读取或搜索相关代码，再用 todo_write 建立计划",
+                    0L);
+        }
+        List<String> targets = ToolOperation.inputPaths(
+                context.getDecision().getInput());
+        if (context.getPlan() == null
+                || targets.isEmpty()
+                || targets.stream().anyMatch(
+                        target -> !context.getPlan().hasDeclaredEditTarget(target))
+                || !context.getPlan().hasVerifyItem()) {
+            return ToolResult.failure(
+                    "plan_update_required",
+                    "写入前计划必须包含 kind=edit、targets=" + targets
+                            + "，并包含 kind=verify 的测试项",
+                    0L);
+        }
+        return null;
     }
 
     private NodeResult requireApproval(AgentContext context, ToolPolicyDecision policy) {
@@ -184,6 +225,9 @@ public class ApprovalGateNode extends AbstractAgentNode {
         context.setStep(context.getStep() + 1);
         String reason = StringUtils.defaultIfBlank(policy.getRiskReason(), "高危动作已被策略拦截");
         ToolResult result = ToolResult.failure("policy_denied", reason, 0L);
+        if (policy.getMetadata() != null && !policy.getMetadata().isEmpty()) {
+            result.setDetails(policy.getMetadata());
+        }
         context.setToolResult(result);
         context.getDynamicText().appendAssistantAction(context.getStep(), name(), context.getDecision());
         context.getDynamicText().appendToolResult(
@@ -204,6 +248,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .riskReason(reason)
                 .operationPreview(policy.getOperationPreview())
                 .observation(result.getObservation())
+                .metadata(policy.getMetadata())
                 .build());
         events.addAll(observationEvents(context));
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);

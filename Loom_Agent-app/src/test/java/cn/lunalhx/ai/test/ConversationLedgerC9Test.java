@@ -529,6 +529,39 @@ public class ConversationLedgerC9Test {
     }
 
     @Test
+    public void decidedApprovalRetryShouldCompleteDurableResume() {
+        AgentContext ctx = createBootstrappedRun("run-decided", "retry");
+        ctx.setResolvedWorkspace(Path.of(".").toAbsolutePath().normalize());
+        ctx.setWorkspaceDisplayName(".");
+        ctx.setCurrentNode(AgentNodeNames.APPROVAL_GATE);
+        ctx.setPendingApprovalId("approval-decided");
+        checkpointRepo.save(AgentCheckpoint.builder()
+                .runId("run-decided")
+                .currentNode(AgentNodeNames.APPROVAL_GATE)
+                .contextSnapshot(AgentContextSnapshot.from(ctx))
+                .reason("before_approval")
+                .build());
+        approvalStore.save(PendingApproval.builder()
+                .approvalId("approval-decided")
+                .runId("run-decided")
+                .context(ctx)
+                .tool("replace_in_file")
+                .permissionLevel(ToolPermissionLevel.WRITE_CONFIRM)
+                .build());
+        approvalStore.decide(
+                "approval-decided", ApprovalDecision.APPROVE, "accepted");
+
+        AgentResumePlan plan = coordinator.prepareApprovalResume(
+                "approval-decided", ApprovalDecision.APPROVE, "retry");
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, plan.startNode());
+        assertEquals("RESUMED", approvalStore.find("approval-decided")
+                .orElseThrow().getState().name());
+        assertThat(checkpointRepo.latest("run-decided")
+                .orElseThrow().getReason()).startsWith("approval_decided:");
+    }
+
+    @Test
     public void approvalDecisionIsDeterministic() {
         String approved = ControlUpdateTexts.renderApprovalDecision("approved", "replace_in_file", "ok");
         assertEquals(approved, ControlUpdateTexts.renderApprovalDecision("approved", "replace_in_file", "ok"));

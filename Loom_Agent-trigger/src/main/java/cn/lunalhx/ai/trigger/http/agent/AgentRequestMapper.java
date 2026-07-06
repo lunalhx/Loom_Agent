@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -77,7 +78,11 @@ public class AgentRequestMapper {
         }
     }
 
-    public record ApprovalCommand(ApprovalDecision decision, String reason) {}
+    public record ApprovalCommand(
+            ApprovalDecision decision,
+            String reason,
+            String reasonCode,
+            List<String> allowedAlternatives) {}
 
     public record UserInputCommand(UserInputAction action, String message) {}
 
@@ -133,7 +138,12 @@ public class AgentRequestMapper {
         if (decision == null) {
             return Result.failure(CommonErrorCode.INVALID_REQUEST, "decision 只能是 APPROVE 或 REJECT");
         }
-        return Result.success(new ApprovalCommand(decision, request.getReason()));
+        return Result.success(new ApprovalCommand(
+                decision,
+                request.getReason(),
+                request.getReasonCode(),
+                request.getAllowedAlternatives() == null
+                        ? List.of() : List.copyOf(request.getAllowedAlternatives())));
     }
 
     public Result<String> mapRunId(String runId) {

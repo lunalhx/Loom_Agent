@@ -2,6 +2,13 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.Application;
 import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceUndoLockRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
@@ -41,10 +48,12 @@ public class SqlitePersistenceIntegrationTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     private ConfigurableApplicationContext context;
+    private String dataDir;
 
     @Before
     public void setUp() throws Exception {
-        context = startContext(temporaryFolder.newFolder().getAbsolutePath());
+        dataDir = temporaryFolder.newFolder().getAbsolutePath();
+        context = startContext(dataDir);
     }
 
     @After
@@ -155,6 +164,61 @@ public class SqlitePersistenceIntegrationTest {
         assertFalse(locks.release(workspace, "run-2"));
         assertTrue(locks.release(workspace, "run-1"));
         assertTrue(locks.acquire(workspace, "run-2", Instant.now().plusSeconds(60)));
+    }
+
+    @Test
+    public void shouldRestoreCheckpointVerificationPlanAndApprovalAcrossContextRestart() {
+        AgentContext agentContext = new AgentContext();
+        agentContext.setRunId("restart-run");
+        agentContext.setQuestion("restart");
+        agentContext.setLastWriteStep(4);
+        agentContext.setLastTestStep(5);
+        agentContext.setLastTestPassed(false);
+        agentContext.setChangedSincePassingTest(true);
+        agentContext.setTouchedFiles(java.util.Set.of("src/main/java/Demo.java"));
+        AgentPlan plan = AgentPlan.forQuestion("restart");
+        agentContext.setPlan(plan);
+
+        context.getBean(AgentCheckpointRepository.class).save(
+                AgentCheckpoint.builder()
+                        .runId("restart-run")
+                        .currentNode("approval_gate")
+                        .contextSnapshot(AgentContextSnapshot.from(agentContext))
+                        .plan(plan)
+                        .reason("pause")
+                        .build());
+        context.getBean(ApprovalStore.class).save(
+                PendingApproval.builder()
+                        .approvalId("restart-approval")
+                        .runId("restart-run")
+                        .tool("write_file")
+                        .permissionLevel(
+                                cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel.WRITE_CONFIRM)
+                        .context(agentContext)
+                        .createdAt(Instant.now())
+                        .expiresAt(Instant.now().plusSeconds(60))
+                        .build());
+
+        context.close();
+        context = startContext(dataDir);
+
+        AgentContext restored = context.getBean(AgentCheckpointRepository.class)
+                .latest("restart-run")
+                .orElseThrow()
+                .getContextSnapshot()
+                .restore();
+        PendingApproval approval = context.getBean(ApprovalStore.class)
+                .find("restart-approval")
+                .orElseThrow();
+
+        assertEquals(4, restored.getLastWriteStep());
+        assertEquals(5, restored.getLastTestStep());
+        assertEquals(Boolean.FALSE, restored.getLastTestPassed());
+        assertTrue(restored.isChangedSincePassingTest());
+        assertTrue(restored.getTouchedFiles().contains("src/main/java/Demo.java"));
+        assertNotNull(restored.getPlan());
+        assertEquals("restart-run", approval.getRunId());
+        assertNotNull(approval.getContext());
     }
 
     private ConfigurableApplicationContext startContext(String dataDir) {

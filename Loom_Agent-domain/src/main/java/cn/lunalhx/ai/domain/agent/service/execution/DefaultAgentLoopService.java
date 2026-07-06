@@ -31,7 +31,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 
 @Slf4j
 public class DefaultAgentLoopService implements AgentLoopService {
@@ -58,8 +59,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
-        return executeAsync("ask", question == null ? null : question.getWorkspace(), sink -> {
+        return executeAsync("ask", question == null ? null : question.getWorkspace(), (sink, capture) -> {
             AgentContext context = resolveContext(question);
+            capture.accept(context);
+            emit(sink, List.of(components.eventFactory().runStarted(context)));
             if (undoCoordinator != null) {
                 undoCoordinator.onRunStart(context);
             }
@@ -93,24 +96,38 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     @Override
     public Flux<AgentEvent> resume(String approvalId, ApprovalDecision decision, String reason) {
-        return executeAsync("resume", approvalId, sink -> {
-            AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(approvalId, decision, reason);
+        return resume(approvalId, decision, reason, null, List.of());
+    }
+
+    @Override
+    public Flux<AgentEvent> resume(
+            String approvalId,
+            ApprovalDecision decision,
+            String reason,
+            String reasonCode,
+            List<String> allowedAlternatives) {
+        return executeAsync("resume", approvalId, (sink, capture) -> {
+            AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(
+                    approvalId, decision, reason, reasonCode, allowedAlternatives);
+            capture.accept(plan.context());
             continueFrom(plan, sink);
         });
     }
 
     @Override
     public Flux<AgentEvent> resumeRun(String runId) {
-        return executeAsync("resumeRun", runId, sink -> {
+        return executeAsync("resumeRun", runId, (sink, capture) -> {
             AgentResumePlan plan = components.resumeCoordinator().prepareRunResume(runId);
+            capture.accept(plan.context());
             continueFrom(plan, sink);
         });
     }
 
     @Override
     public Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message) {
-        return executeAsync("resumeWithUserInput", runId, sink -> {
+        return executeAsync("resumeWithUserInput", runId, (sink, capture) -> {
             AgentResumePlan plan = components.resumeCoordinator().prepareUserInputResume(runId, action, message);
+            capture.accept(plan.context());
             continueFrom(plan, sink);
         });
     }
@@ -156,10 +173,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
     // ==================== 核心编排 ====================
 
     private Flux<AgentEvent> executeAsync(String operation, String reference,
-                                          Consumer<FluxSink<AgentEvent>> action) {
+                                          BiConsumer<FluxSink<AgentEvent>, java.util.function.Consumer<AgentContext>> action) {
         return Flux.create(sink -> executor.execute(() -> {
+            AtomicReference<AgentContext> activeContext = new AtomicReference<>();
             try {
-                action.accept(sink);
+                action.accept(sink, activeContext::set);
             } catch (WorkspaceResolutionException e) {
                 emit(sink, List.of(components.eventFactory().workspaceError(e)));
                 sink.complete();
@@ -168,7 +186,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         operation,
                         reference == null ? null : StringUtils.abbreviate(reference, 200),
                         e);
-                emit(sink, List.of(components.eventFactory().agentError()));
+                emit(sink, List.of(components.eventFactory().agentError(activeContext.get())));
                 sink.complete();
             } finally {
                 MDC.clear();

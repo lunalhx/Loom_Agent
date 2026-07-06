@@ -16,6 +16,7 @@ import java.util.List;
 public class ToolCall {
 
     private String name;
+    private String toolCallId;
     private JsonNode input;
     private WorkspaceRef workspace;
     private Path workspaceRoot;

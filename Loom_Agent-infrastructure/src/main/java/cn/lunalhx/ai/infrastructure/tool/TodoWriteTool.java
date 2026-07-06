@@ -17,7 +17,7 @@ public class TodoWriteTool implements AgentTool {
         return ToolSpec.builder()
                 .name("todo_write")
                 .description("更新当前 Agent 计划和子任务状态，不修改工作区文件")
-                .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"可选任务ID\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"}},\"required\":[\"content\",\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
+                .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"任务ID，更新时用于匹配现有任务\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容，创建新任务时必填\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"kind\":{\"type\":\"string\",\"enum\":[\"inspect\",\"edit\",\"verify\"],\"description\":\"任务类型\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"涉及的工作区相对文件路径\"},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
                 .build();
     }
 
@@ -31,10 +31,38 @@ public class TodoWriteTool implements AgentTool {
             }
             for (int i = 0; i < todos.size(); i++) {
                 JsonNode todo = todos.get(i);
-                if (StringUtils.isBlank(todo.path("content").asText(null))) {
-                    return ToolResult.failure("invalid_todos", "todos[" + i + "].content 不能为空", elapsed(startedAt));
+                String todoId = todo.path("id").asText(null);
+                String todoContent = todo.path("content").asText(null);
+                if (StringUtils.isBlank(todoId) && StringUtils.isBlank(todoContent)) {
+                    return ToolResult.failure("invalid_todos",
+                        "todos[" + i + "]: 创建新任务需要提供 content，或提供 id 更新现有任务",
+                        elapsed(startedAt));
                 }
-                AgentPlanItemStatus.from(todo.path("status").asText("pending"));
+                if (!todo.has("status")) {
+                    return ToolResult.failure(
+                            "invalid_todos",
+                            "todos[" + i + "].status 不能为空",
+                            elapsed(startedAt));
+                }
+                AgentPlanItemStatus.from(todo.path("status").asText());
+                if (StringUtils.isBlank(todoId)) {
+                    String kind = todo.path("kind").asText(null);
+                    if (StringUtils.isBlank(kind)
+                            || !java.util.Set.of("inspect", "edit", "verify").contains(kind)) {
+                        return ToolResult.failure(
+                                "invalid_todos",
+                                "todos[" + i + "].kind 只能是 inspect、edit 或 verify",
+                                elapsed(startedAt));
+                    }
+                    if ("edit".equals(kind)
+                            && (!todo.path("targets").isArray()
+                            || todo.path("targets").isEmpty())) {
+                        return ToolResult.failure(
+                                "invalid_todos",
+                                "todos[" + i + "] kind=edit 时 targets 不能为空",
+                                elapsed(startedAt));
+                    }
+                }
             }
             return ToolResult.success("todo_write accepted " + todos.size() + " tasks", false, elapsed(startedAt));
         } catch (Exception e) {

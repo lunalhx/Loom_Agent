@@ -55,6 +55,7 @@ public class AgentResponseMapper {
                 .nodeInputs(event.getNodeInputs())
                 .thought(event.getThought())
                 .tool(event.getTool())
+                .toolCallId(event.getToolCallId())
                 .input(event.getInput())
                 .approvalId(event.getApprovalId())
                 .permissionLevel(event.getPermissionLevel())
@@ -71,6 +72,7 @@ public class AgentResponseMapper {
                 .message(event.getMessage())
                 .plan(event.getPlan())
                 .checkpointVersion(event.getCheckpointVersion())
+                .recoverable(event.getRecoverable())
                 .metadata(event.getMetadata())
                 .usage(usage)
                 .build();
@@ -80,7 +82,8 @@ public class AgentResponseMapper {
         return AgentApprovalResponse.builder()
                 .approvalId(approval.getApprovalId())
                 .runId(approval.getRunId())
-                .status("PENDING")
+                .status(approval.getState() == null
+                        ? "PENDING" : approval.getState().name())
                 .requestId(approval.getRequestId())
                 .conversationId(approval.getConversationId())
                 .workspace(approval.getWorkspaceDisplayName())
@@ -96,9 +99,15 @@ public class AgentResponseMapper {
     }
 
     public AgentTraceTimelineResponse toTraceTimeline(String runId, List<AgentTraceEvent> events) {
+        return toTraceTimeline(runId, null, events);
+    }
+
+    public AgentTraceTimelineResponse toTraceTimeline(
+            String runId, String status, List<AgentTraceEvent> events) {
         AgentTraceEvent first = events.get(0);
         return AgentTraceTimelineResponse.builder()
                 .runId(runId)
+                .status(status)
                 .traceId(first.getTraceId())
                 .rootRunId(first.getRootRunId())
                 .events(events.stream().map(this::toTraceEvent).toList())
@@ -106,11 +115,17 @@ public class AgentResponseMapper {
     }
 
     public AgentReplayResponse toReplayResponse(AgentReplayTimeline timeline) {
+        return toReplayResponse(timeline, null);
+    }
+
+    public AgentReplayResponse toReplayResponse(
+            AgentReplayTimeline timeline, String status) {
         return AgentReplayResponse.builder()
                 .mode(timeline.getMode())
                 .traceId(timeline.getTraceId())
                 .rootRunId(timeline.getRootRunId())
                 .runId(timeline.getRunId())
+                .status(status)
                 .includeChildren(timeline.getIncludeChildren())
                 .events(timeline.getEvents().stream().map(this::toReplayEvent).toList())
                 .costGenerated(timeline.getCostGenerated())

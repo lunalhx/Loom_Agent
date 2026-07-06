@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -21,6 +23,7 @@ public class ToolResult {
     private Integer originalChars;
     private Integer retainedChars;
     private String sha256;
+    private Map<String, Object> details;
 
     public static ToolResult success(String observation, boolean truncated, long elapsedMs) {
         return ToolResult.builder()

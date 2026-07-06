@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
+import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
@@ -19,6 +20,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -52,6 +55,11 @@ public class CheckpointAgentHook implements AgentHook {
             return AgentHookResult.proceed();
         }
         String currentNode = StringUtils.defaultIfBlank(hookContext.getNextNode(), hookContext.getNode());
+        if (event == AgentHookEvent.AFTER_TOOL) {
+            // The completed result is already present in the snapshot. Resume
+            // at observation so the tool is never executed a second time.
+            currentNode = AgentNodeNames.OBSERVATION;
+        }
         context.runtime().enterNode(currentNode);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         AgentCheckpoint checkpoint = checkpointRepository.save(AgentCheckpoint.builder()
@@ -134,12 +142,28 @@ public class CheckpointAgentHook implements AgentHook {
             return null;
         }
         try {
-            return objectMapper.writeValueAsString(new ToolExecutionSnapshot(context.getToolCall(), context.getToolResult()));
+            String phase = context.getReason() != null
+                    && context.getReason().startsWith("before_tool:")
+                    ? "STARTED" : "COMPLETED";
+            ToolCall call = context.getToolCall();
+            String inputFingerprint = call == null || call.getInput() == null
+                    ? null : DigestUtils.sha256Hex(call.getInput().toString());
+            return objectMapper.writeValueAsString(new ToolExecutionSnapshot(
+                    phase,
+                    call == null ? null : call.getToolCallId(),
+                    inputFingerprint,
+                    call,
+                    context.getToolResult()));
         } catch (Exception e) {
             return "{\"error\":\"tool_execution_snapshot_failed\"}";
         }
     }
 
-    private record ToolExecutionSnapshot(Object call, Object result) {
+    private record ToolExecutionSnapshot(
+            String phase,
+            String toolCallId,
+            String inputFingerprint,
+            Object call,
+            Object result) {
     }
 }

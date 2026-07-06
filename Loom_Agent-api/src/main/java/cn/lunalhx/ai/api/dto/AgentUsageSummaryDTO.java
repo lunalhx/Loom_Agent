@@ -17,6 +17,7 @@ public class AgentUsageSummaryDTO implements Serializable {
     private static final long serialVersionUID = 5227892274571996057L;
 
     private String runId;
+    private String status;
     private String traceId;
     private Long inputTokens;
     private Long outputTokens;

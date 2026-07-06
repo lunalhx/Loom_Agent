@@ -23,17 +23,18 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v3 — only durable state needed for recovery.
+ * Checkpoint snapshot v4 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v3 adds conversation ledger, stable prefix, and generation persistence.
- * v2 snapshots (missing these fields) restore with empty ledger state and
+ * <p>v4 adds execution verification state. Older snapshots with missing fields
+ * restore with safe defaults, while v2 snapshots missing ledger fields
  * are re-initialized by the appropriate initializer node.
  */
 @Data
@@ -42,7 +43,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 3;
+    private int schemaVersion = 4;
 
     // -- identity (durable) --
     private String runId;
@@ -84,6 +85,15 @@ public class AgentContextSnapshot {
     private String lastFailureFingerprint;
     private Integer sameFailureRepeats;
     private Integer noProgressRounds;
+    private Boolean codeReadObserved;
+    private Integer lastWriteStep;
+    private Integer lastTestStep;
+    private Boolean lastTestPassed;
+    private Boolean changedSincePassingTest;
+    private Integer verificationContinuationCount;
+    private List<String> touchedFiles;
+    private List<String> readFiles;
+    private Integer lastTestExitCode;
 
     // -- action (durable) --
     private AgentDecision decision;
@@ -163,7 +173,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(3)
+                .schemaVersion(4)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
@@ -201,6 +211,15 @@ public class AgentContextSnapshot {
                 .lastFailureFingerprint(runtime.lastFailureFingerprint())
                 .sameFailureRepeats(runtime.sameFailureRepeats())
                 .noProgressRounds(runtime.noProgressRounds())
+                .codeReadObserved(runtime.codeReadObserved())
+                .lastWriteStep(runtime.lastWriteStep())
+                .lastTestStep(runtime.lastTestStep())
+                .lastTestPassed(runtime.lastTestPassed())
+                .changedSincePassingTest(runtime.changedSincePassingTest())
+                .verificationContinuationCount(runtime.verificationContinuationCount())
+                .touchedFiles(new ArrayList<>(runtime.touchedFiles()))
+                .readFiles(new ArrayList<>(runtime.readFiles()))
+                .lastTestExitCode(runtime.lastTestExitCode())
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
@@ -294,6 +313,19 @@ public class AgentContextSnapshot {
         context.setLastFailureFingerprint(lastFailureFingerprint);
         context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
         context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
+        context.setCodeReadObserved(Boolean.TRUE.equals(codeReadObserved));
+        context.setLastWriteStep(lastWriteStep == null ? 0 : lastWriteStep);
+        context.setLastTestStep(lastTestStep == null ? 0 : lastTestStep);
+        context.setLastTestPassed(lastTestPassed);
+        context.setChangedSincePassingTest(
+                Boolean.TRUE.equals(changedSincePassingTest));
+        context.setVerificationContinuationCount(
+                verificationContinuationCount == null ? 0 : verificationContinuationCount);
+        context.setTouchedFiles(touchedFiles == null
+                ? new LinkedHashSet<>() : new LinkedHashSet<>(touchedFiles));
+        context.setReadFiles(readFiles == null
+                ? new LinkedHashSet<>() : new LinkedHashSet<>(readFiles));
+        context.setLastTestExitCode(lastTestExitCode);
 
         // action
         context.setDecision(decision);

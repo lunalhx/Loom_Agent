@@ -32,6 +32,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 
 public class AgentFileToolTest {
 
@@ -147,14 +153,44 @@ public class AgentFileToolTest {
                 mock(CommandExecutor.class), mock(BackgroundProcessManager.class));
 
         ObjectNode mavenInput = objectMapper.createObjectNode();
-        mavenInput.put("command", "mvn -pl Loom_Agent-app -am test");
+        mavenInput.put("command", "mvn test -Dtest=ConfigResolverTest");
         ToolPolicyDecision mavenPolicy = tool.policy(call("run_shell", mavenInput));
         assertTrue(mavenPolicy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM);
+        assertEquals("maven_test_allowed", mavenPolicy.getMetadata().get("reasonCode"));
+
+        ObjectNode unsafeMavenInput = objectMapper.createObjectNode();
+        unsafeMavenInput.put("command", "mvn -pl Loom_Agent-app -am test");
+        ToolPolicyDecision unsafeMavenPolicy = tool.policy(call("run_shell", unsafeMavenInput));
+        assertTrue(unsafeMavenPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
+        assertEquals("maven_command_not_allowed",
+                unsafeMavenPolicy.getMetadata().get("reasonCode"));
 
         ObjectNode dangerousInput = objectMapper.createObjectNode();
         dangerousInput.put("command", "rm -rf .");
         ToolPolicyDecision dangerousPolicy = tool.policy(call("run_shell", dangerousInput));
         assertTrue(dangerousPolicy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY);
+    }
+
+    @Test
+    public void mavenTestShouldStayForegroundEvenWhenBackgroundRequested() throws Exception {
+        CommandExecutor executor = mock(CommandExecutor.class);
+        BackgroundProcessManager background = mock(BackgroundProcessManager.class);
+        when(executor.run(anyList(), any(Path.class), anyLong(), any(), anyLong()))
+                .thenReturn(ToolResult.success(
+                        "ExitCode: 0\n[stdout]:\nok\n[stderr]:\n", false, 1));
+        RunShellTool tool = new RunShellTool(
+                properties(), workspacePort, executor, background);
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "mvn -q -o test");
+        input.put("runInBackground", true);
+
+        ToolResult result = tool.call(call("run_shell", input));
+
+        assertTrue(result.isSuccess());
+        assertEquals("TEST", result.getDetails().get("operationKind"));
+        verify(executor).run(
+                anyList(), any(Path.class), anyLong(), any(), anyLong());
+        verifyNoInteractions(background);
     }
 
     @Test

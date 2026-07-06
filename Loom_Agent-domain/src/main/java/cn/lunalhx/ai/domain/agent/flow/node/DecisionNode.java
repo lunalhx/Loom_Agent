@@ -16,14 +16,13 @@ import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.Schema;
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DecisionNode extends AbstractAgentNode {
@@ -32,6 +31,7 @@ public class DecisionNode extends AbstractAgentNode {
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
     private final ConversationLedgerAppendService ledgerAppendService;
+    private final DecisionParser decisionParser;
     private volatile Schema spawnAgentsSchema;
 
     public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
@@ -46,23 +46,24 @@ public class DecisionNode extends AbstractAgentNode {
         this.toolRegistry = toolRegistry;
         this.properties = properties;
         this.ledgerAppendService = ledgerAppendService;
+        this.decisionParser = new DecisionParser(objectMapper);
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
         try {
             context.setDecision(null);
-            AgentDecision decision = parseDecisionJson(context.getModelOutput());
+            Set<String> visibleTools = context.getToolSpecs() == null
+                    ? Set.of()
+                    : context.getToolSpecs().stream()
+                            .map(ToolSpec::getName)
+                            .collect(Collectors.toSet());
+            AgentDecision decision =
+                    decisionParser.parse(context.getModelOutput(), visibleTools);
             context.setDecision(decision);
             context.setParseErrors(0);
             if ("final".equals(decision.getType())) {
                 return NodeResult.next(AgentNodeNames.FINAL_ANSWER, List.of());
-            }
-            if (!"action".equals(decision.getType())) {
-                throw new IllegalArgumentException("type 只能是 action 或 final");
-            }
-            if (StringUtils.isBlank(decision.getTool())) {
-                throw new IllegalArgumentException("action.tool 不能为空");
             }
             // Validate tool is visible in current context's toolSpecs
             if (!isToolVisible(context, decision.getTool())) {
@@ -80,22 +81,54 @@ public class DecisionNode extends AbstractAgentNode {
                 return unavailableSubAgentTool(context, decision);
             }
             return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
+        } catch (DecisionParseException e) {
+            return handleParseError(context, e);
         } catch (Exception e) {
-            context.setParseErrors(context.getParseErrors() + 1);
-            if (context.getParseErrors() > properties.getParseErrorMaxAttempts()) {
-                fail(context, AgentStopReason.PARSE_ERROR, "parse_error", "模型连续返回非法 JSON，已停止");
-                return NodeResult.next(AgentNodeNames.FAIL, List.of());
-            }
-            context.setToolResult(ToolResult.failure("parse_error", "模型输出不是合法 Action JSON，请只输出 action 或 final JSON", 0L));
-            appendStep(context, false);
-            context.getDynamicText().appendSystemNote(
-                    Math.max(1, context.getStep()),
-                    name(),
-                    "Model Output Parse Error",
-                    "模型输出无法解析为 action/final JSON。\nRawOutput:\n" + context.getModelOutput());
-            appendParseErrorToLedger(context);
-            return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
+            return handleParseError(context, new DecisionParseException(
+                    DecisionParseErrorCode.INVALID_JSON,
+                    "模型输出解析异常: " + e.getMessage(),
+                    truncateModelOutput(context)));
         }
+    }
+
+    private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
+        context.setParseErrors(context.getParseErrors() + 1);
+        int maxAttempts = properties.getParseErrorMaxAttempts();
+        if (context.getParseErrors() > maxAttempts) {
+            fail(context, AgentStopReason.PARSE_ERROR, "parse_error",
+                    "模型连续返回非法 JSON (" + context.getParseErrors() + " 次)，已停止。最后错误: " + e.getMessage());
+            return NodeResult.next(AgentNodeNames.FAIL, List.of());
+        }
+        // Build a repair-focused error message for the model, varying on repeat
+        String repairMsg = e.toModelMessage();
+        String guidance;
+        if (context.getParseErrors() == 1) {
+            guidance = "请只输出一个合法的 action 或 final JSON 对象。";
+        } else {
+            // Vary the repair hint on repeated errors per PLAN.md §4.1
+            guidance = "你已经连续 " + context.getParseErrors() + " 次输出非法 JSON。"
+                    + "请检查并修复以下问题后重试：确保输出是纯 JSON（不含 markdown 代码块或额外文字），"
+                    + "type 必须是 \"action\" 或 \"final\"，所有字符串必须用双引号。"
+                    + "示例: {\"type\":\"action\",\"tool\":\"read_file\",\"input\":{\"path\":\"src/App.java\"}}";
+        }
+        context.setToolResult(ToolResult.failure("parse_error",
+                repairMsg + "\n" + guidance, 0L));
+        appendStep(context, false);
+        context.getDynamicText().appendSystemNote(
+                Math.max(1, context.getStep()),
+                name(),
+                "Model Output Parse Error [" + e.getErrorCode().name() + "]",
+                "Attempt " + context.getParseErrors() + "/" + (maxAttempts + 1) + "\n"
+                        + "Error: " + e.getMessage() + "\n"
+                        + "RawOutput:\n" + truncateModelOutput(context));
+        appendParseErrorToLedger(context);
+        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
+    }
+
+    private String truncateModelOutput(AgentContext context) {
+        String output = context.getModelOutput();
+        if (output == null) return "";
+        return output.length() > 500 ? output.substring(0, 500) + "..." : output;
     }
 
     private boolean isToolVisible(AgentContext context, String toolName) {
@@ -176,48 +209,6 @@ public class DecisionNode extends AbstractAgentNode {
                 decision,
                 "Success: false\nObservation:\n当前上下文不允许派生子 Agent");
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
-    }
-
-    private AgentDecision parseDecisionJson(String output) throws Exception {
-        String json = stripMarkdownFence(output);
-        JsonNode root = objectMapper.readTree(json);
-        String type = root.path("type").asText();
-        if (StringUtils.isBlank(type)) {
-            throw new IllegalArgumentException("type 不能为空");
-        }
-        JsonNode input = root.path("input");
-        Map<String, Object> inputView = input.isMissingNode() || input.isNull()
-                ? Map.of()
-                : objectMapper.convertValue(input, new TypeReference<Map<String, Object>>() {
-        });
-        String rawReason = root.path("reason").asText(null);
-        String reason = null;
-        if (StringUtils.isNotBlank(rawReason)) {
-            String trimmed = rawReason.trim();
-            reason = trimmed.length() > 240 ? trimmed.substring(0, 240) : trimmed;
-        }
-        return AgentDecision.builder()
-                .type(type)
-                .thought(root.path("thought").asText(null))
-                .reason(reason)
-                .tool(root.path("tool").asText(null))
-                .input(input)
-                .inputView(inputView)
-                .answer(root.path("answer").asText(null))
-                .evidence(root.path("evidence").isArray()
-                        ? objectMapper.convertValue(root.path("evidence"), new TypeReference<List<Map<String, Object>>>() {
-                })
-                        : List.of())
-                .build();
-    }
-
-    private String stripMarkdownFence(String output) {
-        String text = StringUtils.trimToEmpty(output);
-        if (text.startsWith("```")) {
-            text = text.replaceFirst("^```[a-zA-Z]*\\s*", "");
-            text = text.replaceFirst("\\s*```$", "");
-        }
-        return text;
     }
 
     private void appendParseErrorToLedger(AgentContext context) {

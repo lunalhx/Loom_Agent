@@ -62,15 +62,15 @@ public class DefaultReplayServiceTest {
     }
 
     @Test
-    public void shouldNotPersistTransientPromptAndModelOutputInSnapshotV3() {
+    public void shouldNotPersistTransientPromptAndModelOutputInSnapshotV4() {
         AgentContext context = context("checkpoint-run", null, "checkpoint-run", "trace-checkpoint");
         context.setCurrentNode(AgentNodeNames.MODEL_CALL);
         context.setModelOutput("o".repeat(6000));
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
 
-        assertEquals(3, snapshot.getSchemaVersion());
-        // v3 snapshots exclude transient prompt/model output; restore re-injects toolSpecs etc.
+        assertEquals(4, snapshot.getSchemaVersion());
+        // Snapshots exclude transient prompt/model output; restore re-injects toolSpecs etc.
         AgentContext restored = snapshot.restore();
         assertNull(restored.getModelOutput());
     }

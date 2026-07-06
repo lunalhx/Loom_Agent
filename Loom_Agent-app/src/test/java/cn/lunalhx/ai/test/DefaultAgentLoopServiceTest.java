@@ -238,7 +238,8 @@ public class DefaultAgentLoopServiceTest {
                 .block(Duration.ofSeconds(3));
 
         assertEquals(1, calls.get());
-        assertTrue(approvalStore.find(approval.getApprovalId()).isEmpty());
+        assertEquals("RESUMED", approvalStore.find(approval.getApprovalId())
+                .orElseThrow().getState().name());
         assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.TOOL_CALL));
         assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
                 && event.getObservation().contains("updated: Demo.java")));
@@ -277,7 +278,9 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(resumed.stream().anyMatch(event -> event.getType() == AgentEventType.OBSERVATION
                 && event.getObservation().contains("approval_rejected")));
         assertEquals("用户拒绝写入，未修改文件。",
-                resumed.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+                resumed.stream()
+                        .filter(event -> event.getType() == AgentEventType.ANSWER)
+                        .findFirst().orElseThrow().getAnswer());
     }
 
     @Test
@@ -302,7 +305,9 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.POLICY_DENIED
                 && event.getObservation().contains("policy_denied")));
         assertEquals("高危命令已拦截。",
-                events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
+                events.stream()
+                        .filter(event -> event.getType() == AgentEventType.ANSWER)
+                        .findFirst().orElseThrow().getAnswer());
     }
 
     @Test
@@ -369,7 +374,7 @@ public class DefaultAgentLoopServiceTest {
     public void shouldUpdatePlanWithTodoWriteTool() {
         DefaultAgentLoopService service = newService(
                 completeGateway(new java.util.ArrayList<>(),
-                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"理解代码\",\"status\":\"completed\",\"evidence\":\"已读实现\"},{\"id\":\"task-2\",\"content\":\"补测试\",\"status\":\"in_progress\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"理解代码\",\"status\":\"completed\",\"kind\":\"inspect\",\"evidence\":\"已读实现\"},{\"id\":\"task-2\",\"content\":\"补测试\",\"status\":\"in_progress\",\"kind\":\"verify\"}]}}",
                         "{\"type\":\"final\",\"answer\":\"计划已更新。\",\"evidence\":[]}"),
                 List.of(new TodoWriteTool()));
 
@@ -397,7 +402,7 @@ public class DefaultAgentLoopServiceTest {
         List<ChatPrompt> prompts = new java.util.ArrayList<>();
         DefaultAgentLoopService service = newService(
                 capturePromptGateway(prompts,
-                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\",\"kind\":\"inspect\"},{\"id\":\"task-2\",\"content\":\"完成验证\",\"status\":\"pending\",\"kind\":\"verify\"}]}}",
                         "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
                         "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
                         "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
@@ -435,11 +440,11 @@ public class DefaultAgentLoopServiceTest {
         List<ChatPrompt> prompts = new java.util.ArrayList<>();
         DefaultAgentLoopService service = newService(
                 capturePromptGateway(prompts,
-                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"pending\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"建立计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"in_progress\",\"kind\":\"inspect\"},{\"id\":\"task-2\",\"content\":\"完成验证\",\"status\":\"pending\",\"kind\":\"verify\"}]}}",
                         "{\"type\":\"action\",\"thought\":\"查1\",\"tool\":\"code_search\",\"input\":{\"query\":\"a\"}}",
                         "{\"type\":\"action\",\"thought\":\"查2\",\"tool\":\"code_search\",\"input\":{\"query\":\"b\"}}",
                         "{\"type\":\"action\",\"thought\":\"查3\",\"tool\":\"code_search\",\"input\":{\"query\":\"c\"}}",
-                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"content\":\"检查目标代码\",\"status\":\"completed\"},{\"id\":\"task-2\",\"content\":\"完成修改和验证\",\"status\":\"in_progress\"}]}}",
+                        "{\"type\":\"action\",\"thought\":\"更新计划\",\"tool\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"task-1\",\"status\":\"completed\"},{\"id\":\"task-2\",\"status\":\"completed\"}]}}",
                         "{\"type\":\"final\",\"answer\":\"完成。\",\"evidence\":[]}"),
                 List.of(new TodoWriteTool(), fakeTool("code_search", "ok")));
 
@@ -1178,8 +1183,7 @@ public class DefaultAgentLoopServiceTest {
 
         assertTrue(aborted.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
-        assertTrue(aborted.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+        assertFalse(aborted.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
         assertEquals(3, calls.get());
     }
 
@@ -1210,8 +1214,7 @@ public class DefaultAgentLoopServiceTest {
         assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.USER_INPUT_REQUIRED));
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.CONTEXT_OVERFLOW.code().equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.CONTEXT_OVERFLOW));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -1268,8 +1271,7 @@ public class DefaultAgentLoopServiceTest {
 
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.TIMEOUT));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -1298,8 +1300,7 @@ public class DefaultAgentLoopServiceTest {
 
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.TIMEOUT));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     @Test
@@ -1323,8 +1324,7 @@ public class DefaultAgentLoopServiceTest {
 
         assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.ERROR
                 && ModelErrorCode.MODEL_CALL_TIMEOUT.code().equals(event.getCode())));
-        assertTrue(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE
-                && event.getStopReason() == AgentStopReason.TIMEOUT));
+        assertFalse(events.stream().anyMatch(event -> event.getType() == AgentEventType.DONE));
     }
 
     @Test

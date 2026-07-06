@@ -39,6 +39,7 @@ public class AgentSseResponder {
     private final SseResponder sseResponder = new SseResponder();
 
     private static final Set<AgentEventType> PUBLIC_ASK_WHITELIST = EnumSet.of(
+            AgentEventType.RUN_STARTED,
             AgentEventType.META,
             AgentEventType.PLAN_UPDATED,
             AgentEventType.REPLAN_STARTED,
@@ -51,6 +52,7 @@ public class AgentSseResponder {
             AgentEventType.SKILL_ACTIVATED,
             AgentEventType.APPROVAL_REQUIRED,
             AgentEventType.HIGH_RISK_APPROVAL_REQUIRED,
+            AgentEventType.PAUSED_FOR_APPROVAL,
             AgentEventType.USER_INPUT_REQUIRED,
             AgentEventType.POLICY_DENIED,
             AgentEventType.ANSWER,
