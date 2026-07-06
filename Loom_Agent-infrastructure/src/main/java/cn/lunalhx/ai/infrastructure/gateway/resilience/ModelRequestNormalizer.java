@@ -48,6 +48,29 @@ public final class ModelRequestNormalizer {
                 .build();
     }
 
+    ChatPrompt withEmptyResponseHint(ChatPrompt source) {
+        String existing = source.getSystemPrompt();
+        String hint = "上次响应为空，只返回一个合法 action/final JSON";
+        if (existing != null && existing.contains(hint)) {
+            return source;
+        }
+        String systemPrompt = StringUtils.isBlank(existing) ? hint : existing + "\n" + hint;
+        return ChatPrompt.builder()
+                .requestId(source.getRequestId())
+                .conversationId(source.getConversationId())
+                .message(source.getMessage())
+                .systemPrompt(systemPrompt)
+                .model(source.getModel())
+                .temperature(source.getTemperature())
+                .maxTokens(source.getMaxTokens())
+                .outputFormat(source.getOutputFormat())
+                .capability(source.getCapability())
+                .purpose(source.getPurpose())
+                .deadlineEpochMs(source.getDeadlineEpochMs())
+                .messages(source.getMessages())
+                .build();
+    }
+
     public ModelCallKey key(ChatPrompt prompt) {
         String model = StringUtils.defaultIfBlank(prompt.getModel(),
                 environment.getProperty("spring.ai.deepseek.chat.model", DEFAULT_MODEL));

@@ -33,6 +33,13 @@ public class ProgressGuard {
 
         if (result.isSuccess() && isProgressMaking(context)) {
             resetAll(context);
+            if (shouldSuggestTermination(context)) {
+                context.getDynamicText().appendSystemNote(
+                        context.runtime().step(),
+                        StringUtils.defaultString(context.runtime().currentNode(), "progress_guard"),
+                        "系统提示",
+                        "所有测试已通过，且没有等待保存的文件修改。如果任务已完成，请使用 final_answer 结束任务。");
+            }
             return ProgressResult.CONTINUE;
         }
 
@@ -97,8 +104,18 @@ public class ProgressGuard {
             int repeats = runtime.sameFailureRepeats() + 1;
             runtime.setSameFailureRepeats(repeats);
             if (repeats >= maxRepeats) {
+                if (!runtime.repeatedFailureReplanAttempted()) {
+                    runtime.setRepeatedFailureReplanAttempted(true);
+                    context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
+                    context.getDynamicText().appendSystemNote(
+                            runtime.step(),
+                            StringUtils.defaultString(runtime.currentNode(), "progress_guard"),
+                            "系统提示",
+                            "你已连续相同失败 " + repeats + " 次。请尝试不同的方法，或者考虑是否可以结束任务。");
+                    return ProgressResult.REPLAN;
+                }
                 runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_failure",
-                        "连续相同失败 " + repeats + " 次，无进展");
+                        "连续相同失败 " + repeats + " 次，无进展（已尝试 replan）");
                 context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
                 return ProgressResult.TERMINATE;
             }
@@ -115,7 +132,22 @@ public class ProgressGuard {
         runtime.setSameActionRepeats(0);
         runtime.setLastFailureFingerprint(null);
         runtime.setSameFailureRepeats(0);
+        runtime.setRepeatedFailureReplanAttempted(false);
         runtime.setNoProgressRounds(0);
+    }
+
+    private boolean shouldSuggestTermination(AgentContext context) {
+        AgentRuntimeState runtime = context.runtime();
+        if (runtime.lastTestPassed() == null || !runtime.lastTestPassed()) {
+            return false;
+        }
+        if (runtime.changedSincePassingTest()) {
+            return false;
+        }
+        if (runtime.lastWriteStep() <= 0) {
+            return false;
+        }
+        return true;
     }
 
     private String actionFingerprint(AgentContext context) {
@@ -143,6 +175,7 @@ public class ProgressGuard {
 
     public enum ProgressResult {
         CONTINUE,
+        REPLAN,
         TERMINATE
     }
 }

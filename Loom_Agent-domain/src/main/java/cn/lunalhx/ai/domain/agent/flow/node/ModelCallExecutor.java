@@ -8,6 +8,8 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
+import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
+import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Duration;
@@ -50,7 +52,16 @@ final class ModelCallExecutor {
             }
 
             if (result == null || StringUtils.isBlank(result.getContent())) {
-                return ModelCallResult.error(new IllegalStateException("模型响应为空"), requestedModel, currentMaxTokens);
+                String finishReason = result == null ? null : result.getFinishReason();
+                int contentLength = result == null ? 0 : StringUtils.length(result.getContent());
+                ModelGatewayException emptyError = new ModelGatewayException(
+                        ModelErrorCode.MODEL_EMPTY_RESPONSE,
+                        ModelErrorCode.MODEL_EMPTY_RESPONSE.defaultMessage(),
+                        true, null, null, requestedModel, null);
+                emptyError.setDiagnosticMetadata(java.util.Map.of(
+                        "finishReason", StringUtils.defaultIfBlank(finishReason, "unknown"),
+                        "contentLength", contentLength));
+                return ModelCallResult.error(emptyError, requestedModel, currentMaxTokens);
             }
 
             budgetCoordinator.recordUsage(context, AgentNodeNames.MODEL_CALL, result);

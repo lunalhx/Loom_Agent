@@ -147,13 +147,14 @@ public class AgentLoopAutoConfig {
 
     @Bean
     public AgentLoopRuntimeDependencies agentLoopRuntimeDependencies(AgentRuntimeProperties agentRuntimeProperties,
-                                                                       TraceRecorder traceRecorder,
-                                                                       BudgetGuard budgetGuard,
-                                                                       AgentMetrics agentMetrics,
-                                                                       ContextWindowManager contextWindowManager,
-                                                                       ToolOutputSanitizer toolOutputSanitizer) {
+                                                                        TraceRecorder traceRecorder,
+                                                                        BudgetGuard budgetGuard,
+                                                                        AgentMetrics agentMetrics,
+                                                                        ContextWindowManager contextWindowManager,
+                                                                        ToolOutputSanitizer toolOutputSanitizer,
+                                                                        ModelRuntimeProperties modelRuntimeProperties) {
         return new AgentLoopRuntimeDependencies(agentRuntimeProperties, traceRecorder, budgetGuard,
-                agentMetrics, contextWindowManager, toolOutputSanitizer);
+                agentMetrics, contextWindowManager, toolOutputSanitizer, modelRuntimeProperties);
     }
 
     @Bean

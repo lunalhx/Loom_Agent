@@ -9,6 +9,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.http.HttpTimeoutException;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 public final class ModelFailureClassifier {
@@ -70,6 +71,23 @@ public final class ModelFailureClassifier {
     ModelGatewayException deadlineExceeded(String model) {
         return new ModelGatewayException(ModelErrorCode.MODEL_CALL_TIMEOUT,
                 ModelErrorCode.MODEL_CALL_TIMEOUT.defaultMessage(), false, null, null, model, null);
+    }
+
+    ModelGatewayException emptyResponse(String model, String finishReason, int contentLength) {
+        ModelGatewayException exception = new ModelGatewayException(
+                ModelErrorCode.MODEL_EMPTY_RESPONSE,
+                ModelErrorCode.MODEL_EMPTY_RESPONSE.defaultMessage(),
+                true, null, null, model, null);
+        exception.setDiagnosticMetadata(Map.of(
+                "finishReason", StringUtils.defaultIfBlank(finishReason, "unknown"),
+                "contentLength", contentLength));
+        return exception;
+    }
+
+    boolean isEmptyResponse(Throwable error) {
+        Throwable unwrapped = unwrap(error);
+        return unwrapped instanceof ModelGatewayException exception
+                && exception.getErrorCode() == ModelErrorCode.MODEL_EMPTY_RESPONSE;
     }
 
     private boolean isNonRetryable(ModelGatewayException exception) {

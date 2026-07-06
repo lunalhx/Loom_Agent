@@ -2,6 +2,8 @@ package cn.lunalhx.ai.domain.model.valobj;
 
 import cn.lunalhx.ai.types.error.ErrorCode;
 
+import java.util.Map;
+
 public class ModelGatewayException extends RuntimeException {
 
     private static final long serialVersionUID = -734176253641175884L;
@@ -11,6 +13,7 @@ public class ModelGatewayException extends RuntimeException {
     private final Integer httpStatus;
     private final Long retryAfterMs;
     private String model;
+    private Map<String, Object> diagnosticMetadata;
 
     public ModelGatewayException(ErrorCode errorCode, String message, boolean retryable, Integer httpStatus, Throwable cause) {
         this(errorCode, message, retryable, httpStatus, null, null, cause);
@@ -53,6 +56,14 @@ public class ModelGatewayException extends RuntimeException {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public Map<String, Object> getDiagnosticMetadata() {
+        return diagnosticMetadata;
+    }
+
+    public void setDiagnosticMetadata(Map<String, Object> diagnosticMetadata) {
+        this.diagnosticMetadata = diagnosticMetadata;
     }
 
 }

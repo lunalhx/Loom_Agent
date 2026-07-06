@@ -99,6 +99,16 @@ public class DecisionNode extends AbstractAgentNode {
                     "模型连续返回非法 JSON (" + context.getParseErrors() + " 次)，已停止。最后错误: " + e.getMessage());
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
+        int fallbackThreshold = properties.getParseErrorFallbackModelThreshold() == null
+                ? 1 : properties.getParseErrorFallbackModelThreshold();
+        if (context.getParseErrors() > fallbackThreshold && context.getRecoveryModelOverride() == null) {
+            // Use the fallback model from ModelRecoveryProperties, or hardcode deepseek-v4-pro
+            String fallbackModel = properties.getModelRecovery() != null
+                    && properties.getModelRecovery().getContextFallbackModel() != null
+                    ? properties.getModelRecovery().getContextFallbackModel()
+                    : "deepseek-v4-pro";
+            context.setRecoveryModelOverride(fallbackModel);
+        }
         // Build a repair-focused error message for the model, varying on repeat
         String repairMsg = e.toModelMessage();
         String guidance;

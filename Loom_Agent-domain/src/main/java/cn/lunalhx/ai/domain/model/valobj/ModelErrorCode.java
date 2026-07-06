@@ -21,6 +21,7 @@ public enum ModelErrorCode implements ErrorCode {
     MODEL_DECISION_TRUNCATED("model_decision_truncated", "模型控制决策输出被截断", ErrorCategory.INTERNAL),
     TOOL_RESULT_SUMMARY_TRUNCATED("tool_result_summary_truncated", "工具结果摘要输出被截断", ErrorCategory.INTERNAL),
     CONTENT_FILTERED("content_filtered", "模型输出被内容安全策略拦截", ErrorCategory.FORBIDDEN),
+    MODEL_EMPTY_RESPONSE("model_empty_response", "模型返回空响应，已重试仍无内容", ErrorCategory.INTERNAL),
     MODEL_ERROR("model_error", "模型调用失败", ErrorCategory.INTERNAL),
     APPROVAL_STATE_MISSING("approval_state_missing", "审批状态不一致，审批记录已不可查", ErrorCategory.INTERNAL);
 

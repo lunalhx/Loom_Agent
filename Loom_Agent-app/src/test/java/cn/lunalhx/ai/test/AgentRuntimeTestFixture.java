@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
@@ -283,7 +284,8 @@ public final class AgentRuntimeTestFixture {
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
-                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
+                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer(),
+                new ModelRuntimeProperties());
         ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
                 standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
@@ -306,7 +308,8 @@ public final class AgentRuntimeTestFixture {
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
-                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer());
+                effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer(),
+                new ModelRuntimeProperties());
         ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
                 standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),

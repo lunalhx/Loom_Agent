@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -304,6 +306,211 @@ public class ResilientModelGatewayTest {
 
         assertEquals(2, calls.get());
         assertEquals("ok", chunks.getFirst().getContent());
+    }
+
+    @Test
+    public void shouldRetryEmptyContentAndSucceedOnSecondAttempt() {
+        AtomicInteger calls = new AtomicInteger();
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 1) {
+                    return Mono.just(ModelChatResult.builder().content("").finishReason("stop").build());
+                }
+                return Mono.just(ModelChatResult.builder().content("{\"type\":\"action\"}").finishReason("stop").build());
+            }
+        }, traceRecorder);
+
+        AgentContext context = context("empty-retry-run");
+        ModelChatResult result;
+        try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+            result = gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2));
+        }
+
+        assertEquals(2, calls.get());
+        assertEquals("{\"type\":\"action\"}", result.getContent());
+        assertTrue(traceRecorder.timeline("empty-retry-run").stream()
+                .anyMatch(event -> "model_retry_attempt".equals(event.getEventType())
+                        && "error".equals(event.getStatus())
+                        && "model_empty_response".equals(event.getMetadata().get("errorCode"))));
+        assertTrue(traceRecorder.timeline("empty-retry-run").stream()
+                .anyMatch(event -> "model_retry_attempt".equals(event.getEventType())
+                        && "success".equals(event.getStatus())));
+    }
+
+    @Test
+    public void shouldRetryNullContentAndSucceedOnSecondAttempt() {
+        AtomicInteger calls = new AtomicInteger();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 1) {
+                    return Mono.just(ModelChatResult.builder().content(null).finishReason("stop").build());
+                }
+                return Mono.just(ModelChatResult.builder().content("{\"type\":\"final\"}").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder());
+
+        ModelChatResult result = gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION))
+                .block(Duration.ofSeconds(2));
+
+        assertEquals(2, calls.get());
+        assertEquals("{\"type\":\"final\"}", result.getContent());
+    }
+
+    @Test
+    public void shouldReturnModelEmptyResponseWhenRetryExhausted() {
+        AtomicInteger calls = new AtomicInteger();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.just(ModelChatResult.builder().content("").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder());
+
+        ModelGatewayException error = assertThrows(ModelGatewayException.class,
+                () -> gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION))
+                        .block(Duration.ofSeconds(2)));
+
+        assertEquals(ModelErrorCode.MODEL_EMPTY_RESPONSE, error.getErrorCode());
+        assertTrue(error.isRetryable());
+        int maxAttempts = 3;
+        assertEquals(maxAttempts, calls.get());
+    }
+
+    @Test
+    public void emptyResponseShouldRecordDiagnosticMetadataInTrace() {
+        AtomicInteger calls = new AtomicInteger();
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 1) {
+                    return Mono.just(ModelChatResult.builder().content("").finishReason("length").build());
+                }
+                return Mono.just(ModelChatResult.builder().content("{}").finishReason("stop").build());
+            }
+        }, traceRecorder);
+
+        AgentContext context = context("empty-diagnostic-run");
+        try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+            gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2));
+        }
+
+        assertTrue(traceRecorder.timeline("empty-diagnostic-run").stream()
+                .anyMatch(event -> "model_retry_attempt".equals(event.getEventType())
+                        && "error".equals(event.getStatus())
+                        && "length".equals(event.getMetadata().get("finishReason"))
+                        && Integer.valueOf(0).equals(event.getMetadata().get("contentLength"))));
+    }
+
+    @Test
+    public void emptyResponseRetryShouldAppendControlHintOnSecondAttempt() {
+        List<String> systemPrompts = new ArrayList<>();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                systemPrompts.add(prompt.getSystemPrompt());
+                if (systemPrompts.size() == 1) {
+                    return Mono.just(ModelChatResult.builder().content("").finishReason("stop").build());
+                }
+                return Mono.just(ModelChatResult.builder().content("{}").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder());
+
+        gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2));
+
+        assertEquals(2, systemPrompts.size());
+        assertNull(systemPrompts.get(0));
+        assertNotNull(systemPrompts.get(1));
+        assertTrue(systemPrompts.get(1).contains("上次响应为空"));
+    }
+
+    @Test
+    public void emptyResponseRetryShouldNotStackControlHint() {
+        List<String> systemPrompts = new ArrayList<>();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                systemPrompts.add(prompt.getSystemPrompt());
+                return Mono.just(ModelChatResult.builder().content("").finishReason("stop").build());
+            }
+        }, new InMemoryTraceRecorder());
+
+        assertThrows(ModelGatewayException.class,
+                () -> gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION))
+                        .block(Duration.ofSeconds(2)));
+
+        assertEquals(3, systemPrompts.size());
+        assertNull(systemPrompts.get(0));
+        String hint = "上次响应为空";
+        long hintCount1 = systemPrompts.get(1).chars().filter(c -> c == '上').count();
+        long hintCount2 = systemPrompts.get(2).chars().filter(c -> c == '上').count();
+        assertEquals(1, hintCount1);
+        assertEquals(1, hintCount2);
+    }
+
+    @Test
+    public void emptyResponseMustNotBeRecordedAsSuccessAttempt() {
+        AtomicInteger calls = new AtomicInteger();
+        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
+        ResilientModelGateway gateway = gateway(new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.incrementAndGet() == 1) {
+                    return Mono.just(ModelChatResult.builder().content("").finishReason("stop").build());
+                }
+                return Mono.just(ModelChatResult.builder().content("{}").finishReason("stop").build());
+            }
+        }, traceRecorder);
+
+        AgentContext context = context("empty-not-success-run");
+        try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+            gateway.complete(prompt(ModelCapabilities.COMPLETE_AGENT_DECISION)).block(Duration.ofSeconds(2));
+        }
+
+        long successCount = traceRecorder.timeline("empty-not-success-run").stream()
+                .filter(event -> "model_retry_attempt".equals(event.getEventType())
+                        && "success".equals(event.getStatus()))
+                .count();
+        assertEquals(1, successCount);
     }
 
     private ResilientModelGateway gateway(ModelGateway delegate, InMemoryTraceRecorder traceRecorder) {

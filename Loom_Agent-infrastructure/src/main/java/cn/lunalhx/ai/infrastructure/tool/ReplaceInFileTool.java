@@ -33,7 +33,7 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("replace_in_file")
-                .description("精确替换工作区内文本文件的一段内容。何时使用：局部修改已知文件时。何时不要使用：创建新文件或整体重写请用 write_file。oldText 必须精确匹配（含空白），expectedOccurrences 指定期望匹配次数。权限：写入前必须人工确认")
+                .description("精确替换工作区内文本文件的一段内容。何时使用：已有文件的局部修改优先使用此工具。何时不要使用：创建新文件或整体重写请用 write_file。oldText 必须精确匹配（含空白），expectedOccurrences 指定期望匹配次数。权限：写入前必须人工确认")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +

@@ -130,6 +130,10 @@ public class AgentContext {
     public void setStep(int v) { runtime.setStep(v); }
     public int getParseErrors() { return runtime.parseErrors(); }
     public void setParseErrors(int v) { runtime.setParseErrors(v); }
+    public int getModelCallRetryCount() { return runtime.modelCallRetryCount(); }
+    public void setModelCallRetryCount(int v) { runtime.setModelCallRetryCount(v); }
+    public void incrementModelCallRetryCount() { runtime.setModelCallRetryCount(runtime.modelCallRetryCount() + 1); }
+    public void resetModelCallRetryCount() { runtime.setModelCallRetryCount(0); }
     public Instant getStartedAt() { return runtime.startedAt(); }
     public void setStartedAt(Instant v) { runtime.setStartedAt(v); }
     public List<AgentStep> getHistory() { return runtime.history(); }
@@ -160,6 +164,8 @@ public class AgentContext {
     public void setLastFailureFingerprint(String v) { runtime.setLastFailureFingerprint(v); }
     public int getSameFailureRepeats() { return runtime.sameFailureRepeats(); }
     public void setSameFailureRepeats(int v) { runtime.setSameFailureRepeats(v); }
+    public boolean isRepeatedFailureReplanAttempted() { return runtime.repeatedFailureReplanAttempted(); }
+    public void setRepeatedFailureReplanAttempted(boolean v) { runtime.setRepeatedFailureReplanAttempted(v); }
     public int getNoProgressRounds() { return runtime.noProgressRounds(); }
     public void setNoProgressRounds(int v) { runtime.setNoProgressRounds(v); }
     public boolean isCodeReadObserved() { return runtime.codeReadObserved(); }

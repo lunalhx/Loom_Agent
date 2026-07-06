@@ -14,6 +14,7 @@ public final class AgentRecoveryState {
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
+    private boolean modelErrorRecoveryAttempted;
 
     // -- getters --
 
@@ -24,6 +25,7 @@ public final class AgentRecoveryState {
     public String recoveryModelOverride() { return recoveryModelOverride; }
     public String contextTranscriptArtifactId() { return contextTranscriptArtifactId; }
     public String contextBlockedReason() { return contextBlockedReason; }
+    public boolean modelErrorRecoveryAttempted() { return modelErrorRecoveryAttempted; }
 
     // -- package-private mutators --
 
@@ -34,6 +36,7 @@ public final class AgentRecoveryState {
     public void setRecoveryModelOverride(String v) { this.recoveryModelOverride = v; }
     public void setContextTranscriptArtifactId(String v) { this.contextTranscriptArtifactId = v; }
     public void setContextBlockedReason(String v) { this.contextBlockedReason = v; }
+    public void setModelErrorRecoveryAttempted(boolean v) { this.modelErrorRecoveryAttempted = v; }
 
     // -- behavior methods --
 
@@ -59,5 +62,6 @@ public final class AgentRecoveryState {
         this.contextTranscriptArtifactId = null;
         this.contextBlockedReason = null;
         this.fallbackReason = null;
+        this.modelErrorRecoveryAttempted = false;
     }
 }

@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.util.Objects;
 
@@ -19,20 +20,24 @@ public final class ModelCallServices {
     private final BudgetGuard budgetGuard;
     private final ContextWindowManager contextWindowManager;
     private final ConversationLedgerAppendService ledgerAppendService;
+    private final ModelRuntimeProperties modelRuntimeProperties;
 
     public ModelCallServices(TraceRecorder traceRecorder,
                               BudgetGuard budgetGuard,
                               ContextWindowManager contextWindowManager,
-                              ConversationLedgerAppendService ledgerAppendService) {
+                              ConversationLedgerAppendService ledgerAppendService,
+                              ModelRuntimeProperties modelRuntimeProperties) {
         this.traceRecorder = traceRecorder;
         this.budgetGuard = budgetGuard;
         this.contextWindowManager = contextWindowManager;
         this.ledgerAppendService = Objects.requireNonNull(
                 ledgerAppendService, "ledgerAppendService must not be null");
+        this.modelRuntimeProperties = Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
     }
 
     public TraceRecorder traceRecorder() { return traceRecorder; }
     public BudgetGuard budgetGuard() { return budgetGuard; }
     public ContextWindowManager contextWindowManager() { return contextWindowManager; }
     public ConversationLedgerAppendService ledgerAppendService() { return ledgerAppendService; }
+    public ModelRuntimeProperties modelRuntimeProperties() { return modelRuntimeProperties; }
 }

@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
@@ -34,6 +36,7 @@ public class ModelCallNode extends AbstractAgentNode {
     private final ModelCallFailureClassifier failureClassifier;
     private final ModelCallExecutor executor;
     private final ContextRecoveryChain recoveryChain;
+    private final ContextRecoveryChain modelErrorRecoveryChain;
     private final ConversationLedgerAppendService ledgerAppendService;
 
     public ModelCallNode(ModelGateway modelGateway,
@@ -53,6 +56,12 @@ public class ModelCallNode extends AbstractAgentNode {
                 new FallbackModelStep(properties, modelGateway, budgetCoordinator),
                 new DeepSummaryStep(properties, services.contextWindowManager(), modelGateway),
                 new ExhaustedStep()
+        ));
+        this.modelErrorRecoveryChain = new ContextRecoveryChain(List.of(
+                new FormatReminderStep(),
+                new ModelFallbackStep(services.modelRuntimeProperties()),
+                new ContextSimplifyStep(services.contextWindowManager()),
+                new ModelErrorExhaustedStep()
         ));
         this.ledgerAppendService = services.ledgerAppendService();
     }
@@ -78,6 +87,8 @@ public class ModelCallNode extends AbstractAgentNode {
             context.setFallbackReason(StringUtils.defaultIfBlank(
                     result.chatResult().getFallbackReason(), context.getFallbackReason()));
             resetContextRecovery(context);
+            context.resetModelCallRetryCount();
+            context.recovery().setModelErrorRecoveryAttempted(false);
             String eventKey = ConversationLedgerInitializer.eventKey(
                     context.getRunId(), String.valueOf(context.getStep() + 1), "assistant");
             ledgerAppendService.appendAssistant(
@@ -129,9 +140,30 @@ public class ModelCallNode extends AbstractAgentNode {
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
             }
 
-            default:
-                fail(context, AgentStopReason.MODEL_ERROR, "model_error", "模型决策失败");
+            default: {
+                int retryCount = context.getModelCallRetryCount();
+                int maxRetries = properties.getModelCallRetryMaxAttempts() == null
+                        ? 2 : properties.getModelCallRetryMaxAttempts();
+                if (retryCount < maxRetries) {
+                    context.incrementModelCallRetryCount();
+                    AgentEvent retryEvent = event(context, AgentEventType.OBSERVATION)
+                            .code("model_error_retry")
+                            .message("模型决策失败，正在重试 (第 " + (retryCount + 1) + "/" + maxRetries + " 次)")
+                            .build();
+                    return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(retryEvent));
+                }
+                if (!context.recovery().modelErrorRecoveryAttempted()) {
+                    context.recovery().setModelErrorRecoveryAttempted(true);
+                    return modelErrorRecoveryChain.execute(context,
+                            StringUtils.defaultIfBlank(
+                                    context.getRecoveryModelOverride(),
+                                    context.getCurrentModel()),
+                            requestedMaxTokens, deadlineEpochMs);
+                }
+                fail(context, AgentStopReason.MODEL_ERROR, "model_error",
+                        "模型决策失败（已重试 " + retryCount + " 次，恢复链已耗尽）");
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
+            }
         }
     }
 

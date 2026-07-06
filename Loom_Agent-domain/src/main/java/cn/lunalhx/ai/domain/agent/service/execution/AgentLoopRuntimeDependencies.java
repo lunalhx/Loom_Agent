@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.util.Objects;
 
@@ -23,7 +24,8 @@ public record AgentLoopRuntimeDependencies(
         BudgetGuard budgetGuard,
         AgentMetrics agentMetrics,
         ContextWindowManager contextWindowManager,
-        ToolOutputSanitizer toolOutputSanitizer
+        ToolOutputSanitizer toolOutputSanitizer,
+        ModelRuntimeProperties modelRuntimeProperties
 ) {
     public AgentLoopRuntimeDependencies {
         Objects.requireNonNull(properties, "properties must not be null");
@@ -32,5 +34,6 @@ public record AgentLoopRuntimeDependencies(
         Objects.requireNonNull(agentMetrics, "agentMetrics must not be null");
         Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         Objects.requireNonNull(toolOutputSanitizer, "toolOutputSanitizer must not be null");
+        Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
     }
 }

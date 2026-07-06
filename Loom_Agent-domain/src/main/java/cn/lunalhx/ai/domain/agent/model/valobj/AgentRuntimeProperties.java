@@ -18,6 +18,8 @@ public class AgentRuntimeProperties {
     private Long toolTimeoutMs = 3000L;
     private Integer observationMaxChars = 8000;
     private Integer parseErrorMaxAttempts = 2;
+    private Integer modelCallRetryMaxAttempts = 2;
+    private Integer parseErrorFallbackModelThreshold = 1;
     private Long fileMaxBytes = 200000L;
     private Integer searchMaxResults = 50;
     private Long approvalTtlSeconds = 900L;

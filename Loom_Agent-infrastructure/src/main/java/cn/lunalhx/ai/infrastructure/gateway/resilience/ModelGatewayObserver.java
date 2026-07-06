@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapabilities;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
+import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -90,15 +91,20 @@ public final class ModelGatewayObserver {
 
     private void recordAttempt(AgentContext context, ModelCallKey key,
                                String status, long durationMs, int attemptNo, Throwable error) {
-        Map<String, Object> metadata = Map.of(
-                "provider", key.provider(),
-                "model", key.model(),
-                "capability", key.capability(),
-                "attemptNo", attemptNo,
-                "maxAttempts", maxAttempts,
-                "retryable", error == null || classifier.retryable(error));
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("provider", key.provider());
+        metadata.put("model", key.model());
+        metadata.put("capability", key.capability());
+        metadata.put("attemptNo", attemptNo);
+        metadata.put("maxAttempts", maxAttempts);
+        metadata.put("retryable", error == null || classifier.retryable(error));
+        metadata.put("errorCode", classifier.errorCode(error));
+        if (error instanceof ModelGatewayException exception
+                && exception.getDiagnosticMetadata() != null) {
+            metadata.putAll(exception.getDiagnosticMetadata());
+        }
         traceRecorder.recordModelGatewayEvent(context, "model_retry_attempt", key.capability(), status,
-                durationMs, "model call attempt " + status, error, metadata);
+                durationMs, "model call attempt " + status, error, Map.copyOf(metadata));
         recordRetry(key, status, classifier.errorCode(error));
     }
 
@@ -113,13 +119,19 @@ public final class ModelGatewayObserver {
         if (context == null) {
             return;
         }
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("provider", key.provider());
+        metadata.put("model", key.model());
+        metadata.put("capability", key.capability());
+        metadata.put("attemptNo", attemptNo);
+        metadata.put("maxAttempts", maxAttempts);
+        metadata.put("retryable", error == null || classifier.retryable(error));
+        if (error instanceof ModelGatewayException exception
+                && exception.getDiagnosticMetadata() != null) {
+            metadata.putAll(exception.getDiagnosticMetadata());
+        }
         traceRecorder.recordModelGatewayEvent(context, eventType, key.capability(), status, durationMs, summary, error,
-                Map.of("provider", key.provider(),
-                        "model", key.model(),
-                        "capability", key.capability(),
-                        "attemptNo", attemptNo,
-                        "maxAttempts", maxAttempts,
-                        "retryable", error == null || classifier.retryable(error)));
+                Map.copyOf(metadata));
     }
 
     private void recordModelCall(ModelCallKey key, String status, String errorCode, long durationMs) {

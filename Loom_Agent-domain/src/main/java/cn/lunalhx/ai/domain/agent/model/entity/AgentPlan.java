@@ -97,7 +97,12 @@ public class AgentPlan {
                 }
                 if ("edit".equalsIgnoreCase(existing.getKind())
                         && (existing.getTargets() == null || existing.getTargets().isEmpty())) {
-                    throw new IllegalArgumentException("kind=edit 的任务必须提供非空 targets");
+                    if (existing.getStatus() == null || !existing.getStatus().terminal()) {
+                        throw new IllegalArgumentException("kind=edit 的任务必须提供非空 targets");
+                    }
+                    if (existing.getTargets() == null) {
+                        existing.setTargets(List.of());
+                    }
                 }
                 existing.setUpdateTime(Instant.now());
 

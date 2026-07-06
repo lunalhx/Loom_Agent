@@ -33,7 +33,7 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("write_file")
-                .description("创建新文件或整体覆盖工作区内文本文件。何时使用：创建新文件或完整重写文件内容时。何时不要使用：局部修改请用 replace_in_file。权限：写入前必须人工确认，mode 默认为 create（文件已存在时失败）")
+                .description("创建新文件或整体覆盖工作区内文本文件。何时使用：创建新文件或完整重写文件内容时。何时不要使用：已有文件的局部修改优先 replace_in_file，避免丢失未包含在重写中的内容。权限：写入前必须人工确认，mode 默认为 create（文件已存在时失败）。使用 overwrite 后必须运行测试验证。")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
                         "\"properties\":{" +

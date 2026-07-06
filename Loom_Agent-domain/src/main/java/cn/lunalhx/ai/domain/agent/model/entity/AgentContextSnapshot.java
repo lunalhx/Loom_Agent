@@ -84,6 +84,7 @@ public class AgentContextSnapshot {
     private Integer sameActionRepeats;
     private String lastFailureFingerprint;
     private Integer sameFailureRepeats;
+    private Boolean repeatedFailureReplanAttempted;
     private Integer noProgressRounds;
     private Boolean codeReadObserved;
     private Integer lastWriteStep;
@@ -210,6 +211,7 @@ public class AgentContextSnapshot {
                 .sameActionRepeats(runtime.sameActionRepeats())
                 .lastFailureFingerprint(runtime.lastFailureFingerprint())
                 .sameFailureRepeats(runtime.sameFailureRepeats())
+                .repeatedFailureReplanAttempted(runtime.repeatedFailureReplanAttempted())
                 .noProgressRounds(runtime.noProgressRounds())
                 .codeReadObserved(runtime.codeReadObserved())
                 .lastWriteStep(runtime.lastWriteStep())
@@ -312,6 +314,7 @@ public class AgentContextSnapshot {
         context.setSameActionRepeats(sameActionRepeats == null ? 0 : sameActionRepeats);
         context.setLastFailureFingerprint(lastFailureFingerprint);
         context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
+        context.setRepeatedFailureReplanAttempted(Boolean.TRUE.equals(repeatedFailureReplanAttempted));
         context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
         context.setCodeReadObserved(Boolean.TRUE.equals(codeReadObserved));
         context.setLastWriteStep(lastWriteStep == null ? 0 : lastWriteStep);

@@ -50,10 +50,24 @@ public final class CompleteModelCallExecutor {
 
         long startedAt = System.currentTimeMillis();
         return delegate.complete(state.prompt())
-                .flatMap(result -> classifier.insufficientSystemResource(
-                        result == null ? null : result.getFinishReason())
-                        ? Mono.error(classifier.overloaded(state.key().model(), "insufficient_system_resource"))
-                        : Mono.just(result))
+                .flatMap(result -> {
+                    if (result == null || StringUtils.isBlank(result.getContent())) {
+                        String finishReason = result == null ? null : result.getFinishReason();
+                        int contentLength = result == null ? 0
+                                : StringUtils.length(result.getContent());
+                        if (result != null && result.getUsage() != null) {
+                            observer.recordCacheUsage(context, state.key(),
+                                    state.prompt().getPurpose(), result.getUsage());
+                        }
+                        return Mono.<ModelChatResult>error(classifier.emptyResponse(
+                                state.key().model(), finishReason, contentLength));
+                    }
+                    if (classifier.insufficientSystemResource(result.getFinishReason())) {
+                        return Mono.<ModelChatResult>error(classifier.overloaded(state.key().model(),
+                                "insufficient_system_resource"));
+                    }
+                    return Mono.just(result);
+                })
                 .doOnSuccess(result -> {
                     long durationMs = elapsed(startedAt);
                     if (StringUtils.isBlank(result.getActualModel())) {

@@ -28,6 +28,9 @@ public class ReplanGuardNode extends AbstractAgentNode {
         if (progressResult == ProgressGuard.ProgressResult.TERMINATE) {
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
+        if (progressResult == ProgressGuard.ProgressResult.REPLAN) {
+            return NodeResult.next(AgentNodeNames.REPLAN, List.of());
+        }
         if (context.isUnsafeResumeRequired()) {
             context.setReplanReason(ReplanReason.UNSAFE_RESUME);
             context.setReplanMessage("上次中断可能发生在写操作或测试命令附近，恢复后需要先检查当前文件和测试状态。");

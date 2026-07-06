@@ -48,6 +48,11 @@ public final class ModelRetryPolicy {
         ModelCallKey nextKey = state.key();
         String fallbackReason = state.fallbackReason();
 
+        if (classifier.isEmptyResponse(normalized)) {
+            nextPrompt = requestNormalizer.withEmptyResponseHint(nextPrompt);
+            nextKey = requestNormalizer.key(nextPrompt);
+        }
+
         if (shouldFallback(state.key().model(), nextOverload)) {
             String fallbackModel = resilience().getFallbackModel();
             try {

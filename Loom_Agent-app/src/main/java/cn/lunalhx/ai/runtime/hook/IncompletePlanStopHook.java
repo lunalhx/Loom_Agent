@@ -94,8 +94,10 @@ public class IncompletePlanStopHook implements AgentHook {
         }
 
         // --- Check test results: if tests pass and all edit targets covered, skip bookkeeping ---
-        if (agentContext.getLastTestExitCode() != null
-                && agentContext.getLastTestExitCode() == 0
+        boolean testsPassing = (agentContext.getLastTestExitCode() != null
+                && agentContext.getLastTestExitCode() == 0)
+                || Boolean.TRUE.equals(agentContext.getLastTestPassed());
+        if (testsPassing
                 && agentContext.getPlan().unmetEditTargetCount(agentContext.getTouchedFiles()) == 0
                 && agentContext.getPlan().incompleteEditItemCount() == 0) {
             // Tests pass + all edit targets written → auto-complete remaining items

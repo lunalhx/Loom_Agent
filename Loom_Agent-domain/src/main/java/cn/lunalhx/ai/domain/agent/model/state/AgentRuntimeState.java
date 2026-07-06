@@ -18,6 +18,7 @@ public final class AgentRuntimeState {
 
     private int step;
     private int parseErrors;
+    private int modelCallRetryCount;
     private Instant startedAt;
     private List<AgentStep> history = new ArrayList<>();
     private String currentNode;
@@ -33,6 +34,7 @@ public final class AgentRuntimeState {
     private int sameActionRepeats;
     private String lastFailureFingerprint;
     private int sameFailureRepeats;
+    private boolean repeatedFailureReplanAttempted;
     private int noProgressRounds;
     private boolean codeReadObserved;
     private int lastWriteStep;
@@ -48,6 +50,7 @@ public final class AgentRuntimeState {
 
     public int step() { return step; }
     public int parseErrors() { return parseErrors; }
+    public int modelCallRetryCount() { return modelCallRetryCount; }
     public Instant startedAt() { return startedAt; }
     public List<AgentStep> history() { return history; }
     public String currentNode() { return currentNode; }
@@ -63,6 +66,7 @@ public final class AgentRuntimeState {
     public int sameActionRepeats() { return sameActionRepeats; }
     public String lastFailureFingerprint() { return lastFailureFingerprint; }
     public int sameFailureRepeats() { return sameFailureRepeats; }
+    public boolean repeatedFailureReplanAttempted() { return repeatedFailureReplanAttempted; }
     public int noProgressRounds() { return noProgressRounds; }
     public boolean codeReadObserved() { return codeReadObserved; }
     public int lastWriteStep() { return lastWriteStep; }
@@ -78,6 +82,7 @@ public final class AgentRuntimeState {
 
     public void setStep(int v) { this.step = v; }
     public void setParseErrors(int v) { this.parseErrors = v; }
+    public void setModelCallRetryCount(int v) { this.modelCallRetryCount = v; }
     public void setStartedAt(Instant v) { this.startedAt = v; }
     public void setHistory(List<AgentStep> v) { this.history = v; }
     public void setCurrentNode(String v) { this.currentNode = v; }
@@ -93,6 +98,7 @@ public final class AgentRuntimeState {
     public void setSameActionRepeats(int v) { this.sameActionRepeats = v; }
     public void setLastFailureFingerprint(String v) { this.lastFailureFingerprint = v; }
     public void setSameFailureRepeats(int v) { this.sameFailureRepeats = v; }
+    public void setRepeatedFailureReplanAttempted(boolean v) { this.repeatedFailureReplanAttempted = v; }
     public void setNoProgressRounds(int v) { this.noProgressRounds = v; }
     public void setCodeReadObserved(boolean v) { this.codeReadObserved = v; }
     public void setLastWriteStep(int v) { this.lastWriteStep = v; }
