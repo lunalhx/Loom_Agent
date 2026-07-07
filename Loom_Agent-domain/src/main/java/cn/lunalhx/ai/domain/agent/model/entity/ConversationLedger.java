@@ -46,7 +46,7 @@ public final class ConversationLedger {
     public ConversationLedger appendWithEventKey(String role, String content,
                                                   LedgerStableType stableType, String eventKey) {
         return appendWithEventKey(role, content, stableType, eventKey,
-                null, null, null, null, false);
+                null, null, null, null, false, false);
     }
 
     /**
@@ -63,7 +63,7 @@ public final class ConversationLedger {
                                                   LedgerStableType stableType, String eventKey,
                                                   String toolName, String artifactId,
                                                   Integer originalChars, Integer renderChars,
-                                                  boolean compacted) {
+                                                  boolean compacted, boolean snipped) {
         Objects.requireNonNull(role, "role must not be null");
         Objects.requireNonNull(content, "content must not be null");
         Objects.requireNonNull(stableType, "stableType must not be null");
@@ -88,6 +88,7 @@ public final class ConversationLedger {
                 .originalChars(originalChars)
                 .renderChars(renderChars)
                 .compacted(compacted)
+                .snipped(snipped)
                 .build();
         entries.add(entry);
         return this;

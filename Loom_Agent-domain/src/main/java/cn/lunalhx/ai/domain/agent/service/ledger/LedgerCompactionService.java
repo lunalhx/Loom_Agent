@@ -166,6 +166,7 @@ public final class LedgerCompactionService {
                     .originalChars(entry.originalChars())
                     .renderChars(reference.length())
                     .compacted(true)
+                    .snipped(false)
                     .build());
             changed = true;
         }

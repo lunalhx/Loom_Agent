@@ -33,6 +33,7 @@ public final class ConversationLedgerEntry {
     private final Integer originalChars;
     private final Integer renderChars;
     private final boolean compacted;
+    private final boolean snipped;
 
     private ConversationLedgerEntry(Builder builder) {
         this.entryId = builder.entryId;
@@ -46,6 +47,7 @@ public final class ConversationLedgerEntry {
         this.originalChars = builder.originalChars;
         this.renderChars = builder.renderChars;
         this.compacted = builder.compacted;
+        this.snipped = builder.snipped;
     }
 
     @JsonCreator
@@ -60,7 +62,8 @@ public final class ConversationLedgerEntry {
             @JsonProperty("artifactId") String artifactId,
             @JsonProperty("originalChars") Integer originalChars,
             @JsonProperty("renderChars") Integer renderChars,
-            @JsonProperty("compacted") boolean compacted) {
+            @JsonProperty("compacted") boolean compacted,
+            @JsonProperty("snipped") Boolean snipped) {
         this.entryId = entryId != null ? entryId : UUID.randomUUID().toString();
         this.sequence = sequence;
         this.role = Objects.requireNonNull(role, "role must not be null");
@@ -72,6 +75,7 @@ public final class ConversationLedgerEntry {
         this.originalChars = originalChars;
         this.renderChars = renderChars;
         this.compacted = compacted;
+        this.snipped = snipped != null && snipped;
     }
 
     public static Builder builder() {
@@ -89,6 +93,7 @@ public final class ConversationLedgerEntry {
     public Integer originalChars() { return originalChars; }
     public Integer renderChars() { return renderChars; }
     public boolean compacted() { return compacted; }
+    public boolean snipped() { return snipped; }
 
     @Override
     public boolean equals(Object o) {
@@ -96,6 +101,7 @@ public final class ConversationLedgerEntry {
         if (!(o instanceof ConversationLedgerEntry that)) return false;
         return sequence == that.sequence
                 && compacted == that.compacted
+                && snipped == that.snipped
                 && entryId.equals(that.entryId)
                 && role.equals(that.role)
                 && content.equals(that.content)
@@ -110,7 +116,7 @@ public final class ConversationLedgerEntry {
     @Override
     public int hashCode() {
         return Objects.hash(entryId, sequence, role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars, compacted);
+                toolName, artifactId, originalChars, renderChars, compacted, snipped);
     }
 
     @Override
@@ -121,6 +127,7 @@ public final class ConversationLedgerEntry {
                 + (toolName != null ? ", toolName='" + toolName + '\'' : "")
                 + (artifactId != null ? ", artifactId='" + artifactId + '\'' : "")
                 + ", compacted=" + compacted
+                + ", snipped=" + snipped
                 + '}';
     }
 
@@ -136,6 +143,7 @@ public final class ConversationLedgerEntry {
         private Integer originalChars;
         private Integer renderChars;
         private boolean compacted;
+        private boolean snipped;
 
         public Builder entryId(String v) { this.entryId = v; return this; }
         public Builder sequence(long v) { this.sequence = v; return this; }
@@ -148,6 +156,7 @@ public final class ConversationLedgerEntry {
         public Builder originalChars(Integer v) { this.originalChars = v; return this; }
         public Builder renderChars(Integer v) { this.renderChars = v; return this; }
         public Builder compacted(boolean v) { this.compacted = v; return this; }
+        public Builder snipped(boolean v) { this.snipped = v; return this; }
 
         public ConversationLedgerEntry build() {
             if (entryId == null) {

@@ -180,8 +180,9 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
-    public ConversationLedgerAppendService conversationLedgerAppendService() {
-        return new ConversationLedgerAppendService();
+    public ConversationLedgerAppendService conversationLedgerAppendService(
+            AgentRuntimeProperties agentRuntimeProperties) {
+        return new ConversationLedgerAppendService(agentRuntimeProperties);
     }
 
     @Bean

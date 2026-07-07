@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service.ledger;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
@@ -40,10 +41,35 @@ import java.util.Objects;
  * <h3>Immutability</h3>
  * <p>Every append call returns an immutable snapshot of the ledger at that
  * point. Entries are never modified after creation.
+ *
+ * <h3>Tool result snip</h3>
+ * <p>TOOL_RESULT entries whose raw output exceeds {@code snipThreshold} chars
+ * are truncated before being written to the ledger. This prevents a single
+ * huge tool result (e.g. 500K-char file read) from escaping both the entry‑count
+ * watermark and micro-compaction. The full output is already persisted to blob
+ * store by {@code ContextArtifactService} when applicable; the snip protects
+ * the ledger window when artifact offloading is disabled or the output falls
+ * between the snip threshold and the persistence threshold.
  */
 public final class ConversationLedgerAppendService {
 
+    private static final int DEFAULT_SNIP_THRESHOLD = 8000;
+
+    private final int snipThreshold;
+
+    /** No-arg constructor (default threshold). Used by tests. */
     public ConversationLedgerAppendService() {
+        this.snipThreshold = DEFAULT_SNIP_THRESHOLD;
+    }
+
+    /** Constructor with runtime properties for configurable threshold. */
+    public ConversationLedgerAppendService(AgentRuntimeProperties properties) {
+        if (properties != null && properties.getObservationMaxChars() != null
+                && properties.getObservationMaxChars() > 0) {
+            this.snipThreshold = properties.getObservationMaxChars();
+        } else {
+            this.snipThreshold = DEFAULT_SNIP_THRESHOLD;
+        }
     }
 
     // ================================================================
@@ -70,6 +96,9 @@ public final class ConversationLedgerAppendService {
      * <p>The raw tool output is wrapped in {@code <untrusted_tool_output>}
      * tags to preserve the injection-protection semantic. Role is {@code "user"}.
      *
+     * <p>If {@code rawOutput} exceeds the snip threshold, it is truncated
+     * with a {@code [snipped]} marker. See class-level javadoc for rationale.
+     *
      * @param context   the agent context with an active ledger
      * @param rawOutput the raw tool output (text)
      * @param eventKey  deterministic idempotency key
@@ -78,11 +107,14 @@ public final class ConversationLedgerAppendService {
     public List<ConversationLedgerEntry> appendToolResult(
             AgentContext context, String rawOutput, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
+        SnipResult snipped = snip(rawOutput, null);
         String wrapped = "<untrusted_tool_output>\n"
-                + rawOutput
+                + snipped.output
                 + "\n</untrusted_tool_output>";
-        return append(context, "user", wrapped,
-                LedgerStableType.TOOL_RESULT, eventKey);
+        return appendWithMetadata(context, "user", wrapped,
+                LedgerStableType.TOOL_RESULT, eventKey,
+                null, null, snipped.originalChars, snipped.renderChars,
+                false, snipped.didSnip);
     }
 
     /**
@@ -93,6 +125,11 @@ public final class ConversationLedgerAppendService {
      * so that micro-compaction can later replace the full content with a stable
      * {@code <persisted-output>} reference. The prompt content is still the
      * wrapped raw output — metadata does not affect prompt rendering.
+     *
+     * <p>Snip: if the output was already offloaded to an artifact
+     * ({@code toolResult.artifactId} is set), snip is skipped — the content
+     * is already a compact reference. Otherwise, output exceeding the threshold
+     * is truncated.
      *
      * @param context   the agent context with an active ledger
      * @param rawOutput the raw tool output (text), already rendered for prompt
@@ -105,15 +142,21 @@ public final class ConversationLedgerAppendService {
             AgentContext context, String rawOutput, ToolResult toolResult,
             String toolName, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
+        boolean alreadyOffloaded = toolResult != null
+                && StringUtils.isNotBlank(toolResult.getArtifactId());
+        SnipResult snipped = snip(rawOutput, alreadyOffloaded ? null : toolResult);
         String wrapped = "<untrusted_tool_output>\n"
-                + rawOutput
+                + snipped.output
                 + "\n</untrusted_tool_output>";
         String artifactId = toolResult != null ? toolResult.getArtifactId() : null;
         Integer originalChars = toolResult != null ? toolResult.getOriginalChars() : null;
-        Integer renderChars = StringUtils.length(rawOutput);
+        if (snipped.didSnip && originalChars == null) {
+            originalChars = snipped.originalChars;
+        }
         return appendWithMetadata(context, "user", wrapped,
                 LedgerStableType.TOOL_RESULT, eventKey,
-                toolName, artifactId, originalChars, renderChars, false);
+                toolName, artifactId, originalChars, snipped.renderChars,
+                false, snipped.didSnip);
     }
 
     /**
@@ -166,28 +209,84 @@ public final class ConversationLedgerAppendService {
     }
 
     // ================================================================
-    // Internal
+    // Internal: snip
+    // ================================================================
+
+    /**
+     * Holds the result of snip processing.
+     */
+    static final class SnipResult {
+        final String output;
+        final boolean didSnip;
+        final Integer originalChars;
+        final Integer renderChars;
+
+        SnipResult(String output, boolean didSnip, Integer originalChars, Integer renderChars) {
+            this.output = output;
+            this.didSnip = didSnip;
+            this.originalChars = originalChars;
+            this.renderChars = renderChars;
+        }
+    }
+
+    /**
+     * Truncate raw tool output if it exceeds {@link #snipThreshold}.
+     *
+     * <p>When {@code toolResult} is non-null and carries an {@code artifactId},
+     * the output is assumed to already be an artifact reference (small) — this
+     * method is a no-op in that case. Callers should pass {@code null} for
+     * {@code toolResult} when skipping this check.
+     */
+    private SnipResult snip(String rawOutput, ToolResult toolResult) {
+        int len = StringUtils.length(rawOutput);
+        if (len <= snipThreshold) {
+            return new SnipResult(rawOutput, false, len, len);
+        }
+
+        boolean alreadyOffloaded = toolResult != null
+                && StringUtils.isNotBlank(toolResult.getArtifactId());
+        if (alreadyOffloaded) {
+            return new SnipResult(rawOutput, false,
+                    toolResult.getOriginalChars() != null
+                            ? toolResult.getOriginalChars() : len, len);
+        }
+
+        String artifactRef = toolResult != null && StringUtils.isNotBlank(toolResult.getArtifactId())
+                ? "\nFull content: context_recall(action=get, artifactId=" + toolResult.getArtifactId() + ")"
+                : "\nFull content may be available via context_recall if this tool output was persisted.";
+
+        String truncated = "[snipped: " + len + " chars total, " + snipThreshold + " shown below]\n"
+                + StringUtils.left(rawOutput, snipThreshold)
+                + "\n[... remaining " + (len - snipThreshold) + " chars truncated ...]"
+                + artifactRef;
+
+        return new SnipResult(truncated, true, len, truncated.length());
+    }
+
+    // ================================================================
+    // Internal: append
     // ================================================================
 
     private List<ConversationLedgerEntry> append(
             AgentContext context, String role, String content,
             LedgerStableType stableType, String eventKey) {
         return appendWithMetadata(context, role, content, stableType, eventKey,
-                null, null, null, null, false);
+                null, null, null, null, false, false);
     }
 
     private List<ConversationLedgerEntry> appendWithMetadata(
             AgentContext context, String role, String content,
             LedgerStableType stableType, String eventKey,
             String toolName, String artifactId,
-            Integer originalChars, Integer renderChars, boolean compacted) {
+            Integer originalChars, Integer renderChars,
+            boolean compacted, boolean snipped) {
         Objects.requireNonNull(context, "context must not be null");
 
         context.ensureLedgerActive();
         ConversationLedger ledger = context.getConversationLedger();
 
         ledger.appendWithEventKey(role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars, compacted);
+                toolName, artifactId, originalChars, renderChars, compacted, snipped);
         return ledger.entries();
     }
 }
