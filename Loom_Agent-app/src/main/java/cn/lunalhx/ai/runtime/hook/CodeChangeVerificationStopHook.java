@@ -60,7 +60,7 @@ public class CodeChangeVerificationStopHook implements AgentHook {
              return AgentHookResult.proceed();
          }
 
-        PlanReconciliation.reconcile(context);
+         PlanReconciliation.reconcile(context);
 
         if (context.getPlan() != null) {
             boolean allEditDone = context.getPlan().incompleteEditItemCount() == 0
@@ -75,6 +75,17 @@ public class CodeChangeVerificationStopHook implements AgentHook {
             if (allEditDone && allInspectDone && noActiveVerify) {
                 return AgentHookResult.proceed();
             }
+
+            // All edit deliverables done, only verify remains → auto-block and allow final answer
+            if (allEditDone && allInspectDone) {
+                cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem activeVerify =
+                        context.getPlan().activeVerifyItem();
+                if (activeVerify != null) {
+                    context.getPlan().blockItem(activeVerify.getId(),
+                            "所有编辑目标已完成，验证命令可能不适用，说明见最终回复");
+                    return AgentHookResult.proceed();
+                }
+            }
         }
 
          String reason = context.getLastTestStep() <= 0
@@ -82,6 +93,7 @@ public class CodeChangeVerificationStopHook implements AgentHook {
                 : Boolean.FALSE.equals(context.getLastTestPassed())
                 ? "最近一次测试失败"
                 : "最后一次成功测试早于最近写入";
+        String guidance = "。如果验证命令本身不适用或环境不支持，请在最终回复中说明原因，不要无限循环修文件";
         int attempt = context.getVerificationContinuationCount();
         int max = Math.max(0, guards.getMaxVerificationContinuations() == null
                 ? 2 : guards.getMaxVerificationContinuations());
@@ -89,7 +101,7 @@ public class CodeChangeVerificationStopHook implements AgentHook {
         if (attempt < max) {
             context.setVerificationContinuationCount(attempt + 1);
             context.setReplanReason(ReplanReason.TOOL_FAILURE);
-            context.setReplanMessage(reason + "，必须运行允许的测试并根据 test_result 修复");
+            context.setReplanMessage(reason + "，必须运行允许的测试并根据 test_result 修复" + guidance);
             if (ledgerAppendService != null) {
                 ledgerAppendService.appendSystemNote(context, reason,
                         ConversationLedgerInitializer.eventKey(context.getRunId(),

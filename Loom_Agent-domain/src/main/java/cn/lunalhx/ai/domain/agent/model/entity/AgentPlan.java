@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
+import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -222,15 +223,27 @@ public class AgentPlan {
     }
 
     /**
+     * Lenient version of {@link #applyTodoWriteForReplan(JsonNode, ReplanReason, Set)} with no filtering context.
+     */
+    public List<TodoApplyResult> applyTodoWriteForReplan(JsonNode input) {
+        return applyTodoWriteForReplan(input, null, null);
+    }
+
+    /**
      * Lenient version of {@link #applyTodoWrite} for replan dedup scenarios.
      * <ul>
      *   <li>Never throws — errors convert to {@link TodoApplyResult#skipped}</li>
      *   <li>Duplicate creates are silently ignored (DUPLICATE_CREATE_IGNORED)</li>
      *   <li>Invalid items are skipped (INVALID_DELTA_IGNORED)</li>
+     *   <li>Applies ReplanDeltaPolicy filtering for scope drift, duplicate verify, irrelevant targets</li>
      *   <li>Batch-processes all items, collecting results</li>
      * </ul>
+     *
+     * @param input the JSON todos array
+     * @param reason replan trigger reason (null to skip filtering)
+     * @param touchedFiles files touched during execution (null to skip target relevance check)
      */
-    public List<TodoApplyResult> applyTodoWriteForReplan(JsonNode input) {
+    public List<TodoApplyResult> applyTodoWriteForReplan(JsonNode input, ReplanReason reason, Set<String> touchedFiles) {
         List<TodoApplyResult> results = new ArrayList<>();
         JsonNode todos = input == null ? null : input.path("todos");
         if (todos == null || !todos.isArray()) {
@@ -345,10 +358,60 @@ public class AgentPlan {
                         results.add(TodoApplyResult.skipped(dup.get().getId(), "duplicate"));
                         continue;
                     }
+
+                    // Read kind and targets early for filtering
+                    String kind = todo.path("kind").asText(null);
+                    List<String> targets = readTargets(todo.path("targets"));
+
+                    // --- ReplanDeltaPolicy filtering ---
+                    if (reason != null) {
+
+                        // Check 1: scope drift — edit targets must relate to existing plan or touched files
+                        if ("edit".equalsIgnoreCase(kind) && !targets.isEmpty()) {
+                            if (!checkTargetsRelevant(targets, touchedFiles)) {
+                                appendEvent("REPLAN_DELTA_REJECTED_SCOPE_DRIFT", null,
+                                        "targets not related to existing plan items or touched files",
+                                        null, null, null);
+                                results.add(TodoApplyResult.skipped(null, "scope_drift"));
+                                continue;
+                            }
+                        }
+
+                        // Check 2: duplicate verify — don't create verify when blocked/completed verify exists for same command
+                        if ("verify".equalsIgnoreCase(kind)) {
+                            boolean blockedVerifyExists = items.stream()
+                                    .anyMatch(item -> "verify".equalsIgnoreCase(item.getKind())
+                                            && item.getStatus() != null
+                                            && (item.getStatus() == AgentPlanItemStatus.BLOCKED
+                                                    || item.getStatus() == AgentPlanItemStatus.COMPLETED)
+                                            && verifyDedupeMatches(item, todo));
+                            if (blockedVerifyExists) {
+                                appendEvent("REPLAN_DELTA_REJECTED_DUPLICATE_VERIFY", null,
+                                        "duplicate verify for already blocked/completed verify",
+                                        null, null, null);
+                                results.add(TodoApplyResult.skipped(null, "duplicate_verify"));
+                                continue;
+                            }
+                        }
+
+                        // Check 3: TOOL_FAILURE — require derivedFrom or parentId for new non-inspect tasks
+                        if (reason == ReplanReason.TOOL_FAILURE
+                                && !"inspect".equalsIgnoreCase(kind)) {
+                            String derivedFrom = todo.path("derivedFrom").asText(null);
+                            String parentId = todo.path("parentId").asText(null);
+                            if (StringUtils.isBlank(derivedFrom) && StringUtils.isBlank(parentId)) {
+                                appendEvent("REPLAN_DELTA_REJECTED_NO_SOURCE", null,
+                                        "new task requires derivedFrom or parentId for tool failure replan",
+                                        null, null, null);
+                                results.add(TodoApplyResult.skipped(null, "no_source"));
+                                continue;
+                            }
+                        }
+                    }
+
                     if (StringUtils.isBlank(id)) {
                         id = "task-" + UUID.randomUUID().toString().substring(0, 8);
                     }
-                    String kind = todo.path("kind").asText(null);
                     if (!isValidKind(kind)) {
                         appendEvent("INVALID_DELTA_IGNORED", null,
                                 "invalid_kind=" + kind, null, null, null);
@@ -363,7 +426,6 @@ public class AgentPlan {
                     }
                     AgentPlanItemStatus status =
                             AgentPlanItemStatus.from(todo.path("status").asText());
-                    List<String> targets = readTargets(todo.path("targets"));
                     if ("edit".equalsIgnoreCase(kind) && targets.isEmpty()) {
                         appendEvent("INVALID_DELTA_IGNORED", null,
                                 "kind=edit requires non-empty targets", null, null, null);
@@ -390,6 +452,8 @@ public class AgentPlan {
                             .evidence(todo.path("evidence").asText(null))
                             .blocker(todo.path("blocker").asText(null))
                             .dedupeKey(newDedupeKey)
+                            .derivedFrom(todo.path("derivedFrom").asText(null))
+                            .parentId(todo.path("parentId").asText(null))
                             .order(nextOrder())
                             .updateTime(Instant.now())
                             .build();
@@ -792,6 +856,66 @@ public class AgentPlan {
         key = key.replaceAll("(文件|任务|步骤)\\s*$", "");
         key = key.replaceAll("\\s+", " ");
         return key.trim();
+    }
+
+    /**
+     * Check if at least one of the new targets is related to existing plan items or touched files.
+     */
+    private boolean checkTargetsRelevant(List<String> newTargets, Set<String> touchedFiles) {
+        if (newTargets == null || newTargets.isEmpty()) {
+            return true;
+        }
+        Set<String> knownTargets = new LinkedHashSet<>();
+        for (AgentPlanItem item : items) {
+            if (item.getTargets() != null) {
+                for (String t : item.getTargets()) {
+                    knownTargets.add(ToolOperation.normalizePath(t));
+                }
+            }
+        }
+        if (touchedFiles != null) {
+            for (String f : touchedFiles) {
+                knownTargets.add(ToolOperation.normalizePath(f));
+            }
+        }
+        if (knownTargets.isEmpty()) {
+            return true; // no existing context to validate against
+        }
+        for (String t : newTargets) {
+            if (knownTargets.contains(ToolOperation.normalizePath(t))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if two target lists have any overlap (at least one path in common).
+     */
+    private boolean targetsOverlap(List<String> targetsA, List<String> targetsB) {
+        if (targetsA == null || targetsA.isEmpty() || targetsB == null || targetsB.isEmpty()) {
+            return false;
+        }
+        Set<String> setA = new LinkedHashSet<>();
+        for (String t : targetsA) {
+            setA.add(ToolOperation.normalizePath(t));
+        }
+        for (String t : targetsB) {
+            if (setA.contains(ToolOperation.normalizePath(t))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if a todo JSON node for a verify item matches an existing plan item by dedupe key.
+     */
+    private boolean verifyDedupeMatches(AgentPlanItem item, JsonNode todo) {
+        String existingKey = item.getDedupeKey() != null
+                ? item.getDedupeKey() : dedupeKeyFor(item);
+        String newKey = dedupeKeyFor(todo);
+        return StringUtils.isNotBlank(existingKey) && StringUtils.equals(existingKey, newKey);
     }
 
 }

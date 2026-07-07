@@ -222,7 +222,10 @@ public class ReplanNode extends AbstractAgentNode {
             if (!todos.isArray() || todos.isEmpty()) {
                 return List.of();
             }
-            return context.getPlan().applyTodoWriteForReplan(objectMapper.createObjectNode().set("todos", todos));
+            return context.getPlan().applyTodoWriteForReplan(
+                    objectMapper.createObjectNode().set("todos", todos),
+                    context.getReplanReason(),
+                    context.getTouchedFiles());
         } catch (Exception e) {
             log.warn("Replan JSON parse failed", e);
             if (traceRecorder != null) {
@@ -243,16 +246,19 @@ public class ReplanNode extends AbstractAgentNode {
     private String renderReplanPrompt(AgentContext context, ReplanReason reason) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象。\n");
+        prompt.append("优先关闭、阻塞或跳过无关/错误验证导致的任务，不要扩展用户目标。\n");
         prompt.append("不要为同一 targets/command 创建新任务；如果任务已存在，必须用已有 id 更新，不要换 wording 创建重复任务。\n");
-        prompt.append("不要删除历史任务；只能更新状态或追加任务。\n");
+        prompt.append("不要删除历史记录，但也不要无限扩展任务范围。\n");
+        prompt.append("新任务只在以下情况创建：原计划缺少用户明确要求的交付物；工具结果证明存在未覆盖的目标文件或必要步骤；恢复中断后的安全只读检查。\n");
+        prompt.append("新任务必须带 parentId 或 derivedFrom，指向某个已有任务或工具失败事件。\n");
         prompt.append("保留现有任务的 kind 和 targets 字段。\n");
-        prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\",\"verification\":{\"command\":\"...\",\"passed\":true,\"exitCode\":0,\"summary\":\"...\"}}]}\n");
+        prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\",\"verification\":{\"command\":\"...\",\"passed\":true,\"exitCode\":0,\"summary\":\"...\"},\"derivedFrom\":\"源任务id\",\"parentId\":\"父任务id\"}]}\n");
         prompt.append("\n用户任务：").append(context.getQuestion()).append("\n");
         prompt.append("重规划原因：").append(reason).append("\n");
         if (reason == ReplanReason.STEP_BUDGET_CONTINUATION) {
             prompt.append("当前是第 ").append(context.getSegmentIndex() + 1).append("/")
-                    .append(context.getMaxSegments()).append(" 段执行。请总结已完成内容，选择下一步方向，"
-                    + "不要重复上一段最后的动作。\n");
+                    .append(context.getMaxSegments()).append(" 段执行。请总结已完成内容，继续未完成的用户目标，"
+                    + "不要扩展目标或重复上一段最后的动作。\n");
         }
         prompt.append("失败信息：").append(StringUtils.defaultString(context.getReplanMessage())).append("\n");
         if (StringUtils.contains(context.getReplanMessage(), "策略变更要求")

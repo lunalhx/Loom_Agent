@@ -10,7 +10,9 @@ import cn.lunalhx.ai.domain.agent.service.execution.ProgressGuard;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class ReplanGuardNode extends AbstractAgentNode {
@@ -40,7 +42,7 @@ public class ReplanGuardNode extends AbstractAgentNode {
         ToolResult result = context.getToolResult();
         if (result != null && !result.isSuccess() && !isTodoWrite(context)) {
             context.setReplanReason(toReason(result));
-            context.setReplanMessage(StringUtils.defaultIfBlank(result.getObservation(), "工具执行失败，需要调整计划。"));
+            context.setReplanMessage(buildFailureSummary(context, result));
             return NodeResult.next(AgentNodeNames.REPLAN, List.of());
         }
         if (context.getPlan() != null) {
@@ -61,6 +63,52 @@ public class ReplanGuardNode extends AbstractAgentNode {
             return ReplanReason.POLICY_DENIED;
         }
         return ReplanReason.TOOL_FAILURE;
+    }
+
+    private String buildFailureSummary(AgentContext context, ToolResult result) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("failedTool", context.getDecision() != null ? context.getDecision().getTool() : "unknown");
+
+        String observation = StringUtils.defaultString(result.getObservation());
+        String errorCode = StringUtils.defaultString(result.getErrorCode());
+
+        boolean isShellFailure = "run_shell".equals(context.getDecision() != null
+                ? context.getDecision().getTool() : "");
+        boolean isVerificationCommand = isShellFailure
+                && (StringUtils.contains(observation, "test")
+                || StringUtils.contains(observation, "mvn")
+                || StringUtils.contains(observation, "npm test")
+                || StringUtils.contains(observation, "pytest")
+                || StringUtils.contains(observation, "verify"));
+        boolean isEnvOrPermissionIssue = StringUtils.containsIgnoreCase(observation, "permission denied")
+                || StringUtils.containsIgnoreCase(observation, "command not found")
+                || StringUtils.containsIgnoreCase(observation, "not found")
+                || StringUtils.containsIgnoreCase(observation, "cannot access");
+        boolean failureMayBeVerifierIssue = isShellFailure
+                && (isVerificationCommand || isEnvOrPermissionIssue);
+
+        summary.put("exitCode", errorCode);
+        summary.put("failureMayBeVerifierIssue", failureMayBeVerifierIssue);
+        summary.put("isEnvOrPermissionIssue", isEnvOrPermissionIssue);
+
+        String nextAllowed;
+        if (isVerificationCommand || isEnvOrPermissionIssue) {
+            nextAllowed = "update_existing_only";
+            summary.put("nextAllowedReplanOperation", nextAllowed);
+            summary.put("guidance", "优先更换验证方式或说明无法验证，不要扩展任务范围或修改业务文件");
+        } else {
+            nextAllowed = "may_add_scoped_task";
+            summary.put("nextAllowedReplanOperation", nextAllowed);
+            summary.put("guidance", "可以新增目标范围明确的任务，但必须先判断失败是否指向用户目标的真实缺陷");
+        }
+
+        StringBuilder msg = new StringBuilder();
+        msg.append(observation).append("\n");
+        msg.append("--- 结构化的失败分析 ---\n");
+        for (Map.Entry<String, Object> entry : summary.entrySet()) {
+            msg.append(entry.getKey()).append("=").append(entry.getValue()).append("\n");
+        }
+        return msg.toString();
     }
 
 }

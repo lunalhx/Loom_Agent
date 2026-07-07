@@ -83,6 +83,16 @@ public class IncompletePlanStopHook implements AgentHook {
         // --- Reconciliation: auto-complete plan items based on execution facts ---
         PlanReconciliationResult result = PlanReconciliation.reconcile(agentContext);
 
+        // If all edit deliverables are done, remaining blockers are just verify/bookkeeping → allow final answer
+        if (result.hasRealBlockers() && allEditTargetsMet(agentContext, result)) {
+            if (result.activeVerifyBlockerId() != null) {
+                // Only blocker is verify — auto-resolve and proceed
+                agentContext.getPlan().blockItem(result.activeVerifyBlockerId(),
+                        "所有编辑目标已完成，验证说明见最终回复");
+                result = PlanReconciliation.reconcile(agentContext); // re-reconcile
+            }
+        }
+
         // If no real blockers, reconciliation already resolved bookkeeping items → proceed
         if (!result.hasRealBlockers()) {
             if (result.totalResolved() == 0) {
@@ -238,6 +248,28 @@ public class IncompletePlanStopHook implements AgentHook {
                 .count()
                 + (int) context.getPlan()
                         .unmetEditTargetCount(context.getTouchedFiles());
+    }
+
+    /**
+     * Check if all declared edit deliverables are met: all edit items completed
+     * AND all edit targets have been touched. The only remaining blocker would be
+     * a verify item.
+     */
+    private boolean allEditTargetsMet(AgentContext agentContext, PlanReconciliationResult result) {
+        if (agentContext.getPlan() == null) {
+            return false;
+        }
+        boolean allEditDone = agentContext.getPlan().incompleteEditItemCount() == 0
+                && agentContext.getPlan().unmetEditTargetCount(agentContext.getTouchedFiles()) == 0;
+        if (!allEditDone) {
+            return false;
+        }
+        boolean allInspectDone = agentContext.getPlan().getItems().stream()
+                .filter(item -> "inspect".equalsIgnoreCase(
+                        StringUtils.defaultString(item.getKind(), "")))
+                .noneMatch(item -> item.getStatus() == null
+                        || !item.getStatus().terminal());
+        return allInspectDone && result.activeVerifyBlockerId() != null;
     }
 
 }

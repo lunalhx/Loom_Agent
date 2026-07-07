@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
@@ -449,5 +450,157 @@ public class AgentPlanTest {
                 """));
 
         assertEquals(versionBefore, plan.getVersion());
+    }
+
+    // --- ReplanDeltaPolicy convergence tests ---
+
+    @Test
+    public void replanShouldRejectScopeDriftEditTask() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        // Existing plan has an edit for a.txt
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"edit a","status":"pending","kind":"edit","targets":["a.txt"]}]}
+                """));
+
+        // Replan adds edit for completely unrelated file — should be rejected as scope_drift
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"edit unrelated","status":"pending","kind":"edit","targets":["unrelated.txt"]}]}
+                        """),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("a.txt"));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals("scope_drift", results.get(0).reason());
+        assertTrue(plan.getEvents().stream()
+                .anyMatch(e -> "REPLAN_DELTA_REJECTED_SCOPE_DRIFT".equals(e.getType())));
+    }
+
+    @Test
+    public void replanShouldAllowRelevantEditWhenTouchedFilesMatch() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"edit a","status":"pending","kind":"edit","targets":["a.txt"]}]}
+                """));
+        String parentId = plan.getItems().get(0).getId();
+
+        // Replan adds edit for file that IS in touchedFiles, with parentId
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"edit b","status":"pending","kind":"edit","targets":["b.txt"],"parentId":"%s"}]}
+                        """.formatted(parentId)),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("a.txt", "b.txt"));
+
+        assertEquals(1, results.size());
+        assertTrue("should allow edit when target is in touched files and has parentId", results.get(0).isApplied());
+    }
+
+    @Test
+    public void replanShouldRejectDuplicateVerifyWhenBlockedVerifyExists() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"verify test","status":"in_progress","kind":"verify",
+                  "verification":{"command":"mvn test -pl mymodule"}}]}
+                """));
+        String verifyId = plan.getItems().get(0).getId();
+        plan.blockItem(verifyId, "测试环境不可用");
+
+        // Replan tries to add another verify with same command — should reject
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"run tests again","status":"pending","kind":"verify",
+                          "verification":{"command":"mvn test -pl mymodule"}}]}
+                        """),
+                ReplanReason.TOOL_FAILURE,
+                Set.of());
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertTrue(plan.getEvents().stream()
+                .anyMatch(e -> "DUPLICATE_CREATE_IGNORED".equals(e.getType())
+                        || "REPLAN_DELTA_REJECTED_DUPLICATE_VERIFY".equals(e.getType())));
+    }
+
+    @Test
+    public void replanShouldRejectToolFailureEditWithoutSource() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"initial edit","status":"in_progress","kind":"edit","targets":["a.txt"]}]}
+                """));
+
+        // TOOL_FAILURE replan with new edit but no derivedFrom/parentId — should reject
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"fix the error","status":"pending","kind":"edit","targets":["a.txt"]}]}
+                        """),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("a.txt"));
+
+        // Should be skipped as no_source since targets match but no derivedFrom
+        // (The dedup check will catch it first since targets match existing item)
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+    }
+
+    @Test
+    public void replanShouldAllowToolFailureEditWithDerivedFrom() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"initial edit","status":"in_progress","kind":"edit","targets":["a.txt"]}]}
+                """));
+        String parentId = plan.getItems().get(0).getId();
+
+        // Same targets but with derivedFrom — should NOT be dup since original is not terminal
+        // But dedup catches same targets. Let's use different targets.
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"fix related file","status":"pending","kind":"edit",
+                          "targets":["a.txt","b.txt"],"parentId":"%s"}]}
+                        """.formatted(parentId)),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("a.txt", "b.txt"));
+
+        assertEquals(1, results.size());
+        assertTrue("should allow edit with parentId when targets are in touched files",
+                results.get(0).isApplied());
+        assertNotNull(plan.getItems().get(1).getParentId());
+        assertEquals(parentId, plan.getItems().get(1).getParentId());
+    }
+
+    @Test
+    public void replanUpdateExistingShouldAlwaysWork() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWriteForReplan(objectMapper.readTree("""
+                {"todos":[{"content":"task","status":"in_progress","kind":"edit","targets":["a.txt"]}]}
+                """));
+
+        String id = plan.getItems().get(0).getId();
+        // Update by id should always work regardless of replan context
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"id":"%s","status":"completed","evidence":"done"}]}
+                        """.formatted(id)),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("a.txt"));
+
+        assertEquals(1, results.size());
+        assertTrue(results.get(0).isApplied());
+        assertEquals(AgentPlanItemStatus.COMPLETED, plan.getItems().get(0).getStatus());
+    }
+
+    @Test
+    public void replanWithoutContextSkipsFiltering() throws Exception {
+        AgentPlan plan = new AgentPlan();
+
+        // No replan context → no filtering applied
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"new edit","status":"pending","kind":"edit","targets":["new.txt"]}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertTrue("without replan context, filtering should be skipped", results.get(0).isApplied());
     }
 }

@@ -391,7 +391,14 @@ public class StablePrefixBuilderTest {
         assertTrue(content.contains("security_note"));
 
         // Role protocol
-        assertTrue(content.contains("你是一个受权限约束的代码修改 Agent"));
+        assertTrue(content.contains("你是一个受权限约束的软件工程 Agent"));
+        assertTrue(content.contains("创建文件、解释代码、修改代码、运行验证、总结结果"));
+        assertTrue(content.contains("简单单步任务、纯解释、小型新建文件可以不建复杂计划"));
+        assertTrue(content.contains("选择与任务和项目事实匹配的最小验证方式"));
+        assertTrue(content.contains("工具失败时先判断失败来源"));
+        assertTrue(content.contains("核对用户交付物是否满足要求"));
+        assertTrue("must not contain absolute 'last write then test pass' rule",
+                !content.contains("最后一次写入后测试通过才能结束"));
 
         // Spawn text
         assertTrue(content.contains("spawn_agents"));

@@ -30,6 +30,8 @@ public class AgentPlanItem {
     private PlanItemVerification verification;
     private Instant updateTime;
     private String dedupeKey;
+    private String derivedFrom;
+    private String parentId;
 
     public void setTargets(List<String> targets) {
         this.targets = targets == null ? List.of() : List.copyOf(targets);
