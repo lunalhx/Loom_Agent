@@ -60,7 +60,11 @@ final class ReactiveCompactStep implements ContextRecoveryStep {
                         "afterEntryCount", result.afterEntryCount(),
                         "strategy", StringUtils.defaultString(result.strategy()),
                         "generation", result.generation(),
-                        "transcriptArtifactId", StringUtils.defaultString(result.transcriptArtifactId())))
+                        "transcriptArtifactId", StringUtils.defaultString(result.transcriptArtifactId()),
+                        "compactionDepth", result.compactionDepth(),
+                        "maxInputCompactionDepth", result.maxInputCompactionDepth(),
+                        "maxAllowedCompactionDepth", result.maxAllowedCompactionDepth(),
+                        "depthGuarded", result.depthGuarded()))
                 .build();
     }
 }

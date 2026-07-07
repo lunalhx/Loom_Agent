@@ -46,7 +46,44 @@ public final class ConversationLedger {
     public ConversationLedger appendWithEventKey(String role, String content,
                                                   LedgerStableType stableType, String eventKey) {
         return appendWithEventKey(role, content, stableType, eventKey,
-                null, null, null, null, false, false);
+                null, null, null, null, false, 0, false, false);
+    }
+
+    public ConversationLedger appendWithEventKey(String role, String content,
+                                                  LedgerStableType stableType, String eventKey,
+                                                  String toolName, String artifactId,
+                                                  Integer originalChars, Integer renderChars,
+                                                  boolean compacted, int compactionDepth,
+                                                  boolean microCompacted, boolean snipped) {
+        Objects.requireNonNull(role, "role must not be null");
+        Objects.requireNonNull(content, "content must not be null");
+        Objects.requireNonNull(stableType, "stableType must not be null");
+        if (StringUtils.isBlank(role)) {
+            throw new IllegalArgumentException("role must not be blank");
+        }
+        if (content.isEmpty()) {
+            throw new IllegalArgumentException("content must not be empty");
+        }
+        if (eventKey != null && !seenEventKeys.add(eventKey)) {
+            return this;
+        }
+        ConversationLedgerEntry entry = ConversationLedgerEntry.builder()
+                .sequence(nextSequence++)
+                .role(role)
+                .content(content)
+                .stableType(stableType)
+                .eventKey(eventKey)
+                .toolName(toolName)
+                .artifactId(artifactId)
+                .originalChars(originalChars)
+                .renderChars(renderChars)
+                .compacted(compacted)
+                .compactionDepth(compactionDepth)
+                .microCompacted(microCompacted)
+                .snipped(snipped)
+                .build();
+        entries.add(entry);
+        return this;
     }
 
     /**
@@ -64,34 +101,9 @@ public final class ConversationLedger {
                                                   String toolName, String artifactId,
                                                   Integer originalChars, Integer renderChars,
                                                   boolean compacted, boolean snipped) {
-        Objects.requireNonNull(role, "role must not be null");
-        Objects.requireNonNull(content, "content must not be null");
-        Objects.requireNonNull(stableType, "stableType must not be null");
-        if (StringUtils.isBlank(role)) {
-            throw new IllegalArgumentException("role must not be blank");
-        }
-        if (content.isEmpty()) {
-            throw new IllegalArgumentException("content must not be empty");
-        }
-        if (eventKey != null && !seenEventKeys.add(eventKey)) {
-            // Duplicate event key — idempotent no-op
-            return this;
-        }
-        ConversationLedgerEntry entry = ConversationLedgerEntry.builder()
-                .sequence(nextSequence++)
-                .role(role)
-                .content(content)
-                .stableType(stableType)
-                .eventKey(eventKey)
-                .toolName(toolName)
-                .artifactId(artifactId)
-                .originalChars(originalChars)
-                .renderChars(renderChars)
-                .compacted(compacted)
-                .snipped(snipped)
-                .build();
-        entries.add(entry);
-        return this;
+        return appendWithEventKey(role, content, stableType, eventKey,
+                toolName, artifactId, originalChars, renderChars,
+                compacted, 0, compacted, snipped);
     }
 
     /**

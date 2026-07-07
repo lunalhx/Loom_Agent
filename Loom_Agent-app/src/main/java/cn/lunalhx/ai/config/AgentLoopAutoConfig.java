@@ -200,7 +200,8 @@ public class AgentLoopAutoConfig {
                 config.getCompactionLowWatermark());
         return new LedgerCompactionService(watermark,
                 contextArtifactRepository, contextBlobStore,
-                deepContextSummaryService, contextArtifactPurgeService);
+                deepContextSummaryService, contextArtifactPurgeService,
+                config.getMaxCompactionDepth());
     }
 
     @Bean

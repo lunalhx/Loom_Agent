@@ -131,7 +131,11 @@ public class RenderPromptNode extends AbstractAgentNode {
                         "afterEntryCount", result.afterEntryCount(),
                         "strategy", result.strategy() == null ? "" : result.strategy(),
                         "transcriptArtifactId", result.transcriptArtifactId() == null
-                                ? "" : result.transcriptArtifactId()))
+                                ? "" : result.transcriptArtifactId(),
+                        "compactionDepth", result.compactionDepth(),
+                        "maxInputCompactionDepth", result.maxInputCompactionDepth(),
+                        "maxAllowedCompactionDepth", result.maxAllowedCompactionDepth(),
+                        "depthGuarded", result.depthGuarded()))
                 .build();
     }
 

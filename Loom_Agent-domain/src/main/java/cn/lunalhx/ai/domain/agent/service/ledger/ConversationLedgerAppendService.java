@@ -114,7 +114,7 @@ public final class ConversationLedgerAppendService {
         return appendWithMetadata(context, "user", wrapped,
                 LedgerStableType.TOOL_RESULT, eventKey,
                 null, null, snipped.originalChars, snipped.renderChars,
-                false, snipped.didSnip);
+                false, 0, false, snipped.didSnip);
     }
 
     /**
@@ -156,7 +156,7 @@ public final class ConversationLedgerAppendService {
         return appendWithMetadata(context, "user", wrapped,
                 LedgerStableType.TOOL_RESULT, eventKey,
                 toolName, artifactId, originalChars, snipped.renderChars,
-                false, snipped.didSnip);
+                false, 0, false, snipped.didSnip);
     }
 
     /**
@@ -271,7 +271,7 @@ public final class ConversationLedgerAppendService {
             AgentContext context, String role, String content,
             LedgerStableType stableType, String eventKey) {
         return appendWithMetadata(context, role, content, stableType, eventKey,
-                null, null, null, null, false, false);
+                null, null, null, null, false, 0, false, false);
     }
 
     private List<ConversationLedgerEntry> appendWithMetadata(
@@ -279,14 +279,16 @@ public final class ConversationLedgerAppendService {
             LedgerStableType stableType, String eventKey,
             String toolName, String artifactId,
             Integer originalChars, Integer renderChars,
-            boolean compacted, boolean snipped) {
+            boolean compacted, int compactionDepth,
+            boolean microCompacted, boolean snipped) {
         Objects.requireNonNull(context, "context must not be null");
 
         context.ensureLedgerActive();
         ConversationLedger ledger = context.getConversationLedger();
 
         ledger.appendWithEventKey(role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars, compacted, snipped);
+                toolName, artifactId, originalChars, renderChars,
+                compacted, compactionDepth, microCompacted, snipped);
         return ledger.entries();
     }
 }

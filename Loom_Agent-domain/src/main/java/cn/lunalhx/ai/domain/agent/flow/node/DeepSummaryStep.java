@@ -38,6 +38,21 @@ final class DeepSummaryStep implements ContextRecoveryStep {
             return ContextRecoveryTransition.continueChain();
         }
 
+        if (ledgerCompactionService.wouldExceedMaxCompactionDepth(context)) {
+            AgentEvent event = AgentEvent.builder()
+                    .type(AgentEventType.OBSERVATION)
+                    .code("compaction_depth_exceeded")
+                    .message("Compaction depth exceeded — skipping deep summary for this segment")
+                    .runId(context.getRunId())
+                    .requestId(context.getRequestId())
+                    .conversationId(context.getConversationId())
+                    .workspace(context.getWorkspaceDisplayName())
+                    .parentRunId(context.getParentRunId())
+                    .build();
+            accumulatedEvents.add(event);
+            return ContextRecoveryTransition.continueChain();
+        }
+
         LedgerCompactionResult compactResult = ledgerCompactionService.compact(context);
         context.setContextRecoveryStage(ContextRecoveryStage.DEEP_SUMMARY_APPLIED);
         context.setContextTranscriptArtifactId(compactResult.transcriptArtifactId());
@@ -65,7 +80,11 @@ final class DeepSummaryStep implements ContextRecoveryStep {
                         "beforeEntryCount", result.beforeEntryCount(),
                         "afterEntryCount", result.afterEntryCount(),
                         "strategy", result.strategy() == null ? "" : result.strategy(),
-                        "transcriptArtifactId", StringUtils.defaultString(result.transcriptArtifactId())))
+                        "transcriptArtifactId", StringUtils.defaultString(result.transcriptArtifactId()),
+                        "compactionDepth", result.compactionDepth(),
+                        "maxInputCompactionDepth", result.maxInputCompactionDepth(),
+                        "maxAllowedCompactionDepth", result.maxAllowedCompactionDepth(),
+                        "depthGuarded", result.depthGuarded()))
                 .build();
     }
 }

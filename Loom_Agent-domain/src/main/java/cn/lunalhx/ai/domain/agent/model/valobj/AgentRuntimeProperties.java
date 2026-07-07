@@ -173,6 +173,8 @@ public class AgentRuntimeProperties {
         private Integer compactionHighWatermark = 200;
         /** C10: compaction reduces to this many entries (including summary). */
         private Integer compactionLowWatermark = 50;
+        /** Maximum compaction depth before falling back to deterministic summary. */
+        private Integer maxCompactionDepth = 3;
 
     }
 

@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionResult;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 
 import java.util.List;
+import java.util.Map;
 
 final class ContextSimplifyStep implements ContextRecoveryStep {
 
@@ -34,6 +35,14 @@ final class ContextSimplifyStep implements ContextRecoveryStep {
                 .conversationId(context.getConversationId())
                 .workspace(context.getWorkspaceDisplayName())
                 .parentRunId(context.getParentRunId())
+                .metadata(Map.of(
+                        "compactionDepth", result.compactionDepth(),
+                        "maxInputCompactionDepth", result.maxInputCompactionDepth(),
+                        "maxAllowedCompactionDepth", result.maxAllowedCompactionDepth(),
+                        "depthGuarded", result.depthGuarded(),
+                        "beforeEntryCount", result.beforeEntryCount(),
+                        "afterEntryCount", result.afterEntryCount(),
+                        "strategy", result.strategy() != null ? result.strategy() : ""))
                 .build();
         accumulatedEvents.add(event);
         return ContextRecoveryTransition.renderPrompt(accumulatedEvents);

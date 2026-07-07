@@ -33,6 +33,8 @@ public final class ConversationLedgerEntry {
     private final Integer originalChars;
     private final Integer renderChars;
     private final boolean compacted;
+    private final int compactionDepth;
+    private final boolean microCompacted;
     private final boolean snipped;
 
     private ConversationLedgerEntry(Builder builder) {
@@ -47,6 +49,8 @@ public final class ConversationLedgerEntry {
         this.originalChars = builder.originalChars;
         this.renderChars = builder.renderChars;
         this.compacted = builder.compacted;
+        this.compactionDepth = builder.compactionDepth;
+        this.microCompacted = builder.microCompacted;
         this.snipped = builder.snipped;
     }
 
@@ -63,6 +67,8 @@ public final class ConversationLedgerEntry {
             @JsonProperty("originalChars") Integer originalChars,
             @JsonProperty("renderChars") Integer renderChars,
             @JsonProperty("compacted") boolean compacted,
+            @JsonProperty("compactionDepth") Integer compactionDepth,
+            @JsonProperty("microCompacted") Boolean microCompacted,
             @JsonProperty("snipped") Boolean snipped) {
         this.entryId = entryId != null ? entryId : UUID.randomUUID().toString();
         this.sequence = sequence;
@@ -75,6 +81,8 @@ public final class ConversationLedgerEntry {
         this.originalChars = originalChars;
         this.renderChars = renderChars;
         this.compacted = compacted;
+        this.compactionDepth = compactionDepth != null ? compactionDepth : 0;
+        this.microCompacted = microCompacted != null && microCompacted;
         this.snipped = snipped != null && snipped;
     }
 
@@ -93,6 +101,8 @@ public final class ConversationLedgerEntry {
     public Integer originalChars() { return originalChars; }
     public Integer renderChars() { return renderChars; }
     public boolean compacted() { return compacted; }
+    public int compactionDepth() { return compactionDepth; }
+    public boolean microCompacted() { return microCompacted; }
     public boolean snipped() { return snipped; }
 
     @Override
@@ -101,6 +111,8 @@ public final class ConversationLedgerEntry {
         if (!(o instanceof ConversationLedgerEntry that)) return false;
         return sequence == that.sequence
                 && compacted == that.compacted
+                && compactionDepth == that.compactionDepth
+                && microCompacted == that.microCompacted
                 && snipped == that.snipped
                 && entryId.equals(that.entryId)
                 && role.equals(that.role)
@@ -116,7 +128,8 @@ public final class ConversationLedgerEntry {
     @Override
     public int hashCode() {
         return Objects.hash(entryId, sequence, role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars, compacted, snipped);
+                toolName, artifactId, originalChars, renderChars, compacted,
+                compactionDepth, microCompacted, snipped);
     }
 
     @Override
@@ -127,6 +140,8 @@ public final class ConversationLedgerEntry {
                 + (toolName != null ? ", toolName='" + toolName + '\'' : "")
                 + (artifactId != null ? ", artifactId='" + artifactId + '\'' : "")
                 + ", compacted=" + compacted
+                + ", compactionDepth=" + compactionDepth
+                + ", microCompacted=" + microCompacted
                 + ", snipped=" + snipped
                 + '}';
     }
@@ -143,6 +158,8 @@ public final class ConversationLedgerEntry {
         private Integer originalChars;
         private Integer renderChars;
         private boolean compacted;
+        private int compactionDepth;
+        private boolean microCompacted;
         private boolean snipped;
 
         public Builder entryId(String v) { this.entryId = v; return this; }
@@ -156,6 +173,8 @@ public final class ConversationLedgerEntry {
         public Builder originalChars(Integer v) { this.originalChars = v; return this; }
         public Builder renderChars(Integer v) { this.renderChars = v; return this; }
         public Builder compacted(boolean v) { this.compacted = v; return this; }
+        public Builder compactionDepth(int v) { this.compactionDepth = v; return this; }
+        public Builder microCompacted(boolean v) { this.microCompacted = v; return this; }
         public Builder snipped(boolean v) { this.snipped = v; return this; }
 
         public ConversationLedgerEntry build() {

@@ -757,4 +757,198 @@ public class ConversationLedgerC10Test {
                 .orElse(null);
         assertNotNull("old metadata preserved for retry", oldArtifact);
     }
+
+    // ================================================================
+    // 18. Compaction depth tracking across generations
+    // ================================================================
+
+    @Test
+    public void compactionDepthTracksAcrossGenerations() {
+        AgentContext ctx = createBootstrappedRun("c10-depth", "depth tracking");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark);
+
+        // Round 1: compactionDepth should be 1
+        fillEntries(ctx, 5);
+        LedgerCompactionResult r1 = svc.compact(ctx);
+        assertTrue("first compaction", r1.compacted());
+        assertEquals("depth=1", 1, r1.compactionDepth());
+        assertEquals("maxInputDepth=0", 0, r1.maxInputCompactionDepth());
+        assertFalse("not depth guarded", r1.depthGuarded());
+        ConversationLedgerEntry se1 = summaryEntry(ctx);
+        assertEquals("entry compactionDepth=1", 1, se1.compactionDepth());
+        assertThat(se1.content()).contains("CompactionDepth: 1");
+        assertThat(se1.content()).contains("MaxInputCompactionDepth: 0");
+
+        // Round 2: compactionDepth should be 2
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r2 = svc.compact(ctx);
+        assertTrue("second compaction", r2.compacted());
+        assertEquals("depth=2", 2, r2.compactionDepth());
+        assertEquals("maxInputDepth=1", 1, r2.maxInputCompactionDepth());
+        assertFalse("not depth guarded", r2.depthGuarded());
+
+        // Round 3: compactionDepth should be 3
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r3 = svc.compact(ctx);
+        assertTrue("third compaction", r3.compacted());
+        assertEquals("depth=3", 3, r3.compactionDepth());
+        assertEquals("maxInputDepth=2", 2, r3.maxInputCompactionDepth());
+        assertFalse("not depth guarded", r3.depthGuarded());
+    }
+
+    @Test
+    public void compactionDepthGuardTriggersDeterministicFallback() {
+        AgentContext ctx = createBootstrappedRun("c10-depth-guard", "depth guard");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark);
+
+        // 3 compactions → depth reaches 3
+        for (int i = 0; i < 3; i++) {
+            fillEntries(ctx, 4);
+            svc.compact(ctx);
+        }
+        assertEquals("depth 3 reached", 3, ctx.getGeneration());
+
+        // 4th compaction should be depth-guarded (nextDepth=4 > max=3)
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r4 = svc.compact(ctx);
+        assertTrue("still compacts", r4.compacted());
+        assertEquals("depth=4", 4, r4.compactionDepth());
+        assertEquals("maxInputDepth=3", 3, r4.maxInputCompactionDepth());
+        assertEquals("maxAllowedDepth=3", 3, r4.maxAllowedCompactionDepth());
+        assertTrue("depth guarded", r4.depthGuarded());
+        assertEquals("deterministic_depth_guarded", r4.strategy());
+
+        ConversationLedgerEntry se = summaryEntry(ctx);
+        assertEquals("entry compactionDepth=4", 4, se.compactionDepth());
+        assertThat(se.content()).contains("CompactionDepth: 4");
+        assertThat(se.content()).contains("MaxAllowedCompactionDepth: 3");
+    }
+
+    @Test
+    public void wouldExceedMaxCompactionDepthReturnsTrueAfterMax() {
+        AgentContext ctx = createBootstrappedRun("c10-would-exceed", "would exceed");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark);
+
+        // Fresh context: max depth is 0, next would be 1, not exceeded
+        assertFalse("fresh: not exceeded", svc.wouldExceedMaxCompactionDepth(ctx));
+
+        // 3 compactions → maxInputDepth=3, nextDepth=4 > max=3 → exceeded
+        for (int i = 0; i < 3; i++) {
+            fillEntries(ctx, 4);
+            svc.compact(ctx);
+        }
+        assertTrue("after 3 compactions: exceeded", svc.wouldExceedMaxCompactionDepth(ctx));
+    }
+
+    @Test
+    public void microCompactDoesNotAffectCompactionDepth() {
+        AgentContext ctx = createBootstrappedRun("c10-micro-depth", "micro depth");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark);
+
+        // Do one full compaction to get depth=1
+        fillEntries(ctx, 5);
+        LedgerCompactionResult r1 = svc.compact(ctx);
+        assertEquals("depth=1 after first compact", 1, r1.compactionDepth());
+
+        // The summary entry should have compactionDepth=1, microCompacted=false
+        ConversationLedgerEntry se = summaryEntry(ctx);
+        assertEquals(1, se.compactionDepth());
+        assertFalse("not micro compacted", se.microCompacted());
+
+        // microCompact on this ledger should not change compactionDepth
+        ConversationLedger ledger = ctx.getConversationLedger();
+        boolean microChanged = svc.microCompact(ctx, ledger);
+        // microCompact may or may not change entries, but depth stays same
+        for (ConversationLedgerEntry e : ledger.entries()) {
+            assertTrue("compactionDepth never increases from microCompact",
+                    e.compactionDepth() <= 1);
+        }
+    }
+
+    @Test
+    public void compactionDepthAppearsInDeepSummaryText() {
+        AgentContext ctx = createBootstrappedRun("c10-depth-deep", "deep summary depth");
+        fillEntries(ctx, 10);
+
+        DeepContextSummaryService deepService = new DeepContextSummaryService(
+                new ModelGateway() {
+                    @Override
+                    public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                        return Flux.empty();
+                    }
+                    @Override
+                    public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                        return Mono.just(ModelChatResult.builder()
+                                .content("AI summary content")
+                                .finishReason("stop")
+                                .build());
+                    }
+                },
+                properties,
+                new DefaultBudgetGuard(properties),
+                traceRecorder);
+
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark, deepService);
+
+        LedgerCompactionResult result = svc.compact(ctx);
+        assertTrue("compacted", result.compacted());
+        assertEquals("deep_summary", result.strategy());
+        assertEquals("depth=1", 1, result.compactionDepth());
+
+        ConversationLedgerEntry se = summaryEntry(ctx);
+        assertThat(se.content()).contains("CompactionDepth: 1");
+        assertThat(se.content()).contains("MaxInputCompactionDepth: 0");
+        assertThat(se.content()).contains("MaxAllowedCompactionDepth: 3");
+    }
+
+    @Test
+    public void customMaxCompactionDepthConfig() {
+        AgentContext ctx = createBootstrappedRun("c10-custom-depth", "custom depth");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+
+        // Create service with maxCompactionDepth=2 (instead of default 3)
+        LedgerCompactionService svc = new LedgerCompactionService(
+                watermark, artifactRepository, blobStore, null, null, 2);
+
+        // 2 compactions → depth reaches 2 (still within limit)
+        for (int i = 0; i < 2; i++) {
+            fillEntries(ctx, 4);
+            svc.compact(ctx);
+        }
+
+        // 3rd compaction should be depth-guarded with maxDepth=2
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r3 = svc.compact(ctx);
+        assertEquals("depth=3", 3, r3.compactionDepth());
+        assertEquals("maxAllowedDepth=2", 2, r3.maxAllowedCompactionDepth());
+        assertTrue("depth guarded with custom max", r3.depthGuarded());
+        assertEquals("deterministic_depth_guarded", r3.strategy());
+        assertTrue("wouldExceedMax returns true", svc.wouldExceedMaxCompactionDepth(ctx));
+    }
+
+    @Test
+    public void compactionDepthMetadataInResult() {
+        AgentContext ctx = createBootstrappedRun("c10-meta-depth", "metadata depth");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionService(watermark);
+
+        fillEntries(ctx, 5);
+        LedgerCompactionResult result = svc.compact(ctx);
+
+        // All depth fields should be present and sensible
+        assertTrue("compactionDepth >= 1", result.compactionDepth() >= 1);
+        assertTrue("maxInputCompactionDepth >= 0", result.maxInputCompactionDepth() >= 0);
+        assertEquals("maxAllowedDepth defaults to 3", 3, result.maxAllowedCompactionDepth());
+        // notNeeded returns 0 for depth fields
+        LedgerCompactionResult notNeeded = LedgerCompactionResult.notNeeded(5, 0);
+        assertEquals(0, notNeeded.compactionDepth());
+        assertEquals(0, notNeeded.maxInputCompactionDepth());
+        assertEquals(0, notNeeded.maxAllowedCompactionDepth());
+        assertFalse(notNeeded.depthGuarded());
+    }
 }

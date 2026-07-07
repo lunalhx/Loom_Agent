@@ -57,6 +57,7 @@ public final class LedgerCompactionService {
     private final ContextArtifactRepository artifactRepository;
     private final ContextBlobStore blobStore;
     private final DeepContextSummaryService deepSummaryService;
+    private final int maxCompactionDepth;
     private final ContextArtifactPurgeService purgeService;
     private final LedgerTranscriptRenderer renderer;
 
@@ -65,11 +66,21 @@ public final class LedgerCompactionService {
                                     ContextBlobStore blobStore,
                                     DeepContextSummaryService deepSummaryService,
                                     ContextArtifactPurgeService purgeService) {
+        this(watermark, artifactRepository, blobStore, deepSummaryService, purgeService, 3);
+    }
+
+    public LedgerCompactionService(LedgerWatermark watermark,
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore,
+                                    DeepContextSummaryService deepSummaryService,
+                                    ContextArtifactPurgeService purgeService,
+                                    int maxCompactionDepth) {
         this.watermark = Objects.requireNonNull(watermark, "watermark must not be null");
         this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository must not be null");
         this.blobStore = Objects.requireNonNull(blobStore, "blobStore must not be null");
         this.deepSummaryService = deepSummaryService;
         this.purgeService = purgeService;
+        this.maxCompactionDepth = maxCompactionDepth;
         this.renderer = new LedgerTranscriptRenderer();
     }
 
@@ -147,7 +158,7 @@ public final class LedgerCompactionService {
                 continue;
             }
             seenToolResults++;
-            if (seenToolResults <= keepRecent || entry.compacted()) {
+            if (seenToolResults <= keepRecent || entry.microCompacted()) {
                 continue;
             }
             if (StringUtils.isBlank(entry.artifactId())) {
@@ -171,7 +182,8 @@ public final class LedgerCompactionService {
                     .artifactId(entry.artifactId())
                     .originalChars(entry.originalChars())
                     .renderChars(reference.length())
-                    .compacted(true)
+                    .microCompacted(true)
+                    .compactionDepth(entry.compactionDepth())
                     .snipped(false)
                     .build());
             changed = true;
@@ -201,21 +213,34 @@ public final class LedgerCompactionService {
         int beforeCount = ledger.size();
         List<ConversationLedgerEntry> oldEntries = new ArrayList<>(ledger.entries());
 
+        int maxInputDepth = oldEntries.stream()
+                .mapToInt(ConversationLedgerEntry::compactionDepth)
+                .max().orElse(0);
+        int nextDepth = maxInputDepth + 1;
+        boolean depthGuarded = nextDepth > maxCompactionDepth;
+
         // ---- 1. Persist transcript artifact ----
         String transcript = renderer.render(oldEntries);
         ContextArtifact artifact = persistArtifact(context, transcript);
 
-        // ---- 2. Build summary (deep first, fallback to deterministic) ----
+        // ---- 2. Build summary (deep first, depth-guarded fallback to deterministic) ----
         String strategy;
         String summary;
-        try {
-            String deepResult = tryDeepSummary(context, oldEntries, artifact, transcript);
-            strategy = "deep_summary";
-            summary = deepResult;
-        } catch (Exception e) {
-            // deep summary unavailable / failed — deterministic fallback
-            summary = buildDeterministicSummary(context, oldEntries, artifact);
-            strategy = deepSummaryService != null ? "deep_summary_deterministic" : "deterministic";
+        if (depthGuarded) {
+            summary = buildDeterministicSummary(context, oldEntries, artifact,
+                    nextDepth, maxInputDepth, maxCompactionDepth);
+            strategy = "deterministic_depth_guarded";
+        } else {
+            try {
+                String deepResult = tryDeepSummary(context, oldEntries, artifact, transcript,
+                        nextDepth, maxInputDepth, maxCompactionDepth);
+                strategy = "deep_summary";
+                summary = deepResult;
+            } catch (Exception e) {
+                summary = buildDeterministicSummary(context, oldEntries, artifact,
+                        nextDepth, maxInputDepth, maxCompactionDepth);
+                strategy = deepSummaryService != null ? "deep_summary_deterministic" : "deterministic";
+            }
         }
 
         // ---- 3. Build new entry list: recent tail + summary ----
@@ -227,7 +252,7 @@ public final class LedgerCompactionService {
         for (int i = start; i < oldEntries.size(); i++) {
             newEntries.add(oldEntries.get(i));
         }
-        newEntries.add(createSummaryEntry(ledger.nextSequence(), summary, artifact.getArtifactId()));
+        newEntries.add(createSummaryEntry(ledger.nextSequence(), summary, artifact.getArtifactId(), nextDepth));
 
         // ---- 4. Replace ledger entries ----
         ledger.replaceEntries(newEntries);
@@ -241,8 +266,26 @@ public final class LedgerCompactionService {
         // ---- 6. Purge obsolete TRANSCRIPT artifacts ----
         purgeObsoleteTranscripts(context, artifact.getArtifactId());
 
-        return LedgerCompactionResult.compacted(newGen, beforeCount, newEntries.size(),
-                strategy, artifact.getArtifactId());
+        return LedgerCompactionResult.compactedWithDepth(newGen, beforeCount, newEntries.size(),
+                strategy, artifact.getArtifactId(), nextDepth, maxInputDepth,
+                maxCompactionDepth, depthGuarded);
+    }
+
+    /**
+     * Check whether the next compaction would exceed the max compaction depth.
+     *
+     * <p>Used by {@code DeepSummaryStep} to decide whether to skip compaction
+     * entirely rather than produce yet another deterministic fallback summary.
+     */
+    public boolean wouldExceedMaxCompactionDepth(AgentContext context) {
+        ConversationLedger ledger = context.getConversationLedger();
+        if (ledger == null || ledger.isEmpty()) {
+            return false;
+        }
+        int maxInputDepth = ledger.entries().stream()
+                .mapToInt(ConversationLedgerEntry::compactionDepth)
+                .max().orElse(0);
+        return maxInputDepth + 1 > maxCompactionDepth;
     }
 
     // ================================================================
@@ -251,9 +294,14 @@ public final class LedgerCompactionService {
 
     private String buildDeterministicSummary(AgentContext context,
                                              List<ConversationLedgerEntry> oldEntries,
-                                             ContextArtifact artifact) {
+                                             ContextArtifact artifact,
+                                             int compactionDepth, int maxInputCompactionDepth,
+                                             int maxAllowedCompactionDepth) {
         StringBuilder sb = new StringBuilder();
         sb.append("[Ledger Compaction Summary]\n");
+        sb.append("CompactionDepth: ").append(compactionDepth).append('\n');
+        sb.append("MaxInputCompactionDepth: ").append(maxInputCompactionDepth).append('\n');
+        sb.append("MaxAllowedCompactionDepth: ").append(maxAllowedCompactionDepth).append('\n');
         sb.append("UserGoal: ").append(StringUtils.abbreviate(
                 StringUtils.defaultString(context.getQuestion()), 800)).append('\n');
         if (context.getPlan() != null) {
@@ -293,7 +341,9 @@ public final class LedgerCompactionService {
     private String tryDeepSummary(AgentContext context,
                                   List<ConversationLedgerEntry> oldEntries,
                                   ContextArtifact artifact,
-                                  String transcript) throws Exception {
+                                  String transcript,
+                                  int compactionDepth, int maxInputCompactionDepth,
+                                  int maxAllowedCompactionDepth) throws Exception {
         if (deepSummaryService == null) {
             throw new IllegalStateException("deep summary service is not available");
         }
@@ -312,6 +362,9 @@ public final class LedgerCompactionService {
         StringBuilder sb = new StringBuilder();
         sb.append("[Ledger Deep Compaction Summary — Generation ")
                 .append(context.getGeneration() + 1).append("]\n");
+        sb.append("\nCompactionDepth: ").append(compactionDepth);
+        sb.append("\nMaxInputCompactionDepth: ").append(maxInputCompactionDepth);
+        sb.append("\nMaxAllowedCompactionDepth: ").append(maxAllowedCompactionDepth);
         sb.append(result.getSummary());
         sb.append("\n\nCompactedTranscriptArtifactId: ").append(artifact.getArtifactId());
         sb.append("\nEntriesBeforeCompaction: ").append(oldEntries.size());
@@ -359,13 +412,15 @@ public final class LedgerCompactionService {
     // ================================================================
 
     private ConversationLedgerEntry createSummaryEntry(long sequence, String summary,
-                                                       String artifactId) {
+                                                       String artifactId, int compactionDepth) {
         return ConversationLedgerEntry.builder()
                 .sequence(sequence)
                 .role("user")
                 .content(summary)
                 .stableType(LedgerStableType.SYSTEM_NOTE)
                 .eventKey("compaction:" + artifactId)
+                .compactionDepth(compactionDepth)
+                .microCompacted(false)
                 .build();
     }
 
