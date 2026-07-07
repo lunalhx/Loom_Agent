@@ -18,7 +18,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 /**
- * AgentContextSnapshot schema v4 persistence and backward compatibility tests.
+ * AgentContextSnapshot schema v5 persistence and backward compatibility tests.
  */
 public class AgentContextSnapshotPersistenceTest {
 
@@ -38,7 +38,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.setGeneration(1);
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(4, snapshot.getSchemaVersion());
+        assertEquals(5, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         assertEquals("v3-roundtrip", restored.getRunId());
@@ -65,7 +65,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.ensureLedgerActive(); // creates empty ledger
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(4, snapshot.getSchemaVersion());
+        assertEquals(5, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         // Empty ledger: no entries, so not reconstructed
@@ -357,7 +357,7 @@ public class AgentContextSnapshotPersistenceTest {
         String json = objectMapper.writeValueAsString(original);
         AgentContextSnapshot reloaded = objectMapper.readValue(json, AgentContextSnapshot.class);
 
-        assertEquals(4, reloaded.getSchemaVersion());
+        assertEquals(5, reloaded.getSchemaVersion());
         assertEquals(1, reloaded.getLedgerEntries().size());
         assertEquals("json-test", reloaded.getLedgerEntries().get(0).content());
         assertEquals("fp-json", reloaded.getStablePrefix().fingerprint());
@@ -400,11 +400,36 @@ public class AgentContextSnapshotPersistenceTest {
     // ==================== schema version boundaries ====================
 
     @Test
-    public void snapshotSchemaVersionShouldBe4() {
-        assertEquals(4, new AgentContextSnapshot().getSchemaVersion());
+    public void snapshotSchemaVersionShouldBe5() {
+        assertEquals(5, new AgentContextSnapshot().getSchemaVersion());
         AgentContext ctx = new AgentContext();
-        ctx.setRunId("v4-check");
-        assertEquals(4, AgentContextSnapshot.from(ctx).getSchemaVersion());
+        ctx.setRunId("v5-check");
+        assertEquals(5, AgentContextSnapshot.from(ctx).getSchemaVersion());
+    }
+
+    // ==================== replanAttemptsForFailure ====================
+
+    @Test
+    public void replanAttemptsForFailureRoundTrip() {
+        AgentContext ctx = new AgentContext();
+        ctx.setRunId("replan-test");
+        ctx.setReplanAttemptsForFailure(3);
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
+        assertEquals(3, snapshot.getReplanAttemptsForFailure().intValue());
+
+        AgentContext restored = snapshot.restore();
+        assertEquals(3, restored.getReplanAttemptsForFailure());
+    }
+
+    @Test
+    public void replanAttemptsForFailureDefaultValue() {
+        AgentContext ctx = new AgentContext();
+        ctx.setRunId("replan-default");
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
+        AgentContext restored = snapshot.restore();
+        assertEquals(0, restored.getReplanAttemptsForFailure());
     }
 
     @Test

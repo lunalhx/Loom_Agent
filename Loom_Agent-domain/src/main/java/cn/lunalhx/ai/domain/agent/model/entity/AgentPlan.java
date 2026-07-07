@@ -131,14 +131,44 @@ public class AgentPlan {
                         existing.getStatus(), changed);
 
             } else if (StringUtils.isNotBlank(content)) {
-                // Duplicate content check: reject creation if content matches an existing item
-                Optional<AgentPlanItem> dup = items.stream()
-                        .filter(item -> StringUtils.equals(item.getContent(), content))
-                        .findFirst();
+                // Structured duplicate detection via dedupeKey, with exact content fallback
+                String newDedupeKey = dedupeKeyFor(todo);
+                Optional<AgentPlanItem> dup;
+                if (newDedupeKey != null) {
+                    dup = items.stream()
+                            .filter(item -> {
+                                String existingKey = item.getDedupeKey() != null
+                                        ? item.getDedupeKey() : dedupeKeyFor(item);
+                                return StringUtils.equals(existingKey, newDedupeKey);
+                            })
+                            .filter(item -> item.getStatus() == null || !item.getStatus().terminal())
+                            .findFirst();
+                    if (dup.isEmpty()) {
+                        Optional<AgentPlanItem> terminalDup = items.stream()
+                                .filter(item -> item.getStatus() != null && item.getStatus().terminal())
+                                .filter(item -> {
+                                    String existingKey = item.getDedupeKey() != null
+                                            ? item.getDedupeKey() : dedupeKeyFor(item);
+                                    return StringUtils.equals(existingKey, newDedupeKey);
+                                })
+                                .findFirst();
+                        if (terminalDup.isPresent()) {
+                            appendEvent("CREATE_AFTER_TERMINAL_DUPLICATE", null,
+                                    "terminal_item_id=" + terminalDup.get().getId()
+                                            + " dedupeKey=" + newDedupeKey, null, null, null);
+                        }
+                    }
+                } else {
+                    dup = items.stream()
+                            .filter(item -> StringUtils.equals(item.getContent(), content))
+                            .findFirst();
+                }
                 if (dup.isPresent()) {
+                    appendEvent("DUPLICATE_CREATE_REJECTED", dup.get().getId(),
+                            "dedupeKey=" + newDedupeKey, null, null, null);
                     throw new IllegalArgumentException(
-                            "content=\"" + StringUtils.abbreviate(content, 50) + "\" 与已有任务(id="
-                                    + dup.get().getId() + ")重复，请使用已有 id 更新，不要用 content 创建重复任务");
+                            "任务与已有任务(id=" + dup.get().getId() + ")重复，"
+                                    + "请使用已有 id 更新，不要用近似 wording 创建重复任务");
                 }
                 if (StringUtils.isBlank(id)) {
                     id = "task-" + UUID.randomUUID().toString().substring(0, 8);
@@ -173,6 +203,7 @@ public class AgentPlan {
                         .verification(verification)
                         .evidence(todo.path("evidence").asText(null))
                         .blocker(todo.path("blocker").asText(null))
+                        .dedupeKey(newDedupeKey)
                         .order(nextOrder())
                         .updateTime(Instant.now())
                         .build();
@@ -194,9 +225,17 @@ public class AgentPlan {
     }
 
     public void addReplanItem(String content, String reason, String kind) {
-        if (items.stream().noneMatch(item -> StringUtils.equals(item.getContent(), content))) {
+        String newDedupeKey = content != null ? "content:" + normalizedContentKey(content) : null;
+        boolean isDuplicate = newDedupeKey != null && items.stream().anyMatch(item -> {
+            String existingKey = item.getDedupeKey() != null
+                    ? item.getDedupeKey() : dedupeKeyFor(item);
+            return StringUtils.equals(existingKey, newDedupeKey);
+        });
+        if (!isDuplicate) {
             addItem(content, AgentPlanItemStatus.PENDING, kind);
-            String newId = items.get(items.size() - 1).getId();
+            AgentPlanItem newItem = items.get(items.size() - 1);
+            newItem.setDedupeKey(newDedupeKey);
+            String newId = newItem.getId();
             appendEvent("REPLAN_APPEND", newId, reason, null, AgentPlanItemStatus.PENDING, null);
         } else {
             appendEvent("REPLAN_DEDUPED", null, reason, null, null, null);
@@ -488,6 +527,71 @@ public class AgentPlan {
 
     private String appendIfPresent(String prefix, String value) {
         return StringUtils.isBlank(value) ? "" : prefix + value;
+    }
+
+    private String dedupeKeyFor(JsonNode todo) {
+        String kind = todo.path("kind").asText(null);
+        List<String> targets = readTargets(todo.path("targets"));
+
+        if ("edit".equals(kind) && !targets.isEmpty()) {
+            return "edit:" + String.join("|", targets);
+        }
+        if ("inspect".equals(kind) && !targets.isEmpty()) {
+            return "inspect:" + String.join("|", targets);
+        }
+        if ("verify".equals(kind)) {
+            String verifyCmd = todo.has("verification")
+                    ? todo.path("verification").path("command").asText(null) : null;
+            if (StringUtils.isNotBlank(verifyCmd)) {
+                return "verify:" + verifyCmd.trim();
+            }
+        }
+
+        String content = todo.path("content").asText(null);
+        if (StringUtils.isNotBlank(content)) {
+            return "content:" + normalizedContentKey(content);
+        }
+
+        return null;
+    }
+
+    private String dedupeKeyFor(AgentPlanItem item) {
+        if (item.getDedupeKey() != null) {
+            return item.getDedupeKey();
+        }
+
+        String kind = item.getKind();
+        List<String> targets = item.getTargets();
+
+        if ("edit".equals(kind) && targets != null && !targets.isEmpty()) {
+            return "edit:" + String.join("|", targets);
+        }
+        if ("inspect".equals(kind) && targets != null && !targets.isEmpty()) {
+            return "inspect:" + String.join("|", targets);
+        }
+        if ("verify".equals(kind)) {
+            PlanItemVerification verification = item.getVerification();
+            if (verification != null && StringUtils.isNotBlank(verification.getCommand())) {
+                return "verify:" + verification.getCommand().trim();
+            }
+        }
+
+        String content = item.getContent();
+        if (StringUtils.isNotBlank(content)) {
+            return "content:" + normalizedContentKey(content);
+        }
+
+        return null;
+    }
+
+    private String normalizedContentKey(String content) {
+        if (StringUtils.isBlank(content)) {
+            return "";
+        }
+        String key = content.trim();
+        key = key.replaceAll("(文件|任务|步骤)\\s*$", "");
+        key = key.replaceAll("\\s+", " ");
+        return key.trim();
     }
 
 }

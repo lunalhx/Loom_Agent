@@ -9,6 +9,7 @@ import org.junit.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -234,5 +235,89 @@ public class AgentPlanTest {
         assertEquals(1, appendCount);
         assertEquals(1, dedupCount);
         assertEquals(1, plan.getItems().size());
+    }
+
+    @Test
+    public void sameEditTargetsWithDifferentWordingShouldBeRejected() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"创建 index.html","status":"pending","kind":"edit","targets":["index.html"]}]}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> plan.applyTodoWrite(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"创建 index.html 文件","status":"pending","kind":"edit","targets":["index.html"]}]}
+                        """)));
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_REJECTED".equals(e.getType())));
+    }
+
+    @Test
+    public void differentTargetsWithSimilarContentShouldBeAllowed() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"create file","status":"pending","kind":"edit","targets":["index.html"]}]}
+                """));
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"create file","status":"pending","kind":"edit","targets":["styles.css"]}]}
+                """));
+        assertEquals(2, plan.getItems().size());
+    }
+
+    @Test
+    public void terminalTaskDuplicateShouldAllowCreationWithLog() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"initial task","status":"completed","kind":"edit","targets":["index.html"]}]}
+                """));
+        // Different content, same targets — original is terminal (completed), so creation is allowed
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"updated task","status":"pending","kind":"edit","targets":["index.html"]}]}
+                """));
+        assertEquals(2, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "CREATE_AFTER_TERMINAL_DUPLICATE".equals(e.getType())));
+    }
+
+    @Test
+    public void oldJsonWithoutDedupeKeyShouldDeserialize() throws Exception {
+        String json = """
+                {"planId":"abc","version":1,"currentItemId":null,"roundsSinceUpdate":0,"items":[{"id":"task-1","order":1,"content":"test","status":"PENDING","kind":"inspect","targets":["a.txt"]}]}
+                """;
+        AgentPlan plan = objectMapper.readValue(json, AgentPlan.class);
+        assertNotNull(plan.getItems());
+        assertEquals(1, plan.getItems().size());
+        assertNull(plan.getItems().get(0).getDedupeKey());
+    }
+
+    @Test
+    public void dedupeKeyPresentAfterCreateAndEventsMonotonic() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"edit Foo","status":"pending","kind":"edit","targets":["src/Foo.java"]}]}
+                """));
+        assertNotNull(plan.getItems().get(0).getDedupeKey());
+
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"verify test","status":"pending","kind":"verify","verification":{"command":"mvn test"}}]}
+                """));
+        assertEquals("verify:mvn test", plan.getItems().get(1).getDedupeKey());
+
+        // Event sequence should be monotonic
+        int lastSeq = 0;
+        for (AgentPlanEvent e : plan.getEvents()) {
+            assertTrue(e.getSequence() > lastSeq);
+            lastSeq = e.getSequence();
+        }
+    }
+
+    @Test
+    public void verifyTaskWithSameCommandShouldBeDuplicate() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"run tests","status":"pending","kind":"verify","verification":{"command":"mvn test -pl mymodule"}}]}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> plan.applyTodoWrite(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"execute maven test","status":"pending","kind":"verify","verification":{"command":"mvn test -pl mymodule"}}]}
+                        """)));
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_REJECTED".equals(e.getType())));
     }
 }

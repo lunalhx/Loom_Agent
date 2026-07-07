@@ -197,6 +197,7 @@ public class ReplanNode extends AbstractAgentNode {
     private String renderReplanPrompt(AgentContext context, ReplanReason reason) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象。\n");
+        prompt.append("不要为同一 targets/command 创建新任务；如果任务已存在，必须用已有 id 更新，不要换 wording 创建重复任务。\n");
         prompt.append("不要删除历史任务；只能更新状态或追加任务。\n");
         prompt.append("保留现有任务的 kind 和 targets 字段。\n");
         prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\",\"verification\":{\"command\":\"...\",\"passed\":true,\"exitCode\":0,\"summary\":\"...\"}}]}\n");

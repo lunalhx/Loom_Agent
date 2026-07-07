@@ -29,6 +29,7 @@ public class AgentPlanItem {
     private List<String> targets;
     private PlanItemVerification verification;
     private Instant updateTime;
+    private String dedupeKey;
 
     public void setTargets(List<String> targets) {
         this.targets = targets == null ? List.of() : List.copyOf(targets);
