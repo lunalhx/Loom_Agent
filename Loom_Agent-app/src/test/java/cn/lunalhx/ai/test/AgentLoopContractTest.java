@@ -721,6 +721,49 @@ public class AgentLoopContractTest {
     }
 
     @Test
+    public void bookkeepingOnlyIncompleteItemsShouldNotBlockFinalAnswer() {
+        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
+
+        AgentRuntimeTestFixture fixture = AgentRuntimeTestFixture.fixture()
+                .modelGateway(completeGateway(new ArrayList<>(),
+                        "{\"type\":\"action\",\"thought\":\"设定计划\",\"tool\":\"todo_write\"," +
+                                "\"input\":{\"todos\":[" +
+                                "{\"id\":\"task-1\",\"content\":\"分析需求\",\"status\":\"in_progress\",\"kind\":\"inspect\"}," +
+                                "{\"id\":\"task-2\",\"content\":\"总结结果\",\"status\":\"pending\",\"kind\":\"inspect\"}]}}",
+                        "{\"type\":\"final\",\"answer\":\"分析完成。\",\"evidence\":[]}"))
+                .tools(List.of(new cn.lunalhx.ai.infrastructure.tool.TodoWriteTool()))
+                .properties(properties);
+
+        DefaultAgentLoopService service = fixture.buildAgentLoop();
+        List<AgentEvent> events = service.ask(AgentQuestion.builder()
+                        .runId("bookkeeping-only")
+                        .requestId("bookkeeping-only")
+                        .conversationId("bookkeeping-only")
+                        .question("简单分析")
+                        .maxSteps(8)
+                        .build())
+                .collectList()
+                .block(TIMEOUT);
+
+        assertNotNull(events);
+        List<AgentEventType> types = events.stream().map(AgentEvent::getType).collect(Collectors.toList());
+
+        assertTrue("应包含 ANSWER，实际：" + types, types.contains(AgentEventType.ANSWER));
+        assertTrue("应包含 DONE", types.contains(AgentEventType.DONE));
+        assertFalse("不应包含 ERROR", types.contains(AgentEventType.ERROR));
+
+        assertTrue("应包含 STOP_HOOK_RESULT(decision=reconciled)",
+                types.contains(AgentEventType.STOP_HOOK_RESULT));
+        AgentEvent hookResult = events.stream()
+                .filter(e -> e.getType() == AgentEventType.STOP_HOOK_RESULT)
+                .findFirst().orElseThrow();
+        assertEquals("reconciled", hookResult.getMetadata().get("decision"));
+
+        assertTrue("应包含 PLAN_UPDATED",
+                types.contains(AgentEventType.PLAN_UPDATED));
+    }
+
+    @Test
     public void pendingApprovalConsistencyStopHookShouldRouteToFailWhenApprovalMissing() {
         // 使用一个 "丢失写入" 的 ApprovalStore：save 正常但 find 永远查不到
         ApprovalStore forgetfulStore = new ApprovalStore() {

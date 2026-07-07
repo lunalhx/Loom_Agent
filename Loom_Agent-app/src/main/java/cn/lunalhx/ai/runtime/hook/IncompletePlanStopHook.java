@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -18,14 +17,15 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.agent.service.plan.PlanReconciliation;
+import cn.lunalhx.ai.domain.agent.service.plan.PlanReconciliationResult;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Component
 @Order(200)
@@ -81,42 +81,51 @@ public class IncompletePlanStopHook implements AgentHook {
         }
 
         // --- Reconciliation: auto-complete plan items based on execution facts ---
-        PlanReconciliation.reconcile(agentContext);
+        PlanReconciliationResult result = PlanReconciliation.reconcile(agentContext);
 
-        // After reconciliation, re-check completeness
-        if (agentContext.getPlan() == null
-                || (!agentContext.getPlan().hasIncompleteItems()
-                && agentContext.getPlan()
-                        .unmetEditTargetCount(agentContext.getTouchedFiles()) == 0)) {
-            return AgentHookResult.proceed();
-        }
-
-        // --- Determine if the remaining incomplete items are genuine blockers ---
-        if (isReadOnlyOrMemoryRun(agentContext)) {
-            // Read-only or memory runs: non-edit items that are pending can be skipped
-            // Only block if there are unmet edit targets or incomplete edit items
-            long unmetEdits = agentContext.getPlan()
-                    .unmetEditTargetCount(agentContext.getTouchedFiles());
-            long incompleteEdits = agentContext.getPlan().incompleteEditItemCount();
-            if (unmetEdits == 0 && incompleteEdits == 0) {
-                // Auto-skip remaining pending items and allow completion
-                autoSkipPendingNonEditItems(agentContext);
+        // If no real blockers, reconciliation already resolved bookkeeping items → proceed
+        if (!result.hasRealBlockers()) {
+            if (result.totalResolved() == 0) {
                 return AgentHookResult.proceed();
             }
+
+            List<AgentEvent> events = new ArrayList<>();
+
+            AgentEvent hookEvent = AgentEvent.builder()
+                    .type(AgentEventType.STOP_HOOK_RESULT)
+                    .runId(agentContext.getRunId())
+                    .requestId(agentContext.getRequestId())
+                    .conversationId(agentContext.getConversationId())
+                    .workspace(agentContext.getWorkspaceDisplayName())
+                    .node(AgentNodeNames.FINAL_ANSWER)
+                    .step(agentContext.getStep())
+                    .metadata(Map.of(
+                            "hook", "incomplete_plan",
+                            "decision", "reconciled",
+                            "changedCount", result.changedCount(),
+                            "bookkeepingResolved", result.bookkeepingResolvedCount()))
+                    .build();
+            events.add(hookEvent);
+
+            AgentEvent planUpdated = AgentEvent.builder()
+                    .type(AgentEventType.PLAN_UPDATED)
+                    .runId(agentContext.getRunId())
+                    .requestId(agentContext.getRequestId())
+                    .conversationId(agentContext.getConversationId())
+                    .workspace(agentContext.getWorkspaceDisplayName())
+                    .node(AgentNodeNames.FINAL_ANSWER)
+                    .step(agentContext.getStep())
+                    .metadata(Map.of(
+                            "reason", "reconciliation",
+                            "changedCount", result.changedCount(),
+                            "bookkeepingResolved", result.bookkeepingResolvedCount()))
+                    .build();
+            events.add(planUpdated);
+
+            return AgentHookResult.proceed(events);
         }
 
-        // --- Check test results: if tests pass and all edit targets covered, skip bookkeeping ---
-        boolean testsPassing = (agentContext.getLastTestExitCode() != null
-                && agentContext.getLastTestExitCode() == 0)
-                || Boolean.TRUE.equals(agentContext.getLastTestPassed());
-        if (testsPassing
-                && agentContext.getPlan().unmetEditTargetCount(agentContext.getTouchedFiles()) == 0
-                && agentContext.getPlan().incompleteEditItemCount() == 0) {
-            // Tests pass + all edit targets written → auto-complete remaining items
-            autoCompleteRemainingItems(agentContext);
-            return AgentHookResult.proceed();
-        }
-
+        // Real blockers remain → current continuation/failure logic
         int continuationCount = agentContext.getStopHookContinuationCount();
         int maxContinuations = Math.max(0,
                 incompletePlan.getMaxContinuations() != null
@@ -159,6 +168,7 @@ public class IncompletePlanStopHook implements AgentHook {
                     List.of(hookEvent));
         }
 
+        // Max continuations exceeded
         agentContext.setStopReason(AgentStopReason.TOOL_ERROR);
         agentContext.setErrorCode("incomplete_plan");
         agentContext.setErrorMessage("计划存在未完成项，已达到最大自动续跑次数");
@@ -184,41 +194,6 @@ public class IncompletePlanStopHook implements AgentHook {
                 AgentHookAction.continueAt(AgentNodeNames.FAIL,
                         "incomplete_plan", false),
                 List.of(bypassEvent));
-    }
-
-    /**
-     * Determine if this run was read-only or memory-only (no code writes happened).
-     */
-    private boolean isReadOnlyOrMemoryRun(AgentContext agentContext) {
-        Set<String> touched = agentContext.getTouchedFiles();
-        return touched == null || touched.isEmpty();
-    }
-
-    /**
-     * Auto-skip non-edit pending items when the run was read-only/memory-only.
-     */
-    private void autoSkipPendingNonEditItems(AgentContext agentContext) {
-        if (agentContext.getPlan() == null) return;
-        for (AgentPlanItem item : agentContext.getPlan().getItems()) {
-            if (item.getStatus() != null && item.getStatus().terminal()) continue;
-            String kind = StringUtils.defaultString(item.getKind(), "");
-            if (!"edit".equalsIgnoreCase(kind)) {
-                item.setStatus(AgentPlanItemStatus.SKIPPED);
-                item.setEvidence("只读/内存阶段自动跳过");
-            }
-        }
-    }
-
-    /**
-     * Auto-complete remaining incomplete items when tests pass and all edits are done.
-     */
-    private void autoCompleteRemainingItems(AgentContext agentContext) {
-        if (agentContext.getPlan() == null) return;
-        for (AgentPlanItem item : agentContext.getPlan().getItems()) {
-            if (item.getStatus() != null && item.getStatus().terminal()) continue;
-            item.setStatus(AgentPlanItemStatus.COMPLETED);
-            item.setEvidence("测试通过且所有编辑目标已覆盖，自动完成");
-        }
     }
 
     /**
