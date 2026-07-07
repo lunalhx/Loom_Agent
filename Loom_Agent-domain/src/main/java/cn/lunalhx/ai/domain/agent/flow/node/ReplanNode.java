@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -87,10 +88,45 @@ public class ReplanNode extends AbstractAgentNode {
                 return NodeResult.next(AgentNodeNames.FAIL, List.of());
             }
         }
-        boolean modelUpdated = applyModelPlanDelta(context, prompt);
-        if (!modelUpdated) {
+        List<TodoApplyResult> results = applyModelPlanDelta(context, prompt);
+        if (results == null) {
             context.getPlan().addReplanItem(fallbackItem(reason), "replan:" + reason.name());
+        } else if (results.stream().anyMatch(TodoApplyResult::isApplied)) {
+            context.setNoProgressRounds(0);
+            if (traceRecorder != null) {
+                traceRecorder.recordModelGatewayEvent(context, "replan_applied", name(), "ok", 0L,
+                        "Model replan applied " + results.stream().filter(TodoApplyResult::isApplied).count() + " items",
+                        null, Map.of("appliedCount", results.stream().filter(TodoApplyResult::isApplied).count(),
+                                "skippedCount", results.size() - results.stream().filter(TodoApplyResult::isApplied).count()));
+            }
+        } else {
+            int rounds = context.getNoProgressRounds() + 1;
+            context.setNoProgressRounds(rounds);
+            if (traceRecorder != null) {
+                traceRecorder.recordModelGatewayEvent(context, "replan_no_change", name(), "warn", 0L,
+                        "Replan produced no applicable changes (round " + rounds + ")",
+                        null, Map.of("noProgressRound", rounds, "reason", reason.name()));
+            }
+            int maxRounds = properties.getStepBudget() != null
+                    ? Math.max(1, properties.getStepBudget().getNoProgressMaxRounds() == null
+                            ? 3 : properties.getStepBudget().getNoProgressMaxRounds())
+                    : 3;
+            if (rounds >= maxRounds) {
+                context.setStopReason(AgentStopReason.NO_PROGRESS);
+                context.setErrorCode("replan_no_progress");
+                if (traceRecorder != null) {
+                    traceRecorder.recordModelGatewayEvent(context, "replan_no_progress_terminated", name(), "error", 0L,
+                            "Replan loop terminated after " + rounds + " consecutive no-op rounds",
+                            null, Map.of("maxNoProgressRounds", maxRounds, "reason", reason.name()));
+                }
+                return NodeResult.next(AgentNodeNames.FAIL, List.of(
+                        event(context, AgentEventType.PLAN_UPDATED)
+                                .plan(context.getPlan().toView())
+                                .build()));
+            }
         }
+
+        boolean modelUpdated = results != null;
         appendPlanSnapshotIfChanged(context);
         appendReplanNote(context, reason, modelUpdated);
         if (ledgerAppendService != null) {
@@ -113,21 +149,21 @@ public class ReplanNode extends AbstractAgentNode {
         return NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(replanStarted, planUpdated));
     }
 
-    private boolean applyModelPlanDelta(AgentContext context, String promptText) {
-        long startedAt = System.currentTimeMillis();
+    private List<TodoApplyResult> applyModelPlanDelta(AgentContext context, String promptText) {
         try {
-            long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
-            int maxTokens = 0;
-            ModelChatResult result = null;
-            for (int attempt = 0; attempt < 2; attempt++) {
-                if (budgetGuard != null) {
-                    BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), null,
-                            ModelCallPurpose.CONTROL_JSON, promptText, maxTokens);
-                    if (!check.isAllowed()) {
-                        blockForBudget(context, check);
-                        return false;
-                    }
+        long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
+        int maxTokens = 0;
+        ModelChatResult result = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (budgetGuard != null) {
+                BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, name(), null,
+                        ModelCallPurpose.CONTROL_JSON, promptText, maxTokens);
+                if (!check.isAllowed()) {
+                    blockForBudget(context, check);
+                    return null;
                 }
+            }
+            try {
                 ChatPrompt prompt = ChatPrompt.builder()
                         .requestId(context.getRequestId())
                         .conversationId(context.getConversationId())
@@ -145,52 +181,62 @@ public class ReplanNode extends AbstractAgentNode {
                             .timeout(Duration.ofMillis(remainingMs))
                             .block(Duration.ofMillis(remainingMs + 100L));
                 }
-                if (result == null || !isLength(result.getFinishReason())) {
-                    break;
-                }
-                recordUsage(context, result);
-                if (attempt == 0) {
-                    maxTokens = escalatedMaxTokens();
-                }
-            }
-            if (result == null || StringUtils.isBlank(result.getContent())) {
-                return false;
-            }
-            if (isLength(result.getFinishReason())) {
+            } catch (Exception e) {
+                log.warn("Replan model call failed, fallback to generic item", e);
                 if (traceRecorder != null) {
-                    traceRecorder.recordModelGatewayEvent(context, "model_recovery_exhausted", name(), "error", 0L,
-                            ModelErrorCode.MODEL_DECISION_TRUNCATED.defaultMessage(), null,
+                    traceRecorder.recordModelGatewayEvent(context,
+                            "model_replan_call_failed", name(), "error", 0L,
+                            "Replan model call failed, fallback to generic item", e,
                             Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
-                                    "errorCode", ModelErrorCode.MODEL_DECISION_TRUNCATED.code()));
+                                    "capability", ModelCapabilities.COMPLETE_REPLAN));
                 }
-                return false;
+                return null;
+            }
+            if (result == null || !isLength(result.getFinishReason())) {
+                break;
             }
             recordUsage(context, result);
+            if (attempt == 0) {
+                maxTokens = escalatedMaxTokens();
+            }
+        }
+        if (result == null || StringUtils.isBlank(result.getContent())) {
+            return null;
+        }
+        if (isLength(result.getFinishReason())) {
+            if (traceRecorder != null) {
+                traceRecorder.recordModelGatewayEvent(context, "model_recovery_exhausted", name(), "error", 0L,
+                        ModelErrorCode.MODEL_DECISION_TRUNCATED.defaultMessage(), null,
+                        Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
+                                "errorCode", ModelErrorCode.MODEL_DECISION_TRUNCATED.code()));
+            }
+            return null;
+        }
+        recordUsage(context, result);
+        try {
             JsonNode root = objectMapper.readTree(stripMarkdownFence(result.getContent()));
             JsonNode todos = root.path("todos");
             if (!todos.isArray()) {
                 todos = root.path("items");
             }
             if (!todos.isArray() || todos.isEmpty()) {
-                return false;
+                return List.of();
             }
-            context.getPlan().applyTodoWrite(objectMapper.createObjectNode().set("todos", todos));
-            return true;
+            return context.getPlan().applyTodoWriteForReplan(objectMapper.createObjectNode().set("todos", todos));
         } catch (Exception e) {
-            log.warn("Replan model call failed, fallback to generic item", e);
+            log.warn("Replan JSON parse failed", e);
             if (traceRecorder != null) {
-                long durationMs = System.currentTimeMillis() - startedAt;
                 traceRecorder.recordModelGatewayEvent(context,
-                        "model_replan_call_failed", name(), "error", durationMs,
-                        "Replan model call failed, fallback to generic item", e,
+                        "model_replan_parse_failed", name(), "error", 0L,
+                        "Replan JSON parse failed", e,
                         Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
-                                "capability", ModelCapabilities.COMPLETE_REPLAN,
-                                "fallback", "generic_item",
-                                "replanReason", context.getReplanReason() != null
-                                        ? context.getReplanReason().name()
-                                        : ReplanReason.TOOL_FAILURE.name()));
+                                "capability", ModelCapabilities.COMPLETE_REPLAN));
             }
-            return false;
+            return null;
+        }
+        } catch (Exception e) {
+            log.warn("Replan model plan delta failed, fallback to generic item", e);
+            return null;
         }
     }
 

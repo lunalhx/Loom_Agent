@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
+import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
@@ -218,6 +219,201 @@ public class AgentPlan {
             }
         }
         touch("todo_write");
+    }
+
+    /**
+     * Lenient version of {@link #applyTodoWrite} for replan dedup scenarios.
+     * <ul>
+     *   <li>Never throws — errors convert to {@link TodoApplyResult#skipped}</li>
+     *   <li>Duplicate creates are silently ignored (DUPLICATE_CREATE_IGNORED)</li>
+     *   <li>Invalid items are skipped (INVALID_DELTA_IGNORED)</li>
+     *   <li>Batch-processes all items, collecting results</li>
+     * </ul>
+     */
+    public List<TodoApplyResult> applyTodoWriteForReplan(JsonNode input) {
+        List<TodoApplyResult> results = new ArrayList<>();
+        JsonNode todos = input == null ? null : input.path("todos");
+        if (todos == null || !todos.isArray()) {
+            return results;
+        }
+        boolean anyApplied = false;
+
+        for (JsonNode todo : todos) {
+            try {
+                String content = todo.path("content").asText(null);
+                String id = todo.path("id").asText(null);
+                AgentPlanItem existing = findForUpdate(id).orElse(null);
+
+                if (existing != null) {
+                    AgentPlanItemStatus beforeStatus = existing.getStatus();
+                    Set<String> changed = new LinkedHashSet<>();
+                    if (todo.has("content") && StringUtils.isNotBlank(content)) {
+                        existing.setContent(content);
+                        changed.add("content");
+                    }
+                    if (todo.has("status")) {
+                        existing.setStatus(AgentPlanItemStatus.from(todo.path("status").asText()));
+                        changed.add("status");
+                    }
+                    if (todo.has("evidence")) {
+                        existing.setEvidence(todo.path("evidence").asText(existing.getEvidence()));
+                        changed.add("evidence");
+                    }
+                    if (todo.has("blocker")) {
+                        existing.setBlocker(todo.path("blocker").asText(existing.getBlocker()));
+                        changed.add("blocker");
+                    }
+                    if (todo.has("kind")) {
+                        String kind = todo.path("kind").asText(null);
+                        if (!isValidKind(kind)) {
+                            appendEvent("INVALID_DELTA_IGNORED", existing.getId(),
+                                    "update_invalid_kind=" + kind, beforeStatus, beforeStatus, null);
+                            results.add(TodoApplyResult.skipped(existing.getId(), "invalid"));
+                            continue;
+                        }
+                        existing.setKind(kind);
+                        changed.add("kind");
+                    }
+                    if (todo.path("targets").isArray()) {
+                        existing.setTargets(readTargets(todo.path("targets")));
+                        changed.add("targets");
+                    }
+                    if (todo.has("verification")) {
+                        JsonNode v = todo.path("verification");
+                        PlanItemVerification verif = PlanItemVerification.builder()
+                                .command(v.path("command").asText(null))
+                                .passed(v.path("passed").isNull() ? null : v.path("passed").asBoolean())
+                                .exitCode(v.path("exitCode").isNull() ? null : v.path("exitCode").asInt())
+                                .summary(v.path("summary").asText(null))
+                                .build();
+                        existing.setVerification(verif);
+                        changed.add("verification");
+                    }
+                    if ("edit".equalsIgnoreCase(existing.getKind())
+                            && (existing.getTargets() == null || existing.getTargets().isEmpty())) {
+                        if (existing.getStatus() == null || !existing.getStatus().terminal()) {
+                            appendEvent("INVALID_DELTA_IGNORED", existing.getId(),
+                                    "kind=edit requires targets", existing.getStatus(), existing.getStatus(), null);
+                            results.add(TodoApplyResult.skipped(existing.getId(), "invalid"));
+                            continue;
+                        }
+                        if (existing.getTargets() == null) {
+                            existing.setTargets(List.of());
+                        }
+                    }
+                    existing.setUpdateTime(Instant.now());
+                    appendEvent("UPDATE", existing.getId(), "todo_write", beforeStatus,
+                            existing.getStatus(), changed);
+                    results.add(TodoApplyResult.applied(existing.getId()));
+                    anyApplied = true;
+
+                } else if (StringUtils.isNotBlank(content)) {
+                    String newDedupeKey = dedupeKeyFor(todo);
+                    Optional<AgentPlanItem> dup;
+                    if (newDedupeKey != null) {
+                        dup = items.stream()
+                                .filter(item -> {
+                                    String existingKey = item.getDedupeKey() != null
+                                            ? item.getDedupeKey() : dedupeKeyFor(item);
+                                    return StringUtils.equals(existingKey, newDedupeKey);
+                                })
+                                .filter(item -> item.getStatus() == null || !item.getStatus().terminal())
+                                .findFirst();
+                        if (dup.isEmpty()) {
+                            Optional<AgentPlanItem> terminalDup = items.stream()
+                                    .filter(item -> item.getStatus() != null && item.getStatus().terminal())
+                                    .filter(item -> {
+                                        String existingKey = item.getDedupeKey() != null
+                                                ? item.getDedupeKey() : dedupeKeyFor(item);
+                                        return StringUtils.equals(existingKey, newDedupeKey);
+                                    })
+                                    .findFirst();
+                            if (terminalDup.isPresent()) {
+                                appendEvent("CREATE_AFTER_TERMINAL_DUPLICATE", null,
+                                        "terminal_item_id=" + terminalDup.get().getId()
+                                                + " dedupeKey=" + newDedupeKey, null, null, null);
+                            }
+                        }
+                    } else {
+                        dup = items.stream()
+                                .filter(item -> StringUtils.equals(item.getContent(), content))
+                                .findFirst();
+                    }
+                    if (dup.isPresent()) {
+                        appendEvent("DUPLICATE_CREATE_IGNORED", dup.get().getId(),
+                                "dedupeKey=" + newDedupeKey, null, null, null);
+                        results.add(TodoApplyResult.skipped(dup.get().getId(), "duplicate"));
+                        continue;
+                    }
+                    if (StringUtils.isBlank(id)) {
+                        id = "task-" + UUID.randomUUID().toString().substring(0, 8);
+                    }
+                    String kind = todo.path("kind").asText(null);
+                    if (!isValidKind(kind)) {
+                        appendEvent("INVALID_DELTA_IGNORED", null,
+                                "invalid_kind=" + kind, null, null, null);
+                        results.add(TodoApplyResult.skipped(null, "invalid"));
+                        continue;
+                    }
+                    if (!todo.has("status")) {
+                        appendEvent("INVALID_DELTA_IGNORED", null,
+                                "new item requires status", null, null, null);
+                        results.add(TodoApplyResult.skipped(null, "invalid"));
+                        continue;
+                    }
+                    AgentPlanItemStatus status =
+                            AgentPlanItemStatus.from(todo.path("status").asText());
+                    List<String> targets = readTargets(todo.path("targets"));
+                    if ("edit".equalsIgnoreCase(kind) && targets.isEmpty()) {
+                        appendEvent("INVALID_DELTA_IGNORED", null,
+                                "kind=edit requires non-empty targets", null, null, null);
+                        results.add(TodoApplyResult.skipped(null, "invalid"));
+                        continue;
+                    }
+                    PlanItemVerification verification = null;
+                    if (todo.has("verification")) {
+                        JsonNode v = todo.path("verification");
+                        verification = PlanItemVerification.builder()
+                                .command(v.path("command").asText(null))
+                                .passed(v.path("passed").isNull() ? null : v.path("passed").asBoolean())
+                                .exitCode(v.path("exitCode").isNull() ? null : v.path("exitCode").asInt())
+                                .summary(v.path("summary").asText(null))
+                                .build();
+                    }
+                    AgentPlanItem created = AgentPlanItem.builder()
+                            .id(id)
+                            .content(content)
+                            .status(status)
+                            .kind(kind)
+                            .targets(targets)
+                            .verification(verification)
+                            .evidence(todo.path("evidence").asText(null))
+                            .blocker(todo.path("blocker").asText(null))
+                            .dedupeKey(newDedupeKey)
+                            .order(nextOrder())
+                            .updateTime(Instant.now())
+                            .build();
+                    items.add(created);
+                    appendEvent("CREATE", id, "todo_write", null, status, null);
+                    results.add(TodoApplyResult.applied(id));
+                    anyApplied = true;
+
+                } else {
+                    appendEvent("INVALID_DELTA_IGNORED", null, "no_id_or_content",
+                            null, null, null);
+                    results.add(TodoApplyResult.skipped(null, "no_id_or_content"));
+                }
+            } catch (Exception e) {
+                appendEvent("INVALID_DELTA_IGNORED", null, "error: " + e.getMessage(),
+                        null, null, null);
+                results.add(TodoApplyResult.skipped(null, "error"));
+            }
+        }
+
+        if (anyApplied) {
+            touch("todo_write");
+        }
+        return results;
     }
 
     public void addReplanItem(String content, String reason) {
@@ -494,10 +690,14 @@ public class AgentPlan {
     }
 
     private void validateKind(String kind) {
-        if (StringUtils.isBlank(kind)
-                || !List.of("inspect", "edit", "verify").contains(kind)) {
+        if (!isValidKind(kind)) {
             throw new IllegalArgumentException("kind 只能是 inspect、edit 或 verify");
         }
+    }
+
+    private boolean isValidKind(String kind) {
+        return StringUtils.isNotBlank(kind)
+                && List.of("inspect", "edit", "verify").contains(kind);
     }
 
     private int nextOrder() {

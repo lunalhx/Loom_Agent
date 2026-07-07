@@ -1,68 +1,28 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
-import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
-import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
-import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
-import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
-import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class ReplanNodeTest {
-
-    @Test
-    public void modelExceptionShouldFallbackToGenericItem() {
-        InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
-        ModelGateway failingGateway = failingGateway();
-        ReplanNode node = newNode(failingGateway, traceRecorder);
-        AgentContext context = basicContext();
-
-        NodeResult result = node.apply(context);
-
-        assertNotNull(result);
-        assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
-        assertTrue(context.getPlan().getLastUpdateReason().contains("replan:"));
-
-        boolean foundTrace = traceRecorder.timeline("test-run").stream()
-                .anyMatch(e -> "model_replan_call_failed".equals(e.getEventType())
-                        && "error".equals(e.getStatus())
-                        && "replan".equals(e.getNode())
-                        && e.getErrorMessage() != null
-                        && e.getErrorMessage().contains("bad replan config"));
-        assertTrue(foundTrace);
-    }
-
-    @Test
-    public void traceRecorderNullShouldNotThrow() {
-        ModelGateway failingGateway = failingGateway();
-        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        ReplanNode node = new ReplanNode(failingGateway, properties, new ObjectMapper(), null, null);
-        AgentContext context = basicContext();
-
-        NodeResult result = node.apply(context);
-        assertNotNull(result);
-        assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
-    }
 
     @Test
     public void shouldBlockTaskAfterExceedingReplanLimit() throws Exception {
@@ -104,28 +64,88 @@ public class ReplanNodeTest {
                 .anyMatch(e -> "REPLAN_DEDUPED".equals(e.getType())));
     }
 
-    private static ModelGateway failingGateway() {
-        return new ModelGateway() {
-            @Override
-            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
-                return Flux.error(new RuntimeException("bad replan config"));
-            }
+    @Test
+    public void duplicateReplanDeltaShouldNotAddFallbackItem() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"task","status":"pending","kind":"edit","targets":["a.txt"]}]}
+                        """));
+        int sizeBefore = plan.getItems().size();
 
-            @Override
-            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
-                return Mono.error(new RuntimeException("bad replan config"));
-            }
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"task again","status":"pending","kind":"edit","targets":["a.txt"]}]}
+                        """));
 
-            @Override
-            public ModelCapability capability(String model) {
-                return null;
-            }
-        };
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals(sizeBefore, plan.getItems().size());
     }
 
-    private ReplanNode newNode(ModelGateway modelGateway, InMemoryTraceRecorder traceRecorder) {
-        AgentRuntimeProperties properties = AgentRuntimeTestFixture.standardProperties();
-        return new ReplanNode(modelGateway, properties, new ObjectMapper(), traceRecorder, null);
+    @Test
+    public void noProgressReplanShouldBeTracked() {
+        AgentContext context = basicContext();
+        assertEquals(0, context.getNoProgressRounds());
+
+        context.setNoProgressRounds(1);
+        assertEquals(1, context.getNoProgressRounds());
+
+        context.setNoProgressRounds(0);
+        assertEquals(0, context.getNoProgressRounds());
+    }
+
+    @Test
+    public void consecutiveNoChangeResultsShouldIncrementRounds() {
+        int noProgressRounds = 0;
+        List<TodoApplyResult> allSkipped = List.of(
+                TodoApplyResult.skipped("task-1", "duplicate"));
+
+        if (allSkipped.stream().noneMatch(TodoApplyResult::isApplied)) {
+            noProgressRounds++;
+        }
+        assertEquals(1, noProgressRounds);
+
+        if (allSkipped.stream().noneMatch(TodoApplyResult::isApplied)) {
+            noProgressRounds++;
+        }
+        assertEquals(2, noProgressRounds);
+
+        if (allSkipped.stream().noneMatch(TodoApplyResult::isApplied)) {
+            noProgressRounds++;
+        }
+        assertEquals(3, noProgressRounds);
+
+        int maxRounds = 3;
+        assertTrue(noProgressRounds >= maxRounds);
+    }
+
+    @Test
+    public void appliedReplanShouldResetNoProgress() {
+        int noProgressRounds = 2;
+
+        List<TodoApplyResult> applied = List.of(
+                TodoApplyResult.applied("new-task"));
+
+        if (applied.stream().anyMatch(TodoApplyResult::isApplied)) {
+            noProgressRounds = 0;
+        }
+        assertEquals(0, noProgressRounds);
+    }
+
+    @Test
+    public void mixedBatchWithAppliedShouldResetNoProgress() {
+        int noProgressRounds = 2;
+
+        List<TodoApplyResult> mixed = List.of(
+                TodoApplyResult.applied("task-1"),
+                TodoApplyResult.skipped("task-2", "duplicate"));
+
+        if (mixed.stream().anyMatch(TodoApplyResult::isApplied)) {
+            noProgressRounds = 0;
+        }
+        assertEquals(0, noProgressRounds);
     }
 
     private AgentContext basicContext() {

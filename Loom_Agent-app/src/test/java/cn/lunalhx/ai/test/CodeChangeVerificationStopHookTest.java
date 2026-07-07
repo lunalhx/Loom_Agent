@@ -5,7 +5,9 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.plan.PlanReconciliation;
 import cn.lunalhx.ai.runtime.hook.CodeChangeVerificationStopHook;
 import org.junit.Before;
 import org.junit.Test;
@@ -79,6 +81,56 @@ public class CodeChangeVerificationStopHookTest {
 
         assertTrue(result.isContinue());
         assertEquals(AgentNodeNames.REPLAN, result.getAction().getNextNode());
+    }
+
+    @Test
+    public void staticWebpageAllEditDoneNoVerifyShouldAllowDone() throws Exception {
+        // Scenario: static HTML/CSS/JS written, all edit items complete,
+        // no verify item with runnable command → should allow final answer
+        AgentContext context = context();
+        context.setLastWriteStep(3);
+
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+                {"todos":[
+                  {"content":"create index.html","status":"completed","kind":"edit","targets":["index.html"],"evidence":"done"},
+                  {"content":"create styles.css","status":"completed","kind":"edit","targets":["styles.css"],"evidence":"done"},
+                  {"content":"inspect project","status":"completed","kind":"inspect","targets":["."],"evidence":"done"}
+                ]}"""));
+        context.setPlan(plan);
+        context.setTouchedFiles(java.util.Set.of("index.html", "styles.css"));
+        context.setReadFiles(java.util.Set.of("."));
+
+        AgentHookResult result = stop(context);
+
+        // After reconciliation: all edit done, all inspect terminal, no active verify
+        // → should allow final answer (not force replan)
+        assertFalse(result.isContinue());
+    }
+
+    @Test
+    public void editWithActiveVerifyItemShouldStillRequireVerification() throws Exception {
+        // Scenario: edits are done but there's an active verify item
+        // → should still require verification (force replan)
+        AgentContext context = context();
+        context.setLastWriteStep(3);
+
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+                {"todos":[
+                  {"content":"create index.html","status":"completed","kind":"edit","targets":["index.html"],"evidence":"done"},
+                  {"content":"run tests","status":"in_progress","kind":"verify"}
+                ]}"""));
+        context.setPlan(plan);
+        context.setTouchedFiles(java.util.Set.of("index.html"));
+
+        AgentHookResult result = stop(context);
+
+        // Active verify item still exists → should force replan
+        assertTrue(result.isContinue());
+        assertEquals(
+                cn.lunalhx.ai.domain.agent.flow.AgentNodeNames.REPLAN,
+                result.getAction().getNextNode());
     }
 
     private AgentHookResult stop(AgentContext context) {

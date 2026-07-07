@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
@@ -59,6 +60,10 @@ public class MaxStepContinuationStopHook implements AgentHook {
         }
 
         if (!"max_steps_segment".equals(agentContext.getErrorCode())) {
+            return AgentHookResult.proceed();
+        }
+
+        if (AgentStopReason.NO_PROGRESS.equals(agentContext.getStopReason())) {
             return AgentHookResult.proceed();
         }
 

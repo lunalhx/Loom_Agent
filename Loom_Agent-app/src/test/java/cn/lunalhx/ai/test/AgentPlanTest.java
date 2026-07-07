@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.TodoApplyResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
@@ -319,5 +320,134 @@ public class AgentPlanTest {
                         {"todos":[{"content":"execute maven test","status":"pending","kind":"verify","verification":{"command":"mvn test -pl mymodule"}}]}
                         """)));
         assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_REJECTED".equals(e.getType())));
+    }
+
+    // --- applyTodoWriteForReplan tests ---
+
+    @Test
+    public void replanDuplicateCreateShouldBeSkippedNotThrown() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"create file","status":"pending","kind":"edit","targets":["index.html"]}]}
+                """));
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"create file again","status":"pending","kind":"edit","targets":["index.html"]}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals("duplicate", results.get(0).reason());
+        assertEquals(1, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_IGNORED".equals(e.getType())));
+    }
+
+    @Test
+    public void replanDuplicateWithTerminalOriginalShouldAllowCreate() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"done task","status":"completed","kind":"edit","targets":["index.html"]}]}
+                """));
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"new task","status":"pending","kind":"edit","targets":["index.html"]}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertTrue(results.get(0).isApplied());
+        assertEquals(2, plan.getItems().size());
+    }
+
+    @Test
+    public void replanInvalidDeltaShouldBeSkipped() throws Exception {
+        AgentPlan plan = new AgentPlan();
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"bad edit","status":"pending","kind":"edit"}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals(0, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "INVALID_DELTA_IGNORED".equals(e.getType())));
+    }
+
+    @Test
+    public void replanMixedBatchShouldProcessAll() throws Exception {
+        AgentPlan plan = new AgentPlan();
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[
+                          {"content":"task A","status":"pending","kind":"edit","targets":["a.txt"]},
+                          {"content":"task A","status":"pending","kind":"edit","targets":["a.txt"]}
+                        ]}"""));
+
+        assertEquals(2, results.size());
+        assertTrue(results.get(0).isApplied());
+        assertFalse(results.get(1).isApplied());
+        assertEquals(1, plan.getItems().size());
+    }
+
+    @Test
+    public void replanUpdateByIdShouldStillWork() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWriteForReplan(objectMapper.readTree("""
+                {"todos":[{"content":"task","status":"pending","kind":"inspect"}]}
+                """));
+
+        String id = plan.getItems().get(0).getId();
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"id":"%s","status":"completed","evidence":"done"}]}
+                        """.formatted(id)));
+
+        assertEquals(1, results.size());
+        assertTrue(results.get(0).isApplied());
+        assertEquals(
+                cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus.COMPLETED,
+                plan.getItems().get(0).getStatus());
+    }
+
+    @Test
+    public void replanUnknownIdNoContentShouldBeSkipped() throws Exception {
+        AgentPlan plan = new AgentPlan();
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"id":"nonexistent","status":"completed"}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals("no_id_or_content", results.get(0).reason());
+    }
+
+    @Test
+    public void replanBadKindShouldBeSkipped() throws Exception {
+        AgentPlan plan = new AgentPlan();
+
+        java.util.List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"task","status":"pending","kind":"unknown_kind"}]}
+                        """));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+    }
+
+    @Test
+    public void replanNoTouchesWhenAllSkipped() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        int versionBefore = plan.getVersion();
+
+        plan.applyTodoWriteForReplan(objectMapper.readTree("""
+                {"todos":[{"content":"bad","status":"pending","kind":"edit"}]}
+                """));
+
+        assertEquals(versionBefore, plan.getVersion());
     }
 }

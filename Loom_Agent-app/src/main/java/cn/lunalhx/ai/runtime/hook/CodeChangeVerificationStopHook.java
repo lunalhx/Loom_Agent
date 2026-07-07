@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.plan.PlanReconciliation;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
@@ -55,11 +56,28 @@ public class CodeChangeVerificationStopHook implements AgentHook {
                 || context.getLastWriteStep() <= 0
                 || (Boolean.TRUE.equals(context.getLastTestPassed())
                 && context.getLastTestStep() >= context.getLastWriteStep()
-                && !context.isChangedSincePassingTest())) {
-            return AgentHookResult.proceed();
+                 && !context.isChangedSincePassingTest())) {
+             return AgentHookResult.proceed();
+         }
+
+        PlanReconciliation.reconcile(context);
+
+        if (context.getPlan() != null) {
+            boolean allEditDone = context.getPlan().incompleteEditItemCount() == 0
+                    && context.getPlan().unmetEditTargetCount(context.getTouchedFiles()) == 0;
+            boolean allInspectDone = context.getPlan().getItems().stream()
+                    .filter(item -> "inspect".equalsIgnoreCase(
+                            StringUtils.defaultString(item.getKind(), "")))
+                    .noneMatch(item -> item.getStatus() == null
+                            || !item.getStatus().terminal());
+            boolean noActiveVerify = context.getPlan().activeVerifyItem() == null;
+
+            if (allEditDone && allInspectDone && noActiveVerify) {
+                return AgentHookResult.proceed();
+            }
         }
 
-        String reason = context.getLastTestStep() <= 0
+         String reason = context.getLastTestStep() <= 0
                 ? "代码修改后尚未运行测试"
                 : Boolean.FALSE.equals(context.getLastTestPassed())
                 ? "最近一次测试失败"
