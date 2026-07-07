@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
@@ -10,6 +11,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,6 +29,8 @@ public class AgentPlan {
     private String lastUpdateReason;
     private Instant updatedAt = Instant.now();
     private List<AgentPlanItem> items = new ArrayList<>();
+    private List<AgentPlanEvent> events = new ArrayList<>();
+    private int eventSequence;
 
     public static AgentPlan forQuestion(String question) {
         AgentPlan plan = new AgentPlan();
@@ -52,17 +56,16 @@ public class AgentPlan {
      *
      * <h3>Create vs Update</h3>
      * <ul>
-     *   <li><b>Create</b> — item has no {@code id} that matches an existing item AND
-     *       has non-blank {@code content}. Created items require {@code kind} and,
-     *       for kind=edit, non-empty {@code targets}.</li>
-     *   <li><b>Update</b> — item has an {@code id} that matches an existing item.
+     *   <li><b>Update</b> — item has an {@code id} that matches an existing item
+     *       by id only (content matching is no longer supported).
      *       Only the fields that are <em>explicitly provided</em> in the JSON are
-     *       updated; omitted fields keep their current values. Status is never
-     *       reset to pending on update unless explicitly requested.</li>
+     *       updated; omitted fields keep their current values.</li>
+     *   <li><b>Create</b> — item has no matching {@code id} AND has non-blank
+     *       {@code content}. If content duplicates an existing item, creation
+     *       is rejected (use the existing item's id to update it instead).
+     *       Created items require {@code kind} and, for kind=edit, non-empty
+     *       {@code targets}.</li>
      * </ul>
-     *
-     * <p>Per PLAN.md §3: "新建项：要求 content/status/kind；kind=edit 时必须有非空 targets.
-     * 更新项：已有 id 即可按字段 patch，允许只更新 status/evidence."</p>
      */
     public void applyTodoWrite(JsonNode input) {
         JsonNode todos = input == null ? null : input.path("todos");
@@ -72,28 +75,47 @@ public class AgentPlan {
         for (JsonNode todo : todos) {
             String content = todo.path("content").asText(null);
             String id = todo.path("id").asText(null);
-            AgentPlanItem existing = findForUpdate(id, content).orElse(null);
+            AgentPlanItem existing = findForUpdate(id).orElse(null);
 
             if (existing != null) {
+                AgentPlanItemStatus beforeStatus = existing.getStatus();
+                Set<String> changed = new LinkedHashSet<>();
                 if (todo.has("content") && StringUtils.isNotBlank(content)) {
                     existing.setContent(content);
+                    changed.add("content");
                 }
                 if (todo.has("status")) {
                     existing.setStatus(AgentPlanItemStatus.from(todo.path("status").asText()));
+                    changed.add("status");
                 }
                 if (todo.has("evidence")) {
                     existing.setEvidence(todo.path("evidence").asText(existing.getEvidence()));
+                    changed.add("evidence");
                 }
                 if (todo.has("blocker")) {
                     existing.setBlocker(todo.path("blocker").asText(existing.getBlocker()));
+                    changed.add("blocker");
                 }
                 if (todo.has("kind")) {
                     String kind = todo.path("kind").asText(null);
                     validateKind(kind);
                     existing.setKind(kind);
+                    changed.add("kind");
                 }
                 if (todo.path("targets").isArray()) {
                     existing.setTargets(readTargets(todo.path("targets")));
+                    changed.add("targets");
+                }
+                if (todo.has("verification")) {
+                    JsonNode v = todo.path("verification");
+                    PlanItemVerification verif = PlanItemVerification.builder()
+                            .command(v.path("command").asText(null))
+                            .passed(v.path("passed").isNull() ? null : v.path("passed").asBoolean())
+                            .exitCode(v.path("exitCode").isNull() ? null : v.path("exitCode").asInt())
+                            .summary(v.path("summary").asText(null))
+                            .build();
+                    existing.setVerification(verif);
+                    changed.add("verification");
                 }
                 if ("edit".equalsIgnoreCase(existing.getKind())
                         && (existing.getTargets() == null || existing.getTargets().isEmpty())) {
@@ -105,8 +127,19 @@ public class AgentPlan {
                     }
                 }
                 existing.setUpdateTime(Instant.now());
+                appendEvent("UPDATE", existing.getId(), "todo_write", beforeStatus,
+                        existing.getStatus(), changed);
 
             } else if (StringUtils.isNotBlank(content)) {
+                // Duplicate content check: reject creation if content matches an existing item
+                Optional<AgentPlanItem> dup = items.stream()
+                        .filter(item -> StringUtils.equals(item.getContent(), content))
+                        .findFirst();
+                if (dup.isPresent()) {
+                    throw new IllegalArgumentException(
+                            "content=\"" + StringUtils.abbreviate(content, 50) + "\" 与已有任务(id="
+                                    + dup.get().getId() + ")重复，请使用已有 id 更新，不要用 content 创建重复任务");
+                }
                 if (StringUtils.isBlank(id)) {
                     id = "task-" + UUID.randomUUID().toString().substring(0, 8);
                 }
@@ -121,18 +154,30 @@ public class AgentPlan {
                 if ("edit".equalsIgnoreCase(kind) && targets.isEmpty()) {
                     throw new IllegalArgumentException("kind=edit 的任务必须提供非空 targets");
                 }
+                PlanItemVerification verification = null;
+                if (todo.has("verification")) {
+                    JsonNode v = todo.path("verification");
+                    verification = PlanItemVerification.builder()
+                            .command(v.path("command").asText(null))
+                            .passed(v.path("passed").isNull() ? null : v.path("passed").asBoolean())
+                            .exitCode(v.path("exitCode").isNull() ? null : v.path("exitCode").asInt())
+                            .summary(v.path("summary").asText(null))
+                            .build();
+                }
                 AgentPlanItem created = AgentPlanItem.builder()
                         .id(id)
                         .content(content)
                         .status(status)
                         .kind(kind)
                         .targets(targets)
+                        .verification(verification)
                         .evidence(todo.path("evidence").asText(null))
                         .blocker(todo.path("blocker").asText(null))
                         .order(nextOrder())
                         .updateTime(Instant.now())
                         .build();
                 items.add(created);
+                appendEvent("CREATE", id, "todo_write", null, status, null);
 
             } else {
                 throw new IllegalArgumentException(
@@ -151,8 +196,29 @@ public class AgentPlan {
     public void addReplanItem(String content, String reason, String kind) {
         if (items.stream().noneMatch(item -> StringUtils.equals(item.getContent(), content))) {
             addItem(content, AgentPlanItemStatus.PENDING, kind);
+            String newId = items.get(items.size() - 1).getId();
+            appendEvent("REPLAN_APPEND", newId, reason, null, AgentPlanItemStatus.PENDING, null);
+        } else {
+            appendEvent("REPLAN_DEDUPED", null, reason, null, null, null);
         }
         touch(reason);
+    }
+
+    /**
+     * Mark an item as BLOCKED with a given blocker reason.
+     */
+    public void blockItem(String itemId, String blocker) {
+        Optional<AgentPlanItem> item = items.stream()
+                .filter(i -> StringUtils.equals(i.getId(), itemId))
+                .findFirst();
+        if (item.isPresent()) {
+            AgentPlanItemStatus before = item.get().getStatus();
+            item.get().setStatus(AgentPlanItemStatus.BLOCKED);
+            item.get().setBlocker(blocker);
+            item.get().setUpdateTime(Instant.now());
+            appendEvent("BLOCKED", itemId, "replan_convergence", before,
+                    AgentPlanItemStatus.BLOCKED, Set.of("status", "blocker"));
+        }
     }
 
     public boolean hasIncompleteItems() {
@@ -172,9 +238,74 @@ public class AgentPlan {
                 .anyMatch(normalized::equals);
     }
 
+    /**
+     * Check if path is covered by the currently active (in_progress) edit item.
+     */
+    public boolean hasActiveEditTarget(String path) {
+        AgentPlanItem active = activeEditItem();
+        if (active == null || active.getTargets() == null) {
+            return false;
+        }
+        String normalized = ToolOperation.normalizePath(path);
+        return active.getTargets().stream()
+                .map(ToolOperation::normalizePath)
+                .anyMatch(normalized::equals);
+    }
+
+    /**
+     * Returns the targets of the currently active edit item, or empty list.
+     */
+    public List<String> currentEditableTargets() {
+        AgentPlanItem active = activeEditItem();
+        if (active == null || active.getTargets() == null) {
+            return List.of();
+        }
+        return active.getTargets();
+    }
+
+    /**
+     * Returns the active edit item: the one currently in_progress,
+     * or the unique incomplete edit item if none is explicitly in_progress.
+     * Returns null if there are zero or multiple incomplete edit candidates.
+     */
+    public AgentPlanItem activeEditItem() {
+        // Prefer the explicit in_progress edit item
+        Optional<AgentPlanItem> inProgress = items.stream()
+                .filter(item -> "edit".equalsIgnoreCase(item.getKind()))
+                .filter(item -> item.getStatus() == AgentPlanItemStatus.IN_PROGRESS)
+                .findFirst();
+        if (inProgress.isPresent()) {
+            return inProgress.get();
+        }
+        // Fallback: unique incomplete edit item
+        List<AgentPlanItem> candidates = items.stream()
+                .filter(item -> "edit".equalsIgnoreCase(item.getKind()))
+                .filter(AgentPlanItem::incomplete)
+                .collect(Collectors.toList());
+        return candidates.size() == 1 ? candidates.get(0) : null;
+    }
+
     public boolean hasVerifyItem() {
         return items.stream().anyMatch(item ->
                 "verify".equalsIgnoreCase(item.getKind()));
+    }
+
+    /**
+     * Find the current in_progress verify item, or the unique incomplete verify item.
+     */
+    public AgentPlanItem activeVerifyItem() {
+        Optional<AgentPlanItem> inProgress = items.stream()
+                .filter(item -> "verify".equalsIgnoreCase(item.getKind()))
+                .filter(item -> item.getStatus() == AgentPlanItemStatus.IN_PROGRESS)
+                .findFirst();
+        if (inProgress.isPresent()) {
+            return inProgress.get();
+        }
+        List<AgentPlanItem> candidates = items.stream()
+                .filter(item -> "verify".equalsIgnoreCase(item.getKind()))
+                .filter(AgentPlanItem::incomplete)
+                .collect(Collectors.toList());
+        return candidates.size() == 1 ? candidates.get(0) : null;
     }
 
     public long unmetEditTargetCount(Set<String> touchedFiles) {
@@ -193,11 +324,6 @@ public class AgentPlan {
                 .count();
     }
 
-    /**
-     * Count incomplete edit items regardless of whether targets are declared.
-     * Used by the stop hook to detect edit items that need targets before
-     * they can be auto-completed.
-     */
     public long incompleteEditItemCount() {
         return items.stream()
                 .filter(item -> "edit".equalsIgnoreCase(item.getKind()))
@@ -219,9 +345,6 @@ public class AgentPlan {
                 .collect(Collectors.joining("\n"));
     }
 
-    /**
-     * Full render including kind and targets for replan prompts.
-     */
     public String renderFull() {
         return items.stream()
                 .sorted(Comparator.comparing(AgentPlanItem::getOrder, Comparator.nullsLast(Integer::compareTo)))
@@ -246,7 +369,28 @@ public class AgentPlan {
                 .sorted(Comparator.comparing(AgentPlanItem::getOrder, Comparator.nullsLast(Integer::compareTo)))
                 .map(AgentPlanItem::toView)
                 .collect(Collectors.toList()));
+        if (!events.isEmpty()) {
+            int from = Math.max(0, events.size() - 20);
+            List<Map<String, Object>> recent = new ArrayList<>();
+            for (int i = from; i < events.size(); i++) {
+                recent.add(eventToView(events.get(i)));
+            }
+            view.put("recentEvents", recent);
+        }
         return view;
+    }
+
+    private Map<String, Object> eventToView(AgentPlanEvent e) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("sequence", e.getSequence());
+        m.put("type", e.getType());
+        m.put("itemId", e.getItemId());
+        m.put("reason", e.getReason());
+        m.put("timestamp", e.getTimestamp() != null ? e.getTimestamp().toString() : null);
+        if (e.getBeforeStatus() != null) m.put("beforeStatus", e.getBeforeStatus().code());
+        if (e.getAfterStatus() != null) m.put("afterStatus", e.getAfterStatus().code());
+        if (e.getChangedFields() != null) m.put("changedFields", e.getChangedFields());
+        return m;
     }
 
     private void addItem(String content, AgentPlanItemStatus status) {
@@ -269,15 +413,32 @@ public class AgentPlan {
         items.add(builder.build());
     }
 
-    private Optional<AgentPlanItem> findForUpdate(String id, String content) {
-        if (StringUtils.isNotBlank(id)) {
-            return items.stream()
-                    .filter(item -> StringUtils.equals(item.getId(), id))
-                    .findFirst();
+    /**
+     * Find item by id only. Content matching is no longer supported for updates.
+     */
+    private Optional<AgentPlanItem> findForUpdate(String id) {
+        if (StringUtils.isBlank(id)) {
+            return Optional.empty();
         }
         return items.stream()
-                .filter(item -> StringUtils.equals(item.getContent(), content))
+                .filter(item -> StringUtils.equals(item.getId(), id))
                 .findFirst();
+    }
+
+    private void appendEvent(String type, String itemId, String reason,
+                             AgentPlanItemStatus beforeStatus, AgentPlanItemStatus afterStatus,
+                             Set<String> changedFields) {
+        eventSequence++;
+        events.add(AgentPlanEvent.builder()
+                .sequence(eventSequence)
+                .type(type)
+                .itemId(itemId)
+                .reason(reason)
+                .timestamp(Instant.now())
+                .beforeStatus(beforeStatus)
+                .afterStatus(afterStatus)
+                .changedFields(changedFields)
+                .build());
     }
 
     private List<String> readTargets(JsonNode targetsNode) {

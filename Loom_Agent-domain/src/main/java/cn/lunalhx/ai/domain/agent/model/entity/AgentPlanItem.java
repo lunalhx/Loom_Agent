@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -26,6 +27,7 @@ public class AgentPlanItem {
     private String blocker;
     private String kind;
     private List<String> targets;
+    private PlanItemVerification verification;
     private Instant updateTime;
 
     public void setTargets(List<String> targets) {
@@ -54,6 +56,9 @@ public class AgentPlanItem {
         }
         if (targets != null && !targets.isEmpty()) {
             view.put("targets", targets);
+        }
+        if (verification != null) {
+            view.put("verification", verification);
         }
         return view;
     }

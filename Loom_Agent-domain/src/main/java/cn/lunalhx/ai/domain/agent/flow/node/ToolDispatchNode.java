@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
@@ -24,6 +25,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.codec.digest.DigestUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -201,6 +203,30 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 exitCode = result.isSuccess() ? 0 : 1;
             }
             context.setLastTestExitCode(exitCode.intValue());
+            if (context.getPlan() != null) {
+                var verifyItem = context.getPlan().activeVerifyItem();
+                if (verifyItem != null) {
+                    String command = decision.getInput() != null
+                            ? decision.getInput().path("command").asText("")
+                            : null;
+                    if (StringUtils.isBlank(command)) {
+                        command = tool;
+                    }
+                    int exitCodeVal = exitCode != null ? exitCode.intValue() : (result.isSuccess() ? 0 : 1);
+                    verifyItem.setVerification(PlanItemVerification.builder()
+                            .command(command)
+                            .passed(result.isSuccess())
+                            .exitCode(exitCodeVal)
+                            .summary(result.isSuccess()
+                                    ? "passed"
+                                    : "failed: " + StringUtils.abbreviate(result.getObservation(), 100))
+                            .build());
+                    verifyItem.setEvidence(result.isSuccess()
+                            ? "测试通过 (exit code " + exitCodeVal + ")"
+                            : "测试失败 (exit code " + exitCodeVal + ")");
+                    verifyItem.setUpdateTime(Instant.now());
+                }
+            }
         }
     }
 

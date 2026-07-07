@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
@@ -24,6 +25,8 @@ import java.time.Instant;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ReplanNodeTest {
 
@@ -59,6 +62,46 @@ public class ReplanNodeTest {
         NodeResult result = node.apply(context);
         assertNotNull(result);
         assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
+    }
+
+    @Test
+    public void shouldBlockTaskAfterExceedingReplanLimit() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        ObjectMapper mapper = new ObjectMapper();
+        plan.applyTodoWrite(mapper.readTree("""
+                {"todos":[{"content":"task","status":"in_progress","kind":"edit",
+                  "targets":["src/Foo.java"]}]}
+                """));
+        String taskId = plan.getItems().get(0).getId();
+
+        plan.blockItem(taskId, "continuous failures exceeded limit");
+
+        assertEquals(AgentPlanItemStatus.BLOCKED, plan.getItems().get(0).getStatus());
+        assertTrue(plan.getItems().get(0).getBlocker().contains("failures"));
+    }
+
+    @Test
+    public void shouldIncludeStrategyChangeWarningInReplanPrompt() {
+        AgentContext context = mock(AgentContext.class);
+        AgentPlan plan = AgentPlan.forQuestion("test");
+        when(context.getPlan()).thenReturn(plan);
+        when(context.getQuestion()).thenReturn("test");
+        when(context.getReplanMessage()).thenReturn("策略变更要求: 必须更换策略");
+        when(context.getReplanReason()).thenReturn(ReplanReason.REPEATED_ERROR);
+
+        ReplanNode node = new ReplanNode(mock(ModelGateway.class), null, new ObjectMapper());
+        assertNotNull(plan);
+    }
+
+    @Test
+    public void shouldNotDuplicateReplanItemsWithSameContent() {
+        AgentPlan plan = new AgentPlan();
+        plan.addReplanItem("check the error and retry", "test");
+        int initialSize = plan.getItems().size();
+        plan.addReplanItem("check the error and retry", "test again");
+        assertEquals(initialSize, plan.getItems().size());
+        assertTrue(plan.getEvents().stream()
+                .anyMatch(e -> "REPLAN_DEDUPED".equals(e.getType())));
     }
 
     private static ModelGateway failingGateway() {

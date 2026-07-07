@@ -35,6 +35,7 @@ public final class AgentRuntimeState {
     private String lastFailureFingerprint;
     private int sameFailureRepeats;
     private boolean repeatedFailureReplanAttempted;
+    private int replanAttemptsForFailure;
     private int noProgressRounds;
     private boolean codeReadObserved;
     private int lastWriteStep;
@@ -67,6 +68,7 @@ public final class AgentRuntimeState {
     public String lastFailureFingerprint() { return lastFailureFingerprint; }
     public int sameFailureRepeats() { return sameFailureRepeats; }
     public boolean repeatedFailureReplanAttempted() { return repeatedFailureReplanAttempted; }
+    public int replanAttemptsForFailure() { return replanAttemptsForFailure; }
     public int noProgressRounds() { return noProgressRounds; }
     public boolean codeReadObserved() { return codeReadObserved; }
     public int lastWriteStep() { return lastWriteStep; }
@@ -99,6 +101,7 @@ public final class AgentRuntimeState {
     public void setLastFailureFingerprint(String v) { this.lastFailureFingerprint = v; }
     public void setSameFailureRepeats(int v) { this.sameFailureRepeats = v; }
     public void setRepeatedFailureReplanAttempted(boolean v) { this.repeatedFailureReplanAttempted = v; }
+    public void setReplanAttemptsForFailure(int v) { this.replanAttemptsForFailure = v; }
     public void setNoProgressRounds(int v) { this.noProgressRounds = v; }
     public void setCodeReadObserved(boolean v) { this.codeReadObserved = v; }
     public void setLastWriteStep(int v) { this.lastWriteStep = v; }

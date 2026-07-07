@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
@@ -227,9 +228,22 @@ public class IncompletePlanStopHook implements AgentHook {
                     item.setStatus(AgentPlanItemStatus.COMPLETED);
                     item.setEvidence("目标文件已修改: " + String.join(", ", item.getTargets()));
                 }
-            } else if ("verify".equals(kind) && testsPassing) {
-                item.setStatus(AgentPlanItemStatus.COMPLETED);
-                item.setEvidence("测试已通过 (exit code 0)");
+            } else if ("verify".equals(kind)) {
+                if (item.getVerification() != null) {
+                    PlanItemVerification v = item.getVerification();
+                    if (Boolean.TRUE.equals(v.getPassed())) {
+                        item.setStatus(AgentPlanItemStatus.COMPLETED);
+                        if (item.getEvidence() == null) {
+                            item.setEvidence("验证通过: " + StringUtils.defaultString(v.getSummary(), "exit code " + v.getExitCode()));
+                        }
+                    } else {
+                        item.setStatus(AgentPlanItemStatus.BLOCKED);
+                        item.setBlocker("验证失败: " + StringUtils.defaultString(v.getSummary(), "exit code " + v.getExitCode()));
+                    }
+                } else if (testsPassing) {
+                    item.setStatus(AgentPlanItemStatus.COMPLETED);
+                    item.setEvidence("测试已通过 (exit code 0)");
+                }
             }
         }
     }
@@ -283,6 +297,10 @@ public class IncompletePlanStopHook implements AgentHook {
                 if (item.getStatus() == null || !item.getStatus().terminal()) {
                     msg.append("  - [").append(item.getStatus() == null ? "pending" : item.getStatus().code())
                             .append("] ").append(item.getContent());
+                    if (item.getVerification() != null) {
+                        PlanItemVerification v = item.getVerification();
+                        msg.append(" verified=").append(Boolean.TRUE.equals(v.getPassed()));
+                    }
                     if (StringUtils.isNotBlank(item.getKind())) {
                         msg.append(" (kind=").append(item.getKind()).append(")");
                     }

@@ -17,7 +17,7 @@ public class TodoWriteTool implements AgentTool {
         return ToolSpec.builder()
                 .name("todo_write")
                 .description("更新当前 Agent 计划和子任务状态，不修改工作区文件")
-                .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"任务ID，更新时用于匹配现有任务\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容，创建新任务时必填\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"kind\":{\"type\":\"string\",\"enum\":[\"inspect\",\"edit\",\"verify\"],\"description\":\"任务类型\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"涉及的工作区相对文件路径\"},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
+                .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"任务ID，更新时用于匹配已有任务（不再支持用 content 匹配更新）\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容，创建新任务时必填；不可用于匹配已有任务\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"kind\":{\"type\":\"string\",\"enum\":[\"inspect\",\"edit\",\"verify\"],\"description\":\"任务类型\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"涉及的工作区相对文件路径\"},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"},\"verification\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"passed\":{\"type\":\"boolean\"},\"exitCode\":{\"type\":\"integer\"},\"summary\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
                 .build();
     }
 
@@ -35,7 +35,7 @@ public class TodoWriteTool implements AgentTool {
                 String todoContent = todo.path("content").asText(null);
                 if (StringUtils.isBlank(todoId) && StringUtils.isBlank(todoContent)) {
                     return ToolResult.failure("invalid_todos",
-                        "todos[" + i + "]: 创建新任务需要提供 content，或提供 id 更新现有任务",
+                        "todos[" + i + "]: 创建新任务需要提供 content，或提供 id 更新已有任务（不要用 content 匹配已有任务）",
                         elapsed(startedAt));
                 }
                 if (!todo.has("status")) {
@@ -51,7 +51,7 @@ public class TodoWriteTool implements AgentTool {
                             || !java.util.Set.of("inspect", "edit", "verify").contains(kind)) {
                         return ToolResult.failure(
                                 "invalid_todos",
-                                "todos[" + i + "].kind 只能是 inspect、edit 或 verify",
+                                "todos[" + i + "].kind 新建时必须提供，只能是 inspect、edit 或 verify",
                                 elapsed(startedAt));
                     }
                     if ("edit".equals(kind)

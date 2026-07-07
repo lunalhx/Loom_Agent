@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.domain.agent.model.entity.BudgetCheckResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
@@ -198,7 +199,7 @@ public class ReplanNode extends AbstractAgentNode {
         prompt.append("你是代码 Agent 的重规划器。只能输出 JSON 对象。\n");
         prompt.append("不要删除历史任务；只能更新状态或追加任务。\n");
         prompt.append("保留现有任务的 kind 和 targets 字段。\n");
-        prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\"}]}\n");
+        prompt.append("格式: {\"todos\":[{\"id\":\"task-1\",\"content\":\"...\",\"status\":\"pending|in_progress|completed|blocked|skipped\",\"kind\":\"inspect|edit|verify\",\"targets\":[\"相对路径\"],\"evidence\":\"可选完成证据\",\"blocker\":\"可选阻塞原因\",\"verification\":{\"command\":\"...\",\"passed\":true,\"exitCode\":0,\"summary\":\"...\"}}]}\n");
         prompt.append("\n用户任务：").append(context.getQuestion()).append("\n");
         prompt.append("重规划原因：").append(reason).append("\n");
         if (reason == ReplanReason.STEP_BUDGET_CONTINUATION) {
@@ -207,7 +208,18 @@ public class ReplanNode extends AbstractAgentNode {
                     + "不要重复上一段最后的动作。\n");
         }
         prompt.append("失败信息：").append(StringUtils.defaultString(context.getReplanMessage())).append("\n");
+        if (StringUtils.contains(context.getReplanMessage(), "策略变更要求")
+                || StringUtils.contains(context.getReplanMessage(), "必须更换策略")) {
+            prompt.append("\n警告: 之前的策略已失败。必须在输出中说明本次策略与上次有何不同，不能只重复同一个工具和输入。\n");
+        }
         prompt.append("当前计划：\n").append(context.getPlan().renderFull()).append("\n");
+        long blockedCount = context.getPlan().getItems().stream()
+                .filter(item -> item.getStatus() == AgentPlanItemStatus.BLOCKED)
+                .count();
+        if (blockedCount > 0) {
+            prompt.append("\n注意: 已有 ").append(blockedCount)
+                    .append(" 个任务被标记为 blocked，无需重复尝试。请聚焦其他未完成任务。\n");
+        }
         return prompt.toString();
     }
 

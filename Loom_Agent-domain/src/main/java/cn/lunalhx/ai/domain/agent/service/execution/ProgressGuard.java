@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
@@ -106,34 +107,59 @@ public class ProgressGuard {
 
     private ProgressResult evaluateFailure(AgentContext context, ToolResult result) {
         String fingerprint = failureFingerprint(context, result);
+        AgentRuntimeState runtime = context.runtime();
         int maxRepeats = stepBudget.getSameFailureMaxRepeats() != null
                 ? stepBudget.getSameFailureMaxRepeats() : 2;
 
-        AgentRuntimeState runtime = context.runtime();
-        if (fingerprint.equals(runtime.lastFailureFingerprint())) {
-            int repeats = runtime.sameFailureRepeats() + 1;
-            runtime.setSameFailureRepeats(repeats);
-            if (repeats >= maxRepeats) {
-                if (!runtime.repeatedFailureReplanAttempted()) {
-                    runtime.setRepeatedFailureReplanAttempted(true);
-                    context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
-                    if (ledgerAppendService != null) {
-                        ledgerAppendService.appendSystemNote(context,
-                                "你已连续相同失败 " + repeats + " 次。请尝试不同的方法，或者考虑是否可以结束任务。",
-                                ConversationLedgerInitializer.eventKey(context.getRunId(),
-                                        String.valueOf(runtime.step()), "repeated_failure_note"));
-                    }
-                    return ProgressResult.REPLAN;
-                }
-                runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_failure",
-                        "连续相同失败 " + repeats + " 次，无进展（已尝试 replan）");
-                context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
-                return ProgressResult.TERMINATE;
-            }
-        } else {
+        if (!fingerprint.equals(runtime.lastFailureFingerprint())) {
             runtime.setLastFailureFingerprint(fingerprint);
-            runtime.setSameFailureRepeats(1);
+            runtime.setSameFailureRepeats(0);
+            runtime.setReplanAttemptsForFailure(0);
         }
+
+        int repeats = runtime.sameFailureRepeats() + 1;
+        runtime.setSameFailureRepeats(repeats);
+
+        if (repeats >= maxRepeats) {
+            int replans = runtime.replanAttemptsForFailure();
+            if (replans == 0) {
+                runtime.setReplanAttemptsForFailure(1);
+                context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
+                if (ledgerAppendService != null) {
+                    ledgerAppendService.appendSystemNote(context,
+                            "你已连续相同失败 " + repeats + " 次。请尝试不同的方法修复。",
+                            ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                    String.valueOf(runtime.step()), "repeated_failure_note"));
+                }
+                return ProgressResult.REPLAN;
+            }
+            if (replans == 1) {
+                runtime.setReplanAttemptsForFailure(2);
+                context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
+                context.action().setReplanMessage(
+                        "策略变更要求: 已尝试 " + repeats + " 次相同失败且一次 replan 无效。"
+                        + "本次必须明确说明新策略与上次不同，不得使用同一工具和相同输入。");
+                if (ledgerAppendService != null) {
+                    ledgerAppendService.appendSystemNote(context,
+                            "连续相同失败 " + repeats + " 次且一次 replan 无效。必须更换策略。",
+                            ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                    String.valueOf(runtime.step()), "strategy_change_note"));
+                }
+                return ProgressResult.REPLAN;
+            }
+            runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_failure",
+                    "连续相同失败 " + repeats + " 次，已尝试 " + replans + " 次 replan 均无进展");
+            context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
+            if (context.action().plan() != null) {
+                context.action().plan().getItems().stream()
+                        .filter(item -> item.getStatus() == AgentPlanItemStatus.IN_PROGRESS)
+                        .findFirst()
+                        .ifPresent(item -> context.action().plan().blockItem(item.getId(),
+                                "连续相同失败 " + repeats + " 次无进展"));
+            }
+            return ProgressResult.TERMINATE;
+        }
+
         return ProgressResult.CONTINUE;
     }
 
@@ -144,6 +170,7 @@ public class ProgressGuard {
         runtime.setLastFailureFingerprint(null);
         runtime.setSameFailureRepeats(0);
         runtime.setRepeatedFailureReplanAttempted(false);
+        runtime.setReplanAttemptsForFailure(0);
         runtime.setNoProgressRounds(0);
     }
 
