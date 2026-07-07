@@ -188,8 +188,6 @@ public class AgentContext {
     public void setLastTestExitCode(Integer v) { runtime.setLastTestExitCode(v); }
     // ==================== prompt delegates ====================
 
-    public DynamicText getDynamicText() { return prompt.dynamicText(); }
-    public void setDynamicText(DynamicText v) { prompt.setDynamicText(v); }
     public String getInstructionsHash() { return prompt.instructionsHash(); }
     public void setInstructionsHash(String v) { prompt.setInstructionsHash(v); }
     public String getModelOutput() { return prompt.modelOutput(); }

@@ -32,6 +32,7 @@ import static org.junit.Assert.assertTrue;
 public class RenderPromptNodeLedgerTest {
 
     private RenderPromptNode node;
+    private ConversationLedgerAppendService appendService;
 
     @Before
     public void setUp() {
@@ -42,6 +43,7 @@ public class RenderPromptNodeLedgerTest {
         ConversationLedgerAppendService appendService = new ConversationLedgerAppendService();
         LedgerBootstrapService bootstrapService = new LedgerBootstrapService(
                 appendService, new ConversationLedgerInitializer());
+        this.appendService = appendService;
         LedgerCompactionService compactionService = new LedgerCompactionService(
                 LedgerWatermark.defaults(), artifacts, blobs);
         node = new RenderPromptNode(
@@ -81,11 +83,13 @@ public class RenderPromptNodeLedgerTest {
     @Test
     public void dynamicTextRemainsAvailableButIsNotRenderedAsPromptState() {
         AgentContext context = context();
-        context.getDynamicText().appendSystemNote(1, "test", "trace", "retained");
 
         node.apply(context);
 
-        assertEquals(1, context.getDynamicText().entries().size());
+        String eventKey = ConversationLedgerInitializer.eventKey(context.getRunId(), "1", "test_note");
+        appendService.appendSystemNote(context, "retained", eventKey);
+
+        assertEquals(2, context.getConversationLedger().entries().size());
         assertTrue(context.getStablePrefix().frozenContent().contains("可用工具"));
         assertFalse(context.getStablePrefix().frozenContent().contains("retained"));
     }

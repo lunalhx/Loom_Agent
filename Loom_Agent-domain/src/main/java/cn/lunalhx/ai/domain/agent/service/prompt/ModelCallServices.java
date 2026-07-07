@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.util.Objects;
@@ -21,18 +22,21 @@ public final class ModelCallServices {
     private final ContextWindowManager contextWindowManager;
     private final ConversationLedgerAppendService ledgerAppendService;
     private final ModelRuntimeProperties modelRuntimeProperties;
+    private final LedgerCompactionService ledgerCompactionService;
 
     public ModelCallServices(TraceRecorder traceRecorder,
                               BudgetGuard budgetGuard,
                               ContextWindowManager contextWindowManager,
                               ConversationLedgerAppendService ledgerAppendService,
-                              ModelRuntimeProperties modelRuntimeProperties) {
+                              ModelRuntimeProperties modelRuntimeProperties,
+                              LedgerCompactionService ledgerCompactionService) {
         this.traceRecorder = traceRecorder;
         this.budgetGuard = budgetGuard;
         this.contextWindowManager = contextWindowManager;
         this.ledgerAppendService = Objects.requireNonNull(
                 ledgerAppendService, "ledgerAppendService must not be null");
         this.modelRuntimeProperties = Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
+        this.ledgerCompactionService = Objects.requireNonNull(ledgerCompactionService, "ledgerCompactionService must not be null");
     }
 
     public TraceRecorder traceRecorder() { return traceRecorder; }
@@ -40,4 +44,5 @@ public final class ModelCallServices {
     public ContextWindowManager contextWindowManager() { return contextWindowManager; }
     public ConversationLedgerAppendService ledgerAppendService() { return ledgerAppendService; }
     public ModelRuntimeProperties modelRuntimeProperties() { return modelRuntimeProperties; }
+    public LedgerCompactionService ledgerCompactionService() { return ledgerCompactionService; }
 }

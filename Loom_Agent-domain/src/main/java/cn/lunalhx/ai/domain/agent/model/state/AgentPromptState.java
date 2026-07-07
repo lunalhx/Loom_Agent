@@ -1,15 +1,13 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
-import cn.lunalhx.ai.domain.agent.model.entity.DynamicText;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 
 /**
- * Mutable prompt state for ledger-backed model input and retained DynamicText artifacts.
+ * Mutable prompt state for ledger-backed model input.
  */
 public final class AgentPromptState {
 
-    private DynamicText dynamicText = new DynamicText();
     private transient String instructionsHash;
     private String modelOutput;
 
@@ -28,7 +26,6 @@ public final class AgentPromptState {
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
 
-    public DynamicText dynamicText() { return dynamicText; }
     public String instructionsHash() { return instructionsHash; }
     public String modelOutput() { return modelOutput; }
 
@@ -60,7 +57,6 @@ public final class AgentPromptState {
 
     // -- package-private mutators --
 
-    public void setDynamicText(DynamicText v) { this.dynamicText = v; }
     public void setInstructionsHash(String v) { this.instructionsHash = v; }
     public void setModelOutput(String v) { this.modelOutput = v; }
 

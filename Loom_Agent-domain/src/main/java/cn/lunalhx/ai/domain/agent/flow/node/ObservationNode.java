@@ -30,7 +30,7 @@ public class ObservationNode extends AbstractAgentNode {
                            TraceRecorder traceRecorder,
                            AgentMetrics agentMetrics,
                            ConversationLedgerAppendService ledgerAppendService) {
-        super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "step", "dynamicText"));
+        super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "step"));
         this.sanitizer = sanitizer;
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
@@ -51,17 +51,10 @@ public class ObservationNode extends AbstractAgentNode {
 
         ToolOutputSanitization sanitization = sanitizeObservation(context, toolName, rawObservation);
 
-        context.getDynamicText().appendToolResult(
-                Math.max(1, context.getStep()),
-                name(),
-                context.getDecision(),
-                result,
-                toDynamicObservation(context, result, toolName, sanitization));
-
         if (ledgerAppendService != null) {
             String eventKey = ConversationLedgerInitializer.eventKey(
                     context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
-            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), eventKey);
+            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result, toolName, eventKey);
         }
 
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));

@@ -53,3 +53,6 @@ data/
 *.db-wal
 *.db-shm
 *.db-journal
+
+### Deepwork session state ###
+.slim/deepwork/

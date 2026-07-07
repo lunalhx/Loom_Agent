@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.SubAgentResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.SubAgentStatus;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -23,11 +24,18 @@ public class SubAgentDispatchNode extends AbstractAgentNode {
 
     private final SubAgentCoordinator coordinator;
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public SubAgentDispatchNode(SubAgentCoordinator coordinator, AgentRuntimeProperties properties) {
+        this(coordinator, properties, null);
+    }
+
+    public SubAgentDispatchNode(SubAgentCoordinator coordinator, AgentRuntimeProperties properties,
+                                ConversationLedgerAppendService ledgerAppendService) {
         super(AgentNodeNames.SUB_AGENT_DISPATCH, List.of("decision.input", "agentDepth", "subAgentPolicy"));
         this.coordinator = coordinator;
         this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -35,7 +43,6 @@ public class SubAgentDispatchNode extends AbstractAgentNode {
         long startedAt = System.currentTimeMillis();
         AgentDecision decision = context.getDecision();
         context.setStep(context.getStep() + 1);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)

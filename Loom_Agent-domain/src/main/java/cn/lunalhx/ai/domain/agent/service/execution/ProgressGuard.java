@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -16,9 +18,16 @@ import java.nio.charset.StandardCharsets;
 public class ProgressGuard {
 
     private final AgentRuntimeProperties.StepBudgetProperties stepBudget;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ProgressGuard(AgentRuntimeProperties properties) {
+        this(properties, null);
+    }
+
+    public ProgressGuard(AgentRuntimeProperties properties,
+                         ConversationLedgerAppendService ledgerAppendService) {
         this.stepBudget = properties.getStepBudget();
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     public ProgressResult evaluate(AgentContext context) {
@@ -34,11 +43,12 @@ public class ProgressGuard {
         if (result.isSuccess() && isProgressMaking(context)) {
             resetAll(context);
             if (shouldSuggestTermination(context)) {
-                context.getDynamicText().appendSystemNote(
-                        context.runtime().step(),
-                        StringUtils.defaultString(context.runtime().currentNode(), "progress_guard"),
-                        "系统提示",
-                        "所有测试已通过，且没有等待保存的文件修改。如果任务已完成，请使用 final_answer 结束任务。");
+                if (ledgerAppendService != null) {
+                    ledgerAppendService.appendSystemNote(context,
+                            "所有测试已通过，且没有等待保存的文件修改。如果任务已完成，请使用 final_answer 结束任务。",
+                            ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                    String.valueOf(context.runtime().step()), "termination_suggestion"));
+                }
             }
             return ProgressResult.CONTINUE;
         }
@@ -107,11 +117,12 @@ public class ProgressGuard {
                 if (!runtime.repeatedFailureReplanAttempted()) {
                     runtime.setRepeatedFailureReplanAttempted(true);
                     context.action().setReplanReason(ReplanReason.REPEATED_ERROR);
-                    context.getDynamicText().appendSystemNote(
-                            runtime.step(),
-                            StringUtils.defaultString(runtime.currentNode(), "progress_guard"),
-                            "系统提示",
-                            "你已连续相同失败 " + repeats + " 次。请尝试不同的方法，或者考虑是否可以结束任务。");
+                    if (ledgerAppendService != null) {
+                        ledgerAppendService.appendSystemNote(context,
+                                "你已连续相同失败 " + repeats + " 次。请尝试不同的方法，或者考虑是否可以结束任务。",
+                                ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                        String.valueOf(runtime.step()), "repeated_failure_note"));
+                    }
                     return ProgressResult.REPLAN;
                 }
                 runtime.fail(AgentStopReason.NO_PROGRESS, "repeated_failure",

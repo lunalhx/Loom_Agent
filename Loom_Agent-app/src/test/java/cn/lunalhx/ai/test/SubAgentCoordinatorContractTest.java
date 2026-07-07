@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.SubAgentStatus;
 import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -371,9 +373,11 @@ public class SubAgentCoordinatorContractTest {
         List<String> prompts = new java.util.concurrent.CopyOnWriteArrayList<>();
         SubAgentCoordinator coordinator = coordinatorWithGateway(promptCapturingGateway(prompts, "ok"));
         AgentContext parent = parentWithDecision(spawnInput(1));
-        parent.getDynamicText().appendSystemNote(1, "test", "Parent Secret", "SHOULD_NOT_LEAK_TO_CHILD");
+        ConversationLedgerAppendService appendService = new ConversationLedgerAppendService();
+        parent.ensureLedgerActive();
+        String eventKey = ConversationLedgerInitializer.eventKey(parent.getRunId(), "1", "secret_note");
+        appendService.appendSystemNote(parent, "SHOULD_NOT_LEAK_TO_CHILD", eventKey);
         coordinator.dispatch(parent);
-        // 子 Agent 提示词中不得包含父动态文本中的机密内容
         assertTrue(prompts.stream()
                 .filter(prompt -> prompt.contains("隔离子 Agent"))
                 .noneMatch(prompt -> prompt.contains("SHOULD_NOT_LEAK_TO_CHILD")));

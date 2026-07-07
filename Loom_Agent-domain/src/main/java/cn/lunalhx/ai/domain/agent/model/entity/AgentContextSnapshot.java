@@ -70,6 +70,7 @@ public class AgentContextSnapshot {
     private Integer parseErrors;
     private Instant startedAt;
     private List<AgentStep> history;
+    // Legacy field — no longer written; kept for Jackson backward compat on old snapshots
     private List<DynamicTextEntry> dynamicTextEntries;
     private String currentNode;
     private Long checkpointVersion;
@@ -197,7 +198,6 @@ public class AgentContextSnapshot {
                 .parseErrors(runtime.parseErrors())
                 .startedAt(runtime.startedAt())
                 .history(runtime.history() == null ? null : new ArrayList<>(runtime.history()))
-                .dynamicTextEntries(context.prompt().dynamicText().entries())
                 .currentNode(runtime.currentNode())
                 .checkpointVersion(runtime.checkpointVersion())
                 .finalAnswer(runtime.finalAnswer())
@@ -298,9 +298,6 @@ public class AgentContextSnapshot {
         context.setParseErrors(parseErrors == null ? 0 : parseErrors);
         context.setStartedAt(startedAt);
         context.setHistory(history == null ? new ArrayList<>() : new ArrayList<>(history));
-        DynamicText dt = new DynamicText();
-        dt.replaceEntries(dynamicTextEntries == null ? List.of() : dynamicTextEntries);
-        context.setDynamicText(dt);
         context.setCurrentNode(currentNode);
         context.setCheckpointVersion(checkpointVersion);
         context.setFinalAnswer(finalAnswer);

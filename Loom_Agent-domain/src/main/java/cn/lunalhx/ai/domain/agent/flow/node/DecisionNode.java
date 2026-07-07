@@ -124,13 +124,15 @@ public class DecisionNode extends AbstractAgentNode {
         context.setToolResult(ToolResult.failure("parse_error",
                 repairMsg + "\n" + guidance, 0L));
         appendStep(context, false);
-        context.getDynamicText().appendSystemNote(
-                Math.max(1, context.getStep()),
-                name(),
-                "Model Output Parse Error [" + e.getErrorCode().name() + "]",
-                "Attempt " + context.getParseErrors() + "/" + (maxAttempts + 1) + "\n"
-                        + "Error: " + e.getMessage() + "\n"
-                        + "RawOutput:\n" + truncateModelOutput(context));
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendSystemNote(context,
+                    "Attempt " + context.getParseErrors() + "/" + (maxAttempts + 1) + "\n"
+                            + "Error: " + e.getMessage() + "\n"
+                            + "RawOutput:\n" + truncateModelOutput(context),
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(Math.max(1, context.getStep())),
+                            "parse_error_note:" + context.getParseErrors()));
+        }
         appendParseErrorToLedger(context);
         return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
     }
@@ -182,12 +184,12 @@ public class DecisionNode extends AbstractAgentNode {
         context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure("unknown_tool", "未知工具：" + decision.getTool(), 0L));
         appendStep(context, false);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
-        context.getDynamicText().appendToolResult(
-                context.getStep(),
-                name(),
-                decision,
-                "Success: false\nObservation:\n未知工具：" + decision.getTool());
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendToolResult(context,
+                    "Success: false\nObservation:\n未知工具：" + decision.getTool(),
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getStep()), "unknown_tool"));
+        }
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 
@@ -199,12 +201,12 @@ public class DecisionNode extends AbstractAgentNode {
         context.setToolResult(ToolResult.failure("invalid_tool_input",
                 "工具 " + decision.getTool() + " 参数校验失败: " + errorDetail, 0L));
         appendStep(context, false);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
-        context.getDynamicText().appendToolResult(
-                context.getStep(),
-                name(),
-                decision,
-                "Success: false\nErrorCode: invalid_tool_input\nObservation:\n" + errorDetail);
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendToolResult(context,
+                    "Success: false\nErrorCode: invalid_tool_input\nObservation:\n" + errorDetail,
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getStep()), "invalid_input"));
+        }
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 
@@ -212,12 +214,12 @@ public class DecisionNode extends AbstractAgentNode {
         context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure("sub_agent_unavailable", "当前上下文不允许派生子 Agent", 0L));
         appendStep(context, false);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
-        context.getDynamicText().appendToolResult(
-                context.getStep(),
-                name(),
-                decision,
-                "Success: false\nObservation:\n当前上下文不允许派生子 Agent");
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendToolResult(context,
+                    "Success: false\nObservation:\n当前上下文不允许派生子 Agent",
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getStep()), "sub_agent_unavailable"));
+        }
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 

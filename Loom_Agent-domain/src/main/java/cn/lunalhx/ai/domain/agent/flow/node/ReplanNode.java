@@ -92,13 +92,14 @@ public class ReplanNode extends AbstractAgentNode {
         }
         appendPlanSnapshotIfChanged(context);
         appendReplanNote(context, reason, modelUpdated);
-        context.getDynamicText().appendSystemNote(
-                Math.max(1, context.getStep()),
-                name(),
-                "Replan",
-                "Reason: " + reason + "\n"
-                        + "PlanDeltaSource: " + (modelUpdated ? "model" : "fallback") + "\n"
-                        + StringUtils.defaultString(context.getReplanMessage()));
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendSystemNote(context,
+                    "Reason: " + reason + "\n"
+                            + "PlanDeltaSource: " + (modelUpdated ? "model" : "fallback") + "\n"
+                            + StringUtils.defaultString(context.getReplanMessage()),
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(Math.max(1, context.getStep())), "replan_note"));
+        }
         AgentEvent replanStarted = event(context, AgentEventType.REPLAN_STARTED)
                 .plan(context.getPlan().toView())
                 .message(context.getReplanMessage())

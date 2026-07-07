@@ -111,7 +111,6 @@ public class ToolDispatchNode extends AbstractAgentNode {
         }
         trackExecutionState(context, decision, result);
         context.setToolResult(result);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), decision);
 
         events.add(event(context, AgentEventType.THOUGHT)
                 .step(context.getStep())

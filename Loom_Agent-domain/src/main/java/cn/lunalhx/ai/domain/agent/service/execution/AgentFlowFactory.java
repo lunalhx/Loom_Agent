@@ -135,20 +135,20 @@ public class AgentFlowFactory {
                 new ModelCallNode(modelGateway, properties,
                         new ModelCallServices(traceRecorder, budgetGuard,
                                 contextWindowManager, ledgerAppendService,
-                                runtime.modelRuntimeProperties())),
+                                runtime.modelRuntimeProperties(), ledgerCompactionService)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
                 new InstructionGateNode(),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties, ledgerAppendService),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry, contextWindowManager, ledgerAppendService),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService),
-                new ReplanGuardNode(new ProgressGuard(properties)),
+                new ReplanGuardNode(new ProgressGuard(properties, ledgerAppendService)),
                 new ReplanNode(modelGateway, properties, objectMapper, traceRecorder, budgetGuard, ledgerAppendService),
-                new FinalAnswerNode(),
+                new FinalAnswerNode(ledgerAppendService),
                 new UserInputGateNode(),
                 new FailNode()));
         if (subAgentAvailable) {
-            nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties));
+            nodeList.add(new SubAgentDispatchNode(subAgentCoordinator, properties, ledgerAppendService));
         }
 
         Map<String, AgentNode> nodes = new LinkedHashMap<>();

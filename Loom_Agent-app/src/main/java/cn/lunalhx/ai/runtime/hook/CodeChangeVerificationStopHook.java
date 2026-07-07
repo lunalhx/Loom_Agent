@@ -12,7 +12,10 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -24,9 +27,17 @@ import java.util.Map;
 public class CodeChangeVerificationStopHook implements AgentHook {
 
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
+
+    @Autowired
+    public CodeChangeVerificationStopHook(AgentRuntimeProperties properties,
+                                           ConversationLedgerAppendService ledgerAppendService) {
+        this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
+    }
 
     public CodeChangeVerificationStopHook(AgentRuntimeProperties properties) {
-        this.properties = properties;
+        this(properties, null);
     }
 
     @Override
@@ -61,9 +72,11 @@ public class CodeChangeVerificationStopHook implements AgentHook {
             context.setVerificationContinuationCount(attempt + 1);
             context.setReplanReason(ReplanReason.TOOL_FAILURE);
             context.setReplanMessage(reason + "，必须运行允许的测试并根据 test_result 修复");
-            context.getDynamicText().appendSystemNote(
-                    context.getStep(), AgentNodeNames.FINAL_ANSWER,
-                    "Stop Hook: 验证未完成", reason);
+            if (ledgerAppendService != null) {
+                ledgerAppendService.appendSystemNote(context, reason,
+                        ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                String.valueOf(Math.max(1, context.getStep())), "verification_required"));
+            }
             return AgentHookResult.interrupt(
                     AgentHookAction.continueAt(
                             AgentNodeNames.REPLAN, "verification_required", true),

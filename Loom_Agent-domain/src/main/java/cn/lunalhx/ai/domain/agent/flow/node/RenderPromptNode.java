@@ -12,7 +12,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
-import cn.lunalhx.ai.domain.agent.model.entity.context.ContextCompactResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -67,13 +66,9 @@ public class RenderPromptNode extends AbstractAgentNode {
             fail(context, AgentStopReason.MAX_STEPS, "max_steps_segment", "当前分段步骤数已用完");
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
-        ContextCompactResult compactResult = contextWindowManager.compactBeforePrompt(context);
 
-        // ---- C10: Ledger compaction (independent of DynamicText compaction) ----
+        // ---- Ledger compaction (single-track: micro + watermark) ----
         List<AgentEvent> compactEvents = new ArrayList<>();
-        if (compactResult.isCompacted()) {
-            compactEvents.add(compactEvent(context, compactResult));
-        }
         LedgerCompactionResult ledgerResult = compactLedgerIfNeeded(context);
         if (ledgerResult.compacted()) {
             compactEvents.add(ledgerCompactEvent(context, ledgerResult));
@@ -106,24 +101,8 @@ public class RenderPromptNode extends AbstractAgentNode {
         return "";
     }
 
-    private AgentEvent compactEvent(AgentContext context, ContextCompactResult result) {
-        return event(context, AgentEventType.CONTEXT_COMPACTED)
-                .message("Context compacted before model call")
-                .metadata(Map.of(
-                        "beforeEstimatedTokens", result.getBeforeEstimatedTokens(),
-                        "afterEstimatedTokens", result.getAfterEstimatedTokens(),
-                        "targetTokens", result.getTargetTokens(),
-                        "fitsTarget", result.isFitsTarget(),
-                        "retainedEntryCount", result.getRetainedEntryCount(),
-                        "strategies", result.getStrategies(),
-                        "artifactCount", result.getArtifactCount(),
-                        "transcriptArtifactId", result.getTranscriptArtifactId() == null
-                                ? "" : result.getTranscriptArtifactId()))
-                .build();
-    }
-
     // ================================================================
-    // C10: Ledger compaction
+    // Ledger compaction
     // ================================================================
 
     /**

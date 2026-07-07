@@ -51,19 +51,19 @@ public class ModelCallNode extends AbstractAgentNode {
                 services.budgetGuard(), services.traceRecorder(), promptFactory);
         this.failureClassifier = new ModelCallFailureClassifier();
         this.executor = new ModelCallExecutor(modelGateway, promptFactory, budgetCoordinator);
+        this.ledgerAppendService = services.ledgerAppendService();
         this.recoveryChain = new ContextRecoveryChain(List.of(
-                new ReactiveCompactStep(properties, services.contextWindowManager(), modelGateway),
+                new ReactiveCompactStep(services.ledgerCompactionService()),
                 new FallbackModelStep(properties, modelGateway, budgetCoordinator),
-                new DeepSummaryStep(properties, services.contextWindowManager(), modelGateway),
+                new DeepSummaryStep(properties, services.ledgerCompactionService(), modelGateway),
                 new ExhaustedStep()
         ));
         this.modelErrorRecoveryChain = new ContextRecoveryChain(List.of(
-                new FormatReminderStep(),
+                new FormatReminderStep(ledgerAppendService),
                 new ModelFallbackStep(services.modelRuntimeProperties()),
-                new ContextSimplifyStep(services.contextWindowManager()),
+                new ContextSimplifyStep(services.ledgerCompactionService()),
                 new ModelErrorExhaustedStep()
         ));
-        this.ledgerAppendService = services.ledgerAppendService();
     }
 
     @Override

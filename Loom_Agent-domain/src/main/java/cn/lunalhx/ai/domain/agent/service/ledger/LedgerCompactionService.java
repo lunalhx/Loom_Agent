@@ -104,12 +104,79 @@ public final class LedgerCompactionService {
             return LedgerCompactionResult.notNeeded(0, context.getGeneration());
         }
 
+        // Micro-compaction: replace old TOOL_RESULT entries that have artifact IDs
+        // with stable <persisted-output> references. This runs every prompt cycle
+        // and does not bump generation.
+        microCompact(context, ledger);
+
         int entryCount = ledger.size();
         if (entryCount <= watermark.highEntryCount()) {
             return LedgerCompactionResult.notNeeded(entryCount, context.getGeneration());
         }
 
         return compact(context);
+    }
+
+    /**
+     * Micro-compaction: replace old TOOL_RESULT entries that carry an
+     * {@code artifactId} with a stable {@code <persisted-output>} reference.
+     *
+     * <p>Keeps the most recent {@code keepRecent} tool results intact.
+     * Does NOT bump generation — this is a content-level optimization that
+     * preserves entry count and sequence numbers.
+     *
+     * @return true if any entries were modified
+     */
+    public boolean microCompact(AgentContext context, ConversationLedger ledger) {
+        if (ledger == null || ledger.isEmpty()) {
+            return false;
+        }
+        List<ConversationLedgerEntry> entries = new ArrayList<>(ledger.entries());
+        int keepRecent = 4; // keep most recent 4 tool results intact
+        int seenToolResults = 0;
+        boolean changed = false;
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            ConversationLedgerEntry entry = entries.get(i);
+            if (entry.stableType() != LedgerStableType.TOOL_RESULT) {
+                continue;
+            }
+            seenToolResults++;
+            if (seenToolResults <= keepRecent || entry.compacted()) {
+                continue;
+            }
+            if (StringUtils.isBlank(entry.artifactId())) {
+                continue;
+            }
+            String reference = "<persisted-output"
+                    + " artifactId=\"" + entry.artifactId() + "\""
+                    + " kind=\"tool_result\""
+                    + " originalChars=\"" + nullToZero(entry.originalChars()) + "\""
+                    + " />\n"
+                    + "This tool result was compacted."
+                    + " Use context_recall get with this artifactId when exact output is needed.";
+            entries.set(i, ConversationLedgerEntry.builder()
+                    .entryId(entry.entryId())
+                    .sequence(entry.sequence())
+                    .role(entry.role())
+                    .content(reference)
+                    .stableType(entry.stableType())
+                    .eventKey(entry.eventKey())
+                    .toolName(entry.toolName())
+                    .artifactId(entry.artifactId())
+                    .originalChars(entry.originalChars())
+                    .renderChars(reference.length())
+                    .compacted(true)
+                    .build());
+            changed = true;
+        }
+        if (changed) {
+            ledger.replaceEntries(entries);
+        }
+        return changed;
+    }
+
+    private int nullToZero(Integer value) {
+        return value == null ? 0 : value;
     }
 
     /**

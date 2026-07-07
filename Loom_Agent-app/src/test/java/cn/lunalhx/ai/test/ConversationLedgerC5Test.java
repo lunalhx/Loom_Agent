@@ -142,39 +142,12 @@ public class ConversationLedgerC5Test {
 
         node.apply(ctx);
 
-        // DynamicText must still work exactly as before
-        String dynamicContent = ctx.getDynamicText().render();
-        assertTrue("DynamicText must have untrusted_tool_output boundary",
-                dynamicContent.contains("<untrusted_tool_output"));
-        assertTrue("DynamicText must have tool name",
-                dynamicContent.contains("tool=\"read_file\""));
-        assertTrue("DynamicText must have content",
-                dynamicContent.contains("normal content"));
+        List<ConversationLedgerEntry> entries = ctx.getConversationLedger().entries();
+        assertEquals("one tool_result entry expected", 1, entries.size());
 
-        // Ledger must also have the entry (independent)
-        assertEquals(1, ctx.getConversationLedger().entries().size());
-    }
-
-    @Test
-    public void observationNodeDynamicTextMatchesDisabledMode() {
-        // Verify that DynamicText output is identical with/without ledger
-        ObservationNode ledgerNode = observationNode(enabledService);
-        ObservationNode noLedgerNode = observationNode(null);
-
-        AgentContext ctx1 = basicContext("r-dyn-2");
-        ctx1.ensureLedgerActive();
-        ctx1.setDecision(AgentDecision.builder().tool("read_file").build());
-        ctx1.setToolResult(ToolResult.success("test content", false, 1L));
-        ledgerNode.apply(ctx1);
-
-        AgentContext ctx2 = basicContext("r-dyn-2");
-        ctx2.setDecision(AgentDecision.builder().tool("read_file").build());
-        ctx2.setToolResult(ToolResult.success("test content", false, 1L));
-        noLedgerNode.apply(ctx2);
-
-        // DynamicText content must be identical
-        assertEquals("DynamicText must be identical regardless of ledger",
-                ctx1.getDynamicText().render(), ctx2.getDynamicText().render());
+        ConversationLedgerEntry entry = entries.get(0);
+        assertThat(entry.content()).startsWith("<untrusted_tool_output");
+        assertThat(entry.content()).contains("normal content");
     }
 
     // ================================================================
@@ -289,41 +262,6 @@ public class ConversationLedgerC5Test {
         assertEquals("r-deny-1:2:tool_result", entry.eventKey());
     }
 
-    @Test
-    public void approvalGateDenyDynamicTextUnchanged() {
-        AgentRuntimeProperties props = standardApprovalProps();
-        props.setHighRiskPolicy("DENY");
-
-        AgentTool tool = fixedPolicyTool("deny_tool_dyn", ToolPermissionLevel.HIGH_RISK_DENY);
-        ToolRegistry registry = new ToolRegistry(List.of(tool),
-                new ToolSchemaValidator(new ObjectMapper()));
-
-        ApprovalGateNode ledgerNode = new ApprovalGateNode(registry,
-                new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, enabledService);
-        ApprovalGateNode noLedgerNode = new ApprovalGateNode(registry,
-                new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, null);
-
-        AgentContext ctx1 = basicContext("r-dyn-deny-1");
-        ctx1.ensureLedgerActive();
-        ctx1.setDecision(AgentDecision.builder()
-                .tool("deny_tool_dyn")
-                .input(new ObjectMapper().createObjectNode().put("cmd", "rm"))
-                .build());
-
-        AgentContext ctx2 = basicContext("r-dyn-deny-1");
-        ctx2.setDecision(AgentDecision.builder()
-                .tool("deny_tool_dyn")
-                .input(new ObjectMapper().createObjectNode().put("cmd", "rm"))
-                .build());
-
-        ledgerNode.apply(ctx1);
-        noLedgerNode.apply(ctx2);
-
-        assertEquals("DynamicText must be identical regardless of ledger",
-                ctx1.getDynamicText().render(), ctx2.getDynamicText().render());
-    }
 
     @Test
     public void approvalGateDenyNullLedgerServiceDoesNotCrash() {

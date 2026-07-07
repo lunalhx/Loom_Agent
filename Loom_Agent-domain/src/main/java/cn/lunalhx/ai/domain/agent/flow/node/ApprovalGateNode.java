@@ -96,12 +96,6 @@ public class ApprovalGateNode extends AbstractAgentNode {
     private NodeResult validationFailure(AgentContext context, ToolResult result) {
         context.setStep(context.getStep() + 1);
         context.setToolResult(result);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), context.getDecision());
-        context.getDynamicText().appendToolResult(
-                context.getStep(),
-                name(),
-                context.getDecision(),
-                "Success: false\nObservation:\n" + result.getObservation());
         appendStep(context, false);
         appendToolResultToLedger(context, result);
 
@@ -229,12 +223,6 @@ public class ApprovalGateNode extends AbstractAgentNode {
             result.setDetails(policy.getMetadata());
         }
         context.setToolResult(result);
-        context.getDynamicText().appendAssistantAction(context.getStep(), name(), context.getDecision());
-        context.getDynamicText().appendToolResult(
-                context.getStep(),
-                name(),
-                context.getDecision(),
-                "Success: false\nObservation:\n" + result.getObservation());
         appendStep(context, false);
         appendToolResultToLedger(context, result);
 

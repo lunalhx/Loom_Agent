@@ -14,8 +14,11 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -28,9 +31,17 @@ import java.util.Set;
 public class IncompletePlanStopHook implements AgentHook {
 
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
+
+    @Autowired
+    public IncompletePlanStopHook(AgentRuntimeProperties properties,
+                                   ConversationLedgerAppendService ledgerAppendService) {
+        this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
+    }
 
     public IncompletePlanStopHook(AgentRuntimeProperties properties) {
-        this.properties = properties;
+        this(properties, null);
     }
 
     @Override
@@ -115,12 +126,13 @@ public class IncompletePlanStopHook implements AgentHook {
             agentContext.setReplanReason(ReplanReason.INCOMPLETE_PLAN);
             agentContext.setReplanMessage(buildReplanMessage(agentContext, continuationCount + 1));
 
-            agentContext.getDynamicText().appendSystemNote(
-                    agentContext.getStep(),
-                    AgentNodeNames.FINAL_ANSWER,
-                    "Stop Hook: 计划未完成",
-                    "检测到 " + incompleteItemCount(agentContext)
-                            + " 个未完成计划项，第 " + (continuationCount + 1) + " 次续跑");
+            if (ledgerAppendService != null) {
+                ledgerAppendService.appendSystemNote(agentContext,
+                        "检测到 " + incompleteItemCount(agentContext)
+                                + " 个未完成计划项，第 " + (continuationCount + 1) + " 次续跑",
+                        ConversationLedgerInitializer.eventKey(agentContext.getRunId(),
+                                String.valueOf(Math.max(1, agentContext.getStep())), "incomplete_plan"));
+            }
 
             AgentEvent hookEvent = AgentEvent.builder()
                     .type(AgentEventType.STOP_HOOK_RESULT)

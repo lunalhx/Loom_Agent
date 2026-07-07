@@ -13,6 +13,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -30,11 +32,14 @@ public class BackgroundTaskFinalGuardHook implements AgentHook {
 
     private final BackgroundShellTaskRepository taskRepository;
     private final BackgroundTaskCancelService cancelService;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
     public BackgroundTaskFinalGuardHook(BackgroundShellTaskRepository taskRepository,
-                                         BackgroundTaskCancelService cancelService) {
+                                         BackgroundTaskCancelService cancelService,
+                                         ConversationLedgerAppendService ledgerAppendService) {
         this.taskRepository = taskRepository;
         this.cancelService = cancelService;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -78,11 +83,11 @@ public class BackgroundTaskFinalGuardHook implements AgentHook {
             sb.append("\n请使用 shell_task poll 等待任务完成并读取输出，或使用 shell_task cancel 取消不需要的任务。\n");
             sb.append("连续 ").append(MAX_IGNORED_ATTEMPTS).append(" 次无视此提示将强制失败结束。");
 
-            agentContext.getDynamicText().appendSystemNote(
-                    agentContext.getStep(),
-                    AgentNodeNames.FINAL_ANSWER,
-                    "Stop Hook: 后台任务未完成",
-                    sb.toString());
+            if (ledgerAppendService != null) {
+                ledgerAppendService.appendSystemNote(agentContext, sb.toString(),
+                        ConversationLedgerInitializer.eventKey(agentContext.getRunId(),
+                                String.valueOf(Math.max(1, agentContext.getStep())), "background_task_guard"));
+            }
 
             AgentEvent hookEvent = AgentEvent.builder()
                     .type(AgentEventType.STOP_HOOK_RESULT)

@@ -53,7 +53,6 @@ public final class AgentContextFactory {
         if (StringUtils.isBlank(question.getConversationId())) {
             context.setConversationId(UUID.randomUUID().toString());
         }
-        context.getDynamicText().appendUserTask(context.getQuestion());
         context.setRequestedSkills(question.getSkills());
         return context;
     }
@@ -96,11 +95,6 @@ public final class AgentContextFactory {
 
         // ---- C9R: Restore ledger/prefix/generation, defer bootstrap to RenderPromptNode ----
         if (previous != null) {
-            // Inherit dynamic text entries from previous run
-            if (previous.getDynamicTextEntries() != null) {
-                context.getDynamicText().replaceEntries(previous.getDynamicTextEntries());
-            }
-
             // Restore ledger from previous snapshot
             if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
                 context.setConversationLedger(ConversationLedger.fromPersisted(
@@ -115,8 +109,7 @@ public final class AgentContextFactory {
             }
         }
 
-        // Append the new question to dynamic text; defer ledger append to bootstrap
-        context.getDynamicText().appendUserTask(context.getQuestion());
+        // Defer ledger append to bootstrap
         // Store as pending — bootstrap will append after any config change marker
         context.setPendingContinuation(context.getQuestion());
 

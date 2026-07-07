@@ -8,6 +8,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,9 +26,12 @@ public class BackgroundTaskCompletionHook implements AgentHook {
     private static final Logger log = LoggerFactory.getLogger(BackgroundTaskCompletionHook.class);
 
     private final BackgroundShellTaskRepository taskRepository;
+    private final ConversationLedgerAppendService ledgerAppendService;
 
-    public BackgroundTaskCompletionHook(BackgroundShellTaskRepository taskRepository) {
+    public BackgroundTaskCompletionHook(BackgroundShellTaskRepository taskRepository,
+                                         ConversationLedgerAppendService ledgerAppendService) {
         this.taskRepository = taskRepository;
+        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -53,10 +58,12 @@ public class BackgroundTaskCompletionHook implements AgentHook {
                         task.getTaskId(), task.getStatus());
 
                 String observation = buildCompletionObservation(task);
-                context.getDynamicText().appendSystemNote(
-                        context.getStep(), "background_task",
-                        "Background task " + task.getTaskId() + " completed: " + task.getStatus(),
-                        observation);
+                if (ledgerAppendService != null) {
+                    ledgerAppendService.appendSystemNote(context, observation,
+                            ConversationLedgerInitializer.eventKey(context.getRunId(),
+                                    String.valueOf(Math.max(1, context.getStep())),
+                                    "background_task_completion:" + task.getTaskId()));
+                }
 
                 AgentEventType sseType = switch (task.getStatus()) {
                     case SUCCEEDED -> AgentEventType.BACKGROUND_TASK_COMPLETED;

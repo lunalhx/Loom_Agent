@@ -83,9 +83,7 @@ final class ModelCallBudgetCoordinator {
         if (context.getPlan() != null) {
             input.append(context.getPlan().render());
         }
-        if (context.getDynamicText() != null) {
-            input.append(context.getDynamicText().render());
-        }
+        input.append(promptFactory.budgetInput(context));
         context.getToolSpecs().forEach(spec -> input.append(spec.getName())
                 .append(spec.getDescription())
                 .append(spec.getInputSchema()));

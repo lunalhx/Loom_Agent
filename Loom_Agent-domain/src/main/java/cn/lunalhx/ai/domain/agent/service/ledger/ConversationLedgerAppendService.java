@@ -4,6 +4,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
+import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 import java.util.Objects;
@@ -84,6 +86,37 @@ public final class ConversationLedgerAppendService {
     }
 
     /**
+     * Append a tool result with artifact metadata.
+     *
+     * <p>When a {@link ToolResult} carries an {@code artifactId} (large output
+     * persisted to blob store), the metadata is recorded on the ledger entry
+     * so that micro-compaction can later replace the full content with a stable
+     * {@code <persisted-output>} reference. The prompt content is still the
+     * wrapped raw output — metadata does not affect prompt rendering.
+     *
+     * @param context   the agent context with an active ledger
+     * @param rawOutput the raw tool output (text), already rendered for prompt
+     * @param toolResult the tool result carrying artifact metadata (may be null)
+     * @param toolName  the tool name (may be null)
+     * @param eventKey  deterministic idempotency key
+     * @return immutable snapshot of the ledger after append
+     */
+    public List<ConversationLedgerEntry> appendToolResult(
+            AgentContext context, String rawOutput, ToolResult toolResult,
+            String toolName, String eventKey) {
+        Objects.requireNonNull(rawOutput, "rawOutput must not be null");
+        String wrapped = "<untrusted_tool_output>\n"
+                + rawOutput
+                + "\n</untrusted_tool_output>";
+        String artifactId = toolResult != null ? toolResult.getArtifactId() : null;
+        Integer originalChars = toolResult != null ? toolResult.getOriginalChars() : null;
+        Integer renderChars = StringUtils.length(rawOutput);
+        return appendWithMetadata(context, "user", wrapped,
+                LedgerStableType.TOOL_RESULT, eventKey,
+                toolName, artifactId, originalChars, renderChars, false);
+    }
+
+    /**
      * Append a user input message (mid-run).
      *
      * @param context  the agent context with an active ledger
@@ -114,6 +147,24 @@ public final class ConversationLedgerAppendService {
                 LedgerStableType.CONTROL_UPDATE, eventKey);
     }
 
+    /**
+     * Append a system note (control / status / compaction marker).
+     *
+     * <p>Mapped to {@code "user"} role with {@code SYSTEM_NOTE} stable type.
+     * Used by progress guards, stop hooks, replan events, format reminders,
+     * and compaction summaries.
+     *
+     * @param context  the agent context with an active ledger
+     * @param content  the system note text
+     * @param eventKey deterministic idempotency key
+     * @return immutable snapshot of the ledger after append
+     */
+    public List<ConversationLedgerEntry> appendSystemNote(
+            AgentContext context, String content, String eventKey) {
+        return append(context, "user", content,
+                LedgerStableType.SYSTEM_NOTE, eventKey);
+    }
+
     // ================================================================
     // Internal
     // ================================================================
@@ -121,12 +172,22 @@ public final class ConversationLedgerAppendService {
     private List<ConversationLedgerEntry> append(
             AgentContext context, String role, String content,
             LedgerStableType stableType, String eventKey) {
+        return appendWithMetadata(context, role, content, stableType, eventKey,
+                null, null, null, null, false);
+    }
+
+    private List<ConversationLedgerEntry> appendWithMetadata(
+            AgentContext context, String role, String content,
+            LedgerStableType stableType, String eventKey,
+            String toolName, String artifactId,
+            Integer originalChars, Integer renderChars, boolean compacted) {
         Objects.requireNonNull(context, "context must not be null");
 
         context.ensureLedgerActive();
         ConversationLedger ledger = context.getConversationLedger();
 
-        ledger.appendWithEventKey(role, content, stableType, eventKey);
+        ledger.appendWithEventKey(role, content, stableType, eventKey,
+                toolName, artifactId, originalChars, renderChars, compacted);
         return ledger.entries();
     }
 }

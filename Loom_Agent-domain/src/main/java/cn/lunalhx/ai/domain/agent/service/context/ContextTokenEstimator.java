@@ -1,8 +1,12 @@
 package cn.lunalhx.ai.domain.agent.service.context;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import org.apache.commons.lang3.StringUtils;
+
+import java.util.List;
 
 class ContextTokenEstimator {
 
@@ -16,8 +20,16 @@ class ContextTokenEstimator {
         if (context == null) {
             return 0;
         }
+        int ledgerChars = 0;
+        ConversationLedger ledger = context.getConversationLedger();
+        if (ledger != null) {
+            List<ConversationLedgerEntry> entries = ledger.entries();
+            for (ConversationLedgerEntry entry : entries) {
+                ledgerChars += StringUtils.length(entry.content());
+            }
+        }
         int chars = StringUtils.length(context.getQuestion())
-                + StringUtils.length(context.getDynamicText() == null ? "" : context.getDynamicText().render())
+                + ledgerChars
                 + (context.getPlan() == null ? 0 : StringUtils.length(context.getPlan().render()))
                 + StringUtils.length(context.getSkillCatalogText())
                 + context.getToolSpecs().stream().mapToInt(spec -> StringUtils.length(spec.getName())

@@ -134,7 +134,6 @@ public final class AgentResumeCoordinator {
                 filtered.removeAll(rejectedNames);
                 context.setRequestedSkills(filtered);
             }
-            context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.SKILL_BOOTSTRAP, context.getDecision());
             context.runtime().advanceStep();
             return durableApprovalResume(
                     approvalId, context, AgentNodeNames.START, events);
@@ -151,7 +150,6 @@ public final class AgentResumeCoordinator {
                 "allowedAlternatives",
                 allowedAlternatives == null ? List.of() : allowedAlternatives));
         context.setToolResult(rejection);
-        context.getDynamicText().appendAssistantAction(context.getStep(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
         return durableApprovalResume(
                 approvalId, context, AgentNodeNames.OBSERVATION, events);
     }
@@ -218,7 +216,6 @@ public final class AgentResumeCoordinator {
                     "policy_denied",
                     "审批已过期或不可用，写操作未执行",
                     0L));
-            context.getDynamicText().appendAssistantAction(runtime.step(), AgentNodeNames.APPROVAL_GATE, context.getDecision());
             // C9: Append expiration to ledger
             appendApprovalExpiredToLedger(context, expiredId);
             return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
@@ -275,7 +272,6 @@ public final class AgentResumeCoordinator {
             return AgentResumePlan.continueAt(context, AgentNodeNames.FAIL, events);
         }
 
-        context.getDynamicText().appendUserInput(runtime.step(), StringUtils.trim(message));
         appendUserInputToLedger(context, StringUtils.trim(message));
         context.recovery().reset();
         runtime.clearOutcomeForContinuation();

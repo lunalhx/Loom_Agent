@@ -11,6 +11,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -22,9 +25,17 @@ import java.util.Map;
 public class MaxStepContinuationStopHook implements AgentHook {
 
     private final AgentRuntimeProperties properties;
+    private final ConversationLedgerAppendService ledgerAppendService;
+
+    @Autowired
+    public MaxStepContinuationStopHook(AgentRuntimeProperties properties,
+                                        ConversationLedgerAppendService ledgerAppendService) {
+        this.properties = properties;
+        this.ledgerAppendService = ledgerAppendService;
+    }
 
     public MaxStepContinuationStopHook(AgentRuntimeProperties properties) {
-        this.properties = properties;
+        this(properties, null);
     }
 
     @Override
@@ -66,12 +77,13 @@ public class MaxStepContinuationStopHook implements AgentHook {
         agentContext.setReplanMessage("第 " + (nextSegment + 1) + "/" + agentContext.getMaxSegments()
                 + " 段自动续跑，已用 " + agentContext.getStep() + "/" + agentContext.getMaxTotalSteps() + " 步");
 
-        agentContext.getDynamicText().appendSystemNote(
-                agentContext.getStep(),
-                AgentNodeNames.FAIL,
-                "Step Budget: 分段续跑",
-                "第 " + (agentContext.getSegmentIndex() + 1) + "/" + agentContext.getMaxSegments()
-                        + " 段开始，已用 " + agentContext.getStep() + "/" + agentContext.getMaxTotalSteps() + " 步");
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendSystemNote(agentContext,
+                    "第 " + (agentContext.getSegmentIndex() + 1) + "/" + agentContext.getMaxSegments()
+                            + " 段开始，已用 " + agentContext.getStep() + "/" + agentContext.getMaxTotalSteps() + " 步",
+                    ConversationLedgerInitializer.eventKey(agentContext.getRunId(),
+                            String.valueOf(Math.max(1, agentContext.getStep())), "segment_continuation"));
+        }
 
         AgentEvent hookEvent = AgentEvent.builder()
                 .type(AgentEventType.STOP_HOOK_RESULT)

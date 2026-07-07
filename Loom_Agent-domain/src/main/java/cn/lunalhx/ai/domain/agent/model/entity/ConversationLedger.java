@@ -45,6 +45,25 @@ public final class ConversationLedger {
      */
     public ConversationLedger appendWithEventKey(String role, String content,
                                                   LedgerStableType stableType, String eventKey) {
+        return appendWithEventKey(role, content, stableType, eventKey,
+                null, null, null, null, false);
+    }
+
+    /**
+     * Append an entry with event key and optional metadata.
+     *
+     * <p>Metadata fields ({@code toolName}, {@code artifactId}, {@code originalChars},
+     * {@code renderChars}, {@code compacted}) are stored on the entry for diagnostics
+     * and compaction, but do NOT participate in prompt rendering —
+     * {@code ModelPromptFactory} reads only {@code role} and {@code content}.
+     *
+     * @return {@code this} for fluent chaining
+     */
+    public ConversationLedger appendWithEventKey(String role, String content,
+                                                  LedgerStableType stableType, String eventKey,
+                                                  String toolName, String artifactId,
+                                                  Integer originalChars, Integer renderChars,
+                                                  boolean compacted) {
         Objects.requireNonNull(role, "role must not be null");
         Objects.requireNonNull(content, "content must not be null");
         Objects.requireNonNull(stableType, "stableType must not be null");
@@ -64,6 +83,11 @@ public final class ConversationLedger {
                 .content(content)
                 .stableType(stableType)
                 .eventKey(eventKey)
+                .toolName(toolName)
+                .artifactId(artifactId)
+                .originalChars(originalChars)
+                .renderChars(renderChars)
+                .compacted(compacted)
                 .build();
         entries.add(entry);
         return this;
