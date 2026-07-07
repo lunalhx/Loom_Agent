@@ -17,6 +17,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
+import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator.WorkspaceUndoBusyException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -69,6 +70,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
             try {
                 components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
                 runLoop(context, AgentNodeNames.SKILL_BOOTSTRAP, sink);
+            } catch (WorkspaceUndoBusyException e) {
+                emit(sink, List.of(components.eventFactory().workspaceUndoBusy(context, e)));
+                components.nodeLifecycle().persistFailure(context, events -> emit(sink, events));
+                sink.complete();
+                return;
             } catch (Exception e) {
                 if (undoCoordinator != null) {
                     undoCoordinator.onRunFailed(context);

@@ -2,6 +2,7 @@ package cn.lunalhx.ai.runtime.hook;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHook;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
@@ -24,25 +25,32 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
 
-@Component
 @Order(400)
 public class CheckpointAgentHook implements AgentHook {
 
     private final AgentRunRepository runRepository;
     private final AgentCheckpointRepository checkpointRepository;
     private final ObjectMapper objectMapper;
+    private final ConversationDeletionRepository deletionRepository;
 
     public CheckpointAgentHook(AgentRunRepository runRepository,
                                AgentCheckpointRepository checkpointRepository,
                                ObjectMapper objectMapper) {
+        this(runRepository, checkpointRepository, objectMapper, null);
+    }
+
+    public CheckpointAgentHook(AgentRunRepository runRepository,
+                               AgentCheckpointRepository checkpointRepository,
+                               ObjectMapper objectMapper,
+                               ConversationDeletionRepository deletionRepository) {
         this.runRepository = runRepository;
         this.checkpointRepository = checkpointRepository;
         this.objectMapper = objectMapper;
+        this.deletionRepository = deletionRepository;
     }
 
     @Override
@@ -53,6 +61,14 @@ public class CheckpointAgentHook implements AgentHook {
         AgentContext context = hookContext.getAgentContext();
         if (context == null || StringUtils.isBlank(context.identity().runId())) {
             return AgentHookResult.proceed();
+        }
+        String conversationId = context.identity().conversationId();
+        if (conversationId != null && deletionRepository != null) {
+            java.util.Optional<cn.lunalhx.ai.domain.agent.model.entity.ConversationDeletion> deletionOpt =
+                    deletionRepository.find(conversationId);
+            if (deletionOpt.isPresent() && !"FAILED".equals(deletionOpt.get().getStatus())) {
+                return AgentHookResult.proceed();
+            }
         }
         String currentNode = StringUtils.defaultIfBlank(hookContext.getNextNode(), hookContext.getNode());
         if (event == AgentHookEvent.AFTER_TOOL) {

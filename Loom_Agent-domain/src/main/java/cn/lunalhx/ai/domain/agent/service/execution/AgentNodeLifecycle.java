@@ -16,6 +16,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import org.apache.commons.lang3.StringUtils;
@@ -216,6 +217,20 @@ public final class AgentNodeLifecycle {
 
     public static String runKind(AgentContext context) {
         return StringUtils.isBlank(context.identity().parentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
+    }
+
+    public void persistFailure(AgentContext context, Consumer<List<AgentEvent>> emitter) {
+        if (context == null) {
+            return;
+        }
+        context.runtime().fail(AgentStopReason.MODEL_ERROR,
+                AgentErrorCode.WORKSPACE_UNDO_BUSY.code(),
+                AgentErrorCode.WORKSPACE_UNDO_BUSY.defaultMessage());
+        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
+                .agentContext(context)
+                .node(AgentNodeNames.START)
+                .reason("workspace_undo_busy")
+                .build()));
     }
 
     private void putNodeMdc(AgentContext context, String node) {

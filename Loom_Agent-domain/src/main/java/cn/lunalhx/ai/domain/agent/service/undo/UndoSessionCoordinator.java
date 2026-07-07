@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceSnapshotPort;
 import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceUndoLockRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentUndoSnapshot;
+import cn.lunalhx.ai.domain.agent.model.entity.WorkspaceUndoLock;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.UndoSnapshotStatus;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
@@ -71,7 +72,13 @@ public class UndoSessionCoordinator {
         Instant lockExpiry = Instant.now().plusSeconds(lockTimeoutSec);
         boolean acquired = lockRepository.acquire(workspaceRoot.toString(), context.getRunId(), lockExpiry);
         if (!acquired) {
-            throw new WorkspaceUndoBusyException(workspaceRoot.toString());
+            WorkspaceUndoLock existingLock = lockRepository.findByWorkspace(workspaceRoot.toString()).orElse(null);
+            String holderRunId = existingLock != null ? existingLock.getHolderRunId() : null;
+            Instant existingLockExpiry = existingLock != null ? existingLock.getExpiresAt() : null;
+            markRunUnavailable(context, "workspace_undo_busy",
+                    "workspace undo lock held by runId=" + holderRunId
+                            + ", expiresAt=" + existingLockExpiry);
+            throw new WorkspaceUndoBusyException(workspaceRoot.toString(), holderRunId, existingLockExpiry);
         }
 
         try {
@@ -389,8 +396,19 @@ public class UndoSessionCoordinator {
     }
 
     public static class WorkspaceUndoBusyException extends RuntimeException {
-        public WorkspaceUndoBusyException(String workspace) {
+        private final String workspace;
+        private final String holderRunId;
+        private final java.time.Instant lockExpiresAt;
+
+        public WorkspaceUndoBusyException(String workspace, String holderRunId, java.time.Instant lockExpiresAt) {
             super("workspace_undo_busy: workspace=" + workspace);
+            this.workspace = workspace;
+            this.holderRunId = holderRunId;
+            this.lockExpiresAt = lockExpiresAt;
         }
+
+        public String getWorkspace() { return workspace; }
+        public String getHolderRunId() { return holderRunId; }
+        public java.time.Instant getLockExpiresAt() { return lockExpiresAt; }
     }
 }

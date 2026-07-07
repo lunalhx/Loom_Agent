@@ -10,9 +10,11 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
+import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -228,6 +230,27 @@ public final class AgentEventFactory {
                 .code(AgentErrorCode.RUN_ALREADY_TERMINAL.code())
                 .message(AgentErrorCode.RUN_ALREADY_TERMINAL.defaultMessage())
                 .metadata(Map.of("status", run.getStatus().name()))
+                .build();
+    }
+
+    public AgentEvent workspaceUndoBusy(AgentContext context, UndoSessionCoordinator.WorkspaceUndoBusyException e) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("workspace", e.getWorkspace());
+        if (e.getHolderRunId() != null) {
+            metadata.put("holderRunId", e.getHolderRunId());
+        }
+        if (e.getLockExpiresAt() != null) {
+            metadata.put("lockExpiresAt", e.getLockExpiresAt().toString());
+        }
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .runId(context == null ? null : context.getRunId())
+                .requestId(context == null ? null : context.getRequestId())
+                .conversationId(context == null ? null : context.getConversationId())
+                .workspace(e.getWorkspace())
+                .code(AgentErrorCode.WORKSPACE_UNDO_BUSY.code())
+                .message(AgentErrorCode.WORKSPACE_UNDO_BUSY.defaultMessage())
+                .metadata(metadata)
                 .build();
     }
 }

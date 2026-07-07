@@ -3,6 +3,7 @@ package cn.lunalhx.ai.config;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
@@ -41,12 +42,14 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
 import cn.lunalhx.ai.infrastructure.skill.FileSystemSkillRepository;
+import cn.lunalhx.ai.runtime.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.trigger.http.StreamRequestLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -161,6 +164,16 @@ public class AgentLoopAutoConfig {
     @Bean
     public AgentHookRegistry agentHookRegistry(List<AgentHook> hooks) {
         return new AgentHookRegistry(hooks);
+    }
+
+    @Bean
+    public CheckpointAgentHook checkpointAgentHook(AgentRunRepository runRepository,
+                                                    AgentCheckpointRepository checkpointRepository,
+                                                    ObjectMapper objectMapper,
+                                                    ObjectProvider<ConversationDeletionRepository> deletionRepoProvider) {
+        return new CheckpointAgentHook(
+                runRepository, checkpointRepository, objectMapper,
+                deletionRepoProvider.getIfAvailable());
     }
 
     @Bean

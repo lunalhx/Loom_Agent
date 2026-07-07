@@ -101,7 +101,7 @@
              ORDER BY update_time DESC LIMIT 1) as workspace
         FROM agent_run ar
         WHERE ar.conversation_id NOT IN (
-            SELECT conversation_id FROM agent_conversation_deletion WHERE status = 'COMPLETED'
+            SELECT conversation_id FROM agent_conversation_deletion WHERE status != 'FAILED'
         )
         GROUP BY ar.conversation_id
         ORDER BY MAX(ar.update_time) DESC

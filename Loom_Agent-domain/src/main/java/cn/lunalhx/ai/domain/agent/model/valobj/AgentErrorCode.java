@@ -21,6 +21,7 @@ public enum AgentErrorCode implements ErrorCode {
     INVALID_USER_INPUT("invalid_user_input", "CONTINUE 必须提供非空 message", ErrorCategory.BAD_REQUEST),
     RUN_ALREADY_TERMINAL("run_already_terminal", "当前运行已结束，不能再次恢复", ErrorCategory.CONFLICT),
     BACKGROUND_TASK_NOT_FOUND("background_task_not_found", "后台任务不存在", ErrorCategory.NOT_FOUND),
+    WORKSPACE_UNDO_BUSY("workspace_undo_busy", "工作区正在执行另一个可撤销任务，请稍后重试", ErrorCategory.CONFLICT),
     WORKSPACE_RESOLUTION_FAILED("workspace_resolution_failed", "工作区路径校验失败", ErrorCategory.BAD_REQUEST);
 
     private final String code;
