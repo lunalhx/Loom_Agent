@@ -100,10 +100,13 @@ loom:
     permission-mode: ${AGENT_PERMISSION_MODE:SANDBOX}
     allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
     shell-commands:
+      shell-syntax-level: ${AGENT_SHELL_SYNTAX_LEVEL:HIGH_RISK_CONFIRM}
+      shell-interpreter: ${AGENT_SHELL_INTERPRETER:/bin/sh}
+      session-grants-enabled: ${AGENT_SHELL_SESSION_GRANTS_ENABLED:true}
       read-only: ${AGENT_SHELL_READ_ONLY:pwd,ls,cat,head,tail,wc,grep,sort,uniq,which,file,du,df,echo,rg}
       write: ${AGENT_SHELL_WRITE:mkdir,cp,mv,touch,chmod,date,printf}
-      high-risk: ${AGENT_SHELL_HIGH_RISK:curl,wget,npm,yarn,pip,pip3,docker,ssh,scp,rsync,chown,kill,systemctl,sudo,sed,awk,tar,zip,unzip}
-      deny: ${AGENT_SHELL_DENY:rm,rmdir,find,python,python3,sh,bash,zsh,dash,ksh,csh,fish,ash,exec,eval,source}
+      high-risk: ${AGENT_SHELL_HIGH_RISK:curl,wget,npm,yarn,pip,pip3,docker,ssh,scp,rsync,chown,kill,systemctl,sed,awk,tar,zip,unzip}
+      deny: ${AGENT_SHELL_DENY:rm,rmdir}
       unknown-level: ${AGENT_SHELL_UNKNOWN_LEVEL:WRITE_CONFIRM}
     sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
     sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}

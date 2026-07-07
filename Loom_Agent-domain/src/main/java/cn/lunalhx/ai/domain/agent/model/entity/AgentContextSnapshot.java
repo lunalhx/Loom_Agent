@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -27,7 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v4 — only durable state needed for recovery.
+ * Checkpoint snapshot v5 — only durable state needed for recovery (v5 adds approvalGrants).
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
@@ -43,7 +44,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 4;
+    private int schemaVersion = 5;
 
     // -- identity (durable) --
     private String runId;
@@ -86,6 +87,7 @@ public class AgentContextSnapshot {
     private String lastFailureFingerprint;
     private Integer sameFailureRepeats;
     private Boolean repeatedFailureReplanAttempted;
+    private Integer replanAttemptsForFailure;
     private Integer noProgressRounds;
     private Boolean codeReadObserved;
     private Integer lastWriteStep;
@@ -111,6 +113,7 @@ public class AgentContextSnapshot {
     private String approvedPolicyFingerprint;
     private Boolean approvalExpired;
     private String expiredApprovalId;
+    private List<ApprovalGrant> approvalGrants;
 
     // -- budget (durable usage snapshot) --
     private Long usedPromptTokens;
@@ -175,7 +178,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(4)
+                .schemaVersion(5)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
@@ -212,6 +215,7 @@ public class AgentContextSnapshot {
                 .lastFailureFingerprint(runtime.lastFailureFingerprint())
                 .sameFailureRepeats(runtime.sameFailureRepeats())
                 .repeatedFailureReplanAttempted(runtime.repeatedFailureReplanAttempted())
+                .replanAttemptsForFailure(runtime.replanAttemptsForFailure())
                 .noProgressRounds(runtime.noProgressRounds())
                 .codeReadObserved(runtime.codeReadObserved())
                 .lastWriteStep(runtime.lastWriteStep())
@@ -235,6 +239,7 @@ public class AgentContextSnapshot {
                 .approvedPolicyFingerprint(approval.approvedPolicyFingerprint())
                 .approvalExpired(approval.approvalExpired())
                 .expiredApprovalId(approval.expiredApprovalId())
+                .approvalGrants(approval.approvalGrants() == null ? null : new ArrayList<>(approval.approvalGrants()))
                 // budget
                 .usedPromptTokens(budget.usedPromptTokens())
                 .usedCompletionTokens(budget.usedCompletionTokens())
@@ -312,6 +317,7 @@ public class AgentContextSnapshot {
         context.setLastFailureFingerprint(lastFailureFingerprint);
         context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
         context.setRepeatedFailureReplanAttempted(Boolean.TRUE.equals(repeatedFailureReplanAttempted));
+        context.setReplanAttemptsForFailure(replanAttemptsForFailure == null ? 0 : replanAttemptsForFailure);
         context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
         context.setCodeReadObserved(Boolean.TRUE.equals(codeReadObserved));
         context.setLastWriteStep(lastWriteStep == null ? 0 : lastWriteStep);
@@ -341,6 +347,7 @@ public class AgentContextSnapshot {
         context.setApprovedPolicyFingerprint(approvedPolicyFingerprint);
         context.setApprovalExpired(Boolean.TRUE.equals(approvalExpired));
         context.setExpiredApprovalId(expiredApprovalId);
+        context.setApprovalGrants(approvalGrants == null ? null : new ArrayList<>(approvalGrants));
 
         // budget
         context.setUsedPromptTokens(usedPromptTokens == null ? 0L : usedPromptTokens);

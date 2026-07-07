@@ -6,7 +6,11 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentPlanItemStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -27,6 +31,7 @@ import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class ApprovalGateNodeTest {
@@ -272,5 +277,138 @@ public class ApprovalGateNodeTest {
         props.setHighRiskPolicy(highRiskPolicy);
         props.setApprovalTtlSeconds(900L);
         return props;
+    }
+
+    // ==================== session grant bypass ====================
+
+    @Test
+    public void sessionGrantShouldBypassApprovalForMatchingCommand() {
+        AgentContext context = basicContext("run_shell");
+        ObjectNode input = objectMapper.createObjectNode();
+        input.put("command", "python3 --version");
+        context.setDecision(AgentDecision.builder()
+                .tool("run_shell")
+                .input(input)
+                .build());
+        context.addApprovalGrant(ApprovalGrant.builder()
+                .pattern("python3 --version")
+                .grantedAt(Instant.now())
+                .build());
+
+        AgentTool highRiskTool = new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder().name("run_shell").description("test")
+                        .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"additionalProperties\":false}")
+                        .build();
+            }
+            @Override
+            public ToolPolicyDecision policy(ToolCall call) {
+                return ToolPolicyDecision.highRiskConfirm("test high risk", "python3 --version");
+            }
+            @Override
+            public ToolResult call(ToolCall call) {
+                return ToolResult.success("ok", false, 1L);
+            }
+        };
+
+        ToolRegistry registry = new ToolRegistry(List.of(highRiskTool), new ToolSchemaValidator(new ObjectMapper()));
+        ApprovalGateNode node = new ApprovalGateNode(registry, new InMemoryApprovalStore(), properties("SANDBOX", "CONFIRM"), null);
+
+        NodeResult result = node.apply(context);
+
+        assertNotNull(result);
+        assertEquals("With matching grant, should bypass to TOOL_DISPATCH",
+                AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+    }
+
+    // ==================== active edit target plan guard ====================
+
+    @Test
+    public void shouldRequireActiveEditTargetForWrite() throws Exception {
+        AgentContext context = basicWriteContext();
+        context.setCodeReadObserved(true);
+
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[
+                  {"content":"edit A","status":"pending","kind":"edit","targets":["src/main/App.java"]},
+                  {"content":"edit B","status":"pending","kind":"edit","targets":["src/main/Other.java"]},
+                  {"content":"verify","status":"pending","kind":"verify"}
+                ]}"""));
+        context.setPlan(plan);
+
+        ApprovalGateNode gate = planGuardNode();
+        ToolResult failure = gate.planGuardFailure(context);
+        assertNotNull(failure);
+        assertEquals("plan_update_required", failure.getErrorCode());
+        assertTrue(failure.getObservation().contains("多个编辑任务项"));
+    }
+
+    @Test
+    public void shouldAllowWriteWhenActiveEditTargetCovers() throws Exception {
+        AgentContext context = basicWriteContext();
+        context.setCodeReadObserved(true);
+
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[
+                  {"content":"edit target","status":"in_progress","kind":"edit","targets":["src/main/App.java"]},
+                  {"content":"verify","status":"pending","kind":"verify"}
+                ]}"""));
+        context.setPlan(plan);
+
+        ApprovalGateNode gate = planGuardNode();
+        ToolResult failure = gate.planGuardFailure(context);
+        assertNull(failure);
+    }
+
+    @Test
+    public void shouldRejectWriteWhenNoEditItemExists() throws Exception {
+        AgentContext context = basicWriteContext();
+        context.setCodeReadObserved(true);
+
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[
+                  {"content":"inspect only","status":"in_progress","kind":"inspect","targets":["src/main/App.java"]},
+                  {"content":"verify","status":"pending","kind":"verify"}
+                ]}"""));
+        context.setPlan(plan);
+
+        ApprovalGateNode gate = planGuardNode();
+        ToolResult failure = gate.planGuardFailure(context);
+        assertNotNull(failure);
+        assertEquals("plan_update_required", failure.getErrorCode());
+    }
+
+    // ==================== plan guard helpers ====================
+
+    private ApprovalGateNode planGuardNode() {
+        AgentRuntimeProperties props = new AgentRuntimeProperties();
+        AgentRuntimeProperties.ExecutionGuardProperties guards = new AgentRuntimeProperties.ExecutionGuardProperties();
+        guards.setPlanBeforeWrite(true);
+        props.setExecutionGuards(guards);
+        props.setApprovalTtlSeconds(900L);
+        return gateNode(fixedPolicy(ToolPermissionLevel.WRITE_CONFIRM), props);
+    }
+
+    private AgentContext basicWriteContext() {
+        AgentContext context = new AgentContext();
+        context.setRunId("test-run-" + UUID.randomUUID());
+        context.setRootRunId(context.getRunId());
+        context.setRequestId("req-1");
+        context.setConversationId("conv-1");
+        context.setQuestion("test question");
+        context.setStep(1);
+        context.setStartedAt(Instant.now());
+        context.setCurrentNode(AgentNodeNames.APPROVAL_GATE);
+        context.setCurrentSpanId("span-1");
+        context.setWorkspaceDisplayName("test");
+        context.setDecision(AgentDecision.builder()
+                .tool("write_file")
+                .input(objectMapper.createObjectNode().put("filePath", "src/main/App.java"))
+                .build());
+        return context;
     }
 }

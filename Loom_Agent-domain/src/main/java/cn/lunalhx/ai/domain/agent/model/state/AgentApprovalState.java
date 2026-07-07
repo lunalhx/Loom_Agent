@@ -1,5 +1,10 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
+
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Mutable approval state with behavior methods for complete state transitions.
  */
@@ -11,6 +16,7 @@ public final class AgentApprovalState {
     private String approvedPolicyFingerprint;
     private boolean approvalExpired;
     private String expiredApprovalId;
+    private List<ApprovalGrant> approvalGrants = new ArrayList<>();
 
     // -- getters --
 
@@ -20,6 +26,7 @@ public final class AgentApprovalState {
     public String approvedPolicyFingerprint() { return approvedPolicyFingerprint; }
     public boolean approvalExpired() { return approvalExpired; }
     public String expiredApprovalId() { return expiredApprovalId; }
+    public List<ApprovalGrant> approvalGrants() { return approvalGrants; }
 
     // -- package-private mutators --
 
@@ -29,6 +36,7 @@ public final class AgentApprovalState {
     public void setApprovedPolicyFingerprint(String v) { this.approvedPolicyFingerprint = v; }
     public void setApprovalExpired(boolean v) { this.approvalExpired = v; }
     public void setExpiredApprovalId(String v) { this.expiredApprovalId = v; }
+    public void setApprovalGrants(List<ApprovalGrant> v) { this.approvalGrants = v; }
 
     // -- behavior methods --
 
@@ -70,5 +78,24 @@ public final class AgentApprovalState {
         this.approvedPolicyFingerprint = null;
         this.approvalExpired = false;
         this.expiredApprovalId = null;
+    }
+
+    public void addGrant(ApprovalGrant grant) {
+        if (this.approvalGrants == null) {
+            this.approvalGrants = new ArrayList<>();
+        }
+        this.approvalGrants.add(grant);
+    }
+
+    public ApprovalGrant findMatchingGrant(String command) {
+        if (this.approvalGrants == null) return null;
+        return this.approvalGrants.stream()
+                .filter(g -> g.matches(command))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public void clearGrants() {
+        this.approvalGrants = new ArrayList<>();
     }
 }

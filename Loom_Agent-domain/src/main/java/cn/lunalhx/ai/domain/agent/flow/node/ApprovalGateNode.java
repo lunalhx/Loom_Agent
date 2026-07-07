@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -18,6 +19,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -26,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public class ApprovalGateNode extends AbstractAgentNode {
 
@@ -67,6 +70,16 @@ public class ApprovalGateNode extends AbstractAgentNode {
         }
         if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
             return deny(context, policy);
+        }
+        // Check run-scoped approval grants for matching commands
+        AgentRuntimeProperties.ShellCommandProperties sc = properties.getShellCommands();
+        boolean grantsEnabled = sc == null || Boolean.TRUE.equals(sc.getSessionGrantsEnabled());
+        if (grantsEnabled && "run_shell".equals(context.getDecision().getTool())) {
+            JsonNode toolInput = context.getDecision().getInput();
+            String command = toolInput != null && toolInput.has("command") ? toolInput.get("command").asText() : null;
+            if (command != null && !"null".equals(command) && context.findMatchingGrant(command) != null) {
+                return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+            }
         }
         String mode = StringUtils.defaultString(properties.getPermissionMode(), "SANDBOX").toUpperCase();
         if ("BYPASS".equals(mode)) {
@@ -120,7 +133,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
     }
 
-    private ToolResult planGuardFailure(AgentContext context) {
+    public ToolResult planGuardFailure(AgentContext context) {
         AgentRuntimeProperties.ExecutionGuardProperties guards =
                 properties.getExecutionGuards();
         if (guards == null || !Boolean.TRUE.equals(guards.getPlanBeforeWrite())) {
@@ -138,11 +151,33 @@ public class ApprovalGateNode extends AbstractAgentNode {
         }
         List<String> targets = ToolOperation.inputPaths(
                 context.getDecision().getInput());
-        if (context.getPlan() == null
-                || targets.isEmpty()
-                || targets.stream().anyMatch(
-                        target -> !context.getPlan().hasDeclaredEditTarget(target))
-                || !context.getPlan().hasVerifyItem()) {
+        if (context.getPlan() == null || targets.isEmpty()) {
+            return ToolResult.failure(
+                    "plan_update_required",
+                    "写入前计划必须包含 kind=edit、targets=" + targets
+                            + "，并包含 kind=verify 的测试项",
+                    0L);
+        }
+        if (!targets.stream().allMatch(
+                target -> context.getPlan().hasActiveEditTarget(target))) {
+            List<AgentPlanItem> incompleteEditItems = context.getPlan().getItems().stream()
+                    .filter(item -> "edit".equalsIgnoreCase(item.getKind()))
+                    .filter(AgentPlanItem::incomplete)
+                    .collect(Collectors.toList());
+            if (incompleteEditItems.isEmpty()) {
+                return ToolResult.failure(
+                        "plan_update_required",
+                        "写入前计划必须有 in_progress 的 kind=edit 项包含 targets=" + targets,
+                        0L);
+            }
+            if (context.getPlan().activeEditItem() == null) {
+                return ToolResult.failure(
+                        "plan_update_required",
+                        "存在多个编辑任务项，请先用 todo_write 明确当前 in_progress 的 edit 项",
+                        0L);
+            }
+        }
+        if (!context.getPlan().hasVerifyItem()) {
             return ToolResult.failure(
                     "plan_update_required",
                     "写入前计划必须包含 kind=edit、targets=" + targets
@@ -177,6 +212,8 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
                 .context(context)
+                .approvalScope("ONCE")
+                .approvedPattern(null)
                 .build();
         approvalStore.save(approval);
         boolean highRisk = policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM;

@@ -7,6 +7,8 @@ import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.BackgroundLaunchMode;
 import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import cn.lunalhx.ai.domain.tool.model.ShellOutputLimits;
+import cn.lunalhx.ai.domain.tool.model.ShellCommandAnalysis;
+import cn.lunalhx.ai.domain.tool.model.ShellExecutionMode;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -47,7 +49,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
-                .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。Maven 测试请直接使用 `mvn -q -o test`，或使用 `mvn test -Dtest=TestClass` 选择测试；不要用 cd、管道或 && 包装。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。限制：禁止 shell 解释器、管道、重定向等元字符；只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。")
+                .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。Maven 测试请直接使用 `mvn -q -o test`，或使用 `mvn test -Dtest=TestClass` 选择测试；管道、重定向、逻辑操作等 shell 语法需高危确认后通过 shell 解释器执行，危险命令（sudo、破坏性删除、管道到解释器、敏感文件）直接拒绝。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。")
                 .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"minLength\":1,\"description\":\"要执行的 shell 命令\"},\"cwd\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对工作目录\"},\"timeoutMs\":{\"type\":\"integer\",\"minimum\":1,\"default\":120000,\"description\":\"超时毫秒，受系统配置上限限制\"},\"runInBackground\":{\"type\":\"boolean\",\"default\":false,\"description\":\"是否显式要求后台执行，不等待 yield 窗口\"},\"foregroundYieldMs\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":30000,\"default\":10000,\"description\":\"前台等待毫秒，超时未完成自动转后台\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
                 .build();
     }
@@ -55,18 +57,46 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     @Override
     public ToolPolicyDecision policy(ToolCall call) {
         String command = text(call.getInput(), "command", "");
-        List<String> tokens;
-        try {
-            tokens = splitCommand(command);
-            validatePathLikeArguments(tokens);
-        } catch (Exception e) {
-            return ToolPolicyDecision.highRiskDeny("命令包含不允许的 shell 语法或路径：" + e.getMessage(), command);
-        }
-        if (tokens.isEmpty()) {
+        if (command.isBlank()) {
             return ToolPolicyDecision.highRiskDeny("command 不能为空", command);
         }
+
+        ShellCommandAnalysis analysis = ShellCommandAnalyzer.analyze(command);
+
+        if (analysis.isHardDenied()) {
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("shellAnalysis", analysis);
+            return ToolPolicyDecision.builder()
+                    .permissionLevel(ToolPermissionLevel.HIGH_RISK_DENY)
+                    .riskReason(analysis.getHardDenyReason())
+                    .operationPreview(command)
+                    .metadata(metadata)
+                    .build();
+        }
+
+        if (analysis.getExecutionMode() == ShellExecutionMode.SHELL_EXEC) {
+            String riskReason = "命令需要 shell 解释器执行" +
+                    (analysis.getFeatures() != null && !analysis.getFeatures().isEmpty()
+                            ? "，包含: " + analysis.getFeatures() : "");
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("shellAnalysis", analysis);
+            return ToolPolicyDecision.builder()
+                    .permissionLevel(ToolPermissionLevel.HIGH_RISK_CONFIRM)
+                    .riskReason(riskReason)
+                    .operationPreview(command)
+                    .metadata(metadata)
+                    .build();
+        }
+
+        // SIMPLE_EXEC path
+        List<String> tokens = analysis.getTokens();
+        if (tokens == null || tokens.isEmpty()) {
+            return ToolPolicyDecision.highRiskDeny("命令解析后为空", command);
+        }
+
         String executable = tokens.get(0);
 
+        // Handle env prefix
         if ("env".equals(executable)) {
             String actualCmd = extractEnvCommand(tokens);
             if (actualCmd != null) {
@@ -82,13 +112,17 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                 }
                 tokens = newTokens;
             } else {
-                return ToolPolicyDecision.readOnly("列出环境变量", command);
+                return injectAnalysis(ToolPolicyDecision.readOnly("列出环境变量", command), analysis);
             }
         }
 
+        // isShellInterpreter check - still reject shell interpreters (B3)
         if (isShellInterpreter(executable)) {
-            return ToolPolicyDecision.highRiskDeny(
-                    "禁止通过 shell 解释器执行命令，请直接调用目标命令", command);
+            return injectAnalysis(ToolPolicyDecision.builder()
+                    .permissionLevel(ToolPermissionLevel.HIGH_RISK_CONFIRM)
+                    .riskReason("通过 shell 解释器执行命令需要高危确认")
+                    .operationPreview(command)
+                    .build(), analysis);
         }
 
         if (executable.contains("/")) {
@@ -97,8 +131,8 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                 if (isDenied(basename)) {
                     return denyForCommand(basename, command);
                 }
-                return ToolPolicyDecision.highRiskConfirm(
-                        "路径型可执行文件视为高危操作：" + executable, command);
+                return injectAnalysis(ToolPolicyDecision.highRiskConfirm(
+                        "路径型可执行文件视为高危操作：" + executable, command), analysis);
             }
         }
 
@@ -107,45 +141,50 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         }
 
         if ("git".equals(executable)) {
-            return gitPolicy(tokens, command);
+            return injectAnalysis(gitPolicy(tokens, command), analysis);
         }
 
         if ("mvn".equals(executable) || "./mvnw".equals(executable)
                 || "mvnw".equals(executable)) {
-            return mavenPolicy(tokens, command);
+            return injectAnalysis(mavenPolicy(tokens, command), analysis);
         }
 
         if (shellCommands().getReadOnly().contains(executable)) {
-            return ToolPolicyDecision.readOnly("允许的只读 shell 命令", command);
+            return injectAnalysis(ToolPolicyDecision.readOnly("允许的只读 shell 命令", command), analysis);
         }
 
         if (shellCommands().getWrite().contains(executable)) {
-            return ToolPolicyDecision.writeConfirm("写命令需要人工确认", command);
+            return injectAnalysis(ToolPolicyDecision.writeConfirm("写命令需要人工确认", command), analysis);
         }
 
         if (shellCommands().getHighRisk().contains(executable)) {
-            return ToolPolicyDecision.highRiskConfirm("高危命令需要高危确认", command);
+            return injectAnalysis(ToolPolicyDecision.highRiskConfirm("高危命令需要高危确认", command), analysis);
         }
 
         String unknownLevel = shellCommands().getUnknownLevel();
         if ("HIGH_RISK_DENY".equalsIgnoreCase(unknownLevel)) {
-            return ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable, command);
+            return injectAnalysis(ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable, command), analysis);
         }
         if ("HIGH_RISK_CONFIRM".equalsIgnoreCase(unknownLevel)) {
-            return ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable, command);
+            return injectAnalysis(ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable, command), analysis);
         }
-        return ToolPolicyDecision.writeConfirm("未分类命令需要人工确认：" + executable, command);
+        return injectAnalysis(ToolPolicyDecision.writeConfirm("未分类命令需要人工确认：" + executable, command), analysis);
     }
 
     @Override
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
+        if (Thread.currentThread().isInterrupted()) {
+            return failure("process_interrupted", "命令执行被中断", startedAt);
+        }
         try {
             ToolPolicyDecision policy = policy(call);
             if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
                 return failure("shell_command_rejected", policy.getRiskReason(), startedAt);
             }
-            List<String> tokens = splitCommand(text(call.getInput(), "command", ""));
+
+            ShellCommandAnalysis analysis = extractAnalysis(policy);
+
             Path cwd = resolvePath(call, "cwd", ".");
             if (!Files.isDirectory(cwd)) {
                 return failure("not_directory", "cwd 不是目录：" + relative(call, cwd), startedAt);
@@ -165,48 +204,83 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                     : call.getInput().path("foregroundYieldMs").asLong(DEFAULT_FOREGROUND_YIELD_MS);
             yieldMs = Math.min(Math.max(0L, yieldMs), MAX_FOREGROUND_YIELD_MS);
 
-            if (isMavenTestCommand(tokens)) {
-                ToolResult result = commandExecutor.run(tokens, cwd, timeoutMs,
-                        ShellOutputLimits.builder()
-                                .maxStdoutChars(properties.getShellMaxOutputChars())
-                                .maxStderrChars(properties.getShellMaxStderrChars())
-                                .build(),
-                        startedAt);
-                return enrichTestResult(result, tokens, cwd, startedAt);
+            // Build execution command list based on mode
+            List<String> execTokens;
+            String executionModeLabel;
+            if (analysis != null && analysis.getExecutionMode() == ShellExecutionMode.SHELL_EXEC) {
+                String shellInterpreter = shellCommands().getShellInterpreter();
+                if (shellInterpreter == null || shellInterpreter.isBlank()) {
+                    shellInterpreter = "/bin/sh";
+                }
+                execTokens = List.of(shellInterpreter, "-c", analysis.getRawCommand());
+                executionModeLabel = "SHELL_EXEC";
+            } else {
+                execTokens = new ArrayList<>(analysis.getTokens());
+                executionModeLabel = "SIMPLE_EXEC";
+            }
+
+            ShellOutputLimits limits = ShellOutputLimits.builder()
+                    .maxStdoutChars(properties.getShellMaxOutputChars())
+                    .maxStderrChars(properties.getShellMaxStderrChars())
+                    .build();
+
+            if (isMavenTestCommand(execTokens)) {
+                ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
+                result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
+                        StringUtils.defaultString(result.getObservation()));
+                return enrichTestResult(result, execTokens, cwd, startedAt);
             }
 
             if (runInBackground && backgroundProcessManager != null) {
-                return startBackgroundTask(tokens, cwd, timeoutMs, call, startedAt);
+                return startBackgroundTask(execTokens, cwd, timeoutMs, call, startedAt);
             }
 
             if (yieldMs <= 0 || backgroundProcessManager == null) {
-                ToolResult result = commandExecutor.run(tokens, cwd, timeoutMs,
-                        ShellOutputLimits.builder()
-                                .maxStdoutChars(properties.getShellMaxOutputChars())
-                                .maxStderrChars(properties.getShellMaxStderrChars())
-                                .build(),
-                        startedAt);
-                return enrichTestResult(result, tokens, cwd, startedAt);
+                ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
+                result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
+                        StringUtils.defaultString(result.getObservation()));
+                return enrichTestResult(result, execTokens, cwd, startedAt);
             }
 
             // Try sync with yield
             if (timeoutMs > yieldMs) {
                 timeoutMs = yieldMs;
             }
-            ToolResult result = commandExecutor.run(tokens, cwd, timeoutMs,
-                    ShellOutputLimits.builder()
-                            .maxStdoutChars(properties.getShellMaxOutputChars())
-                            .maxStderrChars(properties.getShellMaxStderrChars())
-                            .build(),
-                    startedAt);
+            ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
 
             if ("command_timeout".equals(result.getErrorCode())) {
-                return startBackgroundTask(tokens, cwd, requestedTimeoutMs, call, startedAt);
+                return startBackgroundTask(execTokens, cwd, requestedTimeoutMs, call, startedAt);
             }
-            return enrichTestResult(result, tokens, cwd, startedAt);
+            result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
+                    StringUtils.defaultString(result.getObservation()));
+            return enrichTestResult(result, execTokens, cwd, startedAt);
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }
+    }
+
+    private ShellCommandAnalysis extractAnalysis(ToolPolicyDecision policy) {
+        if (policy == null || policy.getMetadata() == null) {
+            return null;
+        }
+        Object obj = policy.getMetadata().get("shellAnalysis");
+        if (obj instanceof ShellCommandAnalysis analysis) {
+            return analysis;
+        }
+        return null;
+    }
+
+    private ToolPolicyDecision injectAnalysis(ToolPolicyDecision decision, ShellCommandAnalysis analysis) {
+        if (analysis == null || decision == null) {
+            return decision;
+        }
+        Map<String, Object> metadata = decision.getMetadata();
+        if (metadata == null) {
+            metadata = new LinkedHashMap<>();
+            decision.setMetadata(metadata);
+        }
+        metadata.put("shellAnalysis", analysis);
+        return decision;
     }
 
     private ToolResult startBackgroundTask(List<String> tokens, Path cwd, long timeoutMs,
@@ -251,6 +325,14 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     }
 
     private boolean isMavenTestCommand(List<String> tokens) {
+        // Check raw command for SHELL_EXEC (tokens = ["/bin/sh", "-c", "mvn -q -o test"])
+        if (tokens.size() >= 3 && ("/bin/sh".equals(tokens.get(0)) || "/bin/bash".equals(tokens.get(0)))
+                && "-c".equals(tokens.get(1))) {
+            String rawCmd = tokens.get(2);
+            return rawCmd != null && rawCmd.startsWith("mvn") &&
+                    (rawCmd.contains("test") || rawCmd.contains("verify") || rawCmd.contains(":test"));
+        }
+        // Standard tokens for SIMPLE_EXEC
         return tokens.stream().skip(1).anyMatch(token ->
                 "test".equals(token)
                         || "verify".equals(token)
@@ -374,71 +456,6 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
     private AgentRuntimeProperties.ShellCommandProperties shellCommands() {
         AgentRuntimeProperties.ShellCommandProperties sc = properties.getShellCommands();
         return sc != null ? sc : new AgentRuntimeProperties.ShellCommandProperties();
-    }
-
-    private List<String> splitCommand(String command) {
-        if (StringUtils.isBlank(command)) {
-            throw new IllegalArgumentException("command 不能为空");
-        }
-        List<String> tokens = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean singleQuoted = false;
-        boolean doubleQuoted = false;
-        for (int i = 0; i < command.length(); i++) {
-            char ch = command.charAt(i);
-            if (ch == '\n' || ch == '\r') {
-                throw new IllegalArgumentException("禁止换行");
-            }
-            if (!singleQuoted && ch == '"') {
-                doubleQuoted = !doubleQuoted;
-                continue;
-            }
-            if (!doubleQuoted && ch == '\'') {
-                singleQuoted = !singleQuoted;
-                continue;
-            }
-            if (!singleQuoted && !doubleQuoted) {
-                if (Character.isWhitespace(ch)) {
-                    addToken(tokens, current);
-                    continue;
-                }
-                if (isShellMeta(ch)) {
-                    throw new IllegalArgumentException("禁止 shell 元字符：" + ch);
-                }
-            }
-            current.append(ch);
-        }
-        if (singleQuoted || doubleQuoted) {
-            throw new IllegalArgumentException("引号未闭合");
-        }
-        addToken(tokens, current);
-        return tokens;
-    }
-
-    private void addToken(List<String> tokens, StringBuilder current) {
-        if (!current.isEmpty()) {
-            tokens.add(current.toString());
-            current.setLength(0);
-        }
-    }
-
-    private boolean isShellMeta(char ch) {
-        return "|&;<>`$(){}[]*?~\\".indexOf(ch) >= 0;
-    }
-
-    private void validatePathLikeArguments(List<String> tokens) {
-        for (int i = 1; i < tokens.size(); i++) {
-            String token = tokens.get(i);
-            String lower = token.toLowerCase(Locale.ROOT);
-            if (token.startsWith("/") || token.contains("..")) {
-                throw new IllegalArgumentException("禁止绝对路径或上级目录：" + token);
-            }
-            if (lower.contains(".git") || lower.contains(".idea") || lower.contains("node_modules")
-                    || lower.contains("docs/env/.env") || lower.endsWith(".key")
-                    || lower.endsWith(".pem") || lower.endsWith(".p12")) {
-                throw new IllegalArgumentException("路径被安全策略拦截：" + token);
-            }
-        }
     }
 
 }

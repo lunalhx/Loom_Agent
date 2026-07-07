@@ -322,6 +322,18 @@ public class AgentLoopAutoConfig {
                         && !"HIGH_RISK_DENY".equals(unknownLevel)) {
                     throw new IllegalStateException("AGENT_SHELL_COMMANDS_UNKNOWN_LEVEL 仅支持 WRITE_CONFIRM/HIGH_RISK_CONFIRM/HIGH_RISK_DENY，禁止 READ_ONLY");
                 }
+                // Validate new shell config fields
+                if (sc.getShellSyntaxLevel() != null) {
+                    String shellSyntaxLevel = sc.getShellSyntaxLevel().toUpperCase();
+                    if (!"HIGH_RISK_CONFIRM".equals(shellSyntaxLevel)
+                            && !"HIGH_RISK_DENY".equals(shellSyntaxLevel)) {
+                        throw new IllegalStateException(
+                                "AGENT_SHELL_SYNTAX_LEVEL 仅支持 HIGH_RISK_CONFIRM 或 HIGH_RISK_DENY，当前值：" + sc.getShellSyntaxLevel());
+                    }
+                }
+                if (sc.getShellInterpreter() != null && sc.getShellInterpreter().isBlank()) {
+                    throw new IllegalStateException("AGENT_SHELL_INTERPRETER 不能为空");
+                }
             }
             List<String> allowedShellCommands = agentRuntimeProperties.getAllowedShellCommands();
             boolean hasOldConfig = allowedShellCommands != null && !allowedShellCommands.isEmpty();

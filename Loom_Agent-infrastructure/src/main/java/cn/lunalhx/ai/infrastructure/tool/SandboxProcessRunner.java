@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
 
 final class SandboxProcessRunner {
 
-    private static final Set<String> ENV_ALLOW_LIST = Set.of("PATH", "JAVA_HOME", "M2_HOME", "MAVEN_OPTS", "HOME");
+    private static final Set<String> ENV_ALLOW_LIST = Set.of("PATH", "JAVA_HOME", "M2_HOME", "MAVEN_OPTS", "HOME", "LANG", "LC_ALL", "USER", "TERM");
 
     private SandboxProcessRunner() {
     }

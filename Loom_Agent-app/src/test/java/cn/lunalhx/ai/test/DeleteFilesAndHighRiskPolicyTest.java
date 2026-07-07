@@ -276,8 +276,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "find . -name '*.java'");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("find_files"));
+        assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
     }
 
     @Test
@@ -286,8 +285,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "python3 script.py");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
-        assertTrue(policy.getRiskReason().contains("find_files"));
+        assertEquals(ToolPermissionLevel.WRITE_CONFIRM, policy.getPermissionLevel());
     }
 
     @Test
@@ -342,7 +340,7 @@ public class DeleteFilesAndHighRiskPolicyTest {
         ObjectNode input = objectMapper.createObjectNode();
         input.put("command", "sh -c echo x");
         ToolPolicyDecision policy = tool.policy(call("run_shell", input));
-        assertEquals(ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
+        assertEquals(ToolPermissionLevel.HIGH_RISK_CONFIRM, policy.getPermissionLevel());
     }
 
     @Test

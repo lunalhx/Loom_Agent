@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
@@ -166,6 +167,8 @@ public class AgentContext {
     public void setSameFailureRepeats(int v) { runtime.setSameFailureRepeats(v); }
     public boolean isRepeatedFailureReplanAttempted() { return runtime.repeatedFailureReplanAttempted(); }
     public void setRepeatedFailureReplanAttempted(boolean v) { runtime.setRepeatedFailureReplanAttempted(v); }
+    public int getReplanAttemptsForFailure() { return runtime.replanAttemptsForFailure(); }
+    public void setReplanAttemptsForFailure(int v) { runtime.setReplanAttemptsForFailure(v); }
     public int getNoProgressRounds() { return runtime.noProgressRounds(); }
     public void setNoProgressRounds(int v) { runtime.setNoProgressRounds(v); }
     public boolean isCodeReadObserved() { return runtime.codeReadObserved(); }
@@ -243,6 +246,11 @@ public class AgentContext {
     public void setApprovalExpired(boolean v) { approval.setApprovalExpired(v); }
     public String getExpiredApprovalId() { return approval.expiredApprovalId(); }
     public void setExpiredApprovalId(String v) { approval.setExpiredApprovalId(v); }
+    public List<ApprovalGrant> getApprovalGrants() { return approval.approvalGrants(); }
+    public void setApprovalGrants(List<ApprovalGrant> v) { approval.setApprovalGrants(v); }
+    public void addApprovalGrant(ApprovalGrant v) { approval.addGrant(v); }
+    public ApprovalGrant findMatchingGrant(String command) { return approval.findMatchingGrant(command); }
+    public void clearApprovalGrants() { approval.clearGrants(); }
 
     // ==================== budget delegates ====================
 

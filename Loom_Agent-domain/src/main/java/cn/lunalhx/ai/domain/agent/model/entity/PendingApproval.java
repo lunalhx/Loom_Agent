@@ -41,6 +41,8 @@ public class PendingApproval {
     @Builder.Default
     private ApprovalRecordState state = ApprovalRecordState.PENDING;
     private ApprovalDecision decision;
+    private String approvalScope;
+    private String approvedPattern;
     private String decisionReason;
 
     public boolean expired(Instant now) {
