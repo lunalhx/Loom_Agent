@@ -2,23 +2,11 @@ package cn.lunalhx.ai.infrastructure.adapter.deletion;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceSnapshotPort;
-import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationDeletion;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
-import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentTraceEventDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentUndoSnapshotDao;
-import cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO;
-import cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO;
 import lombok.extern.slf4j.Slf4j;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -32,44 +20,20 @@ public class ConversationDeletionWorker implements Runnable {
 
     private final ConversationDeletionRepository deletionRepository;
     private final AgentRunRepository runRepository;
-    private final AgentRunDao runDao;
-    private final AgentTraceEventDao traceEventDao;
-    private final AgentRunCheckpointDao checkpointDao;
-    private final AgentContextArtifactDao artifactDao;
-    private final AgentPendingApprovalDao approvalDao;
-    private final AgentUndoSnapshotDao undoSnapshotDao;
-    private final AgentMemoryGenerationJobDao memoryJobDao;
     private final AgentLoopService agentLoopService;
-    private final ContextBlobStore contextBlobStore;
-    private final WorkspaceSnapshotPort workspaceSnapshotPort;
+    private final ConversationPurgeHandler purgeHandler;
 
     private final String workerId = UUID.randomUUID().toString();
 
     public ConversationDeletionWorker(
             ConversationDeletionRepository deletionRepository,
             AgentRunRepository runRepository,
-            AgentRunDao runDao,
-            AgentTraceEventDao traceEventDao,
-            AgentRunCheckpointDao checkpointDao,
-            AgentContextArtifactDao artifactDao,
-            AgentPendingApprovalDao approvalDao,
-            AgentUndoSnapshotDao undoSnapshotDao,
-            AgentMemoryGenerationJobDao memoryJobDao,
             AgentLoopService agentLoopService,
-            ContextBlobStore contextBlobStore,
-            WorkspaceSnapshotPort workspaceSnapshotPort) {
+            ConversationPurgeHandler purgeHandler) {
         this.deletionRepository = deletionRepository;
         this.runRepository = runRepository;
-        this.runDao = runDao;
-        this.traceEventDao = traceEventDao;
-        this.checkpointDao = checkpointDao;
-        this.artifactDao = artifactDao;
-        this.approvalDao = approvalDao;
-        this.undoSnapshotDao = undoSnapshotDao;
-        this.memoryJobDao = memoryJobDao;
         this.agentLoopService = agentLoopService;
-        this.contextBlobStore = contextBlobStore;
-        this.workspaceSnapshotPort = workspaceSnapshotPort;
+        this.purgeHandler = purgeHandler;
     }
 
     @Override
@@ -106,7 +70,7 @@ public class ConversationDeletionWorker implements Runnable {
         return deletionRepository.claimTask(conversationId, workerId, lockExpiresAt);
     }
 
-    private void processTask(ConversationDeletion task) {
+    private void processTask(ConversationDeletion task) throws Exception {
         String conversationId = task.getConversationId();
         String status = task.getStatus();
 
@@ -119,19 +83,16 @@ public class ConversationDeletionWorker implements Runnable {
     }
 
     private void processRequested(String conversationId) {
-        List<AgentRun> runs = runRepository.findByConversationId(conversationId);
         agentLoopService.cancelConversation(conversationId);
-        // Preserve current retryCount instead of resetting to 0, and release lock
         ConversationDeletion current = deletionRepository.find(conversationId).orElse(null);
         int retryCount = current != null ? current.getRetryCount() : 0;
         deletionRepository.updateStatusAndReleaseLock(conversationId, "WAITING_FOR_RUNS", retryCount, null);
         log.info("Deletion REQUESTED -> WAITING_FOR_RUNS for conversation {} (retryCount={})", conversationId, retryCount);
     }
 
-    private void processWaitingForRuns(String conversationId) {
+    private void processWaitingForRuns(String conversationId) throws Exception {
         if (agentLoopService.hasActiveRuns(conversationId)) {
             agentLoopService.cancelConversation(conversationId);
-            // Release lock so next iteration can re-claim without 60s wait
             deletionRepository.releaseLock(conversationId);
             return;
         }
@@ -142,54 +103,8 @@ public class ConversationDeletionWorker implements Runnable {
         processPurging(conversationId);
     }
 
-    private void processPurging(String conversationId) {
-        List<AgentRun> runs = runRepository.findByConversationId(conversationId);
-        List<String> runIds = runs.stream().map(AgentRun::getRunId).toList();
-        List<String> rootRunIds = runs.stream().map(AgentRun::getRootRunId).filter(id -> id != null).distinct().toList();
-
-        // 1. Cancel memory generation jobs
-        if (!runIds.isEmpty()) {
-            memoryJobDao.cancelBySourceRunIds(runIds);
-        }
-
-        // 2. Delete context artifact files
-        List<AgentContextArtifactPO> artifacts = artifactDao.selectByConversationId(conversationId);
-        for (AgentContextArtifactPO artifact : artifacts) {
-            contextBlobStore.delete(artifact.getStorageUri());
-        }
-
-        // 3. Delete undo snapshot Git refs
-        List<AgentUndoSnapshotPO> snapshots = undoSnapshotDao.selectByConversationId(conversationId);
-        for (AgentUndoSnapshotPO snapshot : snapshots) {
-            if (snapshot.getWorkspace() != null) {
-                try {
-                    workspaceSnapshotPort.deleteSnapshotRefs(Path.of(snapshot.getWorkspace()), snapshot.getRunId());
-                } catch (Exception e) {
-                    log.warn("Failed to delete snapshot refs for {}: {}", snapshot.getRunId(), e.getMessage());
-                }
-            }
-        }
-
-        // 4. Delete database records in order
-        approvalDao.deleteByConversationId(conversationId);
-        artifactDao.deleteByConversationId(conversationId);
-
-        if (!runIds.isEmpty()) {
-            checkpointDao.deleteByRunIds(runIds);
-        }
-        if (!runIds.isEmpty()) {
-            traceEventDao.deleteByRunIds(runIds);
-        }
-        if (!rootRunIds.isEmpty()) {
-            traceEventDao.deleteByRootRunIds(rootRunIds);
-        }
-        if (!runIds.isEmpty()) {
-            memoryJobDao.deleteBySourceRunIds(runIds);
-        }
-        undoSnapshotDao.deleteByConversationId(conversationId);
-        runDao.deleteByConversationId(conversationId);
-
-        // 5. Mark completed
+    private void processPurging(String conversationId) throws Exception {
+        purgeHandler.purge(conversationId);
         deletionRepository.markCompleted(conversationId);
         log.info("Deletion COMPLETED for conversation {}", conversationId);
     }

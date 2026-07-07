@@ -57,11 +57,11 @@ public class LocalFileContextBlobStore implements ContextBlobStore {
         try {
             Path file = resolveFile(storageUri);
             if (!file.startsWith(storageRoot)) {
-                return;
+                throw new IllegalArgumentException("storageUri out of context storage root");
             }
-            Files.deleteIfExists(file);
+            boolean existed = Files.deleteIfExists(file);
         } catch (Exception e) {
-            // deletion is best-effort
+            throw new IllegalStateException("delete context artifact failed: " + storageUri, e);
         }
     }
 

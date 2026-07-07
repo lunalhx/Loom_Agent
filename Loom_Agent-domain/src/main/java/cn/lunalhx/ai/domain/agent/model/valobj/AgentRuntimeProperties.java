@@ -91,6 +91,10 @@ public class AgentRuntimeProperties {
         private Integer deepSummaryChunkTokenLimit = 12000;
         private Integer deepSummaryMaxCalls = 8;
         private Integer deepSummaryMaxOutputTokens = 2048;
+        private Integer transcriptRetentionHours = 168;
+        private Integer transcriptCleanupIntervalMs = 3600000;
+        private Integer transcriptCleanupBatchSize = 500;
+        private Boolean transcriptCleanupEnabled = true;
 
     }
 

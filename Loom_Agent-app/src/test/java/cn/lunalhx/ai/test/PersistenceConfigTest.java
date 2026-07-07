@@ -360,6 +360,9 @@ public class PersistenceConfigTest {
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> searchByRootRunId(String rootRunId, String query, int limit) { return java.util.List.of(); }
         @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> selectByConversationId(String conversationId) { return java.util.List.of(); }
         @Override public int deleteByConversationId(String conversationId) { return 0; }
+        @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> selectByConversationIdAndKind(String conversationId, String kind) { return java.util.List.of(); }
+        @Override public java.util.List<cn.lunalhx.ai.infrastructure.dao.po.AgentContextArtifactPO> selectExpiredByKind(String kind, String cutoff, int limit) { return java.util.List.of(); }
+        @Override public int deleteByArtifactIdAndRootRunId(String artifactId, String rootRunId) { return 0; }
     }
     private static class MockAgentUndoSnapshotDao implements AgentUndoSnapshotDao {
         @Override public int insert(cn.lunalhx.ai.infrastructure.dao.po.AgentUndoSnapshotPO po) { return 1; }

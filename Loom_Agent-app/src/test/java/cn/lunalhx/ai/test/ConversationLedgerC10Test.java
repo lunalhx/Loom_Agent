@@ -9,12 +9,15 @@ import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
 import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.*;
+import cn.lunalhx.ai.domain.agent.service.context.ContextArtifactPurgeService;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryContextArtifactRepository;
 import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
@@ -130,6 +133,11 @@ public class ConversationLedgerC10Test {
     private LedgerCompactionService compactionService(LedgerWatermark watermark,
                                                       DeepContextSummaryService deepService) {
         return new LedgerCompactionService(watermark, artifactRepository, blobStore, deepService);
+    }
+
+    private LedgerCompactionService compactionServiceWithPurge(LedgerWatermark watermark) {
+        ContextArtifactPurgeService purgeService = new ContextArtifactPurgeService(artifactRepository, blobStore);
+        return new LedgerCompactionService(watermark, artifactRepository, blobStore, null, purgeService);
     }
 
     /** Append N dummy assistant/tool_result pairs to fill the ledger. */
@@ -645,5 +653,108 @@ public class ConversationLedgerC10Test {
         ConversationLedgerEntry se = summaryEntry(ctx1);
         assertNotNull("event key set", se.eventKey());
         assertThat(se.eventKey()).startsWith("compaction:");
+    }
+
+    // ================================================================
+    // 16. Multiple compactions clean up old TRANSCRIPT artifacts
+    // ================================================================
+
+    @Test
+    public void multipleCompactionsCleanUpOldTranscripts() {
+        AgentContext ctx = createBootstrappedRun("c10-purge", "purge test");
+        LedgerWatermark watermark = new LedgerWatermark(5, 3);
+        LedgerCompactionService svc = compactionServiceWithPurge(watermark);
+
+        // Round 1
+        fillEntries(ctx, 5);
+        LedgerCompactionResult r1 = svc.compact(ctx);
+        String artifactId1 = r1.transcriptArtifactId();
+        assertEquals(1, ctx.getGeneration());
+
+        // Round 2
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r2 = svc.compact(ctx);
+        String artifactId2 = r2.transcriptArtifactId();
+        assertEquals(2, ctx.getGeneration());
+
+        // Round 3
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r3 = svc.compact(ctx);
+        String artifactId3 = r3.transcriptArtifactId();
+        assertEquals(3, ctx.getGeneration());
+
+        // Only latest TRANSCRIPT should remain
+        List<ContextArtifact> transcripts = artifactRepository.listByConversationIdAndKind(
+                ctx.getConversationId(), ContextArtifactKind.TRANSCRIPT);
+        assertEquals("only latest transcript remains", 1, transcripts.size());
+        assertEquals("latest transcript is the current one", artifactId3, transcripts.get(0).getArtifactId());
+
+        // Old blobs should be deleted
+        assertEquals("old blob 1 deleted", "", blobStore.read(artifactRepository
+                .findByArtifactIdAndRootRunId(artifactId1, ctx.getRootRunId()).map(ContextArtifact::getStorageUri)
+                .orElse("not-found-check")));
+        assertEquals("old blob 2 deleted", "", blobStore.read(artifactRepository
+                .findByArtifactIdAndRootRunId(artifactId2, ctx.getRootRunId()).map(ContextArtifact::getStorageUri)
+                .orElse("not-found-check")));
+
+        // Current blob still exists
+        assertTrue("current blob exists",
+                blobStore.read(artifactRepository
+                        .findByArtifactIdAndRootRunId(artifactId3, ctx.getRootRunId())
+                        .get().getStorageUri()).length() > 0);
+    }
+
+    // ================================================================
+    // 17. Compaction succeeds even when old blob deletion fails
+    // ================================================================
+
+    @Test
+    public void compactionSucceedsWhenOldBlobDeleteFails() {
+        // Use a blob store that throws on delete to simulate failure
+        ContextBlobStore failingBlobStore = new ContextBlobStore() {
+            private final InMemoryContextBlobStore delegate = new InMemoryContextBlobStore();
+            private int deleteCount = 0;
+
+            @Override
+            public String write(String rootRunId, String artifactId, String content) {
+                return delegate.write(rootRunId, artifactId, content);
+            }
+
+            @Override
+            public String read(String storageUri) {
+                return delegate.read(storageUri);
+            }
+
+            @Override
+            public void delete(String storageUri) {
+                deleteCount++;
+                if (deleteCount <= 2) {
+                    throw new IllegalStateException("simulated blob delete failure");
+                }
+                delegate.delete(storageUri);
+            }
+        };
+
+        ContextArtifactPurgeService purgeService = new ContextArtifactPurgeService(artifactRepository, failingBlobStore);
+        LedgerCompactionService svc = new LedgerCompactionService(
+                new LedgerWatermark(5, 3), artifactRepository, failingBlobStore, null, purgeService);
+
+        AgentContext ctx = createBootstrappedRun("c10-blob-fail", "blob fail test");
+
+        // Round 1: create first transcript
+        fillEntries(ctx, 5);
+        LedgerCompactionResult r1 = svc.compact(ctx);
+        assertEquals(1, ctx.getGeneration());
+
+        // Round 2: first delete fails, but compaction still succeeds
+        fillEntries(ctx, 4);
+        LedgerCompactionResult r2 = svc.compact(ctx);
+        assertEquals(2, ctx.getGeneration());
+
+        // Old metadata should still exist (blob delete failed, so metadata kept for retry)
+        ContextArtifact oldArtifact = artifactRepository
+                .findByArtifactIdAndRootRunId(r1.transcriptArtifactId(), ctx.getRootRunId())
+                .orElse(null);
+        assertNotNull("old metadata preserved for retry", oldArtifact);
     }
 }

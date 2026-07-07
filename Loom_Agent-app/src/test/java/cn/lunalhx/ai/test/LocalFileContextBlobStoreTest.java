@@ -128,6 +128,36 @@ public class LocalFileContextBlobStoreTest {
         assertEquals("default", content);
     }
 
+    // ---- delete existing file succeeds ----
+
+    @Test
+    public void deleteExistingFileSucceeds() {
+        String uri = store.write("root-del", "artifact-del", "to be deleted");
+        assertNotNull(store.read(uri));
+
+        store.delete(uri);
+        assertEquals("", store.read(uri));
+    }
+
+    // ---- delete non-existing file is idempotent ----
+
+    @Test
+    public void deleteNonExistingFileSucceeds() {
+        store.delete("loom-agent:context-artifact:no-root/no-artifact");
+    }
+
+    // ---- delete invalid URI throws ----
+
+    @Test
+    public void deleteInvalidUriThrows() {
+        try {
+            store.delete("/etc/passwd");
+            fail("Should have thrown");
+        } catch (IllegalStateException e) {
+            // expected
+        }
+    }
+
     // ---- special characters in segments are sanitized ----
 
     @Test

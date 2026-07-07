@@ -26,6 +26,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerWatermark;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
+import cn.lunalhx.ai.domain.agent.service.context.ContextArtifactPurgeService;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
 import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.replay.DefaultReplayService;
@@ -190,7 +191,8 @@ public class AgentLoopAutoConfig {
             AgentRuntimeProperties agentRuntimeProperties,
             ContextArtifactRepository contextArtifactRepository,
             ContextBlobStore contextBlobStore,
-            DeepContextSummaryService deepContextSummaryService) {
+            DeepContextSummaryService deepContextSummaryService,
+            ContextArtifactPurgeService contextArtifactPurgeService) {
         AgentRuntimeProperties.ConversationLedgerProperties config =
                 agentRuntimeProperties.getConversationLedger();
         LedgerWatermark watermark = LedgerWatermark.fromConfig(
@@ -198,7 +200,7 @@ public class AgentLoopAutoConfig {
                 config.getCompactionLowWatermark());
         return new LedgerCompactionService(watermark,
                 contextArtifactRepository, contextBlobStore,
-                deepContextSummaryService);
+                deepContextSummaryService, contextArtifactPurgeService);
     }
 
     @Bean

@@ -8,9 +8,12 @@ import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedgerEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
 import cn.lunalhx.ai.domain.agent.model.valobj.context.ContextArtifactKind;
+import cn.lunalhx.ai.domain.agent.service.context.ContextArtifactPurgeService;
 import cn.lunalhx.ai.domain.agent.service.context.DeepContextSummaryService;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -48,36 +51,39 @@ import java.util.UUID;
  */
 public final class LedgerCompactionService {
 
+    private static final Logger log = LoggerFactory.getLogger(LedgerCompactionService.class);
+
     private final LedgerWatermark watermark;
     private final ContextArtifactRepository artifactRepository;
     private final ContextBlobStore blobStore;
     private final DeepContextSummaryService deepSummaryService;
+    private final ContextArtifactPurgeService purgeService;
     private final LedgerTranscriptRenderer renderer;
 
-    /**
-     * Full constructor with optional deep-summary support.
-     *
-     * @param watermark           the high/low entry count thresholds
-     * @param artifactRepository  artifact storage
-     * @param blobStore           blob storage for transcript content
-     * @param deepSummaryService  optional; if null, only deterministic summaries are used
-     */
     public LedgerCompactionService(LedgerWatermark watermark,
-                                   ContextArtifactRepository artifactRepository,
-                                   ContextBlobStore blobStore,
-                                   DeepContextSummaryService deepSummaryService) {
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore,
+                                    DeepContextSummaryService deepSummaryService,
+                                    ContextArtifactPurgeService purgeService) {
         this.watermark = Objects.requireNonNull(watermark, "watermark must not be null");
         this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository must not be null");
         this.blobStore = Objects.requireNonNull(blobStore, "blobStore must not be null");
         this.deepSummaryService = deepSummaryService;
+        this.purgeService = purgeService;
         this.renderer = new LedgerTranscriptRenderer();
     }
 
-    /** Convenience constructor without deep-summary support. */
     public LedgerCompactionService(LedgerWatermark watermark,
-                                   ContextArtifactRepository artifactRepository,
-                                   ContextBlobStore blobStore) {
-        this(watermark, artifactRepository, blobStore, null);
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore,
+                                    DeepContextSummaryService deepSummaryService) {
+        this(watermark, artifactRepository, blobStore, deepSummaryService, null);
+    }
+
+    public LedgerCompactionService(LedgerWatermark watermark,
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore) {
+        this(watermark, artifactRepository, blobStore, null, null);
     }
 
     // ================================================================
@@ -230,9 +236,10 @@ public final class LedgerCompactionService {
         int newGen = context.incrementGeneration();
         context.setLastCompactionGeneration(newGen);
         context.setLedgerBaselineArtifactId(artifact.getArtifactId());
-        // Mirror to the recovery transcript field so resetContextRecovery can
-        // distinguish a ledger-compaction artifact from a recovery artifact.
         context.setContextTranscriptArtifactId(artifact.getArtifactId());
+
+        // ---- 6. Purge obsolete TRANSCRIPT artifacts ----
+        purgeObsoleteTranscripts(context, artifact.getArtifactId());
 
         return LedgerCompactionResult.compacted(newGen, beforeCount, newEntries.size(),
                 strategy, artifact.getArtifactId());
@@ -360,5 +367,33 @@ public final class LedgerCompactionService {
                 .stableType(LedgerStableType.SYSTEM_NOTE)
                 .eventKey("compaction:" + artifactId)
                 .build();
+    }
+
+    private void purgeObsoleteTranscripts(AgentContext context, String currentArtifactId) {
+        if (purgeService == null) {
+            return;
+        }
+        try {
+            List<ContextArtifact> candidates;
+            String conversationId = context.getConversationId();
+            if (conversationId != null && !conversationId.isEmpty()) {
+                candidates = artifactRepository.listByConversationIdAndKind(conversationId, ContextArtifactKind.TRANSCRIPT);
+            } else {
+                candidates = artifactRepository.listByRootRunId(context.getRootRunId()).stream()
+                        .filter(a -> a.getKind() == ContextArtifactKind.TRANSCRIPT)
+                        .toList();
+            }
+            List<ContextArtifact> obsolete = candidates.stream()
+                    .filter(a -> !a.getArtifactId().equals(currentArtifactId))
+                    .toList();
+            if (!obsolete.isEmpty()) {
+                int purged = purgeService.purgeArtifactsNonFatal(obsolete);
+                if (purged > 0) {
+                    log.info("Compaction purged {} obsolete TRANSCRIPT artifacts", purged);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to purge obsolete transcripts after compaction: {}", e.getMessage());
+        }
     }
 }

@@ -17,10 +17,20 @@ public interface AgentContextArtifactDao {
     List<AgentContextArtifactPO> selectByRootRunId(String rootRunId);
 
     List<AgentContextArtifactPO> searchByRootRunId(@Param("rootRunId") String rootRunId,
-                                                   @Param("query") String query,
-                                                   @Param("limit") int limit);
+                                                    @Param("query") String query,
+                                                    @Param("limit") int limit);
 
     List<AgentContextArtifactPO> selectByConversationId(String conversationId);
 
     int deleteByConversationId(String conversationId);
+
+    List<AgentContextArtifactPO> selectByConversationIdAndKind(@Param("conversationId") String conversationId,
+                                                                @Param("kind") String kind);
+
+    List<AgentContextArtifactPO> selectExpiredByKind(@Param("kind") String kind,
+                                                      @Param("cutoff") String cutoff,
+                                                      @Param("limit") int limit);
+
+    int deleteByArtifactIdAndRootRunId(@Param("artifactId") String artifactId,
+                                        @Param("rootRunId") String rootRunId);
 }

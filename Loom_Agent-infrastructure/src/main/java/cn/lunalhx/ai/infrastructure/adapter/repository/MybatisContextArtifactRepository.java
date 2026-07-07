@@ -40,6 +40,33 @@ public class MybatisContextArtifactRepository implements ContextArtifactReposito
         return artifactDao.searchByRootRunId(rootRunId, query, limit).stream().map(this::toEntity).toList();
     }
 
+    @Override
+    public List<ContextArtifact> listByConversationId(String conversationId) {
+        return artifactDao.selectByConversationId(conversationId).stream().map(this::toEntity).toList();
+    }
+
+    @Override
+    public List<ContextArtifact> listByConversationIdAndKind(String conversationId, ContextArtifactKind kind) {
+        return artifactDao.selectByConversationIdAndKind(conversationId, kind.name())
+                .stream().map(this::toEntity).toList();
+    }
+
+    @Override
+    public List<ContextArtifact> listExpiredByKind(ContextArtifactKind kind, Instant cutoff, int limit) {
+        return artifactDao.selectExpiredByKind(kind.name(), cutoff.toString(), limit)
+                .stream().map(this::toEntity).toList();
+    }
+
+    @Override
+    public int deleteByArtifactIdAndRootRunId(String artifactId, String rootRunId) {
+        return artifactDao.deleteByArtifactIdAndRootRunId(artifactId, rootRunId);
+    }
+
+    @Override
+    public int deleteByConversationId(String conversationId) {
+        return artifactDao.deleteByConversationId(conversationId);
+    }
+
     private AgentContextArtifactPO toPo(ContextArtifact artifact) {
         AgentContextArtifactPO po = new AgentContextArtifactPO();
         po.setArtifactId(artifact.getArtifactId());

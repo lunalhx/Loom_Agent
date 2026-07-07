@@ -52,6 +52,24 @@
         ORDER BY create_time ASC
     </select>
 
+    <select id="selectByConversationIdAndKind" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE conversation_id = #{conversationId} AND kind = #{kind}
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="selectExpiredByKind" resultMap="AgentContextArtifactMap">
+        SELECT * FROM agent_context_artifact
+        WHERE kind = #{kind} AND create_time &lt; #{cutoff}
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <delete id="deleteByArtifactIdAndRootRunId">
+        DELETE FROM agent_context_artifact
+        WHERE artifact_id = #{artifactId} AND root_run_id = #{rootRunId}
+    </delete>
+
     <delete id="deleteByConversationId">
         DELETE FROM agent_context_artifact WHERE conversation_id = #{conversationId}
     </delete>

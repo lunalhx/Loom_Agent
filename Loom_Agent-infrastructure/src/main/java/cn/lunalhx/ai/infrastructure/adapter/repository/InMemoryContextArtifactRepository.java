@@ -3,9 +3,11 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.context.ContextArtifactKind;
 import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -13,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class InMemoryContextArtifactRepository implements ContextArtifactRepository {
 
@@ -70,6 +73,51 @@ public class InMemoryContextArtifactRepository implements ContextArtifactReposit
             }
         }
         return matches;
+    }
+
+    @Override
+    public List<ContextArtifact> listByConversationId(String conversationId) {
+        return artifacts.values().stream()
+                .filter(a -> StringUtils.equals(a.getConversationId(), conversationId))
+                .sorted(Comparator.comparing(ContextArtifact::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    @Override
+    public List<ContextArtifact> listByConversationIdAndKind(String conversationId, ContextArtifactKind kind) {
+        return artifacts.values().stream()
+                .filter(a -> StringUtils.equals(a.getConversationId(), conversationId) && a.getKind() == kind)
+                .sorted(Comparator.comparing(ContextArtifact::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    @Override
+    public List<ContextArtifact> listExpiredByKind(ContextArtifactKind kind, Instant cutoff, int limit) {
+        return artifacts.values().stream()
+                .filter(a -> a.getKind() == kind && a.getCreatedAt() != null && a.getCreatedAt().isBefore(cutoff))
+                .sorted(Comparator.comparing(ContextArtifact::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public int deleteByArtifactIdAndRootRunId(String artifactId, String rootRunId) {
+        ContextArtifact artifact = artifacts.get(artifactId);
+        if (artifact != null && StringUtils.equals(artifact.getRootRunId(), rootRunId)) {
+            artifacts.remove(artifactId);
+            return 1;
+        }
+        return 0;
+    }
+
+    @Override
+    public int deleteByConversationId(String conversationId) {
+        List<String> toRemove = artifacts.values().stream()
+                .filter(a -> StringUtils.equals(a.getConversationId(), conversationId))
+                .map(ContextArtifact::getArtifactId)
+                .toList();
+        toRemove.forEach(artifacts::remove);
+        return toRemove.size();
     }
 
 }
