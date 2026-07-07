@@ -265,17 +265,17 @@ public class AgentPlanTest {
     }
 
     @Test
-    public void terminalTaskDuplicateShouldAllowCreationWithLog() throws Exception {
+    public void terminalTaskDuplicateShouldBeRejected() throws Exception {
         AgentPlan plan = new AgentPlan();
         plan.applyTodoWrite(objectMapper.readTree("""
                 {"todos":[{"content":"initial task","status":"completed","kind":"edit","targets":["index.html"]}]}
                 """));
-        // Different content, same targets — original is terminal (completed), so creation is allowed
-        plan.applyTodoWrite(objectMapper.readTree("""
-                {"todos":[{"content":"updated task","status":"pending","kind":"edit","targets":["index.html"]}]}
-                """));
-        assertEquals(2, plan.getItems().size());
-        assertTrue(plan.getEvents().stream().anyMatch(e -> "CREATE_AFTER_TERMINAL_DUPLICATE".equals(e.getType())));
+        assertThrows(IllegalArgumentException.class, () -> plan.applyTodoWrite(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"updated task","status":"pending","kind":"edit","targets":["index.html"]}]}
+                        """)));
+        assertEquals(1, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_REJECTED".equals(e.getType())));
     }
 
     @Test
@@ -345,7 +345,7 @@ public class AgentPlanTest {
     }
 
     @Test
-    public void replanDuplicateWithTerminalOriginalShouldAllowCreate() throws Exception {
+    public void replanDuplicateWithTerminalOriginalShouldBeIgnored() throws Exception {
         AgentPlan plan = new AgentPlan();
         plan.applyTodoWrite(objectMapper.readTree("""
                 {"todos":[{"content":"done task","status":"completed","kind":"edit","targets":["index.html"]}]}
@@ -357,8 +357,10 @@ public class AgentPlanTest {
                         """));
 
         assertEquals(1, results.size());
-        assertTrue(results.get(0).isApplied());
-        assertEquals(2, plan.getItems().size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals("duplicate", results.get(0).reason());
+        assertEquals(1, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_IGNORED".equals(e.getType())));
     }
 
     @Test
@@ -542,6 +544,27 @@ public class AgentPlanTest {
         // (The dedup check will catch it first since targets match existing item)
         assertEquals(1, results.size());
         assertFalse(results.get(0).isApplied());
+    }
+
+    @Test
+    public void replanShouldIgnoreTerminalDuplicateTask() throws Exception {
+        AgentPlan plan = new AgentPlan();
+        plan.applyTodoWrite(objectMapper.readTree("""
+                {"todos":[{"content":"inspect project","status":"skipped","kind":"inspect","targets":["src"]}]}
+                """));
+
+        List<TodoApplyResult> results = plan.applyTodoWriteForReplan(
+                objectMapper.readTree("""
+                        {"todos":[{"content":"inspect project again","status":"pending","kind":"inspect","targets":["src"]}]}
+                        """),
+                ReplanReason.TOOL_FAILURE,
+                Set.of("src"));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isApplied());
+        assertEquals("duplicate", results.get(0).reason());
+        assertEquals(1, plan.getItems().size());
+        assertTrue(plan.getEvents().stream().anyMatch(e -> "DUPLICATE_CREATE_IGNORED".equals(e.getType())));
     }
 
     @Test

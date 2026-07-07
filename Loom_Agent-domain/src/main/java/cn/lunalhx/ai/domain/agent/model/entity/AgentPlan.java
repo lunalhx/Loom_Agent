@@ -143,23 +143,7 @@ public class AgentPlan {
                                         ? item.getDedupeKey() : dedupeKeyFor(item);
                                 return StringUtils.equals(existingKey, newDedupeKey);
                             })
-                            .filter(item -> item.getStatus() == null || !item.getStatus().terminal())
                             .findFirst();
-                    if (dup.isEmpty()) {
-                        Optional<AgentPlanItem> terminalDup = items.stream()
-                                .filter(item -> item.getStatus() != null && item.getStatus().terminal())
-                                .filter(item -> {
-                                    String existingKey = item.getDedupeKey() != null
-                                            ? item.getDedupeKey() : dedupeKeyFor(item);
-                                    return StringUtils.equals(existingKey, newDedupeKey);
-                                })
-                                .findFirst();
-                        if (terminalDup.isPresent()) {
-                            appendEvent("CREATE_AFTER_TERMINAL_DUPLICATE", null,
-                                    "terminal_item_id=" + terminalDup.get().getId()
-                                            + " dedupeKey=" + newDedupeKey, null, null, null);
-                        }
-                    }
                 } else {
                     dup = items.stream()
                             .filter(item -> StringUtils.equals(item.getContent(), content))
@@ -330,23 +314,7 @@ public class AgentPlan {
                                             ? item.getDedupeKey() : dedupeKeyFor(item);
                                     return StringUtils.equals(existingKey, newDedupeKey);
                                 })
-                                .filter(item -> item.getStatus() == null || !item.getStatus().terminal())
                                 .findFirst();
-                        if (dup.isEmpty()) {
-                            Optional<AgentPlanItem> terminalDup = items.stream()
-                                    .filter(item -> item.getStatus() != null && item.getStatus().terminal())
-                                    .filter(item -> {
-                                        String existingKey = item.getDedupeKey() != null
-                                                ? item.getDedupeKey() : dedupeKeyFor(item);
-                                        return StringUtils.equals(existingKey, newDedupeKey);
-                                    })
-                                    .findFirst();
-                            if (terminalDup.isPresent()) {
-                                appendEvent("CREATE_AFTER_TERMINAL_DUPLICATE", null,
-                                        "terminal_item_id=" + terminalDup.get().getId()
-                                                + " dedupeKey=" + newDedupeKey, null, null, null);
-                            }
-                        }
                     } else {
                         dup = items.stream()
                                 .filter(item -> StringUtils.equals(item.getContent(), content))

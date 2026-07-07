@@ -55,11 +55,7 @@ public class AgentUsageSummaryService {
                     .build();
         }
 
-        List<AgentTraceEvent> traceEvents = traceRecorder.timelineByTraceId(traceId);
-        if (traceEvents.isEmpty()) {
-            traceEvents = runEvents;
-        }
-        return aggregate(runId, traceId, traceEvents, status);
+        return aggregate(runId, traceId, runEvents, status);
     }
 
     AgentUsageSummaryDTO aggregate(String runId, String traceId, List<AgentTraceEvent> events) {

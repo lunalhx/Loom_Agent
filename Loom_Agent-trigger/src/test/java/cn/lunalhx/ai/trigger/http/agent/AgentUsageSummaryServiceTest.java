@@ -71,24 +71,28 @@ public class AgentUsageSummaryServiceTest {
     }
 
     @Test
-    public void summarizeShouldResolveWholeTraceFromRunId() {
+    public void summarizeShouldAggregateOnlyRequestedRunWhenTraceHasMultipleRuns() {
         AgentRunRepository runRepository = mock(AgentRunRepository.class);
         TraceRecorder traceRecorder = mock(TraceRecorder.class);
-        when(runRepository.find("child")).thenReturn(Optional.of(AgentRun.builder().runId("child").build()));
-        AgentTraceEvent seed = AgentTraceEvent.builder()
-                .traceId("trace-root").runId("child").eventType("node_start").build();
-        when(traceRecorder.timeline("child")).thenReturn(List.of(seed));
-        when(traceRecorder.timelineByTraceId("trace-root")).thenReturn(List.of(
-                usage("root", "model_call", 100, 10, 80, 20),
-                usage("child", "model_call", 50, 5, 40, 10)));
+        when(runRepository.find("run-1")).thenReturn(Optional.of(AgentRun.builder().runId("run-1").build()));
+        when(runRepository.find("run-2")).thenReturn(Optional.of(AgentRun.builder().runId("run-2").build()));
+        when(traceRecorder.timeline("run-1")).thenReturn(List.of(
+                usage("run-1", "model_call", 80, 20, 70, 10)));
+        when(traceRecorder.timeline("run-2")).thenReturn(List.of(
+                AgentTraceEvent.builder().traceId("trace-shared").runId("run-2").eventType("node_start").build(),
+                usage("run-2", "model_call", 150, 50, 120, 30)));
+        when(traceRecorder.timelineByTraceId("trace-shared")).thenReturn(List.of(
+                usage("run-1", "model_call", 80, 20, 70, 10),
+                usage("run-2", "model_call", 150, 50, 120, 30)));
 
-        AgentUsageSummaryDTO summary =
-                new AgentUsageSummaryService(runRepository, traceRecorder).summarize("child");
+        AgentUsageSummaryService service = new AgentUsageSummaryService(runRepository, traceRecorder);
+        AgentUsageSummaryDTO run1 = service.summarize("run-1");
+        AgentUsageSummaryDTO run2 = service.summarize("run-2");
 
-        assertEquals("child", summary.getRunId());
-        assertEquals("trace-root", summary.getTraceId());
-        assertEquals(Long.valueOf(150), summary.getInputTokens());
-        assertEquals(new BigDecimal("0.8000"), summary.getCacheHitRate());
+        assertEquals(Long.valueOf(100), run1.getTotalTokens());
+        assertEquals(Long.valueOf(200), run2.getTotalTokens());
+        assertEquals(new BigDecimal("0.8750"), run1.getCacheHitRate());
+        assertEquals(new BigDecimal("0.8000"), run2.getCacheHitRate());
     }
 
     private AgentUsageSummaryService service() {
@@ -100,6 +104,7 @@ public class AgentUsageSummaryServiceTest {
                                   Integer hit, Integer miss) {
         return AgentTraceEvent.builder()
                 .runId(runId)
+                .traceId("trace-shared")
                 .eventType("model_usage")
                 .node(node)
                 .tokenUsage(TokenUsage.builder()
