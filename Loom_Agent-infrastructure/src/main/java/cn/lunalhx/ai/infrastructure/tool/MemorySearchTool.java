@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -64,8 +65,9 @@ public class MemorySearchTool implements AgentTool {
             if (limit < 1) limit = 1;
             if (limit > MAX_RESULTS) limit = MAX_RESULTS;
 
-            String workspacePath = call.getWorkspace().getLocation() != null
-                    ? call.getWorkspace().getLocation()
+            WorkspaceRef workspaceRef = call.workspaceRef();
+            String workspacePath = workspaceRef != null && workspaceRef.getLocation() != null
+                    ? workspaceRef.getLocation()
                     : "";
             String workspaceKey = WorkspaceKeyUtil.compute(workspacePath);
 

@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -74,8 +75,9 @@ public class MemorySaveTool implements AgentTool {
             if (importance < 0) importance = 0;
             if (importance > 100) importance = 100;
 
-            String workspacePath = call.getWorkspace().getLocation() != null
-                    ? call.getWorkspace().getLocation()
+            WorkspaceRef workspaceRef = call.workspaceRef();
+            String workspacePath = workspaceRef != null && workspaceRef.getLocation() != null
+                    ? workspaceRef.getLocation()
                     : "";
             String workspaceKey = WorkspaceKeyUtil.compute(workspacePath);
             String contentHash = sha256(title + "|" + body);
