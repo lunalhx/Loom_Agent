@@ -132,6 +132,20 @@ loom:
       deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
     persistence:
       mode: ${AGENT_PERSISTENCE_MODE:memory}
+    long-term-memory:
+      enabled: ${AGENT_MEMORY_ENABLED:false}
+      max-selected: ${AGENT_MEMORY_MAX_SELECTED:8}
+      max-injected-chars: ${AGENT_MEMORY_MAX_INJECTED_CHARS:8000}
+      vector:
+        enabled: ${AGENT_MEMORY_VECTOR_ENABLED:false}
+        search-k: ${AGENT_MEMORY_VECTOR_SEARCH_K:50}
+        embedding:
+          base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+          api-key: ${EMBEDDING_API_KEY:${DASHSCOPE_API_KEY:}}
+          model: ${EMBEDDING_MODEL:text-embedding-v4}
+          dimensions: ${EMBEDDING_DIMENSIONS:1024}
+          timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+          batch-size: ${EMBEDDING_BATCH_SIZE:64}
     memory-store:
       ttl-seconds: ${AGENT_MEMORY_STORE_TTL_SECONDS:3600}
       max-runs: ${AGENT_MEMORY_STORE_MAX_RUNS:1000}

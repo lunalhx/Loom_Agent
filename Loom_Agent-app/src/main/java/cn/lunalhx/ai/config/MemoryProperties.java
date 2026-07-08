@@ -16,6 +16,7 @@ public class MemoryProperties {
     private String selectionModel;
     private String extractionModel;
     private WorkerConfig worker = new WorkerConfig();
+    private VectorConfig vector = new VectorConfig();
 
     @Data
     public static class WorkerConfig {
@@ -24,5 +25,25 @@ public class MemoryProperties {
         private int leaseDurationSeconds = 300;
         private int maxRetries = 3;
         private int staleRecoverySeconds = 600;
+    }
+
+    @Data
+    public static class VectorConfig {
+        private boolean enabled = true;
+        private String extensionPath;
+        private String distanceMetric = "cosine";
+        private int searchK = 50;
+        private EmbeddingConfig embedding = new EmbeddingConfig();
+    }
+
+    @Data
+    public static class EmbeddingConfig {
+        private String provider = "openai-compatible";
+        private String baseUrl = "https://api.openai.com/v1";
+        private String apiKey;
+        private String model = "text-embedding-3-small";
+        private int dimensions = 1536;
+        private int timeoutMs = 8000;
+        private int batchSize = 16;
     }
 }

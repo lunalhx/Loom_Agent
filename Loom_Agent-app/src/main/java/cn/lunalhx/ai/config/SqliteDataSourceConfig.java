@@ -34,6 +34,7 @@ public class SqliteDataSourceConfig {
         sqliteConfig.setBusyTimeout(properties.getBusyTimeoutMs());
         sqliteConfig.enforceForeignKeys(true);
         sqliteConfig.setTransactionMode(SQLiteConfig.TransactionMode.IMMEDIATE);
+        sqliteConfig.enableLoadExtension(true);
 
         SQLiteDataSource sqliteDataSource = new SQLiteDataSource(sqliteConfig);
         sqliteDataSource.setUrl("jdbc:sqlite:" + database);

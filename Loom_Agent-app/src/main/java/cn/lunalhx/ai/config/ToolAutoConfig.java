@@ -3,6 +3,7 @@ package cn.lunalhx.ai.config;
 import cn.lunalhx.ai.domain.agent.service.context.ContextRecallTool;
 import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
+import cn.lunalhx.ai.domain.memory.service.MemorySearchService;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -79,8 +80,9 @@ public class ToolAutoConfig {
 
     @Bean
     @ConditionalOnBean(AgentMemoryRepository.class)
-    public MemorySearchTool memorySearchTool(AgentMemoryRepository memoryRepository) {
-        return new MemorySearchTool(memoryRepository);
+    public MemorySearchTool memorySearchTool(AgentMemoryRepository memoryRepository,
+                                              ObjectProvider<MemorySearchService> searchServiceProvider) {
+        return new MemorySearchTool(memoryRepository, searchServiceProvider.getIfAvailable());
     }
 
     @Bean

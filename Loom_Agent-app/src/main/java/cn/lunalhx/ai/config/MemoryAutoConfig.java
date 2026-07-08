@@ -3,11 +3,14 @@ package cn.lunalhx.ai.config;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
+import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryVectorIndex;
 import cn.lunalhx.ai.domain.memory.service.MemoryExtractionService;
+import cn.lunalhx.ai.domain.memory.service.MemorySearchService;
 import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryRepository;
+import cn.lunalhx.ai.infrastructure.adapter.repository.IndexingAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryDao;
@@ -21,6 +24,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import javax.sql.DataSource;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "loom.agent.long-term-memory.enabled", havingValue = "true")
@@ -36,7 +41,9 @@ public class MemoryAutoConfig {
 
     @Bean
     public AgentMemoryRepository agentMemoryRepository(PersistenceProperties persistence,
-                                                        ObjectProvider<AgentMemoryDao> daoProvider) {
+                                                        ObjectProvider<AgentMemoryDao> daoProvider,
+                                                        ObjectProvider<AgentMemoryVectorIndex> vectorIndexProvider,
+                                                        ObjectProvider<DataSource> dataSourceProvider) {
         AgentMemoryDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
             case MEMORY -> {
@@ -48,8 +55,15 @@ public class MemoryAutoConfig {
                     throw new IllegalStateException(
                             "persistence mode=sqlite requires AgentMemoryDao, but MyBatis DAO is not available");
                 }
-                log.info("AgentMemoryRepository: MyBatis (mode=sqlite)");
-                yield new MybatisAgentMemoryRepository(dao);
+                MybatisAgentMemoryRepository repo = new MybatisAgentMemoryRepository(dao);
+                AgentMemoryVectorIndex vi = vectorIndexProvider.getIfAvailable();
+                DataSource ds = dataSourceProvider.getIfAvailable();
+                if (vi != null && vi.available() && ds != null) {
+                    log.info("AgentMemoryRepository: Indexing (vector search enabled)");
+                    yield new IndexingAgentMemoryRepository(repo, vi, ds);
+                }
+                log.info("AgentMemoryRepository: MyBatis (mode=sqlite, vector disabled)");
+                yield repo;
             }
         };
     }
@@ -76,8 +90,11 @@ public class MemoryAutoConfig {
 
     @Bean
     public MemorySelectionService memorySelectionService(AgentMemoryRepository agentMemoryRepository,
-                                                         MemoryProperties memoryProperties) {
+                                                         MemoryProperties memoryProperties,
+                                                         ObjectProvider<MemorySearchService> searchServiceProvider) {
+        MemorySearchService searchService = searchServiceProvider.getIfAvailable();
         return new MemorySelectionService(agentMemoryRepository,
+                searchService,
                 memoryProperties.getMaxSelected(),
                 memoryProperties.getMaxInjectedChars());
     }

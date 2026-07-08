@@ -12,35 +12,37 @@ import java.util.stream.Collectors;
 public class MemorySelectionService {
 
     private final AgentMemoryRepository memoryRepository;
+    private final MemorySearchService searchService;
     private final int maxSelected;
     private final int maxInjectedChars;
 
-    public MemorySelectionService(AgentMemoryRepository memoryRepository, int maxSelected, int maxInjectedChars) {
+    public MemorySelectionService(AgentMemoryRepository memoryRepository,
+                                   MemorySearchService searchService,
+                                   int maxSelected,
+                                   int maxInjectedChars) {
         this.memoryRepository = memoryRepository;
+        this.searchService = searchService;
         this.maxSelected = maxSelected;
         this.maxInjectedChars = maxInjectedChars;
     }
 
     public SelectionResult select(String workspaceKey, String question) {
-        List<AgentMemory> active = memoryRepository.findActive(workspaceKey, 200);
-        if (active.isEmpty()) {
-            return SelectionResult.EMPTY;
+        List<AgentMemory> pinned = memoryRepository.findPinned(workspaceKey, 4);
+
+        List<AgentMemory> candidates;
+        if (searchService != null) {
+            candidates = searchService.search(workspaceKey, question, maxSelected * 2);
+        } else {
+            List<AgentMemory> active = memoryRepository.findActive(workspaceKey, 200);
+            candidates = active.stream()
+                    .filter(m -> !pinned.contains(m))
+                    .collect(Collectors.toList());
+            candidates = keywordMatch(candidates, question);
         }
-
-        List<AgentMemory> pinned = active.stream()
-                .filter(AgentMemory::isPinned)
-                .limit(4)
-                .collect(Collectors.toList());
-
-        List<AgentMemory> candidates = active.stream()
-                .filter(m -> !m.isPinned())
-                .collect(Collectors.toList());
-
-        List<AgentMemory> keywordMatched = keywordMatch(candidates, question);
 
         List<AgentMemory> selected = new ArrayList<>(pinned);
         int charCount = totalChars(selected);
-        for (AgentMemory m : keywordMatched) {
+        for (AgentMemory m : candidates) {
             if (selected.size() >= maxSelected || charCount + m.getBody().length() > maxInjectedChars) {
                 break;
             }

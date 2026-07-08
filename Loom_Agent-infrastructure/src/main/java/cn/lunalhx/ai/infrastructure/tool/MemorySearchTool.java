@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
+import cn.lunalhx.ai.domain.memory.service.MemorySearchService;
 import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -20,9 +21,11 @@ public class MemorySearchTool implements AgentTool {
     private static final int MAX_RESULTS = 20;
 
     private final AgentMemoryRepository memoryRepository;
+    private final MemorySearchService searchService;
 
-    public MemorySearchTool(AgentMemoryRepository memoryRepository) {
+    public MemorySearchTool(AgentMemoryRepository memoryRepository, MemorySearchService searchService) {
         this.memoryRepository = memoryRepository;
+        this.searchService = searchService;
     }
 
     @Override
@@ -71,14 +74,18 @@ public class MemorySearchTool implements AgentTool {
                     : "";
             String workspaceKey = WorkspaceKeyUtil.compute(workspacePath);
 
-            List<String> keywords = Arrays.stream(query.split("[\\s，,。.!！？?]+"))
-                    .filter(w -> w.length() >= 1)
-                    .toList();
-            if (keywords.isEmpty()) {
-                keywords = List.of(query);
+            List<AgentMemory> results;
+            if (searchService != null) {
+                results = searchService.search(workspaceKey, query, limit);
+            } else {
+                List<String> keywords = Arrays.stream(query.split("[\\s，,。.!！？?]+"))
+                        .filter(w -> w.length() >= 1)
+                        .toList();
+                if (keywords.isEmpty()) {
+                    keywords = List.of(query);
+                }
+                results = memoryRepository.searchByKeywords(workspaceKey, keywords, limit);
             }
-
-            List<AgentMemory> results = memoryRepository.searchByKeywords(workspaceKey, keywords, limit);
 
             StringBuilder sb = new StringBuilder();
             sb.append("找到 ").append(results.size()).append(" 条记忆：\n\n");
