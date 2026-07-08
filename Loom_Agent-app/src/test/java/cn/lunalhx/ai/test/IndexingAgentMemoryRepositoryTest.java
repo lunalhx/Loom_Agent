@@ -44,7 +44,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldDelegateSaveAndEnqueueWhenVectorAvailable() {
+    public void shouldDelegateSaveAndEnqueueWhenVectorAvailable() throws SQLException {
         when(vectorIndex.available()).thenReturn(true);
         AgentMemory mem = createMemory("m1", "test");
         when(delegate.save(mem)).thenReturn(mem);
@@ -57,7 +57,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldDelegateSaveWithoutEnqueueWhenVectorUnavailable() {
+    public void shouldDelegateSaveWithoutEnqueueWhenVectorUnavailable() throws SQLException {
         when(vectorIndex.available()).thenReturn(false);
         AgentMemory mem = createMemory("m1", "test");
         when(delegate.save(mem)).thenReturn(mem);
@@ -68,7 +68,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldEnqueueDeleteOnArchive() {
+    public void shouldEnqueueDeleteOnArchive() throws SQLException {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(true);
 
@@ -79,7 +79,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldEnqueueDeleteOnDeleted() {
+    public void shouldEnqueueDeleteOnDeleted() throws SQLException {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.DELETED, 1L)).thenReturn(true);
 
@@ -89,7 +89,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldNotEnqueueWhenUpdateStatusFails() {
+    public void shouldNotEnqueueWhenUpdateStatusFails() throws SQLException {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(false);
 
@@ -100,7 +100,7 @@ public class IndexingAgentMemoryRepositoryTest {
     }
 
     @Test
-    public void shouldEnqueueUpsertOnActivate() {
+    public void shouldEnqueueUpsertOnActivate() throws SQLException {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ACTIVE, 1L)).thenReturn(true);
         AgentMemory mem = createMemory("m1", "test");
