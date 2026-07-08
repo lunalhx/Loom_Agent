@@ -23,6 +23,7 @@ import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
+import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerWatermark;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
@@ -140,6 +141,11 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
+    public ConversationExecutionGuard conversationExecutionGuard() {
+        return new ConversationExecutionGuard();
+    }
+
+    @Bean
     public AgentLoopStateDependencies agentLoopStateDependencies(ApprovalStore approvalStore,
                                                                   AgentWorkspaceResolver agentWorkspaceResolver,
                                                                   AgentRunRepository agentRunRepository,
@@ -227,10 +233,11 @@ public class AgentLoopAutoConfig {
                                              ContextArtifactRepository contextArtifactRepository,
                                              ContextBlobStore contextBlobStore,
                                              ConversationLedgerAppendService conversationLedgerAppendService,
-                                             LedgerCompactionService ledgerCompactionService) {
+                                             LedgerCompactionService ledgerCompactionService,
+                                             ConversationExecutionGuard conversationExecutionGuard) {
         return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator,
                 skillRepository, contextArtifactRepository, contextBlobStore,
-                conversationLedgerAppendService, ledgerCompactionService);
+                conversationLedgerAppendService, ledgerCompactionService, conversationExecutionGuard);
     }
 
     @Bean

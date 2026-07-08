@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -16,6 +17,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
+import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator.WorkspaceUndoBusyException;
 import lombok.extern.slf4j.Slf4j;
@@ -45,15 +47,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final UndoSessionCoordinator undoCoordinator;
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
+    private final ConversationExecutionGuard executionGuard;
 
     // ==================== 生产构造器 ====================
 
-    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor) {
+    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor, ConversationExecutionGuard executionGuard) {
         this.properties = assembly.properties();
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
         this.executor = executor;
         this.undoCoordinator = assembly.undoCoordinator();
+        this.executionGuard = executionGuard;
     }
 
     // ==================== 公共入口 ====================
@@ -63,23 +67,42 @@ public class DefaultAgentLoopService implements AgentLoopService {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), (sink, capture) -> {
             AgentContext context = resolveContext(question);
             capture.accept(context);
-            emit(sink, List.of(components.eventFactory().runStarted(context)));
-            if (undoCoordinator != null) {
-                undoCoordinator.onRunStart(context);
+            String lockKey = ConversationExecutionGuard.effectiveLockKey(
+                    context.getConversationId(), context.getRunId());
+            String token = null;
+            if (lockKey != null) {
+                token = executionGuard.tryAcquire(lockKey);
+                if (token == null) {
+                    emit(sink, List.of(components.eventFactory().conversationBusy(
+                            context.getConversationId(), context.getRunId(), context.getRequestId(),
+                            null, "ask", Instant.now())));
+                    sink.complete();
+                    return;
+                }
             }
             try {
-                components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
-                runLoop(context, AgentNodeNames.SKILL_BOOTSTRAP, sink);
-            } catch (WorkspaceUndoBusyException e) {
-                emit(sink, List.of(components.eventFactory().workspaceUndoBusy(context, e)));
-                components.nodeLifecycle().persistFailure(context, events -> emit(sink, events));
-                sink.complete();
-                return;
-            } catch (Exception e) {
+                emit(sink, List.of(components.eventFactory().runStarted(context)));
                 if (undoCoordinator != null) {
-                    undoCoordinator.onRunFailed(context);
+                    undoCoordinator.onRunStart(context);
                 }
-                throw e;
+                try {
+                    components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
+                    runLoop(context, AgentNodeNames.SKILL_BOOTSTRAP, sink);
+                } catch (WorkspaceUndoBusyException e) {
+                    emit(sink, List.of(components.eventFactory().workspaceUndoBusy(context, e)));
+                    components.nodeLifecycle().persistFailure(context, events -> emit(sink, events));
+                    sink.complete();
+                    return;
+                } catch (Exception e) {
+                    if (undoCoordinator != null) {
+                        undoCoordinator.onRunFailed(context);
+                    }
+                    throw e;
+                }
+            } finally {
+                if (token != null) {
+                    executionGuard.release(lockKey, token);
+                }
             }
         });
     }
@@ -113,28 +136,96 @@ public class DefaultAgentLoopService implements AgentLoopService {
             String reasonCode,
             List<String> allowedAlternatives) {
         return executeAsync("resume", approvalId, (sink, capture) -> {
-            AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(
-                    approvalId, decision, reason, reasonCode, allowedAlternatives);
-            capture.accept(plan.context());
-            continueFrom(plan, sink);
+            PendingApproval approval = components.approvalStore().find(approvalId).orElse(null);
+            String convId = null;
+            String runId = null;
+            if (approval != null) {
+                if (approval.getContext() != null) {
+                    convId = approval.getContext().getConversationId();
+                    runId = approval.getContext().getRunId();
+                } else {
+                    runId = approval.getRunId();
+                }
+            }
+            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
+            String token = null;
+            if (lockKey != null) {
+                token = executionGuard.tryAcquire(lockKey);
+                if (token == null) {
+                    emit(sink, List.of(components.eventFactory().conversationBusy(
+                            convId, runId, null, null, "resume_approval", Instant.now())));
+                    sink.complete();
+                    return;
+                }
+            }
+            try {
+                AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(
+                        approvalId, decision, reason, reasonCode, allowedAlternatives);
+                capture.accept(plan.context());
+                continueFrom(plan, sink);
+            } finally {
+                if (token != null) {
+                    executionGuard.release(lockKey, token);
+                }
+            }
         });
     }
 
     @Override
     public Flux<AgentEvent> resumeRun(String runId) {
         return executeAsync("resumeRun", runId, (sink, capture) -> {
-            AgentResumePlan plan = components.resumeCoordinator().prepareRunResume(runId);
-            capture.accept(plan.context());
-            continueFrom(plan, sink);
+            AgentRun run = components.runRepository().find(runId).orElse(null);
+            String convId = run != null ? run.getConversationId() : null;
+            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
+            String token = null;
+            if (lockKey != null) {
+                token = executionGuard.tryAcquire(lockKey);
+                if (token == null) {
+                    emit(sink, List.of(components.eventFactory().conversationBusy(
+                            convId, runId, null, run != null ? run.getRunId() : null,
+                            "resumeRun", Instant.now())));
+                    sink.complete();
+                    return;
+                }
+            }
+            try {
+                AgentResumePlan plan = components.resumeCoordinator().prepareRunResume(runId);
+                capture.accept(plan.context());
+                continueFrom(plan, sink);
+            } finally {
+                if (token != null) {
+                    executionGuard.release(lockKey, token);
+                }
+            }
         });
     }
 
     @Override
     public Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message) {
         return executeAsync("resumeWithUserInput", runId, (sink, capture) -> {
-            AgentResumePlan plan = components.resumeCoordinator().prepareUserInputResume(runId, action, message);
-            capture.accept(plan.context());
-            continueFrom(plan, sink);
+            AgentRun run = components.runRepository().find(runId).orElse(null);
+            String convId = run != null ? run.getConversationId() : null;
+            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
+            String token = null;
+            if (lockKey != null) {
+                token = executionGuard.tryAcquire(lockKey);
+                if (token == null) {
+                    emit(sink, List.of(components.eventFactory().conversationBusy(
+                            convId, runId, null, run != null ? run.getRunId() : null,
+                            "resumeWithUserInput", Instant.now())));
+                    sink.complete();
+                    return;
+                }
+            }
+            try {
+                AgentResumePlan plan = components.resumeCoordinator().prepareUserInputResume(runId, action, message);
+                capture.accept(plan.context());
+                continueFrom(plan, sink);
+            } finally {
+                if (token != null) {
+                    executionGuard.release(lockKey, token);
+                }
+            }
         });
     }
 

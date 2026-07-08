@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -250,6 +251,30 @@ public final class AgentEventFactory {
                 .workspace(e.getWorkspace())
                 .code(AgentErrorCode.WORKSPACE_UNDO_BUSY.code())
                 .message(AgentErrorCode.WORKSPACE_UNDO_BUSY.defaultMessage())
+                .metadata(metadata)
+                .build();
+    }
+
+    public AgentEvent conversationBusy(String conversationId, String runId, String requestId,
+                                     String holderRunId, String operation, Instant startedAt) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (holderRunId != null) {
+            metadata.put("holderRunId", holderRunId);
+        }
+        if (operation != null) {
+            metadata.put("operation", operation);
+        }
+        if (startedAt != null) {
+            metadata.put("startedAt", startedAt.toString());
+        }
+        metadata.put("retryable", true);
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .runId(runId)
+                .requestId(requestId)
+                .conversationId(conversationId)
+                .code(AgentErrorCode.CONVERSATION_BUSY.code())
+                .message(AgentErrorCode.CONVERSATION_BUSY.defaultMessage())
                 .metadata(metadata)
                 .build();
     }

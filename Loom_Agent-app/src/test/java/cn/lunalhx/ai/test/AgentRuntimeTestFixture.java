@@ -28,6 +28,7 @@ import cn.lunalhx.ai.infrastructure.context.InMemoryContextBlobStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.SubAgentControlInbox;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.port.InMemorySubAgentControlInbox;
+import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.runtime.hook.CheckpointAgentHook;
 import cn.lunalhx.ai.runtime.hook.CodeChangeVerificationStopHook;
@@ -89,6 +90,7 @@ public final class AgentRuntimeTestFixture {
     private SubAgentCoordinator subAgentCoordinator;
     private boolean subAgentEnabled = false;
     private boolean contextEnabled = false;
+    private ConversationExecutionGuard executionGuard;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicReference<ContextWindowManager> builtContextWindowManager = new AtomicReference<>();
@@ -207,6 +209,11 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
+    public AgentRuntimeTestFixture executionGuard(ConversationExecutionGuard executionGuard) {
+        this.executionGuard = executionGuard;
+        return this;
+    }
+
     // ---- 内部装配 ----
 
     private AgentRuntimeProperties props() {
@@ -247,6 +254,10 @@ public final class AgentRuntimeTestFixture {
 
     private Executor effectiveExecutor() {
         return executor != null ? executor : Runnable::run;
+    }
+
+    private ConversationExecutionGuard effectiveExecutionGuard() {
+        return executionGuard != null ? executionGuard : new ConversationExecutionGuard();
     }
 
     private ContextWindowManager resolveContextWindowManager(AgentRuntimeProperties props) {
@@ -291,7 +302,8 @@ public final class AgentRuntimeTestFixture {
                 standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
                 null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
                 new LedgerCompactionService(
-                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore));
+                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore),
+                effectiveExecutionGuard());
     }
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
@@ -315,7 +327,8 @@ public final class AgentRuntimeTestFixture {
                 standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
                 null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
                 new LedgerCompactionService(
-                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore));
+                        LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore),
+                effectiveExecutionGuard());
     }
 
     private AgentHookRegistry standardHookRegistry(AgentRuntimeProperties props,
