@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.tool.model.BackgroundShellTask;
 import cn.lunalhx.ai.domain.tool.model.ShellOutputLimits;
 import cn.lunalhx.ai.domain.tool.model.ShellCommandAnalysis;
 import cn.lunalhx.ai.domain.tool.model.ShellExecutionMode;
+import cn.lunalhx.ai.domain.tool.model.ShellFeature;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
@@ -66,18 +67,25 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         if (analysis.isHardDenied()) {
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("shellAnalysis", analysis);
+            String riskReason = analysis.getHardDenyReason();
+            List<String> tags = analysis.getRiskTags();
+            if (tags != null && !tags.isEmpty()) {
+                riskReason += " [" + String.join(", ", tags) + "]";
+            }
             return ToolPolicyDecision.builder()
                     .permissionLevel(ToolPermissionLevel.HIGH_RISK_DENY)
-                    .riskReason(analysis.getHardDenyReason())
+                    .riskReason(riskReason)
                     .operationPreview(command)
                     .metadata(metadata)
                     .build();
         }
 
         if (analysis.getExecutionMode() == ShellExecutionMode.SHELL_EXEC) {
-            String riskReason = "命令需要 shell 解释器执行" +
-                    (analysis.getFeatures() != null && !analysis.getFeatures().isEmpty()
-                            ? "，包含: " + analysis.getFeatures() : "");
+            if (isReadOnlyWildcardShellExec(analysis)) {
+                return injectAnalysis(ToolPolicyDecision.readOnly(
+                        "允许的只读 wildcard shell 命令 [wildcard_read_only]", command), analysis);
+            }
+            String riskReason = buildShellExecRiskReason(analysis);
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("shellAnalysis", analysis);
             return ToolPolicyDecision.builder()
@@ -96,10 +104,20 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
         String executable = tokens.get(0);
 
-        // Handle env prefix
         if ("env".equals(executable)) {
             String actualCmd = extractEnvCommand(tokens);
             if (actualCmd != null) {
+                boolean hasEnvVars = false;
+                for (int i = 1; i < tokens.size(); i++) {
+                    if (tokens.get(i).contains("=")) {
+                        hasEnvVars = true;
+                        break;
+                    }
+                }
+                if (hasEnvVars) {
+                    return injectAnalysis(ToolPolicyDecision.highRiskConfirm(
+                            "env 带环境变量执行命令需要高危确认 [ambiguous_shell]", command), analysis);
+                }
                 executable = actualCmd;
                 List<String> newTokens = new ArrayList<>();
                 newTokens.add(executable);
@@ -120,7 +138,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         if (isShellInterpreter(executable)) {
             return injectAnalysis(ToolPolicyDecision.builder()
                     .permissionLevel(ToolPermissionLevel.HIGH_RISK_CONFIRM)
-                    .riskReason("通过 shell 解释器执行命令需要高危确认")
+                    .riskReason("通过 shell 解释器执行命令需要高危确认 [ambiguous_shell]")
                     .operationPreview(command)
                     .build(), analysis);
         }
@@ -163,12 +181,12 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
         String unknownLevel = shellCommands().getUnknownLevel();
         if ("HIGH_RISK_DENY".equalsIgnoreCase(unknownLevel)) {
-            return injectAnalysis(ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable, command), analysis);
+            return injectAnalysis(ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable + " [ambiguous_shell]", command), analysis);
         }
         if ("HIGH_RISK_CONFIRM".equalsIgnoreCase(unknownLevel)) {
-            return injectAnalysis(ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable, command), analysis);
+            return injectAnalysis(ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable + " [ambiguous_shell]", command), analysis);
         }
-        return injectAnalysis(ToolPolicyDecision.writeConfirm("未分类命令需要人工确认：" + executable, command), analysis);
+        return injectAnalysis(ToolPolicyDecision.highRiskConfirm("未分类命令需要高危确认：" + executable + " [ambiguous_shell]", command), analysis);
     }
 
     @Override
@@ -257,6 +275,98 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }
+    }
+
+    private String buildShellExecRiskReason(ShellCommandAnalysis analysis) {
+        StringBuilder sb = new StringBuilder("命令需要 shell 解释器执行");
+        Set<ShellFeature> features = analysis.getFeatures();
+        if (features != null && !features.isEmpty()) {
+            sb.append("，包含: ").append(features);
+        }
+        String primary = analysis.getPrimaryCommand();
+        boolean ambiguous = primary != null && (primary.startsWith("$") || primary.contains("${"));
+        if (features != null && (features.contains(ShellFeature.COMMAND_SUBSTITUTION)
+                || features.contains(ShellFeature.VARIABLE_EXPANSION))) {
+            ambiguous = true;
+        }
+        if (ambiguous) {
+            sb.append(" [ambiguous_shell]");
+        }
+        if (features != null && features.contains(ShellFeature.WILDCARD)
+                && primary != null && shellCommands().getReadOnly().contains(primary)) {
+            sb.append(" [wildcard_read_only]");
+        }
+        return sb.toString();
+    }
+
+    private boolean isReadOnlyWildcardShellExec(ShellCommandAnalysis analysis) {
+        Set<ShellFeature> features = analysis.getFeatures();
+        if (features == null || !features.contains(ShellFeature.WILDCARD)) {
+            return false;
+        }
+        if (features.stream().anyMatch(f -> f != ShellFeature.WILDCARD)) {
+            return false;
+        }
+        String primary = analysis.getPrimaryCommand();
+        return primary != null
+                && shellCommands().getReadOnly().contains(primary)
+                && Set.of("grep", "rg", "ls", "wc").contains(primary)
+                && !hasUnsafeWildcardToken(analysis.getRawCommand());
+    }
+
+    private boolean hasUnsafeWildcardToken(String command) {
+        if (command == null || command.isBlank()) {
+            return true;
+        }
+        List<String> tokens = tokenizeForWildcardSafety(command);
+        for (String token : tokens) {
+            if (!containsWildcard(token)) {
+                continue;
+            }
+            if (token.contains("?") || token.contains("[")) {
+                return true;
+            }
+            if (token.startsWith(".") || token.contains("/.")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> tokenizeForWildcardSafety(String command) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean singleQuoted = false;
+        boolean doubleQuoted = false;
+        for (int i = 0; i < command.length(); i++) {
+            char ch = command.charAt(i);
+            if (!doubleQuoted && ch == '\'') {
+                singleQuoted = !singleQuoted;
+                continue;
+            }
+            if (!singleQuoted && ch == '"') {
+                doubleQuoted = !doubleQuoted;
+                continue;
+            }
+            if (!singleQuoted && !doubleQuoted && Character.isWhitespace(ch)) {
+                addWildcardSafetyToken(tokens, current);
+                continue;
+            }
+            current.append(ch);
+        }
+        addWildcardSafetyToken(tokens, current);
+        return tokens;
+    }
+
+    private void addWildcardSafetyToken(List<String> tokens, StringBuilder current) {
+        if (!current.isEmpty()) {
+            tokens.add(current.toString());
+            current.setLength(0);
+        }
+    }
+
+    private boolean containsWildcard(String token) {
+        return token.indexOf('*') >= 0 || token.indexOf('?') >= 0 || token.indexOf('[') >= 0;
     }
 
     private ShellCommandAnalysis extractAnalysis(ToolPolicyDecision policy) {

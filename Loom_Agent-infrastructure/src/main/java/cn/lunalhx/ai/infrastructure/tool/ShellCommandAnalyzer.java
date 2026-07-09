@@ -19,6 +19,20 @@ public class ShellCommandAnalyzer {
             "(?<!\\|)\\|(?!\\|)[^|]*?\\b(sh|bash|zsh|dash|ksh|csh|fish|ash|python3?|perl|ruby|node)\\b",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern REMOTE_SCRIPT_EXEC = Pattern.compile(
+            "(?:curl|wget)\\s[^|]*\\|\\s*(?:sh|bash|zsh|dash)\\b"
+                    + "|(?:sh|bash|zsh|dash)\\s*<\\s*\\(\\s*(?:curl|wget)\\s"
+                    + "|base64\\s[^|]*\\|\\s*(?:sh|bash|zsh|dash)\\b",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern SENSITIVE_PATH_PATTERN = Pattern.compile(
+            "(?:^|\\s)~/(?:\\.(?:ssh|aws|config|gnupg|kube|netrc)"
+                    + "|etc|usr|bin|sbin|var|root|System|Library)"
+                    + "|(?:^|\\s)/(?:etc|usr|bin|sbin|var|root|System|Library)/"
+                    + "|(?:^|\\s)\\.(?:ssh|aws|config|gnupg|kube|netrc)(?:/|\\s|$)"
+                    + "|(?:^|\\s)\\.git/config",
+            Pattern.CASE_INSENSITIVE);
+
     private static final Set<String> SENSITIVE_FILE_PATTERNS = Set.of(
             ".env", ".pem", ".key", ".p12", "id_rsa", "id_ed25519");
 
@@ -69,6 +83,9 @@ public class ShellCommandAnalyzer {
         result = checkPrivilegeEscalation(command);
         if (result != null) return result;
 
+        result = checkRemoteScriptExecution(command);
+        if (result != null) return result;
+
         result = checkDeviceWrite(command);
         if (result != null) return result;
 
@@ -76,6 +93,9 @@ public class ShellCommandAnalyzer {
         if (result != null) return result;
 
         result = checkSensitiveFiles(command);
+        if (result != null) return result;
+
+        result = checkSensitivePaths(command);
         if (result != null) return result;
 
         result = checkSystemWrite(command);
@@ -134,6 +154,17 @@ public class ShellCommandAnalyzer {
         return null;
     }
 
+    private static ShellCommandAnalysis checkRemoteScriptExecution(String command) {
+        if (REMOTE_SCRIPT_EXEC.matcher(command).find()) {
+            return ShellCommandAnalysis.builder()
+                    .hardDenied(true)
+                    .hardDenyReason("禁止远程脚本执行")
+                    .riskTags(List.of("remote_script_execution"))
+                    .build();
+        }
+        return null;
+    }
+
     private static ShellCommandAnalysis checkDeviceWrite(String command) {
         if (Pattern.compile("dd\\s+.*of=/dev/", Pattern.CASE_INSENSITIVE).matcher(command).find()) {
             return ShellCommandAnalysis.builder()
@@ -166,6 +197,17 @@ public class ShellCommandAnalyzer {
                         .riskTags(List.of("sensitive_file"))
                         .build();
             }
+        }
+        return null;
+    }
+
+    private static ShellCommandAnalysis checkSensitivePaths(String command) {
+        if (SENSITIVE_PATH_PATTERN.matcher(command).find()) {
+            return ShellCommandAnalysis.builder()
+                    .hardDenied(true)
+                    .hardDenyReason("命令涉及敏感路径")
+                    .riskTags(List.of("sensitive_path"))
+                    .build();
         }
         return null;
     }

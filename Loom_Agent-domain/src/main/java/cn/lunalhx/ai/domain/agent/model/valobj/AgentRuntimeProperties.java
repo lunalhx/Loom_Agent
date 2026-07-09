@@ -163,8 +163,8 @@ public class AgentRuntimeProperties {
                 "curl", "wget", "npm", "yarn", "pip", "pip3", "docker", "ssh", "scp", "rsync", "chown", "kill",
                 "systemctl", "sed", "awk", "tar", "zip", "unzip"));
         private List<String> deny = new ArrayList<>(List.of(
-                "rm", "rmdir"));
-        private String unknownLevel = "WRITE_CONFIRM";
+                "rm", "rmdir", "find", "python", "python3"));
+        private String unknownLevel = "HIGH_RISK_CONFIRM";
 
     }
 

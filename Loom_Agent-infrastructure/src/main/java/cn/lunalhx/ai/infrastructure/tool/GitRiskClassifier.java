@@ -8,7 +8,8 @@ import java.util.Set;
 
 public final class GitRiskClassifier {
 
-    private static final Set<String> READ_ONLY_OPS = Set.of("status", "diff", "log");
+    private static final Set<String> READ_ONLY_OPS = Set.of(
+            "status", "diff", "log", "show", "blame", "ls-files", "ls-tree", "rev-parse");
     private static final Set<String> WRITE_OPS = Set.of("add", "commit", "init");
     private static final Set<String> HIGH_RISK_CONFIRM_OPS = Set.of("push", "reset", "clean", "rebase", "checkout");
     private static final Set<String> PROTECTED_BRANCHES = Set.of("main", "master");
@@ -27,10 +28,52 @@ public final class GitRiskClassifier {
         }
 
         if (READ_ONLY_OPS.contains(operation)) {
-            if ("clean".equals(operation) && isDryRun(tokens)) {
-                return ToolPolicyDecision.readOnly("git clean --dry-run 为只读操作", command);
+            return ToolPolicyDecision.readOnly("允许的只读 Git 命令 [git_read_only]", command);
+        }
+
+        if ("branch".equals(operation)) {
+            if (isBranchDelete(tokens)) {
+                return ToolPolicyDecision.highRiskDeny("禁止 git branch 删除分支", command);
             }
-            return ToolPolicyDecision.readOnly("允许的只读 Git 命令", command);
+            if (isReadOnlyBranch(tokens)) {
+                return ToolPolicyDecision.readOnly("允许的只读 Git 命令 [git_read_only]", command);
+            }
+            return ToolPolicyDecision.highRiskConfirm("Git branch 写操作需要高危审批", command);
+        }
+
+        if ("tag".equals(operation)) {
+            if (isReadOnlyTag(tokens)) {
+                return ToolPolicyDecision.readOnly("允许的只读 Git 命令 [git_read_only]", command);
+            }
+            return ToolPolicyDecision.highRiskConfirm("Git tag 写操作需要高危审批", command);
+        }
+
+        if ("remote".equals(operation)) {
+            boolean hasVerbose = tokens.stream().anyMatch(
+                    t -> "-v".equals(t) || "--verbose".equals(t));
+            if (hasVerbose && tokens.size() <= 4) {
+                return ToolPolicyDecision.readOnly("允许的只读 Git 命令 [git_read_only]", command);
+            }
+            return ToolPolicyDecision.highRiskDeny("git remote 仅支持 -v/--verbose", command);
+        }
+
+        if ("config".equals(operation)) {
+            if (tokens.stream().anyMatch(t -> "--global".equals(t)
+                    || "--system".equals(t) || "--file".equals(t))) {
+                return ToolPolicyDecision.highRiskDeny(
+                        "禁止 git config 修改全局/系统配置", command);
+            }
+            boolean isReadOnly = tokens.stream().anyMatch(
+                    t -> "--list".equals(t) || "-l".equals(t)
+                            || "--get".equals(t) || t.startsWith("--get-"));
+            if (isReadOnly || tokens.size() <= 2) {
+                return ToolPolicyDecision.readOnly("允许的只读 Git 命令 [git_read_only]", command);
+            }
+            return ToolPolicyDecision.highRiskDeny("不允许的 git config 写操作", command);
+        }
+
+        if ("clean".equals(operation) && isDryRun(tokens)) {
+            return ToolPolicyDecision.readOnly("git clean --dry-run 为只读操作 [git_read_only]", command);
         }
 
         if (WRITE_OPS.contains(operation)) {
@@ -52,6 +95,47 @@ public final class GitRiskClassifier {
 
     private static boolean isDryRun(List<String> tokens) {
         return tokens.stream().anyMatch(t -> "--dry-run".equals(t) || "-n".equals(t));
+    }
+
+    private static boolean isReadOnlyBranch(List<String> tokens) {
+        if (tokens.size() == 2) {
+            return true;
+        }
+        for (int i = 2; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+            if (!Set.of("-a", "--all", "-r", "--remotes", "-l", "--list", "--contains", "--merged", "--no-merged").contains(token)
+                    && !isPatternArgForPrevious(tokens, i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isBranchDelete(List<String> tokens) {
+        return tokens.stream().anyMatch(
+                t -> "-d".equals(t) || "-D".equals(t) || "--delete".equals(t));
+    }
+
+    private static boolean isReadOnlyTag(List<String> tokens) {
+        if (tokens.size() == 2) {
+            return true;
+        }
+        for (int i = 2; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+            if (!Set.of("-l", "--list", "-n", "--contains", "--merged", "--no-merged").contains(token)
+                    && !isPatternArgForPrevious(tokens, i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isPatternArgForPrevious(List<String> tokens, int index) {
+        if (index <= 2) {
+            return false;
+        }
+        String previous = tokens.get(index - 1);
+        return Set.of("-l", "--list", "--contains", "--merged", "--no-merged").contains(previous);
     }
 
     private static boolean isAlwaysDenied(String operation, List<String> tokens) {
@@ -98,7 +182,7 @@ public final class GitRiskClassifier {
         boolean hasDelete = tokens.contains("--delete") || tokens.contains("-d")
                 || tokens.stream().anyMatch(t -> t.startsWith(":"));
 
-        if (hasMirror) {
+        if (hasMirror || hasDelete) {
             return true;
         }
 
@@ -118,20 +202,16 @@ public final class GitRiskClassifier {
 
         boolean targetsProtectedBranch = false;
         boolean branchAmbiguous = false;
-        if (refspec != null && (hasForce || hasForceWithLease || hasDelete)) {
+        if (refspec != null && (hasForce || hasForceWithLease)) {
             String branch = extractBranchFromRefspec(refspec);
             if (branch != null && PROTECTED_BRANCHES.contains(branch)) {
                 targetsProtectedBranch = true;
             }
-        } else if (refspec == null && (hasForce || hasForceWithLease || hasDelete)) {
+        } else if (refspec == null && (hasForce || hasForceWithLease)) {
             branchAmbiguous = true;
         }
 
-        if (targetsProtectedBranch || branchAmbiguous) {
-            return true;
-        }
-
-        return false;
+        return targetsProtectedBranch || branchAmbiguous;
     }
 
     private static String extractBranchFromRefspec(String refspec) {
