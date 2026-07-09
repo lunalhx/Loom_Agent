@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryVectorIndex;
 import cn.lunalhx.ai.domain.memory.adapter.port.MemoryEmbeddingGateway;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
 import cn.lunalhx.ai.domain.memory.model.valobj.EmbeddingVector;
+import cn.lunalhx.ai.domain.memory.model.valobj.MemorySearchHit;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemorySourceType;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryType;
@@ -16,6 +17,7 @@ import org.junit.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -36,13 +38,17 @@ public class MemorySearchServiceTest {
         searchService = new MemorySearchService(memoryRepository, vectorIndex, embeddingGateway, 50);
     }
 
+    private static List<AgentMemory> extract(List<MemorySearchHit> hits) {
+        return hits.stream().map(MemorySearchHit::memory).collect(Collectors.toList());
+    }
+
     @Test
     public void shouldFallbackToKeywordWhenVectorUnavailable() {
         when(vectorIndex.available()).thenReturn(false);
         when(memoryRepository.searchByKeywords(eq("ws1"), anyList(), eq(10)))
                 .thenReturn(List.of(createMemory("m1", "JUnit testing")));
 
-        List<AgentMemory> results = searchService.search("ws1", "testing", 10);
+        List<AgentMemory> results = extract(searchService.search("ws1", "testing", 10));
         assertEquals(1, results.size());
         assertEquals("m1", results.get(0).getMemoryId());
         verify(embeddingGateway, never()).embed(anyString());
@@ -60,7 +66,7 @@ public class MemorySearchServiceTest {
         AgentMemory memory = createMemory("m1", "Test memory");
         when(memoryRepository.findById("m1")).thenReturn(Optional.of(memory));
 
-        List<AgentMemory> results = searchService.search("ws1", "test query", 5);
+        List<AgentMemory> results = extract(searchService.search("ws1", "test query", 5));
         assertEquals(1, results.size());
         verify(embeddingGateway).embed(anyString());
     }
@@ -72,7 +78,7 @@ public class MemorySearchServiceTest {
         when(memoryRepository.searchByKeywords(eq("ws1"), anyList(), eq(5)))
                 .thenReturn(List.of(createMemory("m1", "fallback")));
 
-        List<AgentMemory> results = searchService.search("ws1", "test", 5);
+        List<AgentMemory> results = extract(searchService.search("ws1", "test", 5));
         assertEquals(1, results.size());
         assertEquals("m1", results.get(0).getMemoryId());
     }
@@ -86,7 +92,7 @@ public class MemorySearchServiceTest {
         when(memoryRepository.searchByKeywords(eq("ws1"), anyList(), eq(2)))
                 .thenReturn(List.of(m1, m2));
 
-        List<AgentMemory> results = searchService.search("ws1", "test query", 2);
+        List<AgentMemory> results = extract(searchService.search("ws1", "test query", 2));
         assertEquals(2, results.size());
     }
 
@@ -97,7 +103,7 @@ public class MemorySearchServiceTest {
         when(embeddingGateway.embed(anyString())).thenReturn(queryVec);
         when(vectorIndex.search(eq("ws1"), eq(queryVec), eq(50))).thenReturn(List.of());
 
-        List<AgentMemory> results = searchService.search("ws1", "test query", 5);
+        List<MemorySearchHit> results = searchService.search("ws1", "test query", 5);
         assertTrue(results.isEmpty());
 
         when(vectorIndex.available()).thenReturn(false);
@@ -124,7 +130,7 @@ public class MemorySearchServiceTest {
         when(memoryRepository.findById("m1")).thenReturn(Optional.of(mem1));
         when(memoryRepository.findById("m2")).thenReturn(Optional.of(mem2));
 
-        List<AgentMemory> results = searchService.search("ws1", "simple query", 10);
+        List<AgentMemory> results = extract(searchService.search("ws1", "simple query", 10));
         assertEquals(2, results.size());
         assertEquals("m1", results.get(0).getMemoryId());
         assertEquals("m2", results.get(1).getMemoryId());
@@ -138,10 +144,10 @@ public class MemorySearchServiceTest {
         when(memoryRepository.searchByKeywords(eq("ws1"), anyList(), eq(10)))
                 .thenReturn(List.of(pinned));
 
-        List<AgentMemory> results = searchService.search("ws1", "test", 10);
-        assertEquals(1, results.size());
-        assertEquals("p1", results.get(0).getMemoryId());
-        assertTrue(results.get(0).isPinned());
+        List<MemorySearchHit> hits = searchService.search("ws1", "test", 10);
+        assertEquals(1, hits.size());
+        assertEquals("p1", hits.get(0).memory().getMemoryId());
+        assertTrue(hits.get(0).memory().isPinned());
     }
 
     @Test
@@ -150,12 +156,25 @@ public class MemorySearchServiceTest {
         AgentMemory mem = createMemory("m1", "active memory");
         when(memoryRepository.findActive("ws1", 10)).thenReturn(List.of(mem));
 
-        List<AgentMemory> results = searchService.search("ws1", "", 10);
+        List<AgentMemory> results = extract(searchService.search("ws1", "", 10));
         assertEquals(1, results.size());
         verify(memoryRepository).findActive("ws1", 10);
 
-        results = searchService.search("ws1", null, 10);
+        results = extract(searchService.search("ws1", null, 10));
         assertEquals(1, results.size());
+    }
+
+    @Test
+    public void shouldIncludeScoreAndSourceInHits() {
+        when(vectorIndex.available()).thenReturn(false);
+        AgentMemory mem = createMemory("m1", "test memory");
+        when(memoryRepository.searchByKeywords(eq("ws1"), anyList(), eq(5)))
+                .thenReturn(List.of(mem));
+
+        List<MemorySearchHit> hits = searchService.search("ws1", "test", 5);
+        assertEquals(1, hits.size());
+        assertEquals(MemorySearchHit.SOURCE_KEYWORD, hits.get(0).recallSource());
+        assertTrue(hits.get(0).comprehensiveScore() >= 0.0);
     }
 
     private AgentMemory createMemory(String id, String title) {

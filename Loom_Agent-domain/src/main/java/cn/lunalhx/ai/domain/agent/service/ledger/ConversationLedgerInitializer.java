@@ -64,6 +64,13 @@ public final class ConversationLedgerInitializer {
             ledger.appendWithEventKey("user", question,
                     LedgerStableType.USER_TASK, eventKey);
         }
+        // Append LONG_TERM_MEMORY after USER_TASK if recall rendered text exists
+        String recallText = context.getMemoryRecallRenderedText();
+        if (recallText != null && !recallText.isEmpty()) {
+            String memoryEventKey = eventKey(runId, "init", "long_term_memory");
+            ledger.appendWithEventKey("user", recallText,
+                    LedgerStableType.LONG_TERM_MEMORY, memoryEventKey);
+        }
         context.setConversationLedger(ledger);
     }
 

@@ -2,100 +2,223 @@ package cn.lunalhx.ai.domain.memory.service;
 
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
+import cn.lunalhx.ai.domain.memory.model.valobj.MemorySearchHit;
+import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 public class MemorySelectionService {
 
+    private static final Logger log = LoggerFactory.getLogger(MemorySelectionService.class);
+
+    private static final int WRAPPER_OVERHEAD = 100;
+
     private final AgentMemoryRepository memoryRepository;
     private final MemorySearchService searchService;
     private final int maxSelected;
     private final int maxInjectedChars;
+    private final double minRelevanceScore;
+    private final int pinnedLimit;
 
     public MemorySelectionService(AgentMemoryRepository memoryRepository,
                                    MemorySearchService searchService,
                                    int maxSelected,
-                                   int maxInjectedChars) {
+                                   int maxInjectedChars,
+                                   double minRelevanceScore,
+                                   int pinnedLimit) {
         this.memoryRepository = memoryRepository;
         this.searchService = searchService;
         this.maxSelected = maxSelected;
         this.maxInjectedChars = maxInjectedChars;
+        this.minRelevanceScore = minRelevanceScore;
+        this.pinnedLimit = pinnedLimit;
     }
 
     public SelectionResult select(String workspaceKey, String question) {
-        List<AgentMemory> pinned = memoryRepository.findPinned(workspaceKey, 4);
+        try {
+            List<MemorySearchHit> pinnedHits = getPinnedHits(workspaceKey);
 
-        List<AgentMemory> candidates;
-        if (searchService != null) {
-            candidates = searchService.search(workspaceKey, question, maxSelected * 2);
-        } else {
-            List<AgentMemory> active = memoryRepository.findActive(workspaceKey, 200);
-            candidates = active.stream()
-                    .filter(m -> !pinned.contains(m))
+            if (question == null || question.isBlank()) {
+                return buildResult(pinnedHits, Collections.emptyList());
+            }
+
+            List<MemorySearchHit> candidateHits;
+            Set<String> pinnedIds = pinnedHits.stream()
+                    .map(h -> h.memory().getMemoryId())
+                    .collect(Collectors.toSet());
+
+            if (searchService != null) {
+                List<MemorySearchHit> searchHits = searchService.search(workspaceKey, question, maxSelected * 2);
+                candidateHits = searchHits.stream()
+                        .filter(h -> h.memory().getStatus() == MemoryStatus.ACTIVE)
+                        .filter(h -> !pinnedIds.contains(h.memory().getMemoryId()))
+                        .collect(Collectors.toList());
+            } else {
+                List<AgentMemory> active = memoryRepository.findActive(workspaceKey, 200);
+                List<String> keywords = extractKeywords(question);
+                candidateHits = active.stream()
+                        .filter(m -> !pinnedIds.contains(m.getMemoryId()))
+                        .map(m -> {
+                            double score = keywords.isEmpty() ? 1.0
+                                    : keywordMatchScore(m, keywords);
+                            return new MemorySearchHit(m, score, MemorySearchHit.SOURCE_KEYWORD);
+                        })
+                        .sorted(Comparator.comparingDouble(MemorySearchHit::comprehensiveScore).reversed())
+                        .collect(Collectors.toList());
+            }
+
+            candidateHits = candidateHits.stream()
+                    .filter(h -> h.comprehensiveScore() >= minRelevanceScore)
+                    .sorted(Comparator.comparingDouble(MemorySearchHit::comprehensiveScore).reversed())
                     .collect(Collectors.toList());
-            candidates = keywordMatch(candidates, question);
-        }
 
-        List<AgentMemory> selected = new ArrayList<>(pinned);
-        int charCount = totalChars(selected);
-        for (AgentMemory m : candidates) {
-            if (selected.size() >= maxSelected || charCount + m.getBody().length() > maxInjectedChars) {
-                break;
-            }
-            if (!selected.contains(m)) {
-                selected.add(m);
-                charCount += m.getBody().length();
-            }
+            return buildResult(pinnedHits, candidateHits);
+        } catch (Exception e) {
+            log.warn("Memory selection failed, returning empty result. workspace={}, question={}: {}",
+                    workspaceKey, question != null ? question.substring(0, Math.min(50, question.length())) : null,
+                    e.getMessage());
+            return SelectionResult.EMPTY;
         }
-
-        return new SelectionResult(selected);
     }
 
-    private List<AgentMemory> keywordMatch(List<AgentMemory> candidates, String question) {
-        if (question == null || question.isBlank()) {
-            return candidates;
+    private List<MemorySearchHit> getPinnedHits(String workspaceKey) {
+        if (memoryRepository == null) {
+            return Collections.emptyList();
         }
-        String lower = question.toLowerCase();
-        List<String> keywords = extractKeywords(lower);
-        if (keywords.isEmpty()) {
-            return candidates;
-        }
-        return candidates.stream()
-                .sorted((a, b) -> Integer.compare(matchScore(b, keywords), matchScore(a, keywords)))
+        List<AgentMemory> pinned = memoryRepository.findPinned(workspaceKey, pinnedLimit);
+        return pinned.stream()
+                .map(m -> new MemorySearchHit(m, 1.0, MemorySearchHit.SOURCE_PINNED))
                 .collect(Collectors.toList());
     }
 
-    private List<String> extractKeywords(String question) {
-        List<String> keywords = new ArrayList<>();
-        for (String word : question.split("[\\s，,。.!！？?]+")) {
-            if (word.length() >= 2) {
-                keywords.add(word);
+    private SelectionResult buildResult(List<MemorySearchHit> pinnedHits,
+                                         List<MemorySearchHit> candidateHits) {
+        List<MemorySearchHit> selectedHits = new ArrayList<>(pinnedHits);
+        int charCount = totalChars(pinnedHits);
+
+        for (MemorySearchHit hit : candidateHits) {
+            if (selectedHits.size() >= maxSelected) {
+                break;
+            }
+            int hitChars = charCount(hit);
+            int remaining = maxInjectedChars - WRAPPER_OVERHEAD - charCount;
+            if (remaining <= 0) {
+                break;
+            }
+            if (hitChars <= remaining) {
+                selectedHits.add(hit);
+                charCount += hitChars;
+            } else if (selectedHits.size() == pinnedHits.size()) {
+                AgentMemory m = hit.memory();
+                int safetyMargin = 10;
+                int maxBodyLen = remaining - (m.getTitle() != null ? m.getTitle().length() : 0)
+                        - (m.getSummary() != null ? m.getSummary().length() : 0)
+                        - (m.getType() != null ? m.getType().name().length() : 0)
+                        - safetyMargin;
+                if (maxBodyLen > 0) {
+                    String body = m.getBody();
+                    if (body != null && body.length() > maxBodyLen) {
+                        body = body.substring(0, maxBodyLen) + "[...]";
+                    }
+                    AgentMemory truncated = AgentMemory.builder()
+                            .memoryId(m.getMemoryId())
+                            .workspaceKey(m.getWorkspaceKey())
+                            .workspacePath(m.getWorkspacePath())
+                            .type(m.getType())
+                            .title(m.getTitle())
+                            .summary(m.getSummary())
+                            .body(body)
+                            .status(m.getStatus())
+                            .pinned(m.isPinned())
+                            .importance(m.getImportance())
+                            .sourceType(m.getSourceType())
+                            .sourceRunId(m.getSourceRunId())
+                            .contentHash(m.getContentHash())
+                            .version(m.getVersion())
+                            .usageCount(m.getUsageCount())
+                            .lastUsedAt(m.getLastUsedAt())
+                            .createdAt(m.getCreatedAt())
+                            .updatedAt(m.getUpdatedAt())
+                            .build();
+                    MemorySearchHit truncatedHit = new MemorySearchHit(truncated, hit.comprehensiveScore(), hit.recallSource());
+                    selectedHits.add(truncatedHit);
+                }
+                break;
             }
         }
-        return keywords;
+
+        List<AgentMemory> selectedMemories = selectedHits.stream()
+                .map(MemorySearchHit::memory)
+                .collect(Collectors.toList());
+
+        return new SelectionResult(selectedMemories, selectedHits, totalChars(selectedHits));
     }
 
-    private int matchScore(AgentMemory memory, List<String> keywords) {
+    private int totalChars(List<MemorySearchHit> hits) {
+        return hits.stream().mapToInt(this::charCount).sum();
+    }
+
+    private int charCount(MemorySearchHit hit) {
+        AgentMemory m = hit.memory();
+        int count = 0;
+        if (m.getTitle() != null) count += m.getTitle().length();
+        if (m.getSummary() != null) count += m.getSummary().length();
+        if (m.getBody() != null) count += m.getBody().length();
+        if (m.getType() != null) count += m.getType().name().length();
+        return count;
+    }
+
+    private double keywordMatchScore(AgentMemory memory, List<String> keywords) {
         String text = (memory.getTitle() + " " + memory.getSummary() + " " + memory.getBody()).toLowerCase();
-        int score = 0;
+        int hits = 0;
         for (String kw : keywords) {
             if (text.contains(kw)) {
-                score++;
+                hits++;
             }
         }
-        return score;
+        return (double) hits / keywords.size();
     }
 
-    private int totalChars(List<AgentMemory> memories) {
-        return memories.stream().mapToInt(m -> m.getBody().length()).sum();
+    private List<String> extractKeywords(String question) {
+        if (question == null || question.isBlank()) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(question.toLowerCase().split("[\\s，,。.!！？?]+"))
+                .filter(w -> w.length() >= 2)
+                .collect(Collectors.toList());
     }
 
-    public record SelectionResult(List<AgentMemory> memories) {
-        public static final SelectionResult EMPTY = new SelectionResult(Collections.emptyList());
+    public String renderWrappedText(SelectionResult result) {
+        if (result == null || result.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("<long_term_memories>\n");
+        sb.append("以下内容是可能相关但可能过期的历史背景。\n");
+        sb.append("当前用户指令、当前仓库事实和工具结果优先。\n\n");
+
+        for (AgentMemory m : result.memories()) {
+            String typeLabel = m.getType() != null ? m.getType().name() : "UNKNOWN";
+            sb.append("[").append(typeLabel).append("] ");
+            sb.append(m.getTitle() != null ? m.getTitle() : "").append("\n");
+            sb.append(m.getSummary() != null ? m.getSummary() : "").append("\n\n");
+        }
+
+        String body = sb.toString();
+        body = body.replace("</long_term_memories>", "&lt;/long_term_memories>");
+        return body + "</long_term_memories>";
+    }
+
+    public record SelectionResult(List<AgentMemory> memories, List<MemorySearchHit> hits, int totalChars) {
+        public static final SelectionResult EMPTY = new SelectionResult(Collections.emptyList(), Collections.emptyList(), 0);
 
         public boolean isEmpty() {
             return memories.isEmpty();

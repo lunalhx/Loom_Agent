@@ -155,6 +155,13 @@ public class AgentContextSnapshot {
     private int lastCompactionGeneration;
     private String ledgerBaselineArtifactId;
 
+    // -- memory recall (v6) --
+    private Boolean memoryRecallExecuted;
+    private List<String> memoryRecallIds;
+    private Integer memoryRecallCount;
+    private Integer memoryRecallChars;
+    private String memoryRecallRenderedText;
+
     // ---- factory methods ----
 
     /** Defensive copy of ledger entries for snapshot isolation. */
@@ -272,6 +279,12 @@ public class AgentContextSnapshot {
                 // ledger compaction (C10)
                 .lastCompactionGeneration(context.prompt().lastCompactionGeneration())
                 .ledgerBaselineArtifactId(context.prompt().ledgerBaselineArtifactId())
+                // memory recall
+                .memoryRecallExecuted(context.isMemoryRecallExecuted())
+                .memoryRecallIds(context.getMemoryRecallIds() == null ? null : new ArrayList<>(context.getMemoryRecallIds()))
+                .memoryRecallCount(context.getMemoryRecallCount())
+                .memoryRecallChars(context.getMemoryRecallChars())
+                .memoryRecallRenderedText(context.getMemoryRecallRenderedText())
                 .build();
     }
 
@@ -385,6 +398,13 @@ public class AgentContextSnapshot {
         context.setConfigFingerprint(configFingerprint);
         context.setLastCompactionGeneration(lastCompactionGeneration);
         context.setLedgerBaselineArtifactId(ledgerBaselineArtifactId);
+
+        // memory recall
+        context.setMemoryRecallExecuted(Boolean.TRUE.equals(memoryRecallExecuted));
+        context.setMemoryRecallIds(memoryRecallIds == null ? null : new ArrayList<>(memoryRecallIds));
+        context.setMemoryRecallCount(memoryRecallCount == null ? 0 : memoryRecallCount);
+        context.setMemoryRecallChars(memoryRecallChars == null ? 0 : memoryRecallChars);
+        context.setMemoryRecallRenderedText(memoryRecallRenderedText);
 
         return context;
     }

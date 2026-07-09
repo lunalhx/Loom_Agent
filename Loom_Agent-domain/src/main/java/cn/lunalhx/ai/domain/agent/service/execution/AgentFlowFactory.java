@@ -19,6 +19,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.PlannerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanGuardNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
+import cn.lunalhx.ai.domain.agent.flow.node.MemoryRecallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.SkillBootstrapNode;
 import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
 import cn.lunalhx.ai.domain.agent.flow.node.SubAgentDispatchNode;
@@ -35,6 +36,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
+import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -67,6 +69,7 @@ public class AgentFlowFactory {
     private final ConversationLedgerAppendService ledgerAppendService;
     private final LedgerBootstrapService bootstrapService;
     private final LedgerCompactionService ledgerCompactionService;
+    private final MemorySelectionService memorySelectionService;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -78,7 +81,8 @@ public class AgentFlowFactory {
                            ContextBlobStore contextBlobStore,
                            ConversationLedgerAppendService ledgerAppendService,
                            LedgerBootstrapService bootstrapService,
-                           LedgerCompactionService ledgerCompactionService) {
+                           LedgerCompactionService ledgerCompactionService,
+                           MemorySelectionService memorySelectionService) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -92,6 +96,7 @@ public class AgentFlowFactory {
         this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService must not be null");
         this.ledgerCompactionService = Objects.requireNonNull(
                 ledgerCompactionService, "ledgerCompactionService must not be null");
+        this.memorySelectionService = memorySelectionService;
     }
 
     /**
@@ -124,6 +129,7 @@ public class AgentFlowFactory {
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new SkillBootstrapNode(skillRepository, state.approvalStore(),
                         contextArtifactRepository, contextBlobStore, properties),
+                new MemoryRecallNode(memorySelectionService),
                 new StartNode(),
                 new PlannerNode(),
                 new RenderPromptNode(contextWindowManager,

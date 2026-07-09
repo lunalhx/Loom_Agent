@@ -303,12 +303,12 @@ public final class AgentRuntimeTestFixture {
                 null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
                 new LedgerCompactionService(
                         LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore),
-                effectiveExecutionGuard());
+                effectiveExecutionGuard(), null);
     }
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props,
-                                                     ContextWindowManager cwm,
-                                                     SubAgentControlInbox inbox) {
+                                                      ContextWindowManager cwm,
+                                                      SubAgentControlInbox inbox) {
         ApprovalStore effectiveApprovalStore = effectiveApprovalStore();
         AgentRunRepository effectiveRunRepo = effectiveRunRepository();
         AgentCheckpointRepository effectiveChkptRepo = effectiveCheckpointRepository();
@@ -328,7 +328,7 @@ public final class AgentRuntimeTestFixture {
                 null, null, contextArtifactRepository, contextBlobStore, ledgerAppendService,
                 new LedgerCompactionService(
                         LedgerWatermark.defaults(), contextArtifactRepository, contextBlobStore),
-                effectiveExecutionGuard());
+                effectiveExecutionGuard(), null);
     }
 
     private AgentHookRegistry standardHookRegistry(AgentRuntimeProperties props,

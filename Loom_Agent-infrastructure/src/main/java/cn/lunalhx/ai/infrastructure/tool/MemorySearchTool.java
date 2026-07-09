@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.tool;
 
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
+import cn.lunalhx.ai.domain.memory.model.valobj.MemorySearchHit;
 import cn.lunalhx.ai.domain.memory.service.MemorySearchService;
 import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
@@ -15,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class MemorySearchTool implements AgentTool {
 
@@ -76,7 +78,9 @@ public class MemorySearchTool implements AgentTool {
 
             List<AgentMemory> results;
             if (searchService != null) {
-                results = searchService.search(workspaceKey, query, limit);
+                results = searchService.search(workspaceKey, query, limit).stream()
+                        .map(MemorySearchHit::memory)
+                        .collect(Collectors.toList());
             } else {
                 List<String> keywords = Arrays.stream(query.split("[\\s，,。.!！？?]+"))
                         .filter(w -> w.length() >= 1)

@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Comparator;
@@ -16,9 +17,27 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
 
     private final Map<String, AgentMemory> store = new ConcurrentHashMap<>();
+    private final int maxActive;
+
+    public InMemoryAgentMemoryRepository() {
+        this.maxActive = 0;
+    }
+
+    public InMemoryAgentMemoryRepository(int maxActive) {
+        this.maxActive = maxActive;
+    }
 
     @Override
     public AgentMemory save(AgentMemory memory) {
+        String workspaceKey = memory.getWorkspaceKey();
+        if (maxActive > 0) {
+            long activeCount = store.values().stream()
+                    .filter(m -> workspaceKey.equals(m.getWorkspaceKey()) && m.getStatus() == MemoryStatus.ACTIVE)
+                    .count();
+            if (activeCount >= maxActive) {
+                findWeakestCandidate(workspaceKey).ifPresent(w -> updateStatus(w.getMemoryId(), MemoryStatus.ARCHIVED, w.getVersion()));
+            }
+        }
         String id = memory.getMemoryId() != null ? memory.getMemoryId() : UUID.randomUUID().toString();
         AgentMemory saved = AgentMemory.builder()
                 .memoryId(id)
@@ -84,9 +103,9 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateUsage(String memoryId, long newVersion) {
+    public boolean updateUsage(String memoryId, long expectedVersion) {
         AgentMemory m = store.get(memoryId);
-        if (m == null) return false;
+        if (m == null || m.getVersion() != expectedVersion) return false;
         store.put(memoryId, AgentMemory.builder()
                 .memoryId(m.getMemoryId())
                 .workspaceKey(m.getWorkspaceKey())
@@ -101,7 +120,7 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
                 .sourceType(m.getSourceType())
                 .sourceRunId(m.getSourceRunId())
                 .contentHash(m.getContentHash())
-                .version(newVersion)
+                .version(m.getVersion() + 1)
                 .usageCount(m.getUsageCount() + 1)
                 .lastUsedAt(Instant.now())
                 .createdAt(m.getCreatedAt())
@@ -160,5 +179,86 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
         return store.values().stream()
                 .filter(m -> sourceRunId.equals(m.getSourceRunId()))
                 .toList();
+    }
+
+    @Override
+    public List<AgentMemory> findExpiredActive(String workspaceKey, int unusedDays, int minImportance, int limit) {
+        Instant cutoff = Instant.now().minus(Duration.ofDays(unusedDays));
+        return store.values().stream()
+                .filter(m -> workspaceKey.equals(m.getWorkspaceKey())
+                        && m.getStatus() == MemoryStatus.ACTIVE
+                        && !m.isPinned()
+                        && m.getImportance() < minImportance)
+                .filter(m -> {
+                    Instant lastUsed = m.getLastUsedAt() != null ? m.getLastUsedAt() : m.getCreatedAt();
+                    return lastUsed != null && lastUsed.isBefore(cutoff);
+                })
+                .sorted(Comparator.comparingInt(AgentMemory::getImportance)
+                        .thenComparingInt(AgentMemory::getUsageCount)
+                        .thenComparing(m -> m.getLastUsedAt() != null ? m.getLastUsedAt() : m.getCreatedAt()))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public List<AgentMemory> findExpiredActiveAll(int unusedDays, int minImportance, int limit) {
+        Instant cutoff = Instant.now().minus(Duration.ofDays(unusedDays));
+        return store.values().stream()
+                .filter(m -> m.getStatus() == MemoryStatus.ACTIVE
+                        && !m.isPinned()
+                        && m.getImportance() < minImportance)
+                .filter(m -> {
+                    Instant lastUsed = m.getLastUsedAt() != null ? m.getLastUsedAt() : m.getCreatedAt();
+                    return lastUsed != null && lastUsed.isBefore(cutoff);
+                })
+                .sorted(Comparator.comparingInt(AgentMemory::getImportance)
+                        .thenComparingInt(AgentMemory::getUsageCount)
+                        .thenComparing(m -> m.getLastUsedAt() != null ? m.getLastUsedAt() : m.getCreatedAt()))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public Optional<AgentMemory> findWeakestCandidate(String workspaceKey) {
+        return store.values().stream()
+                .filter(m -> workspaceKey.equals(m.getWorkspaceKey())
+                        && m.getStatus() == MemoryStatus.ACTIVE
+                        && !m.isPinned())
+                .min(Comparator.comparingInt(AgentMemory::getImportance)
+                        .thenComparingInt(AgentMemory::getUsageCount)
+                        .thenComparing(m -> m.getLastUsedAt() != null ? m.getLastUsedAt() : m.getCreatedAt()));
+    }
+
+    @Override
+    public int batchUpdateStatus(List<String> memoryIds, MemoryStatus status) {
+        if (memoryIds == null || memoryIds.isEmpty()) return 0;
+        int count = 0;
+        for (String id : memoryIds) {
+            AgentMemory m = store.get(id);
+            if (m != null && m.getStatus() == MemoryStatus.ACTIVE) {
+                store.put(id, AgentMemory.builder()
+                        .memoryId(m.getMemoryId())
+                        .workspaceKey(m.getWorkspaceKey())
+                        .workspacePath(m.getWorkspacePath())
+                        .type(m.getType())
+                        .title(m.getTitle())
+                        .summary(m.getSummary())
+                        .body(m.getBody())
+                        .status(status)
+                        .pinned(m.isPinned())
+                        .importance(m.getImportance())
+                        .sourceType(m.getSourceType())
+                        .sourceRunId(m.getSourceRunId())
+                        .contentHash(m.getContentHash())
+                        .version(m.getVersion() + 1)
+                        .usageCount(m.getUsageCount())
+                        .lastUsedAt(m.getLastUsedAt())
+                        .createdAt(m.getCreatedAt())
+                        .updatedAt(Instant.now())
+                        .build());
+                count++;
+            }
+        }
+        return count;
     }
 }

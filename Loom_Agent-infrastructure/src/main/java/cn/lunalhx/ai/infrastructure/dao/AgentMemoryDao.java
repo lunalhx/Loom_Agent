@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.dao;
 
 import cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryPO;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -20,7 +21,7 @@ public interface AgentMemoryDao {
 
     List<AgentMemoryPO> searchByKeywords(String workspaceKey, String searchTerm, int limit);
 
-    int updateUsage(String memoryId, long newVersion);
+    int updateUsage(@Param("memoryId") String memoryId, @Param("expectedVersion") long expectedVersion);
 
     int countActive(String workspaceKey);
 
@@ -29,4 +30,21 @@ public interface AgentMemoryDao {
     List<AgentMemoryPO> selectByContentHash(String workspaceKey, String contentHash);
 
     List<AgentMemoryPO> selectBySourceRunId(String sourceRunId);
+
+    List<AgentMemoryPO> selectExpiredActive(
+            @Param("workspaceKey") String workspaceKey,
+            @Param("unusedDays") int unusedDays,
+            @Param("minImportance") int minImportance,
+            @Param("limit") int limit);
+
+    AgentMemoryPO selectWeakestCandidate(@Param("workspaceKey") String workspaceKey);
+
+    int batchUpdateStatus(
+            @Param("memoryIds") List<String> memoryIds,
+            @Param("status") String status);
+
+    List<AgentMemoryPO> selectExpiredActiveAll(
+            @Param("unusedDays") int unusedDays,
+            @Param("minImportance") int minImportance,
+            @Param("limit") int limit);
 }

@@ -3,6 +3,8 @@ package cn.lunalhx.ai.domain.agent.model.state;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 
+import java.util.List;
+
 /**
  * Mutable prompt state for ledger-backed model input.
  */
@@ -22,12 +24,26 @@ public final class AgentPromptState {
     private int lastCompactionGeneration = -1;
     private String ledgerBaselineArtifactId;
 
+    // ---- memory recall state (v6) ----
+    private boolean memoryRecallExecuted;
+    private List<String> memoryRecallIds;
+    private int memoryRecallCount;
+    private int memoryRecallChars;
+    private String memoryRecallRenderedText;
+
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
 
     public String instructionsHash() { return instructionsHash; }
     public String modelOutput() { return modelOutput; }
+
+    // ---- memory recall accessors (v6) ----
+    public boolean memoryRecallExecuted() { return memoryRecallExecuted; }
+    public List<String> memoryRecallIds() { return memoryRecallIds; }
+    public int memoryRecallCount() { return memoryRecallCount; }
+    public int memoryRecallChars() { return memoryRecallChars; }
+    public String memoryRecallRenderedText() { return memoryRecallRenderedText; }
 
     // ---- conversation ledger accessors ----
     public ConversationLedger conversationLedger() { return conversationLedger; }
@@ -70,6 +86,13 @@ public final class AgentPromptState {
     public void setLedgerBaselineArtifactId(String v) { this.ledgerBaselineArtifactId = v; }
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
+
+    // ---- memory recall mutators (v6) ----
+    public void setMemoryRecallExecuted(boolean v) { this.memoryRecallExecuted = v; }
+    public void setMemoryRecallIds(List<String> v) { this.memoryRecallIds = v; }
+    public void setMemoryRecallCount(int v) { this.memoryRecallCount = v; }
+    public void setMemoryRecallChars(int v) { this.memoryRecallChars = v; }
+    public void setMemoryRecallRenderedText(String v) { this.memoryRecallRenderedText = v; }
 
     /** Ensures ledger state is initialized. Safe to call repeatedly. */
     public void ensureLedgerActive() {

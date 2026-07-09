@@ -18,9 +18,11 @@ import java.util.UUID;
 public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
 
     private final AgentMemoryDao dao;
+    private final int maxActive;
 
-    public MybatisAgentMemoryRepository(AgentMemoryDao dao) {
+    public MybatisAgentMemoryRepository(AgentMemoryDao dao, int maxActive) {
         this.dao = dao;
+        this.maxActive = maxActive;
     }
 
     @Override
@@ -28,6 +30,12 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
         AgentMemoryPO po = toPo(memory);
         AgentMemoryPO existing = dao.selectById(memory.getMemoryId());
         if (existing == null) {
+            if (maxActive > 0 && dao.countActive(po.getWorkspaceKey()) >= maxActive) {
+                AgentMemoryPO weakest = dao.selectWeakestCandidate(po.getWorkspaceKey());
+                if (weakest != null) {
+                    dao.updateStatus(weakest.getMemoryId(), "ARCHIVED", weakest.getVersion());
+                }
+            }
             po.setMemoryId(memory.getMemoryId() != null ? memory.getMemoryId() : UUID.randomUUID().toString());
             po.setVersion(1L);
             dao.insert(po);
@@ -71,8 +79,8 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateUsage(String memoryId, long newVersion) {
-        return dao.updateUsage(memoryId, newVersion) > 0;
+    public boolean updateUsage(String memoryId, long expectedVersion) {
+        return dao.updateUsage(memoryId, expectedVersion) > 0;
     }
 
     @Override
@@ -97,6 +105,30 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
         return dao.selectBySourceRunId(sourceRunId).stream()
                 .map(this::toEntity)
                 .toList();
+    }
+
+    @Override
+    public List<AgentMemory> findExpiredActive(String workspaceKey, int unusedDays, int minImportance, int limit) {
+        return dao.selectExpiredActive(workspaceKey, unusedDays, minImportance, limit).stream()
+                .map(this::toEntity).toList();
+    }
+
+    @Override
+    public Optional<AgentMemory> findWeakestCandidate(String workspaceKey) {
+        AgentMemoryPO po = dao.selectWeakestCandidate(workspaceKey);
+        return po != null ? Optional.of(toEntity(po)) : Optional.empty();
+    }
+
+    @Override
+    public List<AgentMemory> findExpiredActiveAll(int unusedDays, int minImportance, int limit) {
+        return dao.selectExpiredActiveAll(unusedDays, minImportance, limit).stream()
+                .map(this::toEntity).toList();
+    }
+
+    @Override
+    public int batchUpdateStatus(List<String> memoryIds, MemoryStatus status) {
+        if (memoryIds == null || memoryIds.isEmpty()) return 0;
+        return dao.batchUpdateStatus(memoryIds, status.name());
     }
 
     private AgentMemoryPO toPo(AgentMemory m) {

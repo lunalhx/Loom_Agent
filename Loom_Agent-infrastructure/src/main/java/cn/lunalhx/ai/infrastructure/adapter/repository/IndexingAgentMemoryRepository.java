@@ -93,8 +93,12 @@ public class IndexingAgentMemoryRepository implements AgentMemoryRepository {
     @Override public List<AgentMemory> findActive(String workspaceKey, int limit) { return delegate.findActive(workspaceKey, limit); }
     @Override public List<AgentMemory> findPinned(String workspaceKey, int limit) { return delegate.findPinned(workspaceKey, limit); }
     @Override public List<AgentMemory> searchByKeywords(String workspaceKey, List<String> keywords, int limit) { return delegate.searchByKeywords(workspaceKey, keywords, limit); }
-    @Override public boolean updateUsage(String memoryId, long newVersion) { return delegate.updateUsage(memoryId, newVersion); }
+    @Override public boolean updateUsage(String memoryId, long expectedVersion) { return delegate.updateUsage(memoryId, expectedVersion); }
     @Override public int countActive(String workspaceKey) { return delegate.countActive(workspaceKey); }
     @Override public List<AgentMemory> findByContentHash(String workspaceKey, String contentHash) { return delegate.findByContentHash(workspaceKey, contentHash); }
     @Override public List<AgentMemory> findBySourceRunId(String sourceRunId) { return delegate.findBySourceRunId(sourceRunId); }
+    @Override public List<AgentMemory> findExpiredActive(String workspaceKey, int unusedDays, int minImportance, int limit) { return delegate.findExpiredActive(workspaceKey, unusedDays, minImportance, limit); }
+    @Override public Optional<AgentMemory> findWeakestCandidate(String workspaceKey) { return delegate.findWeakestCandidate(workspaceKey); }
+    @Override public int batchUpdateStatus(List<String> memoryIds, MemoryStatus status) { return delegate.batchUpdateStatus(memoryIds, status); }
+    @Override public List<AgentMemory> findExpiredActiveAll(int unusedDays, int minImportance, int limit) { return delegate.findExpiredActiveAll(unusedDays, minImportance, limit); }
 }

@@ -219,6 +219,18 @@ public class AgentContext {
     public void ensureLedgerActive() { prompt.ensureLedgerActive(); }
     public int incrementGeneration() { return prompt.incrementGeneration(); }
 
+    // ---- memory recall delegates (v6) ----
+    public boolean isMemoryRecallExecuted() { return prompt.memoryRecallExecuted(); }
+    public void setMemoryRecallExecuted(boolean v) { prompt.setMemoryRecallExecuted(v); }
+    public List<String> getMemoryRecallIds() { return prompt.memoryRecallIds(); }
+    public void setMemoryRecallIds(List<String> v) { prompt.setMemoryRecallIds(v); }
+    public int getMemoryRecallCount() { return prompt.memoryRecallCount(); }
+    public void setMemoryRecallCount(int v) { prompt.setMemoryRecallCount(v); }
+    public int getMemoryRecallChars() { return prompt.memoryRecallChars(); }
+    public void setMemoryRecallChars(int v) { prompt.setMemoryRecallChars(v); }
+    public String getMemoryRecallRenderedText() { return prompt.memoryRecallRenderedText(); }
+    public void setMemoryRecallRenderedText(String v) { prompt.setMemoryRecallRenderedText(v); }
+
     // ==================== action delegates ====================
 
     public AgentDecision getDecision() { return action.decision(); }

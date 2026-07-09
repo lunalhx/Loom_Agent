@@ -18,7 +18,7 @@ public interface AgentMemoryRepository {
 
     List<AgentMemory> searchByKeywords(String workspaceKey, List<String> keywords, int limit);
 
-    boolean updateUsage(String memoryId, long newVersion);
+    boolean updateUsage(String memoryId, long expectedVersion);
 
     int countActive(String workspaceKey);
 
@@ -27,4 +27,16 @@ public interface AgentMemoryRepository {
     List<AgentMemory> findByContentHash(String workspaceKey, String contentHash);
 
     List<AgentMemory> findBySourceRunId(String sourceRunId);
+
+    List<AgentMemory> findExpiredActive(String workspaceKey, int unusedDays, int minImportance, int limit);
+
+    Optional<AgentMemory> findWeakestCandidate(String workspaceKey);
+
+    int batchUpdateStatus(List<String> memoryIds, MemoryStatus status);
+
+    /**
+     * Find active, non-pinned memories unused for longer than the given days,
+     * across ALL workspaces. Used by the scheduled archive worker.
+     */
+    List<AgentMemory> findExpiredActiveAll(int unusedDays, int minImportance, int limit);
 }

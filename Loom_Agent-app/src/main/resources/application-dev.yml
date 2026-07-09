@@ -182,6 +182,11 @@ loom:
       enabled: ${AGENT_MEMORY_ENABLED:true}
       max-selected: ${AGENT_MEMORY_MAX_SELECTED:8}
       max-injected-chars: ${AGENT_MEMORY_MAX_INJECTED_CHARS:8000}
+      pinned-limit: ${AGENT_MEMORY_PINNED_LIMIT:4}
+      min-relevance-score: ${AGENT_MEMORY_MIN_RELEVANCE_SCORE:0.35}
+      archive-after-unused-days: ${AGENT_MEMORY_ARCHIVE_AFTER_UNUSED_DAYS:90}
+      archive-min-importance: ${AGENT_MEMORY_ARCHIVE_MIN_IMPORTANCE:80}
+      cleanup-interval-hours: ${AGENT_MEMORY_CLEANUP_INTERVAL_HOURS:24}
       vector:
         enabled: ${AGENT_MEMORY_VECTOR_ENABLED:true}
         search-k: ${AGENT_MEMORY_VECTOR_SEARCH_K:50}

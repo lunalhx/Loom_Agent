@@ -87,8 +87,9 @@
         UPDATE agent_memory
         SET usage_count = usage_count + 1,
             last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-            version = #{newVersion}
+            version = version + 1
         WHERE memory_id = #{memoryId}
+          AND version = #{expectedVersion}
     </update>
 
     <select id="countActive" resultType="int">
@@ -105,6 +106,38 @@
           AND version = #{expectedVersion}
     </update>
 
+    <select id="selectExpiredActive" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+          AND pinned = 0
+          AND importance &lt; #{minImportance}
+          AND COALESCE(last_used_at, created_at) &lt; datetime('now', '-' || #{unusedDays} || ' days')
+        ORDER BY importance ASC, usage_count ASC, COALESCE(last_used_at, created_at) ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectWeakestCandidate" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE workspace_key = #{workspaceKey}
+          AND status = 'ACTIVE'
+          AND pinned = 0
+        ORDER BY importance ASC,
+                 usage_count ASC,
+                 COALESCE(last_used_at, created_at) ASC
+        LIMIT 1
+    </select>
+
+    <update id="batchUpdateStatus">
+        UPDATE agent_memory
+        SET status = #{status},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE memory_id IN
+        <foreach collection="memoryIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
     <select id="selectByContentHash" resultMap="AgentMemoryMap">
         SELECT * FROM agent_memory
         WHERE workspace_key = #{workspaceKey}
@@ -114,6 +147,16 @@
     <select id="selectBySourceRunId" resultMap="AgentMemoryMap">
         SELECT * FROM agent_memory
         WHERE source_run_id = #{sourceRunId}
+    </select>
+
+    <select id="selectExpiredActiveAll" resultMap="AgentMemoryMap">
+        SELECT * FROM agent_memory
+        WHERE status = 'ACTIVE'
+          AND pinned = 0
+          AND importance &lt; #{minImportance}
+          AND COALESCE(last_used_at, created_at) &lt; datetime('now', '-' || #{unusedDays} || ' days')
+        ORDER BY importance ASC, usage_count ASC, COALESCE(last_used_at, created_at) ASC
+        LIMIT #{limit}
     </select>
 
 </mapper>

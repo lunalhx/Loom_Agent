@@ -37,6 +37,7 @@ import cn.lunalhx.ai.domain.agent.service.subagent.RoleToolRegistryFactory;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.undo.WorkspaceUndoService;
+import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
@@ -52,6 +53,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -234,10 +236,12 @@ public class AgentLoopAutoConfig {
                                              ContextBlobStore contextBlobStore,
                                              ConversationLedgerAppendService conversationLedgerAppendService,
                                              LedgerCompactionService ledgerCompactionService,
-                                             ConversationExecutionGuard conversationExecutionGuard) {
+                                             ConversationExecutionGuard conversationExecutionGuard,
+                                             MemorySelectionService memorySelectionService) {
         return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry, undoSessionCoordinator,
                 skillRepository, contextArtifactRepository, contextBlobStore,
-                conversationLedgerAppendService, ledgerCompactionService, conversationExecutionGuard);
+                conversationLedgerAppendService, ledgerCompactionService, conversationExecutionGuard,
+                memorySelectionService);
     }
 
     @Bean
@@ -515,5 +519,16 @@ public class AgentLoopAutoConfig {
 
     private static boolean isNonDefaultList(List<String> list) {
         return list != null && !list.isEmpty();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(MemorySelectionService.class)
+    public MemorySelectionService fallbackMemorySelectionService() {
+        return new MemorySelectionService(null, null, 0, 0, 0.35, 4) {
+            @Override
+            public SelectionResult select(String ws, String q) { return SelectionResult.EMPTY; }
+            @Override
+            public String renderWrappedText(SelectionResult r) { return ""; }
+        };
     }
 }

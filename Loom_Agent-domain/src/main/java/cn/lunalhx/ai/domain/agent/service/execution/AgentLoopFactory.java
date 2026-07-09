@@ -23,6 +23,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
+import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -44,6 +45,7 @@ public class AgentLoopFactory {
     private final UndoSessionCoordinator undoCoordinator;
     private final ConversationLedgerAppendService ledgerAppendService;
     private final ConversationExecutionGuard executionGuard;
+    private final MemorySelectionService memorySelectionService;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -55,7 +57,8 @@ public class AgentLoopFactory {
                            ContextBlobStore contextBlobStore,
                             ConversationLedgerAppendService ledgerAppendService,
                             LedgerCompactionService ledgerCompactionService,
-                            ConversationExecutionGuard executionGuard) {
+                            ConversationExecutionGuard executionGuard,
+                            MemorySelectionService memorySelectionService) {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -64,12 +67,13 @@ public class AgentLoopFactory {
                 ledgerAppendService, "ledgerAppendService must not be null");
         Objects.requireNonNull(ledgerCompactionService, "ledgerCompactionService must not be null");
         this.executionGuard = Objects.requireNonNull(executionGuard, "executionGuard must not be null");
+        this.memorySelectionService = memorySelectionService;
         LedgerBootstrapService bs = new LedgerBootstrapService(
                 ledgerAppendService, new ConversationLedgerInitializer());
 
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime, hookRegistry, undoCoordinator,
                 skillRepository, contextArtifactRepository, contextBlobStore,
-                ledgerAppendService, bs, ledgerCompactionService);
+                ledgerAppendService, bs, ledgerCompactionService, memorySelectionService);
     }
 
     /**

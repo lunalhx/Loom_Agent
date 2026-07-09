@@ -29,6 +29,7 @@ public enum AgentEventType {
     BACKGROUND_TASK_FAILED("background_task_failed"),
     BACKGROUND_TASK_CANCELLED("background_task_cancelled"),
     STOP_HOOK_RESULT("stop_hook_result"),
+    MEMORY_RECALLED("memory_recalled"),
     DONE("done"),
     ERROR("error");
 

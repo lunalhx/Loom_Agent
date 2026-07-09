@@ -107,6 +107,15 @@ public final class AgentContextFactory {
                 context.setStablePrefix(previous.getStablePrefix());
                 context.setGeneration(Math.max(0, previous.getGeneration()));
             }
+
+            // Restore memory recall state (prevent re-recall on continuation)
+            if (Boolean.TRUE.equals(previous.getMemoryRecallExecuted())) {
+                context.setMemoryRecallExecuted(true);
+                context.setMemoryRecallIds(previous.getMemoryRecallIds());
+                context.setMemoryRecallCount(previous.getMemoryRecallCount() == null ? 0 : previous.getMemoryRecallCount());
+                context.setMemoryRecallChars(previous.getMemoryRecallChars() == null ? 0 : previous.getMemoryRecallChars());
+                context.setMemoryRecallRenderedText(previous.getMemoryRecallRenderedText());
+            }
         }
 
         // Defer ledger append to bootstrap

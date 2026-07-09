@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.flow;
 public final class AgentNodeNames {
 
     public static final String SKILL_BOOTSTRAP = "skill_bootstrap";
+    public static final String MEMORY_RECALL = "memory_recall";
     public static final String SKILL_ACTIVATION = "skill_activation";
     public static final String START = "start";
     public static final String PLANNER = "planner";

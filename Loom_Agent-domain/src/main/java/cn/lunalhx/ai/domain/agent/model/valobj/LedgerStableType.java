@@ -11,7 +11,8 @@ public enum LedgerStableType {
     ASSISTANT_ACTION("assistant_action"),
     TOOL_RESULT("tool_result"),
     CONTROL_UPDATE("control_update"),
-    SYSTEM_NOTE("system_note");
+    SYSTEM_NOTE("system_note"),
+    LONG_TERM_MEMORY("long_term_memory");
 
     private final String code;
 

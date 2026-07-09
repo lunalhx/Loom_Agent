@@ -15,6 +15,11 @@ public class MemoryProperties {
     private int maxInjectedChars = 8000;
     private String selectionModel;
     private String extractionModel;
+    private int pinnedLimit = 4;
+    private double minRelevanceScore = 0.35;
+    private int archiveAfterUnusedDays = 90;
+    private int archiveMinImportance = 80;
+    private int cleanupIntervalHours = 24;
     private WorkerConfig worker = new WorkerConfig();
     private VectorConfig vector = new VectorConfig();
 
