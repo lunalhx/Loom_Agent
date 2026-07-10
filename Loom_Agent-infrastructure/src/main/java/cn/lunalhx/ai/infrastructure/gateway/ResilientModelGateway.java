@@ -35,7 +35,7 @@ public class ResilientModelGateway implements ModelGateway {
     private final StreamingModelCallExecutor streamingExecutor;
 
     @Autowired
-    public ResilientModelGateway(@Qualifier("deepSeekModelGateway") ModelGateway delegate,
+    public ResilientModelGateway(@Qualifier("springAiModelGateway") ModelGateway delegate,
                                  ModelRuntimeProperties properties,
                                  TraceRecorder traceRecorder,
                                  MeterRegistry meterRegistry,

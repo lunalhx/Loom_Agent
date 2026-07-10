@@ -17,18 +17,27 @@ spring:
   ai:
     model:
       chat: none
-    deepseek:
-      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
-      api-key: ${DEEPSEEK_API_KEY:test-key}
-      chat:
-        model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
-        temperature: ${DEEPSEEK_TEMPERATURE:0.7}
-        max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
 
 loom:
   mcp:
     enabled: false
   ai:
+    provider: ${LOOM_AI_PROVIDER:deepseek}
+    providers:
+      deepseek:
+        base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        completions-path: /chat/completions
+        api-key: ${DEEPSEEK_API_KEY:test-key}
+        default-model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+        temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+        max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
+      opencode-go:
+        base-url: ${OPENCODE_GO_BASE_URL:https://opencode.ai/zen/go}
+        completions-path: ${OPENCODE_GO_COMPLETIONS_PATH:/v1/chat/completions}
+        api-key: ${OPENCODE_GO_API_KEY:}
+        default-model: ${OPENCODE_GO_MODEL:deepseek-v4-flash}
+        temperature: ${OPENCODE_GO_TEMPERATURE:0.7}
+        max-tokens: ${OPENCODE_GO_MAX_TOKENS:2048}
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:10000}
     first-token-timeout-ms: ${AI_FIRST_TOKEN_TIMEOUT_MS:30000}
     stream-timeout-ms: ${AI_STREAM_TIMEOUT_MS:120000}

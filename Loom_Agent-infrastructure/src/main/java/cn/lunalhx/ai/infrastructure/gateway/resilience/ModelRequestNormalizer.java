@@ -11,8 +11,6 @@ import org.springframework.core.env.Environment;
 
 public final class ModelRequestNormalizer {
 
-    private static final String PROVIDER = "deepseek";
-    private static final String DEFAULT_MODEL = "deepseek-v4-flash";
     private static final int DEFAULT_MAX_TOKENS = 2048;
 
     private final ModelRuntimeProperties properties;
@@ -72,36 +70,38 @@ public final class ModelRequestNormalizer {
     }
 
     public ModelCallKey key(ChatPrompt prompt) {
-        String model = StringUtils.defaultIfBlank(prompt.getModel(),
-                environment.getProperty("spring.ai.deepseek.chat.model", DEFAULT_MODEL));
+        String model = StringUtils.defaultIfBlank(prompt.getModel(), defaultModel());
         String capability = StringUtils.defaultIfBlank(prompt.getCapability(), ModelCapabilities.STREAM_CHAT);
-        return new ModelCallKey(PROVIDER, model, capability);
+        return new ModelCallKey(providerName(), model, capability);
     }
 
     String defaultModel() {
-        return environment.getProperty("spring.ai.deepseek.chat.model", DEFAULT_MODEL);
+        return properties.activeProvider().getDefaultModel();
     }
 
     int defaultMaxTokens() {
-        return environment.getProperty("spring.ai.deepseek.chat.max-tokens", Integer.class, DEFAULT_MAX_TOKENS);
+        ModelRuntimeProperties.ProviderConfig active = properties.activeProvider();
+        return active.getMaxTokens() != null ? active.getMaxTokens() : DEFAULT_MAX_TOKENS;
     }
 
     public ModelCapability capability(String model) {
-        String resolved = StringUtils.defaultIfBlank(model,
-                environment.getProperty("spring.ai.deepseek.chat.model", DEFAULT_MODEL));
+        String resolved = StringUtils.defaultIfBlank(model, defaultModel());
         return properties.capability(resolved);
     }
 
     private ChatPrompt normalize(ChatPrompt prompt, String fallback) {
         prompt.setCapability(StringUtils.defaultIfBlank(prompt.getCapability(), fallback));
-        prompt.setModel(StringUtils.defaultIfBlank(prompt.getModel(),
-                environment.getProperty("spring.ai.deepseek.chat.model", DEFAULT_MODEL)));
+        prompt.setModel(StringUtils.defaultIfBlank(prompt.getModel(), defaultModel()));
         if (prompt.getPurpose() == null) {
             prompt.setPurpose(prompt.getOutputFormat() == OutputFormat.JSON_OBJECT
                     ? ModelCallPurpose.CONTROL_JSON
                     : ModelCallPurpose.FINAL_TEXT);
         }
         return prompt;
+    }
+
+    private String providerName() {
+        return properties.getProvider();
     }
 
 }

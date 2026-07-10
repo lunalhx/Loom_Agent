@@ -300,16 +300,35 @@ public class AgentLoopAutoConfig {
             if ("none".equalsIgnoreCase(chatProvider)) {
                 return;
             }
-            String baseUrl = environment.getProperty("spring.ai.deepseek.base-url");
-            String apiKey = environment.getProperty("spring.ai.deepseek.api-key");
-            String model = environment.getProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash");
-            if (StringUtils.isBlank(baseUrl)) {
-                throw new IllegalStateException("DEEPSEEK_BASE_URL 不能为空");
+            String provider = modelRuntimeProperties.getProvider();
+            if ("none".equalsIgnoreCase(provider)) {
+                return;
             }
-            if (StringUtils.isBlank(apiKey)) {
-                throw new IllegalStateException("DEEPSEEK_API_KEY 不能为空，请参考 docs/env/.env.example");
+            if (!"deepseek".equals(provider) && !"opencode-go".equals(provider)) {
+                throw new IllegalStateException("LOOM_AI_PROVIDER 仅支持 deepseek 或 opencode-go，当前值：" + provider);
             }
-            modelRuntimeProperties.normalizeModel(model, "deepseek-v4-flash");
+            ModelRuntimeProperties.ProviderConfig activeProvider;
+            try {
+                activeProvider = modelRuntimeProperties.activeProvider();
+            } catch (Exception e) {
+                throw new IllegalStateException("Provider 配置缺失: " + e.getMessage(), e);
+            }
+            if (StringUtils.isBlank(activeProvider.getBaseUrl())) {
+                throw new IllegalStateException("Provider " + provider + " 的 base-url 不能为空");
+            }
+            if (StringUtils.isBlank(activeProvider.getApiKey())) {
+                throw new IllegalStateException("Provider " + provider + " 的 api-key 不能为空");
+            }
+            String defaultModel = activeProvider.getDefaultModel();
+            if (StringUtils.isBlank(defaultModel)) {
+                throw new IllegalStateException("Provider " + provider + " 的 default-model 不能为空");
+            }
+            modelRuntimeProperties.normalizeModel(defaultModel, defaultModel);
+
+            if (environment.containsProperty("spring.ai.deepseek.api-key")
+                    || environment.containsProperty("spring.ai.deepseek.base-url")) {
+                log.warn("检测到已废弃的 spring.ai.deepseek.* 配置，请迁移到 loom.ai.providers.deepseek.*");
+            }
             requirePositive(modelRuntimeProperties.getConnectTimeoutMs(), "AI_CONNECT_TIMEOUT_MS");
             requirePositive(modelRuntimeProperties.getFirstTokenTimeoutMs(), "AI_FIRST_TOKEN_TIMEOUT_MS");
             requirePositive(modelRuntimeProperties.getStreamTimeoutMs(), "AI_STREAM_TIMEOUT_MS");
@@ -416,7 +435,7 @@ public class AgentLoopAutoConfig {
                 if (!modelRuntimeProperties.getAllowedModels().contains(contextFallbackModel)) {
                     throw new IllegalStateException("AGENT_CONTEXT_FALLBACK_MODEL 必须存在于 allowed-models");
                 }
-                Long currentLength = modelRuntimeProperties.capability(model).getContextLength();
+                Long currentLength = modelRuntimeProperties.capability(defaultModel).getContextLength();
                 Long fallbackLength = modelRuntimeProperties.capability(contextFallbackModel).getContextLength();
                 if (currentLength == null || fallbackLength == null || fallbackLength <= currentLength) {
                     throw new IllegalStateException("AGENT_CONTEXT_FALLBACK_MODEL 的 context-length 必须大于默认模型");

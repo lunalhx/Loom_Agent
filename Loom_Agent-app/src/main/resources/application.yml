@@ -11,6 +11,11 @@ spring:
     locations: classpath:db/migration
     clean-disabled: true
     validate-on-migrate: true
+  ai:
+    retry:
+      max-attempts: 1
+      on-client-errors: false
+      on-http-codes:
   sql:
     init:
       mode: never

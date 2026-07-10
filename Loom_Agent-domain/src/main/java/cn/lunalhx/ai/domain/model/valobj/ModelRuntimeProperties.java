@@ -11,6 +11,8 @@ import java.util.Map;
 @Data
 public class ModelRuntimeProperties {
 
+    private String provider = "deepseek";
+    private Map<String, ProviderConfig> providers = new LinkedHashMap<>();
     private Long connectTimeoutMs = 10000L;
     private Long firstTokenTimeoutMs = 30000L;
     private Long streamTimeoutMs = 120000L;
@@ -57,6 +59,27 @@ public class ModelRuntimeProperties {
         pricing.put("deepseek-v4-flash", new ModelPricing());
         pricing.put("deepseek-v4-pro", new ModelPricing());
         return pricing;
+    }
+
+    @Data
+    public static class ProviderConfig {
+
+        private String baseUrl;
+        private String completionsPath;
+        private String apiKey;
+        private String defaultModel;
+        private Double temperature = 0.7;
+        private Integer maxTokens = 2048;
+
+    }
+
+    public ProviderConfig activeProvider() {
+        ProviderConfig p = providers.get(provider);
+        if (p == null) {
+            throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR,
+                    "未找到 provider 配置: " + provider, false, null, null);
+        }
+        return p;
     }
 
     @Data

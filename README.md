@@ -64,7 +64,7 @@ App 和 Playwright 全部容器化运行，SQLite 数据持久化在 `app-data` 
 ```bash
 # 1. 配置环境变量
 cp docs/env/.env.example docs/env/.env
-# 编辑 docs/env/.env，填入 DEEPSEEK_API_KEY，并修改 HOST_WORKSPACE_ROOT 为实际路径
+# 编辑 docs/env/.env，填入 DEEPSEEK_API_KEY（或切换 OPENCODE_GO_API_KEY + LOOM_AI_PROVIDER=opencode-go），并修改 HOST_WORKSPACE_ROOT 为实际路径
 
 # 2. 启动
 cd docs/dev-ops
@@ -85,7 +85,7 @@ SQLite 是嵌入式数据库，无需额外基础设施：
 ```bash
 # 1. 配置环境变量
 cp docs/env/.env.example docs/env/.env
-# 编辑 docs/env/.env，填入 DEEPSEEK_API_KEY
+# 编辑 docs/env/.env，填入 DEEPSEEK_API_KEY（或切换 OPENCODE_GO_API_KEY + LOOM_AI_PROVIDER=opencode-go）
 
 # 2. 启动应用
 mvn -pl Loom_Agent-app -am spring-boot:run
@@ -283,7 +283,7 @@ SkillBootstrap → Start → Plan → RenderPrompt → ModelCall → Decision
 |------|------|
 | **语言** | Java 21 |
 | **框架** | Spring Boot 3.4.3 |
-| **AI** | Spring AI 1.0.9 + DeepSeek |
+| **AI** | Spring AI 1.0.9 + DeepSeek / OpenCode Go |
 | **MCP** | Model Context Protocol SDK 1.1.1 |
 | **数据库** | SQLite + sqlite-vec 向量扩展 + Flyway 迁移 |
 | **ORM** | MyBatis 3.0.4 |
@@ -303,7 +303,9 @@ SkillBootstrap → Start → Plan → RenderPrompt → ModelCall → Decision
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DEEPSEEK_API_KEY` | （必填） | DeepSeek API Key |
+| `LOOM_AI_PROVIDER` | `deepseek` | AI 提供商：`deepseek` / `opencode-go` |
+| `DEEPSEEK_API_KEY` | （deepseek 必填） | DeepSeek API Key |
+| `OPENCODE_GO_API_KEY` | （opencode-go 必填） | OpenCode Go API Key |
 | `DASHSCOPE_API_KEY` | （可选） | Embedding 向量 API Key |
 | `SERVER_PORT` / `APP_HOST_PORT` | `8091` | 应用端口 |
 | `LOOM_DATA_DIR` | `~/.loom-agent` | SQLite、artifact 本地数据目录 |
