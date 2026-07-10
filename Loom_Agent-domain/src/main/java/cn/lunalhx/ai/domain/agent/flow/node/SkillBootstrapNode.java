@@ -63,12 +63,12 @@ public class SkillBootstrapNode extends AbstractAgentNode {
     protected NodeResult doApply(AgentContext context) {
         // 1. Check if skill feature is enabled
         if (skillRepository == null || !isSkillEnabled()) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
         Path workspaceRoot = context.getResolvedWorkspace();
         if (workspaceRoot == null) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
         // 2. Discover catalog (cached per run)
@@ -91,7 +91,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
         SkillCatalog catalog = context.getAvailableSkillCatalog();
         if (catalog == null) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
         // 4. Resolve target skills based on requestedSkills semantics
@@ -152,7 +152,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
         // 7. Handle project skills
         if (projectSkills.isEmpty()) {
-            return NodeResult.next(AgentNodeNames.START, activationEvents);
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, activationEvents);
         }
 
         // Filter out already approved or rejected
@@ -167,7 +167,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
         }
 
         if (pendingProjectSkills.isEmpty()) {
-            return NodeResult.next(AgentNodeNames.START, activationEvents);
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, activationEvents);
         }
 
         // 8. Create single batch approval for all pending project skills
@@ -184,16 +184,16 @@ public class SkillBootstrapNode extends AbstractAgentNode {
      */
     public NodeResult completeActivation(AgentContext context) {
         if (skillRepository == null || !isSkillEnabled()) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
         Path workspaceRoot = context.getResolvedWorkspace();
         if (workspaceRoot == null) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
         List<String> approved = context.getApprovedSkillNames();
         if (approved == null || approved.isEmpty()) {
-            return NodeResult.next(AgentNodeNames.START, List.of());
+            return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
         SkillCatalog catalog = context.getAvailableSkillCatalog();
@@ -229,7 +229,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
         context.setApprovedSkillNames(null);
         context.setPendingApprovalId(null);
 
-        return NodeResult.next(AgentNodeNames.START, events);
+        return NodeResult.next(AgentNodeNames.MEMORY_RECALL, events);
     }
 
     private AgentEvent activateSkill(AgentContext context, SkillDescriptor descriptor, Path workspaceRoot) {

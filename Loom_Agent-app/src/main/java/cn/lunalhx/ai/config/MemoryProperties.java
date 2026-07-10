@@ -8,7 +8,7 @@ public class MemoryProperties {
     private boolean enabled = false;
     private boolean useMemories = true;
     private boolean generateMemories = true;
-    private int generationDelayMinutes = 10;
+    private int generationDelayMinutes = 1;
     private boolean disableOnExternalContext = true;
     private int maxActive = 200;
     private int maxSelected = 8;

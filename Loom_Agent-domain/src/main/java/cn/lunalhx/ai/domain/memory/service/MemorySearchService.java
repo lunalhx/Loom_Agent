@@ -58,8 +58,14 @@ public class MemorySearchService {
     private List<MemorySearchHit> vectorSearch(String workspaceKey, String query, int limit) {
         EmbeddingVector queryEmbedding = embeddingGateway.embed(query);
         List<ScoredMemoryId> scored = vectorIndex.search(workspaceKey, queryEmbedding, searchK);
+        log.info("vectorSearch workspace={}, query={}..., scored={} hits",
+                workspaceKey.substring(0, Math.min(16, workspaceKey.length())),
+                query.substring(0, Math.min(50, query.length())),
+                scored.size());
         if (scored.isEmpty()) {
-            return List.of();
+            log.warn("vectorSearch returned 0 results for workspace={}, falling back to keyword", 
+                    workspaceKey.substring(0, Math.min(16, workspaceKey.length())));
+            return keywordSearch(workspaceKey, query, limit);
         }
 
         List<String> keywords = extractKeywords(query);
