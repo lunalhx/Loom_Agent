@@ -130,7 +130,7 @@ public class AgentLoopFactory {
                 state.approvalStore(), state.checkpointRepository(), state.runRepository(),
                 contextFactory, eventFactory, ledgerAppendService);
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
-                runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory);
+                runtime.traceRecorder(), runtime.agentMetrics(), flow.hookRegistry(), eventFactory, flow.nodes());
         return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory,
                 state.runRepository(), state.checkpointRepository(), state.approvalStore());
     }

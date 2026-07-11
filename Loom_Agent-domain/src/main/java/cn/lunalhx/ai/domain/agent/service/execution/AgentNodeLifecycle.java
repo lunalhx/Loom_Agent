@@ -13,7 +13,6 @@ import cn.lunalhx.ai.domain.agent.flow.hook.StopHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
-import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
@@ -23,23 +22,30 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public final class AgentNodeLifecycle {
 
     private final TraceRecorder traceRecorder;
     private final AgentMetrics agentMetrics;
     private final AgentHookRegistry hookRegistry;
     private final AgentEventFactory eventFactory;
+    private final Map<String, AgentNode> nodes;
 
     public AgentNodeLifecycle(TraceRecorder traceRecorder,
                               AgentMetrics agentMetrics,
                               AgentHookRegistry hookRegistry,
-                              AgentEventFactory eventFactory) {
+                              AgentEventFactory eventFactory,
+                              Map<String, AgentNode> nodes) {
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
         this.hookRegistry = hookRegistry;
         this.eventFactory = eventFactory;
+        this.nodes = nodes;
     }
 
     public void userPromptSubmitted(AgentContext context, Consumer<List<AgentEvent>> emitter) {
@@ -68,15 +74,20 @@ public final class AgentNodeLifecycle {
 
         if (beforeResult.continued()) {
             AgentHookAction action = beforeResult.action();
-            if (action.isClearTerminalState()) {
-                context.runtime().clearOutcomeForContinuation();
-                context.approval().setPendingApprovalId(null);
+            String targetNode = action.getNextNode();
+            if (!nodes.containsKey(targetNode)) {
+                log.warn("BEFORE_NODE hook redirect target '{}' not found, skipping redirect and executing original node '{}'", targetNode, node.name());
+            } else {
+                if (action.isClearTerminalState()) {
+                    context.runtime().clearOutcomeForContinuation();
+                    context.approval().setPendingApprovalId(null);
+                }
+                traceRecorder.recordStop(context, "continued",
+                        "before_node_hook_continued to " + targetNode);
+                agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
+                MDC.clear();
+                return AgentNodeExecution.stopContinued(targetNode, action);
             }
-            traceRecorder.recordStop(context, "continued",
-                    "before_node_hook_continued to " + action.getNextNode());
-            agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
-            MDC.clear();
-            return AgentNodeExecution.stopContinued(action.getNextNode(), action);
         }
 
         emitter.accept(List.of(eventFactory.nodeStarted(context, node)));
@@ -126,14 +137,19 @@ public final class AgentNodeLifecycle {
 
         if (stopResult.continued()) {
             AgentHookAction action = stopResult.action();
-            if (action.isClearTerminalState()) {
-                context.runtime().clearOutcomeForContinuation();
-                context.approval().setPendingApprovalId(null);
+            String targetNode = action.getNextNode();
+            if (!nodes.containsKey(targetNode)) {
+                log.warn("STOP hook redirect target '{}' not found, proceeding with original termination", targetNode);
+            } else {
+                if (action.isClearTerminalState()) {
+                    context.runtime().clearOutcomeForContinuation();
+                    context.approval().setPendingApprovalId(null);
+                }
+                traceRecorder.recordStop(context, "continued", "stop_hook_continued to " + targetNode);
+                agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
+                MDC.clear();
+                return AgentNodeExecution.stopContinued(targetNode, action);
             }
-            traceRecorder.recordStop(context, "continued", "stop_hook_continued to " + action.getNextNode());
-            agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
-            MDC.clear();
-            return AgentNodeExecution.stopContinued(action.getNextNode(), action);
         }
 
         traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));

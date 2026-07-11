@@ -10,8 +10,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -35,16 +33,13 @@ public class ApprovalGateNode extends AbstractAgentNode {
     private final ToolRegistry toolRegistry;
     private final ApprovalStore approvalStore;
     private final AgentRuntimeProperties properties;
-    private final ConversationLedgerAppendService ledgerAppendService;
 
     public ApprovalGateNode(ToolRegistry toolRegistry, ApprovalStore approvalStore,
-                            AgentRuntimeProperties properties,
-                            ConversationLedgerAppendService ledgerAppendService) {
+                            AgentRuntimeProperties properties) {
         super(AgentNodeNames.APPROVAL_GATE, List.of("decision.tool", "decision.input", "toolPolicy"));
         this.toolRegistry = toolRegistry;
         this.approvalStore = approvalStore;
         this.properties = properties;
-        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -107,10 +102,8 @@ public class ApprovalGateNode extends AbstractAgentNode {
     }
 
     private NodeResult validationFailure(AgentContext context, ToolResult result) {
-        context.setStep(context.getStep() + 1);
+        context.runtime().advanceStep();
         context.setToolResult(result);
-        appendStep(context, false);
-        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)
@@ -125,12 +118,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .input(context.getDecision().getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
-        events.add(event(context, AgentEventType.OBSERVATION)
-                .step(context.getStep())
-                .tool(context.getDecision().getTool())
-                .observation(result.getObservation())
-                .build());
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
+        return NodeResult.next(AgentNodeNames.OBSERVATION, events);
     }
 
     public ToolResult planGuardFailure(AgentContext context) {
@@ -253,15 +241,13 @@ public class ApprovalGateNode extends AbstractAgentNode {
     }
 
     private NodeResult deny(AgentContext context, ToolPolicyDecision policy) {
-        context.setStep(context.getStep() + 1);
+        context.runtime().advanceStep();
         String reason = StringUtils.defaultIfBlank(policy.getRiskReason(), "高危动作已被策略拦截");
         ToolResult result = ToolResult.failure("policy_denied", reason, 0L);
         if (policy.getMetadata() != null && !policy.getMetadata().isEmpty()) {
             result.setDetails(policy.getMetadata());
         }
         context.setToolResult(result);
-        appendStep(context, false);
-        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.POLICY_DENIED)
@@ -275,21 +261,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .observation(result.getObservation())
                 .metadata(policy.getMetadata())
                 .build());
-        events.addAll(observationEvents(context));
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
-    }
-
-    private void appendToolResultToLedger(AgentContext context, ToolResult result) {
-        if (ledgerAppendService == null) {
-            return;
-        }
-        String eventKey = ConversationLedgerInitializer.eventKey(
-                context.getRunId(), String.valueOf(context.getStep()), "tool_result");
-        String rawOutput = result != null ? result.getObservation() : "";
-        if (rawOutput == null) {
-            rawOutput = "";
-        }
-        ledgerAppendService.appendToolResult(context, rawOutput, eventKey);
+        return NodeResult.next(AgentNodeNames.OBSERVATION, events);
     }
 
 }

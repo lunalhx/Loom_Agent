@@ -337,6 +337,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 if (node == null) {
                     context.runtime().fail(AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
                     node = nodes.get(AgentNodeNames.FAIL);
+                    if (node == null) {
+                        log.error("FAIL 节点缺失，无法继续执行。currentNode={}", currentNode);
+                        sink.complete();
+                        return;
+                    }
                 }
 
                 AgentNodeExecution execution =

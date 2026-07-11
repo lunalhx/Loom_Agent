@@ -144,7 +144,7 @@ public class AgentFlowFactory {
                                 runtime.modelRuntimeProperties(), ledgerCompactionService)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
                 new InstructionGateNode(),
-                new ApprovalGateNode(toolRegistry, state.approvalStore(), properties, ledgerAppendService),
+                new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
                 new ToolDispatchNode(toolRegistry, properties, hookRegistry, contextWindowManager, ledgerAppendService),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService),

@@ -5,7 +5,7 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
+import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -53,9 +53,9 @@ public class InstructionGateNode extends AbstractAgentNode {
     }
 
     private boolean isWritableTool(String toolName) {
-        return toolName != null && (toolName.contains("file") || toolName.contains("shell")
-                || toolName.contains("git") || toolName.contains("write")
-                || toolName.contains("replace") || toolName.contains("delete"));
+        return ToolOperation.isWorkspaceWrite(toolName)
+                || "run_shell".equals(toolName)
+                || "git_op".equals(toolName);
     }
 
     String loadInstructionsChain(Path workspace, String pathScope) {
