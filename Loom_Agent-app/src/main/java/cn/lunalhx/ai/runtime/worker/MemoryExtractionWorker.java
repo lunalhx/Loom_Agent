@@ -21,8 +21,12 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 @ConditionalOnProperty(name = "loom.agent.long-term-memory.enabled", havingValue = "true")
@@ -182,6 +186,40 @@ public class MemoryExtractionWorker {
                 continue;
             }
 
+            AgentMemory conflict = findSimilarMemory(workspaceKey, em);
+            if (conflict != null) {
+                AgentMemory updated = AgentMemory.builder()
+                        .memoryId(conflict.getMemoryId())
+                        .workspaceKey(conflict.getWorkspaceKey())
+                        .workspacePath(conflict.getWorkspacePath())
+                        .type(em.type())
+                        .title(em.title())
+                        .summary(em.summary())
+                        .body(em.body())
+                        .status(conflict.getStatus())
+                        .pinned(conflict.isPinned())
+                        .importance(Math.max(conflict.getImportance(), em.importance()))
+                        .sourceType(conflict.getSourceType())
+                        .sourceRunId(conflict.getSourceRunId())
+                        .contentHash(em.contentHash())
+                        .version(conflict.getVersion())
+                        .usageCount(conflict.getUsageCount())
+                        .lastUsedAt(conflict.getLastUsedAt())
+                        .createdAt(conflict.getCreatedAt())
+                        .updatedAt(Instant.now())
+                        .build();
+                try {
+                    memoryRepository.save(updated);
+                    saved.add(updated);
+                    log.info("Updated conflicting memory: oldTitle={}, newTitle={}",
+                            conflict.getTitle(), em.title());
+                } catch (Exception e) {
+                    log.warn("Failed to update conflicting memory: title={}, error={}",
+                            em.title(), e.getMessage());
+                }
+                continue;
+            }
+
             int activeCount = memoryRepository.countActive(workspaceKey);
             if (activeCount >= maxActive) {
                 log.info("Memory capacity reached for workspace {}: {}/{}", workspaceKey, activeCount, maxActive);
@@ -219,6 +257,45 @@ public class MemoryExtractionWorker {
             }
         }
         return saved;
+    }
+
+    private AgentMemory findSimilarMemory(String workspaceKey, ExtractedMemory em) {
+        if (em.title() == null || em.title().isBlank()) {
+            return null;
+        }
+        List<AgentMemory> existing = memoryRepository.findActive(workspaceKey, 200);
+        Set<String> titleWords = Arrays.stream(em.title().toLowerCase()
+                .split("[\\s,，。.!！？?;；:：()（）\\[\\]\"']+"))
+                .filter(w -> w.length() >= 2)
+                .collect(Collectors.toSet());
+
+        for (AgentMemory m : existing) {
+            if (m.getType() != em.type()) {
+                continue;
+            }
+            if (m.getTitle() == null || m.getTitle().isBlank()) {
+                continue;
+            }
+            Set<String> existingWords = Arrays.stream(m.getTitle().toLowerCase()
+                    .split("[\\s,，。.!！？?;；:：()（）\\[\\]\"']+"))
+                    .filter(w -> w.length() >= 2)
+                    .collect(Collectors.toSet());
+
+            double jaccard = jaccard(titleWords, existingWords);
+            if (jaccard > 0.6) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    private static double jaccard(Set<String> a, Set<String> b) {
+        if (a.isEmpty() && b.isEmpty()) return 1.0;
+        Set<String> intersection = new HashSet<>(a);
+        intersection.retainAll(b);
+        Set<String> union = new HashSet<>(a);
+        union.addAll(b);
+        return (double) intersection.size() / union.size();
     }
 
     private MemoryExtractionPayload parsePayload(String json) throws IOException {

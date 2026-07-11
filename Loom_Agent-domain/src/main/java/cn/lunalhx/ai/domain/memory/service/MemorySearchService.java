@@ -24,9 +24,9 @@ public class MemorySearchService {
 
     private static final Logger log = LoggerFactory.getLogger(MemorySearchService.class);
 
-    private static final double W_DISTANCE = 0.4;
-    private static final double W_IMPORTANCE = 0.2;
-    private static final double W_RECENCY = 0.2;
+    private static final double W_DISTANCE = 0.6;
+    private static final double W_IMPORTANCE = 0.1;
+    private static final double W_RECENCY = 0.1;
     private static final double W_KEYWORD = 0.2;
 
     private final AgentMemoryRepository memoryRepository;

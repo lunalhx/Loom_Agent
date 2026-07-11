@@ -11,9 +11,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import cn.lunalhx.ai.domain.memory.model.valobj.MemoryType;
 
 public class MemorySelectionService {
 
@@ -79,6 +82,8 @@ public class MemorySelectionService {
                     .filter(h -> h.comprehensiveScore() >= minRelevanceScore)
                     .sorted(Comparator.comparingDouble(MemorySearchHit::comprehensiveScore).reversed())
                     .collect(Collectors.toList());
+
+            candidateHits = deduplicateByTitleKeyword(candidateHits);
 
             return buildResult(pinnedHits, candidateHits);
         } catch (Exception e) {
@@ -202,19 +207,85 @@ public class MemorySelectionService {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("<long_term_memories>\n");
-        sb.append("以下内容是可能相关但可能过期的历史背景。\n");
-        sb.append("当前用户指令、当前仓库事实和工具结果优先。\n\n");
+        sb.append("以下是本工作区已确认的项目规范和约定，请在本次任务中严格遵守。\n\n");
 
         for (AgentMemory m : result.memories()) {
             String typeLabel = m.getType() != null ? m.getType().name() : "UNKNOWN";
+            String guidance = typeGuidance(m.getType());
             sb.append("[").append(typeLabel).append("] ");
+            if (m.isPinned()) {
+                sb.append("[PINNED] ");
+            }
             sb.append(m.getTitle() != null ? m.getTitle() : "").append("\n");
-            sb.append(m.getSummary() != null ? m.getSummary() : "").append("\n\n");
+            sb.append(m.getSummary() != null ? m.getSummary() : "").append("\n");
+            if (m.getBody() != null && !m.getBody().isBlank()) {
+                sb.append(m.getBody()).append("\n");
+            }
+            if (guidance != null && !guidance.isBlank()) {
+                sb.append(guidance).append("\n");
+            }
+            sb.append("\n");
         }
 
         String body = sb.toString();
         body = body.replace("</long_term_memories>", "&lt;/long_term_memories>");
         return body + "</long_term_memories>";
+    }
+
+    private String typeGuidance(MemoryType type) {
+        if (type == null) return null;
+        return switch (type) {
+            case PITFALL -> "[WARNING: 此条为已知坑，必须避免重复犯同样的错误]";
+            case PREFERENCE -> "[此条为项目偏好，如与通用最佳实践冲突请优先遵循项目偏好]";
+            case WORKFLOW -> "[此条为项目工作流规范，请严格遵循]";
+            case PROJECT -> "[此条为项目事实，请作为已知条件使用]";
+            case REFERENCE -> "[此条为参考资料，可按需查阅]";
+        };
+    }
+
+    private List<MemorySearchHit> deduplicateByTitleKeyword(List<MemorySearchHit> hits) {
+        List<MemorySearchHit> result = new ArrayList<>();
+        Set<String> seenKeywords = new HashSet<>();
+
+        for (MemorySearchHit hit : hits) {
+            String title = hit.memory().getTitle();
+            if (title == null || title.isBlank()) {
+                result.add(hit);
+                continue;
+            }
+            Set<String> titleWords = Arrays.stream(title.toLowerCase()
+                    .split("[\\s,，。.!！？?;；:：()（）\\[\\]\"']+"))
+                    .filter(w -> w.length() >= 2)
+                    .collect(Collectors.toSet());
+
+            boolean isDuplicate = false;
+            for (String seen : seenKeywords) {
+                Set<String> seenWords = Arrays.stream(seen.toLowerCase()
+                        .split("[\\s,，。.!！？?;；:：()（）\\[\\]\"']+"))
+                        .filter(w -> w.length() >= 2)
+                        .collect(Collectors.toSet());
+                double jaccard = jaccardSimilarity(titleWords, seenWords);
+                if (jaccard > 0.6) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+
+            if (!isDuplicate) {
+                result.add(hit);
+                seenKeywords.add(title);
+            }
+        }
+        return result;
+    }
+
+    private double jaccardSimilarity(Set<String> a, Set<String> b) {
+        if (a.isEmpty() && b.isEmpty()) return 1.0;
+        Set<String> intersection = new HashSet<>(a);
+        intersection.retainAll(b);
+        Set<String> union = new HashSet<>(a);
+        union.addAll(b);
+        return (double) intersection.size() / union.size();
     }
 
     public record SelectionResult(List<AgentMemory> memories, List<MemorySearchHit> hits, int totalChars) {

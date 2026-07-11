@@ -346,12 +346,13 @@ public class AgentLoopAutoConfig {
             if (agentRuntimeProperties.getShellMaxStderrChars() == null || agentRuntimeProperties.getShellMaxStderrChars() <= 0) {
                 throw new IllegalStateException("AGENT_SHELL_MAX_STDERR_CHARS 必须大于 0");
             }
-            if (!"DENY".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
-                    && !"CONFIRM".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())
-                    && !"ALLOW".equalsIgnoreCase(agentRuntimeProperties.getHighRiskPolicy())) {
+            String highRiskPolicy = StringUtils.defaultIfBlank(agentRuntimeProperties.getHighRiskPolicy(), "CONFIRM").toUpperCase();
+            if (!"DENY".equals(highRiskPolicy)
+                    && !"CONFIRM".equals(highRiskPolicy)
+                    && !"ALLOW".equals(highRiskPolicy)) {
                 throw new IllegalStateException("AGENT_HIGH_RISK_POLICY 仅支持 DENY/CONFIRM/ALLOW");
             }
-            String permissionMode = StringUtils.defaultString(agentRuntimeProperties.getPermissionMode(), "SANDBOX").toUpperCase();
+            String permissionMode = StringUtils.defaultIfBlank(agentRuntimeProperties.getPermissionMode(), "SANDBOX").toUpperCase();
             if (!"SANDBOX".equals(permissionMode)
                     && !"ACCEPT_EDITS".equals(permissionMode)
                     && !"BYPASS".equals(permissionMode)) {

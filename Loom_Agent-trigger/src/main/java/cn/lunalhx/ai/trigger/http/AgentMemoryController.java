@@ -142,7 +142,7 @@ public class AgentMemoryController {
                 .importance(importance)
                 .sourceType(MemorySourceType.MANUAL_API)
                 .contentHash(existing.getContentHash())
-                .version(existing.getVersion())
+                .version(existing.getVersion() + 1)
                 .usageCount(existing.getUsageCount())
                 .lastUsedAt(existing.getLastUsedAt())
                 .createdAt(existing.getCreatedAt())

@@ -189,7 +189,7 @@ loom:
       mode: ${AGENT_PERSISTENCE_MODE:sqlite}
     long-term-memory:
       enabled: ${AGENT_MEMORY_ENABLED:true}
-      max-selected: ${AGENT_MEMORY_MAX_SELECTED:8}
+      max-selected: ${AGENT_MEMORY_MAX_SELECTED:4}
       max-injected-chars: ${AGENT_MEMORY_MAX_INJECTED_CHARS:8000}
       vector:
         enabled: ${AGENT_MEMORY_VECTOR_ENABLED:true}
