@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 
 public class McpAgentTool implements AgentTool {
@@ -34,6 +35,8 @@ public class McpAgentTool implements AgentTool {
     private final int maxDescriptionChars;
     private final McpInputSchemaSimplifier schemaSimplifier;
     private final AgentMetrics metrics;
+    private final boolean blockPrivateIps;
+    private final List<String> blockedDomains;
 
     public McpAgentTool(String serverAlias,
                         String remoteToolName,
@@ -45,7 +48,9 @@ public class McpAgentTool implements AgentTool {
                         ToolPermissionLevel permissionLevel,
                         int maxDescriptionChars,
                         McpInputSchemaSimplifier schemaSimplifier,
-                        AgentMetrics metrics) {
+                        AgentMetrics metrics,
+                        boolean blockPrivateIps,
+                        List<String> blockedDomains) {
         this.serverAlias = serverAlias;
         this.remoteToolName = remoteToolName;
         this.localName = localName;
@@ -57,6 +62,8 @@ public class McpAgentTool implements AgentTool {
         this.maxDescriptionChars = maxDescriptionChars;
         this.schemaSimplifier = schemaSimplifier;
         this.metrics = metrics;
+        this.blockPrivateIps = blockPrivateIps;
+        this.blockedDomains = blockedDomains != null ? blockedDomains : List.of();
     }
 
     @Override
@@ -109,6 +116,11 @@ public class McpAgentTool implements AgentTool {
                 }
             }
 
+            ToolResult urlCheck = validateUrl(remoteToolName, arguments, startedAt);
+            if (urlCheck != null) {
+                return urlCheck;
+            }
+
             McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(remoteToolName, arguments);
             McpSchema.CallToolResult mcpResult = client.callTool(request);
             long elapsed = System.currentTimeMillis() - startedAt;
@@ -141,6 +153,65 @@ public class McpAgentTool implements AgentTool {
             metrics.recordMcpToolDuration(serverAlias, remoteToolName, errorCode, elapsed);
             return ToolResult.failure(errorCode, "MCP tool call failed: " + e.getMessage(), elapsed);
         }
+    }
+
+    private ToolResult validateUrl(String toolName, Map<String, Object> arguments, long startedAt) {
+        if (!"browser_navigate".equals(remoteToolName) || arguments == null) {
+            return null;
+        }
+        Object urlObj = arguments.get("url");
+        if (!(urlObj instanceof String url) || url.isBlank()) {
+            return null;
+        }
+
+        try {
+            java.net.URI uri = new java.net.URI(url);
+            String host = uri.getHost();
+            if (host == null) {
+                return null;
+            }
+            host = host.toLowerCase();
+
+            if (blockPrivateIps && isPrivateHost(host)) {
+                long elapsed = System.currentTimeMillis() - startedAt;
+                return ToolResult.failure("url_blocked",
+                        "禁止访问内网地址: " + host + " [" + url + "]", elapsed);
+            }
+            for (String blocked : blockedDomains) {
+                if (host.equals(blocked) || host.endsWith("." + blocked)) {
+                    long elapsed = System.currentTimeMillis() - startedAt;
+                    return ToolResult.failure("url_blocked",
+                            "禁止访问域名: " + host + " [" + url + "]", elapsed);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - startedAt;
+            return ToolResult.failure("url_blocked", "URL 解析失败: " + e.getMessage(), elapsed);
+        }
+    }
+
+    private boolean isPrivateHost(String host) {
+        if (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("::1")
+                || host.startsWith("192.168.") || host.startsWith("10.")
+                || host.startsWith("172.") && is172Private(host)
+                || host.equals("0.0.0.0") || host.equals("[::]")
+                || host.endsWith(".local") || host.endsWith(".internal")) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean is172Private(String host) {
+        try {
+            String[] parts = host.split("\\.");
+            if (parts.length >= 2) {
+                int second = Integer.parseInt(parts[1]);
+                return second >= 16 && second <= 31;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return false;
     }
 
     private String buildDescription() {

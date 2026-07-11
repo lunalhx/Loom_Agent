@@ -34,7 +34,7 @@ public class MemoryExtractionServiceTest {
 
         ExtractionResult result = service.extract(payload, System.currentTimeMillis() + 60000);
 
-        assertTrue(result.isSuccess());
+        assertTrue(result.hasMemories());
         assertEquals(2, result.memories().size());
         assertEquals(MemoryType.PREFERENCE, result.memories().get(0).type());
         assertEquals("Uses tabs", result.memories().get(0).title());
@@ -65,7 +65,7 @@ public class MemoryExtractionServiceTest {
         ExtractionResult result = service.extract(
                 new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-        assertTrue(result.isSuccess());
+        assertTrue(result.hasMemories());
         assertEquals(1, result.memories().size());
     }
 
@@ -170,7 +170,7 @@ public class MemoryExtractionServiceTest {
         ExtractionResult result = service.extract(
                 new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-        assertTrue(result.isSuccess());
+        assertTrue(result.hasMemories());
         assertEquals(100, result.memories().get(0).importance());
         assertEquals(0, result.memories().get(1).importance());
     }
@@ -186,7 +186,7 @@ public class MemoryExtractionServiceTest {
         ExtractionResult result = service.extract(
                 new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-        assertTrue(result.isSuccess());
+        assertTrue(result.hasMemories());
         assertEquals(200, result.memories().get(0).title().length());
         assertEquals(500, result.memories().get(0).summary().length());
         assertEquals(10000, result.memories().get(0).body().length());
@@ -208,7 +208,7 @@ public class MemoryExtractionServiceTest {
         ExtractionResult result = service.extract(
                 new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-        assertTrue(result.isSuccess());
+        assertTrue(result.hasMemories());
         assertEquals(5, result.memories().size());
     }
 
@@ -222,7 +222,7 @@ public class MemoryExtractionServiceTest {
             ExtractionResult result = service.extract(
                     new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-            assertTrue("Type " + type + " should be valid", result.isSuccess());
+            assertTrue("Type " + type + " should be valid", result.hasMemories());
             assertEquals(type, result.memories().get(0).type());
         }
     }
@@ -235,7 +235,7 @@ public class MemoryExtractionServiceTest {
         ExtractionResult result = service.extract(
                 new MemoryExtractionPayload("q", "a", 1, "/tmp"), System.currentTimeMillis() + 60000);
 
-        assertTrue("Should strip plain ``` fences", result.isSuccess());
+        assertTrue("Should strip plain ``` fences", result.hasMemories());
         assertEquals(1, result.memories().size());
     }
 

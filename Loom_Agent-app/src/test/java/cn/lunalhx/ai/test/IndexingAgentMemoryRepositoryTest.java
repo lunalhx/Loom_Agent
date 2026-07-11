@@ -7,44 +7,36 @@ import cn.lunalhx.ai.domain.memory.model.valobj.MemorySourceType;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryType;
 import cn.lunalhx.ai.infrastructure.adapter.repository.IndexingAgentMemoryRepository;
+import cn.lunalhx.ai.infrastructure.dao.AgentMemoryEmbeddingJobDao;
 import org.junit.Before;
 import org.junit.Test;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class IndexingAgentMemoryRepositoryTest {
 
     private AgentMemoryRepository delegate;
     private AgentMemoryVectorIndex vectorIndex;
-    private DataSource dataSource;
-    private Connection connection;
-    private PreparedStatement ps;
+    private AgentMemoryEmbeddingJobDao embeddingJobDao;
     private IndexingAgentMemoryRepository repo;
 
     @Before
-    public void setUp() throws SQLException {
+    public void setUp() {
         delegate = mock(AgentMemoryRepository.class);
         vectorIndex = mock(AgentMemoryVectorIndex.class);
-        dataSource = mock(DataSource.class);
-        connection = mock(Connection.class);
-        ps = mock(PreparedStatement.class);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.prepareStatement(anyString())).thenReturn(ps);
-        repo = new IndexingAgentMemoryRepository(delegate, vectorIndex, dataSource);
+        embeddingJobDao = mock(AgentMemoryEmbeddingJobDao.class);
+        repo = new IndexingAgentMemoryRepository(delegate, vectorIndex, embeddingJobDao);
     }
 
     @Test
-    public void shouldDelegateSaveAndEnqueueWhenVectorAvailable() throws SQLException {
+    public void shouldDelegateSaveAndEnqueueWhenVectorAvailable() {
         when(vectorIndex.available()).thenReturn(true);
         AgentMemory mem = createMemory("m1", "test");
         when(delegate.save(mem)).thenReturn(mem);
@@ -52,55 +44,54 @@ public class IndexingAgentMemoryRepositoryTest {
         AgentMemory result = repo.save(mem);
         assertEquals("m1", result.getMemoryId());
         verify(delegate).save(mem);
-        verify(connection, atLeastOnce()).prepareStatement(contains("UPSERT"));
-        verify(ps, atLeastOnce()).executeUpdate();
+        verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("UPSERT"));
     }
 
     @Test
-    public void shouldDelegateSaveWithoutEnqueueWhenVectorUnavailable() throws SQLException {
+    public void shouldDelegateSaveWithoutEnqueueWhenVectorUnavailable() {
         when(vectorIndex.available()).thenReturn(false);
         AgentMemory mem = createMemory("m1", "test");
         when(delegate.save(mem)).thenReturn(mem);
 
         repo.save(mem);
         verify(delegate).save(mem);
-        verify(connection, never()).prepareStatement(anyString());
+        verify(embeddingJobDao, never()).insertOrIgnore(anyString(), anyString(), anyString());
     }
 
     @Test
-    public void shouldEnqueueDeleteOnArchive() throws SQLException {
+    public void shouldEnqueueDeleteOnArchive() {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(true);
 
         boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
         assertTrue(result);
         verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
-        verify(connection, atLeastOnce()).prepareStatement(contains("DELETE"));
+        verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("DELETE"));
     }
 
     @Test
-    public void shouldEnqueueDeleteOnDeleted() throws SQLException {
+    public void shouldEnqueueDeleteOnDeleted() {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.DELETED, 1L)).thenReturn(true);
 
         boolean result = repo.updateStatus("m1", MemoryStatus.DELETED, 1L);
         assertTrue(result);
-        verify(connection, atLeastOnce()).prepareStatement(contains("DELETE"));
+        verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("DELETE"));
     }
 
     @Test
-    public void shouldNotEnqueueWhenUpdateStatusFails() throws SQLException {
+    public void shouldNotEnqueueWhenUpdateStatusFails() {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(false);
 
         boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
         assertFalse(result);
         verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
-        verify(connection, never()).prepareStatement(anyString());
+        verify(embeddingJobDao, never()).insertOrIgnore(anyString(), anyString(), anyString());
     }
 
     @Test
-    public void shouldEnqueueUpsertOnActivate() throws SQLException {
+    public void shouldEnqueueUpsertOnActivate() {
         when(vectorIndex.available()).thenReturn(true);
         when(delegate.updateStatus("m1", MemoryStatus.ACTIVE, 1L)).thenReturn(true);
         AgentMemory mem = createMemory("m1", "test");
@@ -109,7 +100,7 @@ public class IndexingAgentMemoryRepositoryTest {
         boolean result = repo.updateStatus("m1", MemoryStatus.ACTIVE, 1L);
         assertTrue(result);
         verify(delegate).findById("m1");
-        verify(connection, atLeastOnce()).prepareStatement(contains("UPSERT"));
+        verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("UPSERT"));
     }
 
     @Test

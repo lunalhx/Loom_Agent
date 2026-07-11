@@ -6,10 +6,14 @@ import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+@Component
+@ConditionalOnProperty(name = "loom.agent.long-term-memory.enabled", havingValue = "true")
 public class MemoryArchiveWorker {
 
     private static final Logger log = LoggerFactory.getLogger(MemoryArchiveWorker.class);

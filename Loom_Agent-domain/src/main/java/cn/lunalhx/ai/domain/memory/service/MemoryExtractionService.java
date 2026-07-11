@@ -278,7 +278,7 @@ public class MemoryExtractionService {
             return new ExtractionResult(Collections.emptyList(), false, true, errorMessage);
         }
 
-        public boolean isSuccess() {
+        public boolean hasMemories() {
             return !isEmpty && !retryable && !memories.isEmpty();
         }
     }

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.lunalhx.ai.infrastructure.dao.AgentMemoryEmbeddingJobDao">
+
+    <resultMap id="EmbeddingJobMap" type="cn.lunalhx.ai.infrastructure.dao.po.AgentMemoryEmbeddingJobPO">
+        <id column="job_id" property="jobId"/>
+        <result column="memory_id" property="memoryId"/>
+        <result column="action" property="action"/>
+        <result column="status" property="status"/>
+        <result column="retry_count" property="retryCount"/>
+        <result column="not_before" property="notBefore"/>
+        <result column="error_message" property="errorMessage"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectNextPending" resultMap="EmbeddingJobMap">
+        SELECT job_id, memory_id, action, retry_count
+        FROM agent_memory_embedding_job
+        WHERE status = 'PENDING'
+          AND not_before &lt;= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        LIMIT 1
+    </select>
+
+    <update id="claimJob">
+        UPDATE agent_memory_embedding_job
+        SET status = 'RUNNING',
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="markSucceeded">
+        UPDATE agent_memory_embedding_job
+        SET status = 'SUCCEEDED',
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+    </update>
+
+    <update id="markFailed">
+        UPDATE agent_memory_embedding_job
+        SET status = 'FAILED',
+            retry_count = #{retryCount},
+            error_message = #{errorMessage},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+    </update>
+
+    <update id="markRetry">
+        UPDATE agent_memory_embedding_job
+        SET status = 'PENDING',
+            retry_count = #{retryCount},
+            error_message = #{errorMessage},
+            not_before = #{notBefore},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE job_id = #{jobId}
+    </update>
+
+    <insert id="insertOrIgnore">
+        INSERT OR IGNORE INTO agent_memory_embedding_job(job_id, memory_id, action)
+        VALUES (#{jobId}, #{memoryId}, #{action})
+    </insert>
+
+</mapper>

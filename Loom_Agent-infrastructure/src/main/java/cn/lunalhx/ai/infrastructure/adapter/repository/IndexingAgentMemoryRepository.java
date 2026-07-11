@@ -4,14 +4,11 @@ import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryVectorIndex;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemoryStatus;
+import cn.lunalhx.ai.infrastructure.dao.AgentMemoryEmbeddingJobDao;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,14 +19,14 @@ public class IndexingAgentMemoryRepository implements AgentMemoryRepository {
 
     private final AgentMemoryRepository delegate;
     private final AgentMemoryVectorIndex vectorIndex;
-    private final DataSource dataSource;
+    private final AgentMemoryEmbeddingJobDao embeddingJobDao;
 
     public IndexingAgentMemoryRepository(AgentMemoryRepository delegate,
-                                          AgentMemoryVectorIndex vectorIndex,
-                                          DataSource dataSource) {
+                                           AgentMemoryVectorIndex vectorIndex,
+                                           AgentMemoryEmbeddingJobDao embeddingJobDao) {
         this.delegate = delegate;
         this.vectorIndex = vectorIndex;
-        this.dataSource = dataSource;
+        this.embeddingJobDao = embeddingJobDao;
     }
 
     @Override
@@ -64,29 +61,13 @@ public class IndexingAgentMemoryRepository implements AgentMemoryRepository {
     private void enqueueUpsert(AgentMemory memory) {
         if (!vectorIndex.available()) return;
         String jobId = UUID.randomUUID().toString();
-        String sql = "INSERT OR IGNORE INTO agent_memory_embedding_job(job_id, memory_id, action) VALUES (?, ?, 'UPSERT')";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, jobId);
-            ps.setString(2, memory.getMemoryId());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            log.debug("enqueue upsert skipped: {}", e.getMessage());
-        }
+        embeddingJobDao.insertOrIgnore(jobId, memory.getMemoryId(), "UPSERT");
     }
 
     private void enqueueDelete(String memoryId) {
         if (!vectorIndex.available()) return;
         String jobId = UUID.randomUUID().toString();
-        String sql = "INSERT OR IGNORE INTO agent_memory_embedding_job(job_id, memory_id, action) VALUES (?, ?, 'DELETE')";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, jobId);
-            ps.setString(2, memoryId);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            log.debug("enqueue delete skipped: {}", e.getMessage());
-        }
+        embeddingJobDao.insertOrIgnore(jobId, memoryId, "DELETE");
     }
 
     @Override public Optional<AgentMemory> findById(String memoryId) { return delegate.findById(memoryId); }

@@ -1,0 +1,277 @@
+server:
+  port: ${SERVER_PORT:8091}
+
+thread:
+  pool:
+    executor:
+      config:
+        core-pool-size: 20
+        max-pool-size: 50
+        keep-alive-time: 5000
+        block-queue-size: 5000
+        policy: CallerRunsPolicy
+
+spring:
+  ai:
+    model:
+      chat: deepseek
+
+loom:
+  mcp:
+    enabled: ${MCP_ENABLED:false}
+    request-timeout-ms: ${MCP_REQUEST_TIMEOUT_MS:60000}
+    max-tools-per-server: ${MCP_MAX_TOOLS_PER_SERVER:64}
+    servers:
+      exa:
+        enabled: ${EXA_MCP_ENABLED:true}
+        required: false
+        transport: STREAMABLE_HTTP
+        base-url: https://mcp.exa.ai
+        endpoint: /mcp
+        enabled-tools:
+          - web_search_exa
+          - web_fetch_exa
+        default-permission: READ_ONLY
+      playwright:
+        enabled: ${PLAYWRIGHT_MCP_ENABLED:true}
+        required: false
+        transport: ${PLAYWRIGHT_MCP_TRANSPORT:STDIO}
+        command: ${PLAYWRIGHT_MCP_COMMAND:npx}
+        base-url: ${PLAYWRIGHT_MCP_BASE_URL:}
+        endpoint: /mcp
+        args:
+          - -y
+          - "@playwright/mcp@latest"
+          - --headless
+          - --browser
+          - chrome
+          - --isolated
+        env:
+          PATH: ${PLAYWRIGHT_MCP_PATH:${PATH:}}
+        enabled-tools:
+          - browser_navigate
+          - browser_snapshot
+          - browser_click
+          - browser_type
+          - browser_fill_form
+          - browser_wait_for
+          - browser_console_messages
+          - browser_network_requests
+          - browser_network_request
+          - browser_take_screenshot
+          - browser_close
+        default-permission: WRITE_CONFIRM
+        block-private-ips: true
+        blocked-domains: []
+        tool-permissions:
+          browser_snapshot: READ_ONLY
+          browser_console_messages: READ_ONLY
+          browser_network_requests: READ_ONLY
+          browser_network_request: READ_ONLY
+  ai:
+    provider: ${LOOM_AI_PROVIDER:deepseek}
+    providers:
+      deepseek:
+        base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        completions-path: /chat/completions
+        api-key: ${DEEPSEEK_API_KEY:}
+        default-model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+        temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+        max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
+      opencode-go:
+        base-url: ${OPENCODE_GO_BASE_URL:https://opencode.ai/zen/go}
+        completions-path: ${OPENCODE_GO_COMPLETIONS_PATH:/v1/chat/completions}
+        api-key: ${OPENCODE_GO_API_KEY:}
+        default-model: ${OPENCODE_GO_MODEL:deepseek-v4-flash}
+        temperature: ${OPENCODE_GO_TEMPERATURE:0.7}
+        max-tokens: ${OPENCODE_GO_MAX_TOKENS:2048}
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:10000}
+    first-token-timeout-ms: ${AI_FIRST_TOKEN_TIMEOUT_MS:30000}
+    stream-timeout-ms: ${AI_STREAM_TIMEOUT_MS:120000}
+    retry-max-attempts: ${AI_RETRY_MAX_ATTEMPTS:3}
+    retry-backoff-initial-ms: ${AI_RETRY_BACKOFF_INITIAL_MS:300}
+    retry-backoff-max-ms: ${AI_RETRY_BACKOFF_MAX_MS:3000}
+    max-message-length: ${AI_MAX_MESSAGE_LENGTH:20000}
+    resilience:
+      enabled: ${AI_RESILIENCE_ENABLED:true}
+      retry-max-attempts: ${AI_RESILIENCE_RETRY_MAX_ATTEMPTS:3}
+      retry-backoff-initial-ms: ${AI_RESILIENCE_RETRY_BACKOFF_INITIAL_MS:300}
+      retry-backoff-max-ms: ${AI_RESILIENCE_RETRY_BACKOFF_MAX_MS:3000}
+      circuit-failure-rate-threshold: ${AI_RESILIENCE_CIRCUIT_FAILURE_RATE_THRESHOLD:50}
+      circuit-slow-call-rate-threshold: ${AI_RESILIENCE_CIRCUIT_SLOW_CALL_RATE_THRESHOLD:50}
+      circuit-slow-call-duration-ms: ${AI_RESILIENCE_CIRCUIT_SLOW_CALL_DURATION_MS:30000}
+      circuit-sliding-window-size: ${AI_RESILIENCE_CIRCUIT_SLIDING_WINDOW_SIZE:10}
+      circuit-open-state-wait-ms: ${AI_RESILIENCE_CIRCUIT_OPEN_STATE_WAIT_MS:30000}
+      circuit-half-open-permitted-calls: ${AI_RESILIENCE_CIRCUIT_HALF_OPEN_PERMITTED_CALLS:2}
+      overload-fallback-threshold: ${AI_RESILIENCE_OVERLOAD_FALLBACK_THRESHOLD:3}
+      fallback-model: ${AI_RESILIENCE_FALLBACK_MODEL:deepseek-v4-pro}
+      fallback-stickiness-scope: ${AI_RESILIENCE_FALLBACK_STICKINESS_SCOPE:current_step}
+    allowed-models:
+      - deepseek-v4-flash
+      - deepseek-v4-pro
+    model-capabilities:
+      deepseek-v4-flash:
+        model: deepseek-v4-flash
+        context-length: ${DEEPSEEK_FLASH_CONTEXT_LENGTH:1000000}
+        max-output-tokens: ${DEEPSEEK_FLASH_MAX_OUTPUT_TOKENS:384000}
+        supports-json-output: true
+        supports-tool-calls: true
+      deepseek-v4-pro:
+        model: deepseek-v4-pro
+        context-length: ${DEEPSEEK_PRO_CONTEXT_LENGTH:1000000}
+        max-output-tokens: ${DEEPSEEK_PRO_MAX_OUTPUT_TOKENS:384000}
+        supports-json-output: true
+        supports-tool-calls: true
+    model-pricing:
+      deepseek-v4-flash:
+        input-price-per-1k: ${DEEPSEEK_FLASH_INPUT_PRICE_PER_1K:0}
+        output-price-per-1k: ${DEEPSEEK_FLASH_OUTPUT_PRICE_PER_1K:0}
+      deepseek-v4-pro:
+        input-price-per-1k: ${DEEPSEEK_PRO_INPUT_PRICE_PER_1K:0}
+        output-price-per-1k: ${DEEPSEEK_PRO_OUTPUT_PRICE_PER_1K:0}
+    diagnostics:
+      prompt-cache:
+        enabled: ${AI_DIAGNOSTICS_PROMPT_CACHE_ENABLED:false}
+        log-redacted-body: ${AI_DIAGNOSTICS_PROMPT_CACHE_LOG_REDACTED_BODY:false}
+        body-preview-limit: ${AI_DIAGNOSTICS_PROMPT_CACHE_BODY_PREVIEW_LIMIT:240}
+        max-conversation-keys: ${AI_DIAGNOSTICS_PROMPT_CACHE_MAX_CONVERSATION_KEYS:1024}
+        entry-ttl-seconds: ${AI_DIAGNOSTICS_PROMPT_CACHE_ENTRY_TTL_SECONDS:600}
+  agent:
+    enabled: ${AGENT_ENABLED:true}
+    workspace-root: ${AGENT_WORKSPACE_ROOT:.}
+    max-steps: ${AGENT_MAX_STEPS:30}
+    total-timeout-ms: ${AGENT_TOTAL_TIMEOUT_MS:1800000}
+    step-timeout-ms: ${AGENT_STEP_TIMEOUT_MS:120000}
+    tool-timeout-ms: ${AGENT_TOOL_TIMEOUT_MS:3000}
+    observation-max-chars: ${AGENT_OBSERVATION_MAX_CHARS:8000}
+    parse-error-max-attempts: ${AGENT_PARSE_ERROR_MAX_ATTEMPTS:2}
+    file-max-bytes: ${AGENT_FILE_MAX_BYTES:200000}
+    search-max-results: ${AGENT_SEARCH_MAX_RESULTS:50}
+    approval-ttl-seconds: ${AGENT_APPROVAL_TTL_SECONDS:900}
+    shell-timeout-ms: ${AGENT_SHELL_TIMEOUT_MS:120000}
+    shell-max-output-chars: ${AGENT_SHELL_MAX_OUTPUT_CHARS:12000}
+    shell-max-stderr-chars: ${AGENT_SHELL_MAX_STDERR_CHARS:4000}
+    high-risk-policy: ${AGENT_HIGH_RISK_POLICY:CONFIRM}
+    permission-mode: ${AGENT_PERMISSION_MODE:SANDBOX}
+    allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
+    shell-commands:
+      shell-syntax-level: ${AGENT_SHELL_SYNTAX_LEVEL:HIGH_RISK_CONFIRM}
+      shell-interpreter: ${AGENT_SHELL_INTERPRETER:/bin/sh}
+      session-grants-enabled: ${AGENT_SHELL_SESSION_GRANTS_ENABLED:true}
+      read-only: ${AGENT_SHELL_READ_ONLY:pwd,ls,cat,head,tail,wc,grep,sort,uniq,which,file,du,df,echo,rg}
+      write: ${AGENT_SHELL_WRITE:mkdir,cp,mv,touch,chmod,date,printf}
+      high-risk: ${AGENT_SHELL_HIGH_RISK:curl,wget,npm,yarn,pip,pip3,docker,ssh,scp,rsync,chown,kill,systemctl,sed,awk,tar,zip,unzip}
+      deny: ${AGENT_SHELL_DENY:rm,rmdir}
+      unknown-level: ${AGENT_SHELL_UNKNOWN_LEVEL:WRITE_CONFIRM}
+    sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
+    sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}
+    sub-agent-max-concurrency: ${AGENT_SUB_AGENT_MAX_CONCURRENCY:4}
+    sub-agent-max-depth: ${AGENT_SUB_AGENT_MAX_DEPTH:1}
+    sub-agent-timeout-ms: ${AGENT_SUB_AGENT_TIMEOUT_MS:60000}
+    sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
+    context:
+      enabled: ${AGENT_CONTEXT_ENABLED:true}
+      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${LOOM_DATA_DIR:${user.home}/.loom-agent}/context-artifacts}
+      persist-tool-result-chars: ${AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS:12000}
+      tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
+      keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
+      max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
+      auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
+      reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
+      reactive-keep-recent-entries: ${AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES:5}
+      context-safety-margin-tokens: ${AGENT_CONTEXT_SAFETY_MARGIN_TOKENS:4096}
+      summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
+      deep-summary-model: ${AGENT_CONTEXT_DEEP_SUMMARY_MODEL:}
+      deep-summary-chunk-token-limit: ${AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT:12000}
+      deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
+      deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
+    persistence:
+      mode: ${AGENT_PERSISTENCE_MODE:sqlite}
+    long-term-memory:
+      enabled: ${AGENT_MEMORY_ENABLED:true}
+      max-selected: ${AGENT_MEMORY_MAX_SELECTED:8}
+      max-injected-chars: ${AGENT_MEMORY_MAX_INJECTED_CHARS:8000}
+      vector:
+        enabled: ${AGENT_MEMORY_VECTOR_ENABLED:true}
+        search-k: ${AGENT_MEMORY_VECTOR_SEARCH_K:50}
+        embedding:
+          base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+          api-key: ${EMBEDDING_API_KEY:${DASHSCOPE_API_KEY:}}
+          model: ${EMBEDDING_MODEL:text-embedding-v4}
+          dimensions: ${EMBEDDING_DIMENSIONS:1024}
+          timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+          batch-size: ${EMBEDDING_BATCH_SIZE:64}
+    memory-store:
+      ttl-seconds: ${AGENT_MEMORY_STORE_TTL_SECONDS:3600}
+      max-runs: ${AGENT_MEMORY_STORE_MAX_RUNS:1000}
+      max-approvals: ${AGENT_MEMORY_STORE_MAX_APPROVALS:1000}
+      max-trace-runs: ${AGENT_MEMORY_STORE_MAX_TRACE_RUNS:1000}
+      max-trace-events-per-run: ${AGENT_MEMORY_STORE_MAX_TRACE_EVENTS_PER_RUN:1000}
+      max-checkpoint-runs: ${AGENT_MEMORY_STORE_MAX_CHECKPOINT_RUNS:1000}
+      max-checkpoints-per-run: ${AGENT_MEMORY_STORE_MAX_CHECKPOINTS_PER_RUN:5}
+      max-context-artifacts: ${AGENT_MEMORY_STORE_MAX_CONTEXT_ARTIFACTS:2000}
+      max-context-blobs: ${AGENT_MEMORY_STORE_MAX_CONTEXT_BLOBS:2000}
+      max-budget-states: ${AGENT_MEMORY_STORE_MAX_BUDGET_STATES:1000}
+      max-sub-agent-inboxes: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_INBOXES:1000}
+      max-sub-agent-messages-per-run: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_MESSAGES_PER_RUN:10}
+    model-recovery:
+      escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:8192}
+      continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}
+      context-fallback-model: ${AGENT_CONTEXT_FALLBACK_MODEL:}
+    budget:
+      enabled: ${AGENT_BUDGET_ENABLED:false}
+      max-total-tokens: ${AGENT_BUDGET_MAX_TOTAL_TOKENS:200000}
+      reserved-output-tokens: ${AGENT_BUDGET_RESERVED_OUTPUT_TOKENS:2048}
+      estimated-chars-per-token: ${AGENT_BUDGET_ESTIMATED_CHARS_PER_TOKEN:4}
+      input-price-per-1k: ${AGENT_BUDGET_INPUT_PRICE_PER_1K:0}
+      output-price-per-1k: ${AGENT_BUDGET_OUTPUT_PRICE_PER_1K:0}
+      max-total-cost: ${AGENT_BUDGET_MAX_TOTAL_COST:}
+    step-budget:
+      continuation-enabled: ${AGENT_STEP_BUDGET_CONTINUATION_ENABLED:true}
+      max-segments: ${AGENT_STEP_BUDGET_MAX_SEGMENTS:5}
+      child-max-segments: ${AGENT_STEP_BUDGET_CHILD_MAX_SEGMENTS:2}
+      max-total-steps: ${AGENT_STEP_BUDGET_MAX_TOTAL_STEPS:150}
+      same-action-max-repeats: ${AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS:2}
+      same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
+      no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
+    execution-guards:
+      plan-before-write: ${AGENT_PLAN_BEFORE_WRITE:true}
+      verification-after-write: ${AGENT_VERIFICATION_AFTER_WRITE:true}
+      max-verification-continuations: ${AGENT_VERIFICATION_MAX_CONTINUATIONS:2}
+    conversation-ledger:
+      compaction-high-watermark: 200
+      compaction-low-watermark: 50
+  http:
+    stream-limit:
+      enabled: ${LOOM_HTTP_STREAM_LIMIT_ENABLED:true}
+      max-client-states: ${LOOM_HTTP_STREAM_LIMIT_MAX_CLIENT_STATES:10000}
+      client-state-ttl-seconds: ${LOOM_HTTP_STREAM_LIMIT_CLIENT_STATE_TTL_SECONDS:3600}
+      agent-ask:
+        max-concurrent-global: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_CONCURRENT_GLOBAL:8}
+        max-concurrent-per-client: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_CONCURRENT_PER_CLIENT:2}
+        max-starts-per-window: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_MAX_STARTS_PER_WINDOW:6}
+        window-seconds: ${LOOM_HTTP_STREAM_LIMIT_AGENT_ASK_WINDOW_SECONDS:60}
+
+mybatis:
+  mapper-locations: classpath:/mybatis/mapper/*.xml
+  config-location: classpath:/mybatis/config/mybatis-config.xml
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml
+
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      access: read-only
+    prometheus:
+      access: read-only

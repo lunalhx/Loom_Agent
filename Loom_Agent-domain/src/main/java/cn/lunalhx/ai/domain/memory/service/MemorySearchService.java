@@ -63,7 +63,7 @@ public class MemorySearchService {
                 query.substring(0, Math.min(50, query.length())),
                 scored.size());
         if (scored.isEmpty()) {
-            log.warn("vectorSearch returned 0 results for workspace={}, falling back to keyword", 
+            log.debug("vectorSearch returned 0 results for workspace={}, falling back to keyword", 
                     workspaceKey.substring(0, Math.min(16, workspaceKey.length())));
             return keywordSearch(workspaceKey, query, limit);
         }

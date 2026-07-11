@@ -103,7 +103,13 @@ public class MemoryExtractionWorker {
                 return;
             }
 
-            List<AgentMemory> saved = saveMemories(payload, result.memories(), sourceRunId);
+            String fallbackWorkspaceKey = job.getWorkspaceKey();
+            if (payload.getWorkspacePath().isBlank() && fallbackWorkspaceKey != null && !fallbackWorkspaceKey.isBlank()) {
+                log.debug("Legacy payload has blank workspacePath; using job workspaceKey={} for jobId={}",
+                        fallbackWorkspaceKey, jobId);
+            }
+
+            List<AgentMemory> saved = saveMemories(payload, result.memories(), sourceRunId, fallbackWorkspaceKey);
             if (!saved.isEmpty()) {
                 boolean ok = jobRepository.transitionToSucceeded(jobId, workerId);
                 if (ok) {
@@ -152,10 +158,16 @@ public class MemoryExtractionWorker {
     }
 
     private List<AgentMemory> saveMemories(MemoryExtractionPayload payload,
-                                            List<ExtractedMemory> extracted,
-                                            String sourceRunId) {
+                                             List<ExtractedMemory> extracted,
+                                             String sourceRunId,
+                                             String fallbackWorkspaceKey) {
         String workspacePath = payload.getWorkspacePath();
-        String workspaceKey = cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil.compute(workspacePath);
+        String workspaceKey;
+        if (workspacePath.isBlank() && fallbackWorkspaceKey != null && !fallbackWorkspaceKey.isBlank()) {
+            workspaceKey = fallbackWorkspaceKey;
+        } else {
+            workspaceKey = cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil.compute(workspacePath);
+        }
         int maxActive = memoryProperties.getMaxActive();
 
         List<AgentMemory> existingForRun = memoryRepository.findBySourceRunId(sourceRunId);

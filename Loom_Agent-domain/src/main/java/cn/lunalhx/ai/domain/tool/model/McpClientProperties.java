@@ -44,6 +44,8 @@ public class McpClientProperties {
         private Map<String, String> toolPermissions = new HashMap<>();
         private Long connectTimeoutMs;
         private Long requestTimeoutMs;
+        private boolean blockPrivateIps = true;
+        private List<String> blockedDomains = new ArrayList<>();
 
         public enum Transport {
             STDIO,

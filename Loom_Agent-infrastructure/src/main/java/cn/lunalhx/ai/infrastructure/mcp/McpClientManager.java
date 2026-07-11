@@ -149,7 +149,9 @@ public class McpClientManager {
                     serverAlias, tool.name(), localName, client,
                     resultMapper, jsonMapper, tool, permission,
                     properties.getMaxDescriptionChars(), simplifier,
-                    metrics
+                    metrics,
+                    config.isBlockPrivateIps(),
+                    config.getBlockedDomains()
             );
             agentTools.add(agentTool);
         }

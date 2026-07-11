@@ -14,6 +14,7 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.IndexingAgentMemoryReposi
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryDao;
+import cn.lunalhx.ai.infrastructure.dao.AgentMemoryEmbeddingJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryRevisionDao;
 import cn.lunalhx.ai.runtime.worker.MemoryArchiveWorker;
@@ -50,6 +51,7 @@ public class MemoryAutoConfig {
                                                         ObjectProvider<AgentMemoryDao> daoProvider,
                                                         ObjectProvider<AgentMemoryVectorIndex> vectorIndexProvider,
                                                         ObjectProvider<DataSource> dataSourceProvider,
+                                                        ObjectProvider<AgentMemoryEmbeddingJobDao> embeddingJobDaoProvider,
                                                         MemoryProperties memoryProperties) {
         AgentMemoryDao dao = daoProvider.getIfAvailable();
         return switch (persistence.getMode()) {
@@ -65,9 +67,10 @@ public class MemoryAutoConfig {
                 MybatisAgentMemoryRepository repo = new MybatisAgentMemoryRepository(dao, memoryProperties.getMaxActive());
                 AgentMemoryVectorIndex vi = vectorIndexProvider.getIfAvailable();
                 DataSource ds = dataSourceProvider.getIfAvailable();
-                if (vi != null && vi.available() && ds != null) {
+                AgentMemoryEmbeddingJobDao embeddingJobDao = embeddingJobDaoProvider.getIfAvailable();
+                if (vi != null && vi.available() && ds != null && embeddingJobDao != null) {
                     log.info("AgentMemoryRepository: Indexing (vector search enabled)");
-                    yield new IndexingAgentMemoryRepository(repo, vi, ds);
+                    yield new IndexingAgentMemoryRepository(repo, vi, embeddingJobDao);
                 }
                 log.info("AgentMemoryRepository: MyBatis (mode=sqlite, vector disabled)");
                 yield repo;
