@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -33,6 +34,8 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("code_search")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("在工作区内执行不区分大小写的文本子串搜索，返回匹配文件、行号和代码片段。不是语义搜索，不是正则搜索。何时使用：需要根据代码内容定位文件时。何时不要使用：按文件名查找请用 find_files，读取已知路径文件请用 read_file。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
@@ -56,8 +59,9 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                 return failure("query_required", "query 不能为空", startedAt);
             }
             Path searchRoot = resolveDirectory(call, "path", ".");
-            int userLimit = Math.max(1, Math.min(properties.getSearchMaxResults(), integer(call.getInput(), "limit", 20)));
-            int collectLimit = properties.getSearchMaxResults();
+            AgentRuntimeProperties runProperties = runtimeProperties(call);
+            int userLimit = Math.max(1, Math.min(runProperties.getSearchMaxResults(), integer(call.getInput(), "limit", 20)));
+            int collectLimit = runProperties.getSearchMaxResults();
             AtomicInteger count = new AtomicInteger();
             List<SearchMatch> matches = new ArrayList<>();
             String lowerQuery = query.toLowerCase(Locale.ROOT);
@@ -65,7 +69,7 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
             Files.walkFileTree(searchRoot, new FileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt) || count.get() >= collectLimit) {
+                    if (timedOut(call, startedAt) || count.get() >= collectLimit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (isTraversalBlocked(dir)) {
@@ -76,7 +80,7 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt) || count.get() >= collectLimit) {
+                    if (timedOut(call, startedAt) || count.get() >= collectLimit) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (!Files.isRegularFile(file)) {
@@ -89,7 +93,7 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                         return FileVisitResult.CONTINUE;
                     }
                     try {
-                        if (Files.size(file) > properties.getFileMaxBytes()) {
+                        if (Files.size(file) > runProperties.getFileMaxBytes()) {
                             return FileVisitResult.CONTINUE;
                         }
                     } catch (IOException e) {
@@ -128,7 +132,7 @@ public class CodeSearchTool extends FileSystemToolSupport implements AgentTool {
                 shown++;
             }
 
-            boolean truncated = count.get() >= collectLimit || timedOut(startedAt) || matches.size() > userLimit;
+            boolean truncated = count.get() >= collectLimit || timedOut(call, startedAt) || matches.size() > userLimit;
             return ToolResult.success(output.toString(), truncated, elapsed(startedAt));
         } catch (Exception e) {
             return failure("code_search_failed", e.getMessage(), startedAt);

@@ -69,6 +69,9 @@ public class DecisionNode extends AbstractAgentNode {
             if (!isToolVisible(context, decision.getTool())) {
                 return unknownTool(context, decision);
             }
+            if (!context.getActivatedSkillToolPolicy().allows(decision.getTool())) {
+                return skillToolNotAllowed(context, decision);
+            }
             // Validate input against schema
             ToolInputValidationResult validation = validateInput(decision);
             if (!validation.valid()) {
@@ -92,20 +95,21 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         context.setParseErrors(context.getParseErrors() + 1);
-        int maxAttempts = properties.getParseErrorMaxAttempts();
+        int maxAttempts = runProperties.getParseErrorMaxAttempts();
         if (context.getParseErrors() > maxAttempts) {
             fail(context, AgentStopReason.PARSE_ERROR, "parse_error",
                     "模型连续返回非法 JSON (" + context.getParseErrors() + " 次)，已停止。最后错误: " + e.getMessage());
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
-        int fallbackThreshold = properties.getParseErrorFallbackModelThreshold() == null
-                ? 1 : properties.getParseErrorFallbackModelThreshold();
+        int fallbackThreshold = runProperties.getParseErrorFallbackModelThreshold() == null
+                ? 1 : runProperties.getParseErrorFallbackModelThreshold();
         if (context.getParseErrors() > fallbackThreshold && context.getRecoveryModelOverride() == null) {
             // Use the fallback model from ModelRecoveryProperties, or hardcode deepseek-v4-pro
-            String fallbackModel = properties.getModelRecovery() != null
-                    && properties.getModelRecovery().getContextFallbackModel() != null
-                    ? properties.getModelRecovery().getContextFallbackModel()
+            String fallbackModel = runProperties.getModelRecovery() != null
+                    && runProperties.getModelRecovery().getContextFallbackModel() != null
+                    ? runProperties.getModelRecovery().getContextFallbackModel()
                     : "deepseek-v4-pro";
             context.setRecoveryModelOverride(fallbackModel);
         }
@@ -193,6 +197,20 @@ public class DecisionNode extends AbstractAgentNode {
         return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
     }
 
+    private NodeResult skillToolNotAllowed(AgentContext context, AgentDecision decision) {
+        context.setStep(context.getStep() + 1);
+        String message = "当前激活的 Skill 不允许调用工具：" + decision.getTool();
+        context.setToolResult(ToolResult.failure("skill_tool_not_allowed", message, 0L));
+        appendStep(context, false);
+        if (ledgerAppendService != null) {
+            ledgerAppendService.appendToolResult(context,
+                    "Success: false\nErrorCode: skill_tool_not_allowed\nObservation:\n" + message,
+                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getStep()), "skill_tool_not_allowed"));
+        }
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
+    }
+
     private NodeResult invalidInput(AgentContext context, AgentDecision decision, ToolInputValidationResult validation) {
         String errorDetail = validation.errors().stream()
                 .map(e -> e.pointer() + ": " + e.message())
@@ -230,7 +248,7 @@ public class DecisionNode extends AbstractAgentNode {
         String text = ControlUpdateTexts.renderParseErrorNote(
                 context.getModelOutput(),
                 context.getParseErrors(),
-                properties.getParseErrorMaxAttempts());
+                context.runtimeProperties(properties).getParseErrorMaxAttempts());
         // Each parse error within the same step uses a distinct event key
         // (the attempt counter makes it unique)
         String eventKey = ConversationLedgerInitializer.eventKey(

@@ -1,46 +1,14 @@
 package cn.lunalhx.ai.domain.agent.model.valobj;
 
 import lombok.Data;
-
-import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.List;
+import lombok.experimental.Delegate;
 
 @Data
 public class AgentRuntimeProperties {
-
-    private Boolean enabled = true;
-    private String workspaceRoot = ".";
-    private List<String> allowedWorkspaceRoots = new ArrayList<>();
-    private Integer maxSteps = 30;
-    private Long totalTimeoutMs = 1800000L;
-    private Long stepTimeoutMs = 120000L;
-    private Long toolTimeoutMs = 3000L;
-    private Integer observationMaxChars = 8000;
-    private Integer parseErrorMaxAttempts = 2;
-    private Integer modelCallRetryMaxAttempts = 2;
-    private Integer parseErrorFallbackModelThreshold = 1;
-    private Long fileMaxBytes = 200000L;
-    private Integer searchMaxResults = 50;
-    private Long approvalTtlSeconds = 900L;
-    private Long shellTimeoutMs = 120000L;
-    private Long shellMaxTimeoutMs = 600000L;
-    private Integer shellMaxOutputChars = 12000;
-    private Integer shellMaxStderrChars = 4000;
-    private String highRiskPolicy = "CONFIRM";
-    private String permissionMode = "SANDBOX";
-    private List<String> allowedShellCommands = new ArrayList<>(List.of("mvn", "./mvnw", "git", "rm", "pwd", "ls", "rg"));
-    private ShellCommandProperties shellCommands = new ShellCommandProperties();
-    private Boolean subAgentEnabled = true;
-    private Integer subAgentMaxChildren = 6;
-    private Integer subAgentMaxConcurrency = 4;
-    private Integer subAgentMaxDepth = 1;
-    private Long subAgentTimeoutMs = 60000L;
-    private Boolean subAgentRecoveryEnabled = true;
-    private Long subAgentIdleRecoveryMs = 60000L;
-    private Long subAgentRecoveryPollIntervalMs = 1000L;
-    private Integer subAgentSummaryMaxChars = 12000;
+    @Delegate
+    private AgentCoreProperties core = new AgentCoreProperties();
     private BudgetProperties budget = new BudgetProperties();
+    private ShellCommandProperties shellCommands = new ShellCommandProperties();
     private ContextProperties context = new ContextProperties();
     private StopHooksProperties stopHooks = new StopHooksProperties();
     private ExecutionGuardProperties executionGuards = new ExecutionGuardProperties();
@@ -50,161 +18,23 @@ public class AgentRuntimeProperties {
     private ConversationLedgerProperties conversationLedger = new ConversationLedgerProperties();
     private SkillProperties skills = new SkillProperties();
     private BackgroundShellProperties backgroundShell = new BackgroundShellProperties();
+    private SandboxProperties sandbox = new SandboxProperties();
+    private MemoryRuntimeProperties longTermMemory = new MemoryRuntimeProperties();
 
-    @Data
-    public static class BudgetProperties {
-
-        private Boolean enabled = false;
-        private Integer maxTotalTokens = 200000;
-        private Integer reservedOutputTokens = 2048;
-        private Integer estimatedCharsPerToken = 4;
-        private BigDecimal inputPricePer1k = BigDecimal.ZERO;
-        private BigDecimal outputPricePer1k = BigDecimal.ZERO;
-        private BigDecimal maxTotalCost;
-
+    public synchronized void replaceFrom(AgentRuntimeProperties replacement) {
+        this.core = replacement.core;
+        this.budget = replacement.budget;
+        this.shellCommands = replacement.shellCommands;
+        this.context = replacement.context;
+        this.stopHooks = replacement.stopHooks;
+        this.executionGuards = replacement.executionGuards;
+        this.modelRecovery = replacement.modelRecovery;
+        this.stepBudget = replacement.stepBudget;
+        this.undo = replacement.undo;
+        this.conversationLedger = replacement.conversationLedger;
+        this.skills = replacement.skills;
+        this.backgroundShell = replacement.backgroundShell;
+        this.sandbox = replacement.sandbox;
+        this.longTermMemory = replacement.longTermMemory;
     }
-
-    @Data
-    public static class ModelRecoveryProperties {
-
-        private Integer escalatedMaxTokens = 8192;
-        private Integer continuationMaxAttempts = 3;
-        private String contextFallbackModel;
-
-    }
-
-    @Data
-    public static class ContextProperties {
-
-        private Boolean enabled = true;
-        private String storageRoot = System.getProperty("java.io.tmpdir") + "/loom-agent/context-artifacts";
-        private Integer persistToolResultChars = 12000;
-        private Integer toolPreviewChars = 2000;
-        private Integer keepRecentToolResults = 4;
-        private Integer maxDynamicEntries = 60;
-        private Integer autoCompactTokenLimit = 64000;
-        private Integer reactiveCompactMaxAttempts = 1;
-        private Integer reactiveKeepRecentEntries = 5;
-        private Integer contextSafetyMarginTokens = 4096;
-        private Integer summaryMaxChars = 6000;
-        private String deepSummaryModel;
-        private Integer deepSummaryChunkTokenLimit = 12000;
-        private Integer deepSummaryMaxCalls = 8;
-        private Integer deepSummaryMaxOutputTokens = 2048;
-        private Integer transcriptRetentionHours = 168;
-        private Integer transcriptCleanupIntervalMs = 3600000;
-        private Integer transcriptCleanupBatchSize = 500;
-        private Boolean transcriptCleanupEnabled = true;
-
-    }
-
-    @Data
-    public static class StopHooksProperties {
-
-        private Boolean enabled = true;
-        private IncompletePlanProperties incompletePlan = new IncompletePlanProperties();
-
-        @Data
-        public static class IncompletePlanProperties {
-
-            private Boolean enabled = true;
-            private Integer maxContinuations = 1;
-            private Boolean rootOnly = true;
-
-        }
-
-    }
-
-    @Data
-    public static class ExecutionGuardProperties {
-
-        private Boolean planBeforeWrite = false;
-        private Boolean verificationAfterWrite = false;
-        private Integer maxVerificationContinuations = 2;
-
-    }
-
-    @Data
-    public static class StepBudgetProperties {
-
-        private Boolean continuationEnabled = true;
-        private Integer maxSegments = 5;
-        private Integer childMaxSegments = 2;
-        private Integer maxTotalSteps = 150;
-        private Integer sameActionMaxRepeats = 2;
-        private Integer sameFailureMaxRepeats = 2;
-        private Integer noProgressMaxRounds = 3;
-
-    }
-
-    @Data
-    public static class UndoProperties {
-
-        private boolean enabled = true;
-        private int retentionHours = 168;
-        private int maxChangedFiles = 500;
-        private long maxChangedBytes = 104_857_600L;
-        private long commandTimeoutMs = 30_000L;
-        private long cleanupIntervalMs = 3_600_000L;
-
-    }
-
-    @Data
-    public static class ShellCommandProperties {
-
-        private String shellSyntaxLevel = "HIGH_RISK_CONFIRM";
-        private String shellInterpreter = "/bin/sh";
-        private Boolean sessionGrantsEnabled = true;
-        private List<String> readOnly = new ArrayList<>(List.of(
-                "pwd", "ls", "cat", "head", "tail", "wc", "grep", "sort", "uniq", "which", "file", "du", "df", "echo", "rg"));
-        private List<String> write = new ArrayList<>(List.of(
-                "mkdir", "cp", "mv", "touch", "chmod", "date", "printf"));
-        private List<String> highRisk = new ArrayList<>(List.of(
-                "curl", "wget", "npm", "yarn", "pip", "pip3", "docker", "ssh", "scp", "rsync", "chown", "kill",
-                "systemctl", "sed", "awk", "tar", "zip", "unzip"));
-        private List<String> deny = new ArrayList<>(List.of(
-                "rm", "rmdir", "find", "python", "python3"));
-        private String unknownLevel = "HIGH_RISK_CONFIRM";
-
-    }
-
-    @Data
-    public static class ConversationLedgerProperties {
-
-        /** C10: ledger compaction triggers when entry count exceeds this. */
-        private Integer compactionHighWatermark = 200;
-        /** C10: compaction reduces to this many entries (including summary). */
-        private Integer compactionLowWatermark = 50;
-        /** Maximum compaction depth before falling back to deterministic summary. */
-        private Integer maxCompactionDepth = 3;
-
-    }
-
-    @Data
-    public static class SkillProperties {
-
-        private Boolean enabled = true;
-        private String userDir = null;
-        private String projectDir = ".agents/skills";
-        private Integer catalogMaxChars = 8000;
-        private Integer maxResourceFiles = 256;
-        private Long maxResourceBytes = 10_485_760L;
-        private Long maxSnapshotBytes = 52_428_800L;
-
-    }
-
-    @Data
-    public static class BackgroundShellProperties {
-
-        private boolean enabled = true;
-        private int globalMaxTasks = 8;
-        private int perRunMaxTasks = 4;
-        private int ioThreads = 4;
-        private long foregroundYieldMs = 10_000L;
-        private long maxForegroundYieldMs = 30_000L;
-        private long taskRetentionHours = 24;
-        private String dataDir;
-
-    }
-
 }

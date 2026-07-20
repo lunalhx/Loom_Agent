@@ -17,7 +17,6 @@ import cn.lunalhx.ai.infrastructure.adapter.deletion.MybatisConversationPurgeHan
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryConversationDeletionRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisConversationDeletionRepository;
 import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
@@ -85,7 +84,6 @@ public class DeletionAutoConfig {
             ObjectProvider<AgentContextArtifactDao> artifactDaoProvider,
             ObjectProvider<AgentPendingApprovalDao> approvalDaoProvider,
             ObjectProvider<AgentUndoSnapshotDao> undoSnapshotDaoProvider,
-            ObjectProvider<AgentMemoryGenerationJobDao> memoryJobDaoProvider,
             ContextArtifactPurgeService purgeService,
             WorkspaceSnapshotPort workspaceSnapshotPort,
             ContextArtifactRepository artifactRepository,
@@ -102,17 +100,16 @@ public class DeletionAutoConfig {
                 AgentContextArtifactDao artifactDao = artifactDaoProvider.getIfAvailable();
                 AgentPendingApprovalDao approvalDao = approvalDaoProvider.getIfAvailable();
                 AgentUndoSnapshotDao undoSnapshotDao = undoSnapshotDaoProvider.getIfAvailable();
-                AgentMemoryGenerationJobDao memoryJobDao = memoryJobDaoProvider.getIfAvailable();
                 if (runDao == null || traceEventDao == null || checkpointDao == null
                         || artifactDao == null || approvalDao == null
-                        || undoSnapshotDao == null || memoryJobDao == null) {
+                        || undoSnapshotDao == null) {
                     throw new IllegalStateException(
                             "persistence mode=sqlite requires all DAOs, but some are not available");
                 }
                 log.info("ConversationPurgeHandler: Mybatis");
                 yield new MybatisConversationPurgeHandler(
                         runRepository, runDao, traceEventDao, checkpointDao,
-                        artifactDao, approvalDao, undoSnapshotDao, memoryJobDao,
+                        artifactDao, approvalDao, undoSnapshotDao,
                         purgeService, workspaceSnapshotPort, artifactRepository);
             }
         };

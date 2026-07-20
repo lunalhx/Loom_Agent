@@ -36,7 +36,7 @@ public class WorkspaceUndoService {
     private final WorkspaceSnapshotPort snapshotPort;
     private final AgentRunRepository runRepository;
     private final AgentWorkspaceResolver workspaceResolver;
-    private final AgentRuntimeProperties.UndoProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config;
     private final ObjectMapper objectMapper;
 
     public WorkspaceUndoService(UndoSnapshotRepository snapshotRepository,
@@ -44,7 +44,7 @@ public class WorkspaceUndoService {
                                 WorkspaceSnapshotPort snapshotPort,
                                 AgentRunRepository runRepository,
                                 AgentWorkspaceResolver workspaceResolver,
-                                AgentRuntimeProperties.UndoProperties config) {
+                                cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config) {
         this.snapshotRepository = snapshotRepository;
         this.lockRepository = lockRepository;
         this.snapshotPort = snapshotPort;

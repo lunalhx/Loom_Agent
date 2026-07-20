@@ -47,7 +47,7 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
             AgentRole role = task.getRole() == null ? AgentRole.EXPLORER : task.getRole();
             ToolRegistry childRegistry = toolRegistryFactory.create(role);
             DefaultAgentLoopService childService = serviceFactory.create(childRegistry);
-            long blockMs = blockTimeoutMs();
+            long blockMs = blockTimeoutMs(parent);
             List<AgentEvent> events = childService.ask(childQuestion(parent, task, ordinal, childRunId, role))
                     .onErrorResume(error -> Flux.just(AgentEvent.builder()
                             .type(AgentEventType.ERROR)
@@ -65,8 +65,9 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
                     .findFirst()
                     .orElse(null);
             if (answer != null && StringUtils.isNotBlank(answer.getAnswer())) {
-                String clamped = clamp(answer.getAnswer());
-                boolean truncated = StringUtils.length(answer.getAnswer()) > positive(properties.getSubAgentSummaryMaxChars(), 12000);
+                String clamped = clamp(parent, answer.getAnswer());
+                boolean truncated = StringUtils.length(answer.getAnswer()) > positive(
+                        parent.runtimeProperties(properties).getSubAgentSummaryMaxChars(), 12000);
                 int steps = stepCount(events);
                 if (isPartialAnswer(answer)) {
                     return resultFactory.partial(task, childRunId, role, clamped, truncated, steps, elapsed(startedAt));
@@ -86,10 +87,11 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
         }
     }
 
-    private long blockTimeoutMs() {
-        long timeoutMs = positive(properties.getSubAgentTimeoutMs(), 60000L);
-        long recoveryMs = Boolean.TRUE.equals(properties.getSubAgentRecoveryEnabled())
-                ? positive(properties.getSubAgentIdleRecoveryMs(), 60000L)
+    private long blockTimeoutMs(AgentContext parent) {
+        AgentRuntimeProperties runProperties = parent.runtimeProperties(properties);
+        long timeoutMs = positive(runProperties.getSubAgentTimeoutMs(), 60000L);
+        long recoveryMs = Boolean.TRUE.equals(runProperties.getSubAgentRecoveryEnabled())
+                ? positive(runProperties.getSubAgentIdleRecoveryMs(), 60000L)
                 : 0L;
         return timeoutMs + recoveryMs + 1000L;
     }
@@ -149,8 +151,8 @@ class ChildAgentRunner implements SubAgentExecutionScheduler.TaskRunner {
         return text.toString();
     }
 
-    private String clamp(String text) {
-        int maxChars = positive(properties.getSubAgentSummaryMaxChars(), 12000);
+    private String clamp(AgentContext parent, String text) {
+        int maxChars = positive(parent.runtimeProperties(properties).getSubAgentSummaryMaxChars(), 12000);
         return StringUtils.length(text) > maxChars ? StringUtils.abbreviate(text, maxChars) : text;
     }
 

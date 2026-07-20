@@ -1,12 +1,13 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.common.LoomPaths;
 import lombok.Data;
 
 @Data
 public class PersistenceProperties {
 
     private Mode mode = Mode.SQLITE;
-    private String dataDir = System.getProperty("user.home") + "/.loom-agent";
+    private String dataDir = LoomPaths.system().home().toString();
     private int busyTimeoutMs = 5000;
     private int maxPoolSize = 4;
 

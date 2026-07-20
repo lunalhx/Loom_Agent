@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets;
 
 public class ProgressGuard {
 
-    private final AgentRuntimeProperties.StepBudgetProperties stepBudget;
+    private final AgentRuntimeProperties properties;
     private final ConversationLedgerAppendService ledgerAppendService;
 
     public ProgressGuard(AgentRuntimeProperties properties) {
@@ -27,11 +27,13 @@ public class ProgressGuard {
 
     public ProgressGuard(AgentRuntimeProperties properties,
                          ConversationLedgerAppendService ledgerAppendService) {
-        this.stepBudget = properties.getStepBudget();
+        this.properties = properties;
         this.ledgerAppendService = ledgerAppendService;
     }
 
     public ProgressResult evaluate(AgentContext context) {
+        cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget =
+                context.runtimeProperties(properties).getStepBudget();
         if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
             return ProgressResult.CONTINUE;
         }
@@ -55,10 +57,10 @@ public class ProgressGuard {
         }
 
         if (!result.isSuccess()) {
-            return evaluateFailure(context, result);
+            return evaluateFailure(context, result, stepBudget);
         }
 
-        return evaluateAction(context);
+        return evaluateAction(context, stepBudget);
     }
 
     private boolean isProgressMaking(AgentContext context) {
@@ -83,7 +85,8 @@ public class ProgressGuard {
         return false;
     }
 
-    private ProgressResult evaluateAction(AgentContext context) {
+    private ProgressResult evaluateAction(AgentContext context,
+                                          cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget) {
         String fingerprint = actionFingerprint(context);
         int maxRepeats = stepBudget.getSameActionMaxRepeats() != null
                 ? stepBudget.getSameActionMaxRepeats() : 2;
@@ -105,7 +108,8 @@ public class ProgressGuard {
         return ProgressResult.CONTINUE;
     }
 
-    private ProgressResult evaluateFailure(AgentContext context, ToolResult result) {
+    private ProgressResult evaluateFailure(AgentContext context, ToolResult result,
+                                           cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget) {
         String fingerprint = failureFingerprint(context, result);
         AgentRuntimeState runtime = context.runtime();
         int maxRepeats = stepBudget.getSameFailureMaxRepeats() != null

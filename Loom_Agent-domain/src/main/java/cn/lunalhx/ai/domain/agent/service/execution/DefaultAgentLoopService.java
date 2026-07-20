@@ -36,6 +36,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxProvider;
 
 @Slf4j
 public class DefaultAgentLoopService implements AgentLoopService {
@@ -48,16 +49,24 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
+    private final SandboxProvider sandboxProvider;
 
     // ==================== 生产构造器 ====================
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor, ConversationExecutionGuard executionGuard) {
+        this(assembly, executor, executionGuard, null);
+    }
+
+    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
+                            ConversationExecutionGuard executionGuard,
+                            SandboxProvider sandboxProvider) {
         this.properties = assembly.properties();
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
         this.executor = executor;
         this.undoCoordinator = assembly.undoCoordinator();
         this.executionGuard = executionGuard;
+        this.sandboxProvider = sandboxProvider;
     }
 
     // ==================== 公共入口 ====================
@@ -67,8 +76,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), (sink, capture) -> {
             AgentContext context = resolveContext(question);
             capture.accept(context);
-            String lockKey = ConversationExecutionGuard.effectiveLockKey(
-                    context.getConversationId(), context.getRunId());
+            String lockKey = StringUtils.isBlank(context.getParentRunId())
+                    ? ConversationExecutionGuard.effectiveLockKey(
+                            context.getConversationId(), context.getRunId())
+                    : null;
             String token = null;
             if (lockKey != null) {
                 token = executionGuard.tryAcquire(lockKey);
@@ -247,6 +258,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
         for (String runId : runIds) {
             cancelRun(runId);
         }
+        if (sandboxProvider != null) {
+            sandboxProvider.endConversation(conversationId);
+        }
     }
 
     @Override
@@ -385,7 +399,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
     // ==================== 私有辅助 ====================
 
     private boolean isTotalTimeout(AgentContext context) {
-        return Duration.between(context.runtime().startedAt(), Instant.now()).toMillis() > properties.getTotalTimeoutMs();
+        return Duration.between(context.runtime().startedAt(), Instant.now()).toMillis()
+                > context.runtimeProperties(properties).getTotalTimeoutMs();
     }
 
     private void emit(FluxSink<AgentEvent> sink, List<AgentEvent> events) {

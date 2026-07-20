@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 
 @Data
 @Builder
@@ -24,6 +25,8 @@ public class BackgroundShellTask {
     private String errorMessage;
     private String stdoutFile;
     private String stderrFile;
+    @Builder.Default
+    private List<String> envKeys = List.of();
     private long stdoutBytes;
     private long stderrBytes;
     private Instant startedAt;

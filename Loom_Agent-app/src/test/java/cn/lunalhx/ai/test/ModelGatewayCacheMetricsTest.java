@@ -627,6 +627,10 @@ public class ModelGatewayCacheMetricsTest {
         properties.getResilience().setCircuitSlidingWindowSize(slidingWindowSize);
         properties.getResilience().setCircuitOpenStateWaitMs(5000L);
         properties.getResilience().setCircuitFailureRateThreshold(50.0F);
+        ModelRuntimeProperties.ProviderConfig cfg = new ModelRuntimeProperties.ProviderConfig();
+        cfg.setDefaultModel("deepseek-v4-flash");
+        cfg.setMaxTokens(2048);
+        properties.getProviders().put("deepseek", cfg);
         return properties;
     }
 

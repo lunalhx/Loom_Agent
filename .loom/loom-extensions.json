@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "exa": {
+      "enabled": true,
+      "required": false,
+      "transport": "STREAMABLE_HTTP",
+      "baseUrl": "https://mcp.exa.ai",
+      "endpoint": "/mcp",
+      "enabledTools": ["web_search_exa", "web_fetch_exa"],
+      "defaultPermission": "READ_ONLY"
+    },
+    "playwright": {
+      "enabled": true,
+      "required": false,
+      "transport": "STDIO",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chrome", "--isolated"],
+      "env": {
+        "PATH": "${PATH}"
+      },
+      "enabledTools": [
+        "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
+        "browser_fill_form", "browser_wait_for", "browser_console_messages",
+        "browser_network_requests", "browser_network_request", "browser_take_screenshot",
+        "browser_close"
+      ],
+      "defaultPermission": "WRITE_CONFIRM",
+      "blockPrivateIps": true,
+      "blockedDomains": [],
+      "toolPermissions": {
+        "browser_snapshot": "READ_ONLY",
+        "browser_console_messages": "READ_ONLY",
+        "browser_network_requests": "READ_ONLY",
+        "browser_network_request": "READ_ONLY"
+      }
+    }
+  },
+  "skills": {}
+}

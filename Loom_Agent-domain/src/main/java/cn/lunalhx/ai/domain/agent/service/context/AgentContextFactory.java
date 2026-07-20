@@ -5,6 +5,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
@@ -25,6 +27,7 @@ public final class AgentContextFactory {
     private final List<ToolSpec> toolSpecs;
     private final boolean subAgentAvailable;
     private final ConversationLedgerAppendService ledgerAppendService;
+    private final AgentRuntimeConfigSource runtimeConfigSource;
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
@@ -38,17 +41,30 @@ public final class AgentContextFactory {
                                List<ToolSpec> toolSpecs,
                                boolean subAgentAvailable,
                                ConversationLedgerAppendService ledgerAppendService) {
+        this(properties, workspaceResolver, toolSpecs, subAgentAvailable, ledgerAppendService,
+                () -> AgentRunConfig.startup(properties,
+                        new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties()));
+    }
+
+    public AgentContextFactory(AgentRuntimeProperties properties,
+                               AgentWorkspaceResolver workspaceResolver,
+                               List<ToolSpec> toolSpecs,
+                               boolean subAgentAvailable,
+                               ConversationLedgerAppendService ledgerAppendService,
+                               AgentRuntimeConfigSource runtimeConfigSource) {
         this.properties = properties;
         this.workspaceResolver = workspaceResolver;
         this.toolSpecs = List.copyOf(toolSpecs);
         this.subAgentAvailable = subAgentAvailable;
         this.ledgerAppendService = ledgerAppendService;
+        this.runtimeConfigSource = runtimeConfigSource;
     }
 
     public AgentContext create(AgentQuestion question) {
         AgentWorkspace workspace = workspaceResolver.resolve(question.getWorkspace());
         String runId = StringUtils.defaultIfBlank(question.getRunId(), UUID.randomUUID().toString());
         AgentContext context = new AgentContext();
+        context.setRunConfig(runtimeConfigSource.captureRunConfig());
         applyCommonFields(context, question, workspace, runId);
         if (StringUtils.isBlank(question.getConversationId())) {
             context.setConversationId(UUID.randomUUID().toString());
@@ -63,6 +79,7 @@ public final class AgentContextFactory {
         String requestId = StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString());
 
         AgentContext context = new AgentContext();
+        context.setRunConfig(runtimeConfigSource.captureRunConfig());
         context.setRunId(runId);
         context.setParentRunId(question.getParentRunId());
         String rootRunId = previous != null && StringUtils.isNotBlank(previous.getRootRunId())
@@ -79,7 +96,8 @@ public final class AgentContextFactory {
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
-        context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        context.setMaxSteps(question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
         context.setStep(0);
         context.setParseErrors(0);
@@ -144,7 +162,8 @@ public final class AgentContextFactory {
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
-        context.setMaxSteps(question.getMaxSteps() == null ? properties.getMaxSteps() : question.getMaxSteps());
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        context.setMaxSteps(question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
         context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
         List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
@@ -159,7 +178,8 @@ public final class AgentContextFactory {
     }
 
     private void initStepBudget(AgentContext context, AgentQuestion question) {
-        AgentRuntimeProperties.StepBudgetProperties stepBudget = properties.getStepBudget();
+        cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget =
+                context.runtimeProperties(properties).getStepBudget();
         if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
             context.setMaxSegments(1);
             context.setMaxTotalSteps(context.getMaxSteps());
@@ -183,6 +203,7 @@ public final class AgentContextFactory {
     }
 
     public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {
+        context.setRunConfig(runtimeConfigSource.captureRunConfig());
         restoreWorkspace(context, workspace);
         context.setStartedAt(Instant.now());
         context.setCheckpointVersion(checkpointVersion);
@@ -198,6 +219,7 @@ public final class AgentContextFactory {
     }
 
     public AgentContext prepareApprovalResume(AgentContext context, PendingApproval approval) {
+        context.setRunConfig(runtimeConfigSource.captureRunConfig());
         restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
         context.setWorkspace(approval.getWorkspace());
         context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
@@ -215,10 +237,12 @@ public final class AgentContextFactory {
 
     private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
         boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         return requested
                 && subAgentAvailable
-                && Boolean.TRUE.equals(properties.getSubAgentEnabled())
-                && context.getAgentDepth() < Math.max(1, properties.getSubAgentMaxDepth() == null ? 1 : properties.getSubAgentMaxDepth());
+                && Boolean.TRUE.equals(runProperties.getSubAgentEnabled())
+                && context.getAgentDepth() < Math.max(1,
+                runProperties.getSubAgentMaxDepth() == null ? 1 : runProperties.getSubAgentMaxDepth());
     }
 
     private void restoreWorkspace(AgentContext context, String workspace) {

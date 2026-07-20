@@ -111,12 +111,13 @@ class SubAgentExecutionScheduler {
     private List<SubAgentResult> recoverAndCollect(List<SubAgentRunHandle> handles,
                                                     SubAgentDispatchPlan plan,
                                                     AgentContext parent) {
-        if (!Boolean.TRUE.equals(properties.getSubAgentRecoveryEnabled())) {
+        AgentRuntimeProperties runProperties = parent.runtimeProperties(properties);
+        if (!Boolean.TRUE.equals(runProperties.getSubAgentRecoveryEnabled())) {
             handles.forEach(h -> h.future().cancel(true));
             return collectTimeoutResults(handles, plan);
         }
 
-        long recoveryMs = positive(properties.getSubAgentIdleRecoveryMs(), 60000L);
+        long recoveryMs = positive(runProperties.getSubAgentIdleRecoveryMs(), 60000L);
         long deadline = System.currentTimeMillis() + recoveryMs;
 
         for (SubAgentRunHandle handle : handles) {
@@ -130,7 +131,7 @@ class SubAgentExecutionScheduler {
             }
         }
 
-        long pollInterval = positive(properties.getSubAgentRecoveryPollIntervalMs(), 1000L);
+        long pollInterval = positive(runProperties.getSubAgentRecoveryPollIntervalMs(), 1000L);
         while (System.currentTimeMillis() < deadline) {
             boolean allDone = handles.stream().allMatch(h -> h.future().isDone());
             if (allDone) {

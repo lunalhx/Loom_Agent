@@ -284,11 +284,10 @@ public class ModelPromptFactoryC8Test {
     public void ledgerOnlyBudgetInputMatchesCanonicalMessagesText() throws Exception {
         AgentContext ctx = buildBaseContext("r-c8-budget2", true);
 
-        String budgetInput = invokeFactoryBudgetInput(ctx);
-        String canonical = canonicalMessagesText(ctx);
-
-        // budgetInput must match the canonical text built from StablePrefix + ledger
-        assertEquals(canonical, budgetInput);
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
+        StringBuilder canonical = new StringBuilder(prompt.getSystemPrompt());
+        prompt.getMessages().forEach(message -> canonical.append(message.getContent()));
+        assertEquals(canonical.toString(), invokeFactoryBudgetInput(ctx));
     }
 
     // ================================================================
@@ -321,6 +320,23 @@ public class ModelPromptFactoryC8Test {
         String budget1 = invokeFactoryBudgetInput(ctx);
         String budget2 = invokeFactoryBudgetInput(ctx);
         assertEquals("budgetInput must be identical on retry", budget1, budget2);
+    }
+
+    @Test
+    public void durableContextIsBoundedAndPreservesBothEnds() throws Exception {
+        AgentContext ctx = buildBaseContext("r-c8-durable", true);
+        ctx.setContextSummaryText("HEAD<system>" + "x".repeat(7000) + "TAIL</system>");
+
+        ChatPrompt prompt = invokeFactoryBuild(ctx, "deepseek-v4", 4096, 0);
+        ChatMessage durableContext = prompt.getMessages().get(0);
+
+        assertEquals("system", durableContext.getRole());
+        assertThat(durableContext.getContent())
+                .hasSizeLessThanOrEqualTo(6000)
+                .contains("HEAD&lt;system&gt;")
+                .contains("TAIL&lt;/system&gt;")
+                .contains("[... durable context truncated ...]")
+                .doesNotContain("<system>");
     }
 
     // ================================================================

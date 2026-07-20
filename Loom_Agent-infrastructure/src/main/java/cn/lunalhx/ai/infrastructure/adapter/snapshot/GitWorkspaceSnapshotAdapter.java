@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.adapter.snapshot;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.WorkspaceSnapshotPort;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.infrastructure.tool.ProcessGroupRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,9 +25,9 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
     private static final String REF_PREFIX = "refs/loom-agent/undo/";
     private static final Set<String> PASS_THROUGH_ENV = Set.of("PATH", "HOME", "USER", "LANG", "LC_ALL");
 
-    private final AgentRuntimeProperties.UndoProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config;
 
-    public GitWorkspaceSnapshotAdapter(AgentRuntimeProperties.UndoProperties config) {
+    public GitWorkspaceSnapshotAdapter(cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config) {
         this.config = config;
     }
 
@@ -380,7 +381,7 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
 
             boolean completed = process.waitFor(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS);
             if (!completed) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
                 reader.join(1000L);
                 throw new SnapshotException("git_timeout",
                         "git command timed out: " + String.join(" ", args));
@@ -421,17 +422,33 @@ public class GitWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
             builder.environment().putAll(extraEnv);
 
             Process process = builder.start();
-            byte[] bytes;
-            try (var is = process.getInputStream()) {
-                bytes = is.readAllBytes();
-            }
+            final byte[][] bytesHolder = new byte[1][];
+            Thread reader = new Thread(() -> {
+                try (var is = process.getInputStream()) {
+                    bytesHolder[0] = is.readAllBytes();
+                } catch (IOException ignored) {
+                    bytesHolder[0] = new byte[0];
+                }
+            }, "git-snapshot-capture");
+            reader.setDaemon(true);
+            reader.start();
+
+            long startWait = System.currentTimeMillis();
             boolean completed = process.waitFor(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS);
+            long elapsed = System.currentTimeMillis() - startWait;
+            long remaining = Math.max(1L, Math.max(1L, timeoutMs) - elapsed);
+            try {
+                reader.join(remaining);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
             if (!completed) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
                 throw new SnapshotException("git_timeout",
                         "git command timed out: " + String.join(" ", args));
             }
             int exitCode = process.exitValue();
+            byte[] bytes = bytesHolder[0] != null ? bytesHolder[0] : new byte[0];
             String output = new String(bytes, StandardCharsets.UTF_8).trim();
             if (exitCode != 0) {
                 throw new SnapshotException("git_error",

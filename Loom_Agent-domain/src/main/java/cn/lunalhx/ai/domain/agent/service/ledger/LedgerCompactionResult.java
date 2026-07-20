@@ -24,15 +24,23 @@ public record LedgerCompactionResult(
         int compactionDepth,
         int maxInputCompactionDepth,
         int maxAllowedCompactionDepth,
-        boolean depthGuarded) {
+        boolean depthGuarded,
+        int estimatedTokens,
+        int tokenLimit) {
 
     public static LedgerCompactionResult notNeeded(int entryCount, int generation) {
-        return new LedgerCompactionResult(false, generation, entryCount, entryCount, null, null, 0, 0, 0, false);
+        return new LedgerCompactionResult(false, generation, entryCount, entryCount, null, null, 0, 0, 0, false, -1, -1);
+    }
+
+    public static LedgerCompactionResult notNeeded(int entryCount, int generation,
+                                                    int estimatedTokens, int tokenLimit) {
+        return new LedgerCompactionResult(false, generation, entryCount, entryCount,
+                null, null, 0, 0, 0, false, estimatedTokens, tokenLimit);
     }
 
     public static LedgerCompactionResult compacted(int generation, int before, int after,
                                                     String strategy, String transcriptArtifactId) {
-        return new LedgerCompactionResult(true, generation, before, after, strategy, transcriptArtifactId, 0, 0, 0, false);
+        return new LedgerCompactionResult(true, generation, before, after, strategy, transcriptArtifactId, 0, 0, 0, false, -1, -1);
     }
 
     public static LedgerCompactionResult compactedWithDepth(int generation, int before, int after,
@@ -41,6 +49,15 @@ public record LedgerCompactionResult(
                                                              int maxAllowedCompactionDepth, boolean depthGuarded) {
         return new LedgerCompactionResult(true, generation, before, after, strategy,
                 transcriptArtifactId, compactionDepth, maxInputCompactionDepth,
-                maxAllowedCompactionDepth, depthGuarded);
+                maxAllowedCompactionDepth, depthGuarded, -1, -1);
+    }
+
+    public static LedgerCompactionResult compactedWithTokens(int generation, int before, int after,
+            String strategy, String transcriptArtifactId, int compactionDepth,
+            int maxInputCompactionDepth, int maxAllowedCompactionDepth, boolean depthGuarded,
+            int estimatedTokens, int tokenLimit) {
+        return new LedgerCompactionResult(true, generation, before, after, strategy,
+                transcriptArtifactId, compactionDepth, maxInputCompactionDepth,
+                maxAllowedCompactionDepth, depthGuarded, estimatedTokens, tokenLimit);
     }
 }

@@ -52,7 +52,7 @@ public class DefaultBudgetGuard implements BudgetGuard {
 
     @Override
     public BudgetCheckResult checkBeforeModelCall(AgentContext context, String node, String input) {
-        AgentRuntimeProperties.BudgetProperties budget = budget();
+        cn.lunalhx.ai.domain.agent.model.valobj.BudgetProperties budget = budget(context);
         long usedTokens = currentUsedTokens(context);
         long estimatedInputTokens = estimateTokens(input, budget);
         long reservedOutputTokens = positive(budget.getReservedOutputTokens(), 0);
@@ -80,15 +80,15 @@ public class DefaultBudgetGuard implements BudgetGuard {
                                                   String input,
                                                   int requestedMaxTokens) {
         BudgetCheckResult tokenCheck = checkBeforeModelCall(context, node, input);
-        if (!tokenCheck.isAllowed() || !Boolean.TRUE.equals(budget().getEnabled())) {
+        if (!tokenCheck.isAllowed() || !Boolean.TRUE.equals(budget(context).getEnabled())) {
             return tokenCheck;
         }
-        BigDecimal maxTotalCost = budget().getMaxTotalCost();
+        BigDecimal maxTotalCost = budget(context).getMaxTotalCost();
         if (maxTotalCost == null || maxTotalCost.signum() <= 0) {
             return tokenCheck;
         }
         long estimatedInputTokens = tokenCheck.getEstimatedInputTokens();
-        ModelPricing pricing = pricing(model);
+        ModelPricing pricing = pricing(model, context);
         BigDecimal estimatedRequestCost = price(pricing.getInputPricePer1k(), estimatedInputTokens)
                 .add(price(pricing.getOutputPricePer1k(), Math.max(0, requestedMaxTokens)));
         BigDecimal remainingCost = maxTotalCost.subtract(context.getEstimatedCost());
@@ -112,7 +112,7 @@ public class DefaultBudgetGuard implements BudgetGuard {
         if (totalTokens <= 0) {
             totalTokens = promptTokens + completionTokens;
         }
-        TraceCost cost = calculateCost(actualModel, promptTokens, completionTokens);
+        TraceCost cost = calculateCost(actualModel, promptTokens, completionTokens, context);
         String rootRunId = rootRunId(context);
         final long finalTotalTokens = totalTokens;
         final BigDecimal costAmount = cost != null ? cost.getTotalCost() : null;
@@ -150,8 +150,9 @@ public class DefaultBudgetGuard implements BudgetGuard {
         return context.getUsedTokens();
     }
 
-    private TraceCost calculateCost(String model, long promptTokens, long completionTokens) {
-        ModelPricing pricing = pricing(model);
+    private TraceCost calculateCost(String model, long promptTokens, long completionTokens,
+                                    AgentContext context) {
+        ModelPricing pricing = pricing(model, context);
         BigDecimal inputCost = price(pricing.getInputPricePer1k(), promptTokens);
         BigDecimal outputCost = price(pricing.getOutputPricePer1k(), completionTokens);
         return TraceCost.builder()
@@ -161,14 +162,17 @@ public class DefaultBudgetGuard implements BudgetGuard {
                 .build();
     }
 
-    private ModelPricing pricing(String model) {
-        if (modelProperties != null && StringUtils.isNotBlank(model)) {
-            ModelPricing configured = modelProperties.getModelPricing().get(model);
+    private ModelPricing pricing(String model, AgentContext context) {
+        ModelRuntimeProperties effectiveModel = context == null
+                ? modelProperties : context.modelRuntimeProperties(modelProperties);
+        if (effectiveModel != null && StringUtils.isNotBlank(model)) {
+            ModelPricing configured = effectiveModel.getModelPricing().get(model);
             if (configured != null) {
                 return configured;
             }
         }
-        return new ModelPricing(budget().getInputPricePer1k(), budget().getOutputPricePer1k());
+        var budget = budget(context);
+        return new ModelPricing(budget.getInputPricePer1k(), budget.getOutputPricePer1k());
     }
 
     private BigDecimal price(BigDecimal pricePer1k, long tokens) {
@@ -179,7 +183,7 @@ public class DefaultBudgetGuard implements BudgetGuard {
                 .divide(BigDecimal.valueOf(1000L), 8, RoundingMode.HALF_UP);
     }
 
-    private long estimateTokens(String input, AgentRuntimeProperties.BudgetProperties budget) {
+    private long estimateTokens(String input, cn.lunalhx.ai.domain.agent.model.valobj.BudgetProperties budget) {
         if (StringUtils.isEmpty(input)) {
             return 0L;
         }
@@ -187,11 +191,12 @@ public class DefaultBudgetGuard implements BudgetGuard {
         return (StringUtils.length(input) + charsPerToken - 1L) / charsPerToken;
     }
 
-    private AgentRuntimeProperties.BudgetProperties budget() {
-        if (properties.getBudget() == null) {
-            properties.setBudget(new AgentRuntimeProperties.BudgetProperties());
+    private cn.lunalhx.ai.domain.agent.model.valobj.BudgetProperties budget(AgentContext context) {
+        AgentRuntimeProperties effective = context == null ? properties : context.runtimeProperties(properties);
+        if (effective.getBudget() == null) {
+            effective.setBudget(new cn.lunalhx.ai.domain.agent.model.valobj.BudgetProperties());
         }
-        return properties.getBudget();
+        return effective.getBudget();
     }
 
     private String rootRunId(AgentContext context) {

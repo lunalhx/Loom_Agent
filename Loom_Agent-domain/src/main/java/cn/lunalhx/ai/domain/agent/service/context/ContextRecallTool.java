@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.StringUtils;
 
@@ -31,6 +32,8 @@ public class ContextRecallTool implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name(NAME)
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("读取被压缩或外置的当前运行的上下文 artifact。只读取 Agent 上下文历史，不读取工作区文件。何时使用：需要回顾被压缩的旧 Observation 或子 Agent 摘要时。何时不要使用：读取工作区文件请用 read_file，搜索代码请用 code_search。支持 list/search/get 三种操作。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +

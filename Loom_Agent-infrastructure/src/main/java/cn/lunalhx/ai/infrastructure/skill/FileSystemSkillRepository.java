@@ -3,8 +3,10 @@ package cn.lunalhx.ai.infrastructure.skill;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillCatalog;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillDescriptor;
+import cn.lunalhx.ai.domain.common.LoomPaths;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillResourceManifest;
 import cn.lunalhx.ai.domain.agent.model.entity.SkillSource;
+import cn.lunalhx.ai.domain.tool.model.SkillState;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -18,6 +20,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 public class FileSystemSkillRepository implements SkillRepository {
@@ -33,10 +37,19 @@ public class FileSystemSkillRepository implements SkillRepository {
 
     private final Path userSkillsDir;
     private final String projectSkillsDir;
+    private final Supplier<Map<String, SkillState>> skillStates;
+    private final Map<Path, CatalogCache> catalogs = new ConcurrentHashMap<>();
 
     public FileSystemSkillRepository(Path userSkillsDir, String projectSkillsDir) {
+        this(userSkillsDir, projectSkillsDir, null);
+    }
+
+    public FileSystemSkillRepository(Path userSkillsDir,
+                                     String projectSkillsDir,
+                                     Supplier<Map<String, SkillState>> skillStates) {
         this.userSkillsDir = userSkillsDir;
         this.projectSkillsDir = projectSkillsDir;
+        this.skillStates = skillStates;
     }
 
     @Override
@@ -70,6 +83,20 @@ public class FileSystemSkillRepository implements SkillRepository {
             }
         }
 
+        Map<String, SkillState> configured = configuredSkillStates();
+        if (configured != null) {
+            resolved.removeIf(skill -> {
+                SkillState state = configured.get(skill.name());
+                return state == null || !state.isEnabled();
+            });
+            for (String name : configured.keySet()) {
+                boolean found = skills.stream().anyMatch(skill -> skill.name().equals(name));
+                if (!found) {
+                    diagnostics.add("missing: configured skill '" + name + "' was not found");
+                }
+            }
+        }
+
         // Catalog budget truncation: truncate descriptions first, then omit low-priority
         boolean truncated = false;
         int totalChars = estimateCatalogChars(resolved);
@@ -88,12 +115,17 @@ public class FileSystemSkillRepository implements SkillRepository {
             }
         }
 
-        return new SkillCatalog(List.copyOf(resolved), List.copyOf(diagnostics), truncated);
+        SkillCatalog catalog = new SkillCatalog(List.copyOf(resolved), List.copyOf(diagnostics), truncated);
+        catalogs.put(cacheKey(workspaceRoot), new CatalogCache(configHash(configured), catalog));
+        return catalog;
     }
 
     @Override
     public SkillDescriptor resolve(String name, Path workspaceRoot) {
-        SkillCatalog catalog = discover(workspaceRoot);
+        Map<String, SkillState> configured = configuredSkillStates();
+        CatalogCache cached = catalogs.get(cacheKey(workspaceRoot));
+        SkillCatalog catalog = cached != null && cached.configHash() == configHash(configured)
+                ? cached.catalog() : discover(workspaceRoot);
         return catalog.skills().stream()
                 .filter(s -> s.name().equals(name))
                 .findFirst()
@@ -196,13 +228,28 @@ public class FileSystemSkillRepository implements SkillRepository {
 
     private Path resolveUserDir() {
         if (userSkillsDir == null) {
-            String home = System.getProperty("user.home");
-            if (home != null) {
-                return Path.of(home, ".loom-agent", "skills");
-            }
-            return null;
+            return LoomPaths.system().skills();
         }
         return userSkillsDir;
+    }
+
+    private Map<String, SkillState> configuredSkillStates() {
+        if (skillStates == null) {
+            return null;
+        }
+        Map<String, SkillState> states = skillStates.get();
+        return states == null ? Map.of() : Map.copyOf(states);
+    }
+
+    private int configHash(Map<String, SkillState> states) {
+        return states == null ? 0 : states.hashCode();
+    }
+
+    private Path cacheKey(Path workspaceRoot) {
+        return workspaceRoot.toAbsolutePath().normalize();
+    }
+
+    private record CatalogCache(int configHash, SkillCatalog catalog) {
     }
 
     private void scanDir(Path dir, SkillSource source, List<SkillDescriptor> skills,
@@ -244,10 +291,13 @@ public class FileSystemSkillRepository implements SkillRepository {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> metadata = fm.get("metadata") instanceof Map
                             ? (Map<String, Object>) fm.get("metadata") : Map.of();
-                    @SuppressWarnings("unchecked")
-                    List<String> allowedTools = fm.get("allowed-tools") instanceof List
-                            ? ((List<?>) fm.get("allowed-tools")).stream()
-                                    .map(Object::toString).toList()
+                    boolean allowedToolsDeclared = fm.containsKey("allowed-tools");
+                    if (allowedToolsDeclared && !(fm.get("allowed-tools") instanceof List)) {
+                        diagnostics.add("parse_error: skill '" + name + "' allowed-tools must be a list");
+                        continue;
+                    }
+                    List<String> allowedTools = fm.get("allowed-tools") instanceof List<?> values
+                            ? values.stream().map(Object::toString).toList()
                             : List.of();
 
                     String body = extractBody(raw);
@@ -256,7 +306,7 @@ public class FileSystemSkillRepository implements SkillRepository {
 
                     SkillDescriptor descriptor = new SkillDescriptor(
                             name, description, license, compatibility,
-                            metadata, allowedTools, source, subdir,
+                            metadata, allowedTools, allowedToolsDeclared, source, subdir,
                             manifestSha256, resourceCount);
                     skills.add(descriptor);
                     target.put(name, descriptor);

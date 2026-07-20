@@ -36,6 +36,7 @@ final class ReactiveCompactStep implements ContextRecoveryStep {
             return ContextRecoveryTransition.continueChain();
         }
 
+        context.recovery().reactiveCompacted();
         context.setContextRecoveryStage(ContextRecoveryStage.REACTIVE_COMPACTED);
         context.setContextTranscriptArtifactId(result.transcriptArtifactId());
 

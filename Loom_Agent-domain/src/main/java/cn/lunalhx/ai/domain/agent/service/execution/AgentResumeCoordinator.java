@@ -32,6 +32,8 @@ import java.util.Map;
 
 public final class AgentResumeCoordinator {
 
+    private static final int MIN_SUPPORTED_SNAPSHOT_VERSION = 5;
+
     private final ApprovalStore approvalStore;
     private final AgentCheckpointRepository checkpointRepository;
     private final AgentRunRepository runRepository;
@@ -184,7 +186,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 4) {
+        if (snapshot.getSchemaVersion() < MIN_SUPPORTED_SNAPSHOT_VERSION) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 
@@ -242,7 +244,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
-        if (snapshot.getSchemaVersion() < 2 || snapshot.getSchemaVersion() > 4) {
+        if (snapshot.getSchemaVersion() < MIN_SUPPORTED_SNAPSHOT_VERSION) {
             return AgentResumePlan.complete(List.of(eventFactory.checkpointNotFound(runId)));
         }
 

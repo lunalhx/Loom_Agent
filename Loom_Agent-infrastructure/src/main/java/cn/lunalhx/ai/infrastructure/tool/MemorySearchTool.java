@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Arrays;
@@ -34,6 +35,8 @@ public class MemorySearchTool implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("memory_search")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("搜索长期记忆，返回匹配的记忆条目（只读）")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +

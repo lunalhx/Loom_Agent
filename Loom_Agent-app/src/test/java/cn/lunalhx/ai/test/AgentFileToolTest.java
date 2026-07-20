@@ -15,6 +15,7 @@ import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import cn.lunalhx.ai.infrastructure.tool.ReadFileTool;
 import cn.lunalhx.ai.infrastructure.tool.ReplaceInFileTool;
 import cn.lunalhx.ai.infrastructure.tool.RunShellTool;
+import cn.lunalhx.ai.infrastructure.tool.SandboxEnvPolicy;
 import cn.lunalhx.ai.infrastructure.tool.WriteFileTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -27,6 +28,7 @@ import org.junit.rules.TemporaryFolder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -54,8 +56,10 @@ public class AgentFileToolTest {
     public void setUp() throws Exception {
         workspacePort = new LocalWorkspacePort();
         Path logDir = temporaryFolder.newFolder("bg-logs").toPath();
-        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2, null);
-        commandExecutor = new LocalCommandExecutor(processManager);
+        SandboxEnvPolicy envPolicy = new SandboxEnvPolicy(
+                SandboxEnvPolicy.Mode.BLACKLIST, Set.of(), Set.of());
+        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2, null, envPolicy);
+        commandExecutor = new LocalCommandExecutor(processManager, envPolicy);
     }
 
     @After

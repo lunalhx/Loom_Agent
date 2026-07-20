@@ -8,17 +8,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 final class SandboxProcessRunner {
 
-    private static final Set<String> ENV_ALLOW_LIST = Set.of("PATH", "JAVA_HOME", "M2_HOME", "MAVEN_OPTS", "HOME", "LANG", "LC_ALL", "USER", "TERM");
-
     private SandboxProcessRunner() {
     }
 
-    static ToolResult run(List<String> command, Path cwd, long timeoutMs, ShellOutputLimits limits, long startedAt) {
+    static ToolResult run(List<String> command, Path cwd, Map<String, String> extraEnv,
+                          long timeoutMs, ShellOutputLimits limits, long startedAt,
+                          SandboxEnvPolicy envPolicy) {
         Process process = null;
         StreamReader stdoutReader = null;
         StreamReader stderrReader = null;
@@ -27,11 +26,7 @@ final class SandboxProcessRunner {
                     .directory(cwd.toFile());
             Map<String, String> originalEnv = Map.copyOf(builder.environment());
             builder.environment().clear();
-            ENV_ALLOW_LIST.forEach(key -> {
-                if (originalEnv.containsKey(key)) {
-                    builder.environment().put(key, originalEnv.get(key));
-                }
-            });
+            builder.environment().putAll(envPolicy.filter(originalEnv, extraEnv));
 
             process = builder.start();
             stdoutReader = new StreamReader(process.getInputStream(), limits.getMaxStdoutChars());
@@ -45,7 +40,7 @@ final class SandboxProcessRunner {
 
             boolean completed = process.waitFor(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS);
             if (!completed) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
                 stdoutThread.join(1000L);
                 stderrThread.join(1000L);
                 return ToolResult.builder()
@@ -72,7 +67,7 @@ final class SandboxProcessRunner {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (process != null && process.isAlive()) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
             }
             return ToolResult.failure("process_interrupted", "命令执行被中断", elapsed(startedAt));
         } catch (Exception e) {

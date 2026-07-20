@@ -37,12 +37,12 @@ public final class ModelCallPreflight {
         }
         ModelCapability capability;
         try {
-            capability = properties.capability(key.model());
+            capability = requestNormalizer.effectiveProperties(prompt).capability(key.model());
         } catch (ModelGatewayException e) {
             throw e;
         }
         int requestedMaxTokens = prompt.getMaxTokens() == null
-                ? requestNormalizer.defaultMaxTokens()
+                ? requestNormalizer.defaultMaxTokens(prompt)
                 : prompt.getMaxTokens();
         long estimatedPromptTokens = estimateTokens(prompt);
         if (requestedMaxTokens > capability.getMaxOutputTokens()) {
@@ -78,7 +78,7 @@ public final class ModelCallPreflight {
 
     void validateFallbackBudget(AgentContext context, ChatPrompt prompt, String fallbackModel) {
         int maxTokens = prompt.getMaxTokens() == null
-                ? requestNormalizer.defaultMaxTokens()
+                ? requestNormalizer.defaultMaxTokens(prompt)
                 : prompt.getMaxTokens();
         checkBudget(context, prompt, fallbackModel, maxTokens);
     }

@@ -222,7 +222,7 @@ public class ApprovalGateNodeTest {
 
     private ApprovalGateNode gateNode(AgentTool tool, AgentRuntimeProperties props) {
         ToolRegistry registry = new ToolRegistry(List.of(tool), new ToolSchemaValidator(new ObjectMapper()));
-        return new ApprovalGateNode(registry, new InMemoryApprovalStore(), props, null);
+        return new ApprovalGateNode(registry, new InMemoryApprovalStore(), props);
     }
 
     private AgentTool fixedPolicy(ToolPermissionLevel level) {
@@ -313,7 +313,7 @@ public class ApprovalGateNodeTest {
         };
 
         ToolRegistry registry = new ToolRegistry(List.of(highRiskTool), new ToolSchemaValidator(new ObjectMapper()));
-        ApprovalGateNode node = new ApprovalGateNode(registry, new InMemoryApprovalStore(), properties("SANDBOX", "CONFIRM"), null);
+        ApprovalGateNode node = new ApprovalGateNode(registry, new InMemoryApprovalStore(), properties("SANDBOX", "CONFIRM"));
 
         NodeResult result = node.apply(context);
 
@@ -386,7 +386,7 @@ public class ApprovalGateNodeTest {
 
     private ApprovalGateNode planGuardNode() {
         AgentRuntimeProperties props = new AgentRuntimeProperties();
-        AgentRuntimeProperties.ExecutionGuardProperties guards = new AgentRuntimeProperties.ExecutionGuardProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.ExecutionGuardProperties guards = new cn.lunalhx.ai.domain.agent.model.valobj.ExecutionGuardProperties();
         guards.setPlanBeforeWrite(true);
         props.setExecutionGuards(guards);
         props.setApprovalTtlSeconds(900L);

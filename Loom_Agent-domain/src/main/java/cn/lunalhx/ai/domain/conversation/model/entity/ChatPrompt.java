@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.conversation.model.entity;
 
 import cn.lunalhx.ai.domain.model.valobj.OutputFormat;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,5 +28,6 @@ public class ChatPrompt {
     private ModelCallPurpose purpose;
     private Long deadlineEpochMs;
     private List<ChatMessage> messages;
+    private ModelRuntimeProperties runtimeProperties;
 
 }

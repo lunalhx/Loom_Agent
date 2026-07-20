@@ -18,7 +18,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 /**
- * AgentContextSnapshot schema v5 persistence and backward compatibility tests.
+ * AgentContextSnapshot schema v6 persistence and backward compatibility tests.
  */
 public class AgentContextSnapshotPersistenceTest {
 
@@ -38,7 +38,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.setGeneration(1);
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(5, snapshot.getSchemaVersion());
+        assertEquals(6, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         assertEquals("v3-roundtrip", restored.getRunId());
@@ -65,7 +65,7 @@ public class AgentContextSnapshotPersistenceTest {
         ctx.ensureLedgerActive(); // creates empty ledger
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(ctx);
-        assertEquals(5, snapshot.getSchemaVersion());
+        assertEquals(6, snapshot.getSchemaVersion());
 
         AgentContext restored = snapshot.restore();
         // Empty ledger: no entries, so not reconstructed
@@ -357,7 +357,7 @@ public class AgentContextSnapshotPersistenceTest {
         String json = objectMapper.writeValueAsString(original);
         AgentContextSnapshot reloaded = objectMapper.readValue(json, AgentContextSnapshot.class);
 
-        assertEquals(5, reloaded.getSchemaVersion());
+        assertEquals(6, reloaded.getSchemaVersion());
         assertEquals(1, reloaded.getLedgerEntries().size());
         assertEquals("json-test", reloaded.getLedgerEntries().get(0).content());
         assertEquals("fp-json", reloaded.getStablePrefix().fingerprint());
@@ -400,11 +400,11 @@ public class AgentContextSnapshotPersistenceTest {
     // ==================== schema version boundaries ====================
 
     @Test
-    public void snapshotSchemaVersionShouldBe5() {
-        assertEquals(5, new AgentContextSnapshot().getSchemaVersion());
+    public void snapshotSchemaVersionShouldBe6() {
+        assertEquals(6, new AgentContextSnapshot().getSchemaVersion());
         AgentContext ctx = new AgentContext();
-        ctx.setRunId("v5-check");
-        assertEquals(5, AgentContextSnapshot.from(ctx).getSchemaVersion());
+        ctx.setRunId("v6-check");
+        assertEquals(6, AgentContextSnapshot.from(ctx).getSchemaVersion());
     }
 
     // ==================== replanAttemptsForFailure ====================

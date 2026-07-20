@@ -32,14 +32,14 @@ public class UndoSessionCoordinator {
     private final UndoSnapshotRepository snapshotRepository;
     private final WorkspaceUndoLockRepository lockRepository;
     private final AgentWorkspaceResolver workspaceResolver;
-    private final AgentRuntimeProperties.UndoProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config;
     private final ObjectMapper objectMapper;
 
     public UndoSessionCoordinator(WorkspaceSnapshotPort snapshotPort,
                                   UndoSnapshotRepository snapshotRepository,
                                   WorkspaceUndoLockRepository lockRepository,
                                   AgentWorkspaceResolver workspaceResolver,
-                                  AgentRuntimeProperties.UndoProperties config) {
+                                  cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config) {
         this.snapshotPort = snapshotPort;
         this.snapshotRepository = snapshotRepository;
         this.lockRepository = lockRepository;

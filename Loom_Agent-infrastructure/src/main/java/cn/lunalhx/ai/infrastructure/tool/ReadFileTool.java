@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -27,6 +28,8 @@ public class ReadFileTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("read_file")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("读取工作区内已知路径的单个文本文件，返回指定行号范围的内容。何时使用：已确知文件路径需要查看内容时。何时不要使用：路径未知请先用 find_files 定位，搜索内容请用 code_search。限制：最多返回 200 行。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +

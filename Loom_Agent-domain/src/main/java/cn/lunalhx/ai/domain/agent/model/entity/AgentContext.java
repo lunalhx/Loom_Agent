@@ -12,14 +12,19 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.ActivatedSkillToolPolicy;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -124,6 +129,17 @@ public class AgentContext {
     public void setToolSpecs(List<ToolSpec> v) { environment.setToolSpecs(v); }
     public boolean isSubAgentSpawnAllowed() { return environment.subAgentSpawnAllowed(); }
     public void setSubAgentSpawnAllowed(boolean v) { environment.setSubAgentSpawnAllowed(v); }
+    public AgentRunConfig getRunConfig() { return environment.runConfig(); }
+    public void setRunConfig(AgentRunConfig v) { environment.setRunConfig(v); }
+    public AgentRuntimeProperties runtimeProperties(AgentRuntimeProperties fallback) {
+        return environment.runConfig() == null ? fallback : environment.runConfig().agent();
+    }
+    public ModelRuntimeProperties modelRuntimeProperties(ModelRuntimeProperties fallback) {
+        return environment.runConfig() == null ? fallback : environment.runConfig().model();
+    }
+    public MemoryRuntimeProperties memoryRuntimeProperties(MemoryRuntimeProperties fallback) {
+        return environment.runConfig() == null ? fallback : environment.runConfig().agent().getLongTermMemory();
+    }
 
     // ==================== runtime delegates ====================
 
@@ -231,6 +247,12 @@ public class AgentContext {
     public String getMemoryRecallRenderedText() { return prompt.memoryRecallRenderedText(); }
     public void setMemoryRecallRenderedText(String v) { prompt.setMemoryRecallRenderedText(v); }
 
+    // ---- incremental context summary delegates (TODO7 Phase 2) ----
+    public String getContextSummaryText() { return prompt.contextSummaryText(); }
+    public void setContextSummaryText(String v) { prompt.setContextSummaryText(v); }
+    public long getContextSummaryThroughSequence() { return prompt.contextSummaryThroughSequence(); }
+    public void setContextSummaryThroughSequence(long v) { prompt.setContextSummaryThroughSequence(v); }
+
     // ==================== action delegates ====================
 
     public AgentDecision getDecision() { return action.decision(); }
@@ -323,6 +345,9 @@ public class AgentContext {
     public void setAvailableSkillCatalog(SkillCatalog v) { skill.setAvailableSkillCatalog(v); }
     public List<SkillActivation> getActivatedSkills() { return skill.activatedSkills(); }
     public void setActivatedSkills(List<SkillActivation> v) { skill.setActivatedSkills(v); }
+    public ActivatedSkillToolPolicy getActivatedSkillToolPolicy() {
+        return ActivatedSkillToolPolicy.from(skill.activatedSkills());
+    }
     public String getSkillCatalogText() { return skill.skillCatalogText(); }
     public void setSkillCatalogText(String v) { skill.setSkillCatalogText(v); }
     public List<String> getApprovedSkillNames() { return skill.approvedSkillNames(); }

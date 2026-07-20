@@ -63,7 +63,7 @@ public class ResilientModelGateway implements ModelGateway {
         ChatPrompt normalized = requestNormalizer.normalizeComplete(prompt);
         ModelCallKey key = requestNormalizer.key(normalized);
         AgentContext context = ModelCallTraceContext.current();
-        if (!enabled()) {
+        if (!enabled(normalized)) {
             return delegate.complete(normalized);
         }
         return completeExecutor.execute(normalized, key, context);
@@ -74,7 +74,7 @@ public class ResilientModelGateway implements ModelGateway {
         ChatPrompt normalized = requestNormalizer.normalizeStream(prompt);
         ModelCallKey key = requestNormalizer.key(normalized);
         AgentContext context = ModelCallTraceContext.current();
-        if (!enabled()) {
+        if (!enabled(normalized)) {
             return delegate.stream(normalized);
         }
         return streamingExecutor.execute(normalized, key, context);
@@ -85,8 +85,10 @@ public class ResilientModelGateway implements ModelGateway {
         return requestNormalizer.capability(model);
     }
 
-    private boolean enabled() {
-        ModelRuntimeProperties.ResilienceProperties resilience = properties.getResilience();
+    private boolean enabled(ChatPrompt prompt) {
+        ModelRuntimeProperties effective = prompt.getRuntimeProperties() == null
+                ? properties : prompt.getRuntimeProperties();
+        ModelRuntimeProperties.ResilienceProperties resilience = effective.getResilience();
         if (resilience == null) {
             return true;
         }

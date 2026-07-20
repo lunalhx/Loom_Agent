@@ -17,7 +17,6 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -25,12 +24,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Set;
 
 public class BackgroundProcessManager {
 
     private static final Logger log = LoggerFactory.getLogger(BackgroundProcessManager.class);
 
-    private static final Set<String> ENV_ALLOW_LIST = Set.of("PATH", "JAVA_HOME", "M2_HOME", "MAVEN_OPTS", "HOME");
     private static final long MAX_OUTPUT_BYTES = 50 * 1024 * 1024; // 50 MiB
 
     private final Path taskLogDir;
@@ -40,15 +39,18 @@ public class BackgroundProcessManager {
     private final int globalMaxTasks;
     private final int perRunMaxTasks;
     private final BackgroundShellTaskRepository taskRepository;
+    private final SandboxEnvPolicy envPolicy;
 
     private final Map<String, ActiveTaskHandle> activeHandles = new ConcurrentHashMap<>();
     private final Map<String, Thread> monitorThreads = new ConcurrentHashMap<>();
+    private final Map<String, Set<ProcessHandle>> foregroundProcesses = new ConcurrentHashMap<>();
     private final AtomicInteger globalTaskCount = new AtomicInteger(0);
     private final ExecutorService ioExecutor;
 
     public BackgroundProcessManager(Path taskLogDir, long defaultTimeoutMs, long foregroundYieldMs,
                                      long maxTimeoutMs, int globalMaxTasks, int perRunMaxTasks,
-                                     int ioThreads, BackgroundShellTaskRepository taskRepository) {
+                                     int ioThreads, BackgroundShellTaskRepository taskRepository,
+                                     SandboxEnvPolicy envPolicy) {
         this.taskLogDir = taskLogDir;
         this.defaultTimeoutMs = defaultTimeoutMs;
         this.foregroundYieldMs = foregroundYieldMs;
@@ -56,6 +58,7 @@ public class BackgroundProcessManager {
         this.globalMaxTasks = globalMaxTasks;
         this.perRunMaxTasks = perRunMaxTasks;
         this.taskRepository = taskRepository;
+        this.envPolicy = envPolicy;
         this.ioExecutor = Executors.newFixedThreadPool(ioThreads, r -> {
             Thread t = new Thread(r, "bg-task-io");
             t.setDaemon(true);
@@ -76,19 +79,26 @@ public class BackgroundProcessManager {
     public record SyncResult(boolean success, String errorCode, String message,
                               String observation, boolean truncated, long elapsedMs) {}
 
-    public SyncResult runSync(List<String> command, Path cwd, long timeoutMs, ShellOutputLimits limits, long startedAt) {
+    public SyncResult runSync(List<String> command, Path cwd, Map<String, String> extraEnv,
+                              long timeoutMs, ShellOutputLimits limits, long startedAt) {
+        return runSync(command, cwd, extraEnv, timeoutMs, limits, startedAt, null);
+    }
+
+    public SyncResult runSync(List<String> command, Path cwd, Map<String, String> extraEnv,
+                              long timeoutMs, ShellOutputLimits limits, long startedAt,
+                              String conversationId) {
         Process process = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command).directory(cwd.toFile());
             Map<String, String> originalEnv = Map.copyOf(builder.environment());
             builder.environment().clear();
-            ENV_ALLOW_LIST.forEach(key -> {
-                if (originalEnv.containsKey(key)) {
-                    builder.environment().put(key, originalEnv.get(key));
-                }
-            });
+            builder.environment().putAll(envPolicy.filter(originalEnv, extraEnv));
 
             process = builder.start();
+            if (conversationId != null) {
+                foregroundProcesses.computeIfAbsent(conversationId, ignored -> ConcurrentHashMap.newKeySet())
+                        .add(process.toHandle());
+            }
             StreamCollector stdout = new StreamCollector(process.getInputStream(), limits.getMaxStdoutChars());
             StreamCollector stderr = new StreamCollector(process.getErrorStream(), limits.getMaxStderrChars());
             Thread stdoutThread = new Thread(stdout, "sync-stdout");
@@ -100,7 +110,7 @@ public class BackgroundProcessManager {
 
             boolean completed = process.waitFor(Math.max(1L, timeoutMs), TimeUnit.MILLISECONDS);
             if (!completed) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
                 stdoutThread.join(1000L);
                 stderrThread.join(1000L);
                 return new SyncResult(false, "command_timeout", "命令执行超时",
@@ -120,13 +130,23 @@ public class BackgroundProcessManager {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (process != null && process.isAlive()) {
-                process.destroyForcibly();
+                ProcessGroupRunner.terminate(process.toHandle(), 5000);
             }
             return new SyncResult(false, "process_interrupted", "命令执行被中断", null, false,
                     System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             return new SyncResult(false, "process_failed", e.getMessage(), null, false,
                     System.currentTimeMillis() - startedAt);
+        } finally {
+            if (process != null && conversationId != null) {
+                Set<ProcessHandle> handles = foregroundProcesses.get(conversationId);
+                if (handles != null) {
+                    handles.remove(process.toHandle());
+                    if (handles.isEmpty()) {
+                        foregroundProcesses.remove(conversationId, handles);
+                    }
+                }
+            }
         }
     }
 
@@ -136,6 +156,22 @@ public class BackgroundProcessManager {
     public BackgroundStartResult startBackground(List<String> command, Path cwd, long requestedTimeoutMs,
                                                   String runId, String conversationId, String workspace,
                                                   BackgroundLaunchMode launchMode) {
+        return startBackground(command, cwd, Map.of(), requestedTimeoutMs, runId,
+                conversationId, workspace, launchMode);
+    }
+
+    public BackgroundStartResult startBackground(List<String> command, Path cwd,
+                                                  Map<String, String> extraEnv, long requestedTimeoutMs,
+                                                  String runId, String conversationId, String workspace,
+                                                  BackgroundLaunchMode launchMode) {
+        return startBackground(command, cwd, extraEnv, requestedTimeoutMs, runId,
+                conversationId, workspace, launchMode, taskLogDir);
+    }
+
+    public BackgroundStartResult startBackground(List<String> command, Path cwd,
+                                                  Map<String, String> extraEnv, long requestedTimeoutMs,
+                                                  String runId, String conversationId, String workspace,
+                                                  BackgroundLaunchMode launchMode, Path taskStateRoot) {
         long timeoutMs = Math.min(Math.max(1L, requestedTimeoutMs), maxTimeoutMs);
         long actualTimeout = timeoutMs > 0 ? timeoutMs : defaultTimeoutMs;
 
@@ -150,10 +186,10 @@ public class BackgroundProcessManager {
         }
 
         String taskId = UUID.randomUUID().toString();
-        Path logDir = taskLogDir.resolve(runId).resolve(taskId);
+        Path logDir;
         try {
-            Files.createDirectories(logDir);
-        } catch (IOException e) {
+            logDir = safeTaskLogDir(taskStateRoot, runId, taskId);
+        } catch (Exception e) {
             return new BackgroundStartResult(false, "background_task_io_error",
                     "无法创建任务日志目录: " + e.getMessage(), null);
         }
@@ -172,6 +208,7 @@ public class BackgroundProcessManager {
                 .status(BackgroundTaskStatus.STARTING)
                 .stdoutFile(stdoutFile.toString())
                 .stderrFile(stderrFile.toString())
+                .envKeys(envPolicy.extraEnvKeys(extraEnv))
                 .startedAt(Instant.now())
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
@@ -181,11 +218,7 @@ public class BackgroundProcessManager {
             ProcessBuilder builder = new ProcessBuilder(command).directory(cwd.toFile());
             Map<String, String> originalEnv = Map.copyOf(builder.environment());
             builder.environment().clear();
-            ENV_ALLOW_LIST.forEach(key -> {
-                if (originalEnv.containsKey(key)) {
-                    builder.environment().put(key, originalEnv.get(key));
-                }
-            });
+            builder.environment().putAll(envPolicy.filter(originalEnv, extraEnv));
 
             Process process = builder.start();
             task.setPid(process.pid());
@@ -221,6 +254,31 @@ public class BackgroundProcessManager {
             return new BackgroundStartResult(false, "background_start_failed",
                     "后台进程启动失败: " + e.getMessage(), task);
         }
+    }
+
+    private Path safeTaskLogDir(Path root, String runId, String taskId) throws IOException {
+        if (runId == null || !runId.matches("[A-Za-z0-9._-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid run id");
+        }
+        Files.createDirectories(root);
+        Path realRoot = root.toRealPath();
+        Path resolved = realRoot.resolve(runId).resolve(taskId).normalize();
+        if (!resolved.startsWith(realRoot)) {
+            throw new IllegalArgumentException("Background task path escapes its session root");
+        }
+        Path ancestor = resolved;
+        while (ancestor != null && !Files.exists(ancestor, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            ancestor = ancestor.getParent();
+        }
+        if (ancestor == null || !ancestor.toRealPath().startsWith(realRoot)) {
+            throw new IOException("Background task path escapes through a symbolic link");
+        }
+        Files.createDirectories(resolved);
+        Path realResolved = resolved.toRealPath();
+        if (!realResolved.startsWith(realRoot)) {
+            throw new IOException("Background task path escapes through a symbolic link");
+        }
+        return realResolved;
     }
 
     private void streamToFile(InputStream in, Path file, ActiveTaskHandle handle) {
@@ -260,7 +318,7 @@ public class BackgroundProcessManager {
                 return;
             }
             if (!completed) {
-                killProcessTree(handle.process);
+                ProcessGroupRunner.terminate(handle.process.toHandle(), 5000);
                 handle.task.setStatus(BackgroundTaskStatus.TIMED_OUT);
                 handle.task.setErrorCode("command_timeout");
                 handle.task.setErrorMessage("命令执行超时");
@@ -300,7 +358,7 @@ public class BackgroundProcessManager {
         handle.task.setStatus(BackgroundTaskStatus.CANCELLED);
         handle.task.setCompletedAt(Instant.now());
         handle.task.setUpdatedAt(Instant.now());
-        killProcessTree(handle.process);
+        ProcessGroupRunner.terminate(handle.process.toHandle(), 5000);
         cleanup(handle);
         return true;
     }
@@ -315,14 +373,40 @@ public class BackgroundProcessManager {
                 });
     }
 
+    public int activeProcessCountForConversation(String conversationId) {
+        int foreground = foregroundProcesses.getOrDefault(conversationId, Set.of()).size();
+        int background = (int) activeHandles.values().stream()
+                .filter(handle -> conversationId.equals(handle.task.getConversationId()))
+                .count();
+        return foreground + background;
+    }
+
+    public void cancelAllProcessesForConversation(String conversationId) {
+        for (ProcessHandle handle : List.copyOf(foregroundProcesses.getOrDefault(conversationId, Set.of()))) {
+            ProcessGroupRunner.terminate(handle, 5000);
+        }
+        foregroundProcesses.remove(conversationId);
+        activeHandles.values().stream()
+                .filter(handle -> conversationId.equals(handle.task.getConversationId()))
+                .map(handle -> handle.registryKey)
+                .toList()
+                .forEach(key -> {
+                    int separator = key.indexOf('/');
+                    cancelProcess(key.substring(0, separator), key.substring(separator + 1));
+                });
+    }
+
     public void shutdown() {
         for (ActiveTaskHandle h : List.copyOf(activeHandles.values())) {
             h.cancelled.set(true);
-            killProcessTree(h.process);
+            ProcessGroupRunner.terminate(h.process.toHandle(), 5000);
         }
         activeHandles.clear();
         monitorThreads.values().forEach(Thread::interrupt);
         monitorThreads.clear();
+        foregroundProcesses.values().forEach(handles -> handles.forEach(
+                handle -> ProcessGroupRunner.terminate(handle, 5000)));
+        foregroundProcesses.clear();
         ioExecutor.shutdownNow();
     }
 
@@ -330,7 +414,7 @@ public class BackgroundProcessManager {
         if (!handle.cancelled.compareAndSet(false, true)) {
             return;
         }
-        killProcessTree(handle.process);
+        ProcessGroupRunner.terminate(handle.process.toHandle(), 5000);
         handle.task.setStatus(BackgroundTaskStatus.FAILED);
         handle.task.setErrorCode(errorCode);
         handle.task.setErrorMessage(message);
@@ -354,30 +438,6 @@ public class BackgroundProcessManager {
         globalTaskCount.decrementAndGet();
         if (taskRepository != null) {
             taskRepository.save(handle.task);
-        }
-    }
-
-    private void killProcessTree(Process process) {
-        if (process == null || !process.isAlive()) {
-            return;
-        }
-        try {
-            ProcessHandle phandle = process.toHandle();
-            phandle.descendants().forEach(ph -> {
-                try {
-                    ph.destroyForcibly();
-                } catch (Exception ignored) {
-                }
-            });
-            phandle.destroyForcibly();
-            phandle.descendants().forEach(ph -> {
-                try {
-                    ph.destroyForcibly();
-                } catch (Exception ignored) {
-                }
-            });
-        } catch (Exception e) {
-            process.destroyForcibly();
         }
     }
 

@@ -48,8 +48,8 @@ public class CodeChangeVerificationStopHook implements AgentHook {
             return AgentHookResult.proceed();
         }
         AgentContext context = hookContext.getAgentContext();
-        AgentRuntimeProperties.ExecutionGuardProperties guards =
-                properties.getExecutionGuards();
+        cn.lunalhx.ai.domain.agent.model.valobj.ExecutionGuardProperties guards = context == null
+                ? null : context.runtimeProperties(properties).getExecutionGuards();
         if (context == null || guards == null
                 || !Boolean.TRUE.equals(guards.getVerificationAfterWrite())
                 || StringUtils.isNotBlank(context.getParentRunId())
@@ -74,17 +74,6 @@ public class CodeChangeVerificationStopHook implements AgentHook {
 
             if (allEditDone && allInspectDone && noActiveVerify) {
                 return AgentHookResult.proceed();
-            }
-
-            // All edit deliverables done, only verify remains → auto-block and allow final answer
-            if (allEditDone && allInspectDone) {
-                cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem activeVerify =
-                        context.getPlan().activeVerifyItem();
-                if (activeVerify != null) {
-                    context.getPlan().blockItem(activeVerify.getId(),
-                            "所有编辑目标已完成，验证命令可能不适用，说明见最终回复");
-                    return AgentHookResult.proceed();
-                }
             }
         }
 

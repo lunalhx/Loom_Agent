@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
@@ -46,6 +47,7 @@ public class AgentLoopFactory {
     private final ConversationLedgerAppendService ledgerAppendService;
     private final ConversationExecutionGuard executionGuard;
     private final MemorySelectionService memorySelectionService;
+    private final SandboxProvider sandboxProvider;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                            AgentLoopStateDependencies state,
@@ -56,9 +58,27 @@ public class AgentLoopFactory {
                            ContextArtifactRepository contextArtifactRepository,
                            ContextBlobStore contextBlobStore,
                             ConversationLedgerAppendService ledgerAppendService,
-                            LedgerCompactionService ledgerCompactionService,
+                           LedgerCompactionService ledgerCompactionService,
                             ConversationExecutionGuard executionGuard,
                             MemorySelectionService memorySelectionService) {
+        this(modelGateway, state, runtime, hookRegistry, undoCoordinator, skillRepository,
+                contextArtifactRepository, contextBlobStore, ledgerAppendService,
+                ledgerCompactionService, executionGuard, memorySelectionService, null);
+    }
+
+    public AgentLoopFactory(ModelGateway modelGateway,
+                            AgentLoopStateDependencies state,
+                            AgentLoopRuntimeDependencies runtime,
+                            AgentHookRegistry hookRegistry,
+                            UndoSessionCoordinator undoCoordinator,
+                            SkillRepository skillRepository,
+                            ContextArtifactRepository contextArtifactRepository,
+                            ContextBlobStore contextBlobStore,
+                            ConversationLedgerAppendService ledgerAppendService,
+                            LedgerCompactionService ledgerCompactionService,
+                            ConversationExecutionGuard executionGuard,
+                            MemorySelectionService memorySelectionService,
+                            SandboxProvider sandboxProvider) {
         Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -68,6 +88,7 @@ public class AgentLoopFactory {
         Objects.requireNonNull(ledgerCompactionService, "ledgerCompactionService must not be null");
         this.executionGuard = Objects.requireNonNull(executionGuard, "executionGuard must not be null");
         this.memorySelectionService = memorySelectionService;
+        this.sandboxProvider = sandboxProvider;
         LedgerBootstrapService bs = new LedgerBootstrapService(
                 ledgerAppendService, new ConversationLedgerInitializer());
 
@@ -82,7 +103,8 @@ public class AgentLoopFactory {
     public DefaultAgentLoopService createStandalone(ToolRegistry toolRegistry, Executor executor) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         Objects.requireNonNull(executor, "executor must not be null");
-        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), executor, executionGuard);
+        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), executor, executionGuard,
+                sandboxProvider);
     }
 
     /**
@@ -94,7 +116,8 @@ public class AgentLoopFactory {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         Objects.requireNonNull(executor, "executor must not be null");
         Objects.requireNonNull(subAgentCoordinator, "subAgentCoordinator must not be null");
-        return new DefaultAgentLoopService(assembleRoot(toolRegistry, subAgentCoordinator), executor, executionGuard);
+        return new DefaultAgentLoopService(assembleRoot(toolRegistry, subAgentCoordinator), executor,
+                executionGuard, sandboxProvider);
     }
 
     /**
@@ -104,7 +127,8 @@ public class AgentLoopFactory {
      */
     public DefaultAgentLoopService createChild(ToolRegistry toolRegistry) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
-        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), Runnable::run, executionGuard);
+        return new DefaultAgentLoopService(assembleStandalone(toolRegistry), Runnable::run,
+                executionGuard, sandboxProvider);
     }
 
     // ==================== Phase 3 装配方法 ====================
@@ -125,7 +149,7 @@ public class AgentLoopFactory {
         AgentEventFactory eventFactory = new AgentEventFactory();
         AgentContextFactory contextFactory = new AgentContextFactory(
                 runtime.properties(), state.workspaceResolver(), flow.toolSpecs(), flow.subAgentAvailable(),
-                ledgerAppendService);
+                ledgerAppendService, runtime.runtimeConfigSource());
         AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
                 state.approvalStore(), state.checkpointRepository(), state.runRepository(),
                 contextFactory, eventFactory, ledgerAppendService);

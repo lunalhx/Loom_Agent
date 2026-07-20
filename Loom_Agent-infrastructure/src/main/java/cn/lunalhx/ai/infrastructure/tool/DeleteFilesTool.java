@@ -137,7 +137,7 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         long symlinkCount = entries.stream().filter(entry -> entry.kind() == EntryKind.SYMLINK).count();
         long totalBytes = entries.stream().mapToLong(DeletionEntry::size).sum();
         List<String> relativeTargets = targets.stream().map(path -> relative(root, path)).toList();
-        Set<String> riskFlags = riskFlags(entries, targets, totalBytes);
+        Set<String> riskFlags = riskFlags(call, entries, targets, totalBytes);
 
         List<Map<String, Object>> targetMetadata = new ArrayList<>();
         for (Path target : targets) {
@@ -373,7 +373,8 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         }
     }
 
-    private Set<String> riskFlags(List<DeletionEntry> entries, List<Path> targets, long totalBytes) {
+    private Set<String> riskFlags(ToolCall call, List<DeletionEntry> entries,
+                                  List<Path> targets, long totalBytes) {
         Set<String> flags = new LinkedHashSet<>();
         if (targets.stream().anyMatch(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))) {
             flags.add("RECURSIVE");
@@ -387,7 +388,7 @@ public class DeleteFilesTool extends FileSystemToolSupport implements AgentTool 
         if (entries.size() > LARGE_DELETE_ENTRIES || totalBytes > LARGE_DELETE_BYTES) {
             flags.add("LARGE_DELETE");
         }
-        AgentRuntimeProperties.UndoProperties undo = properties.getUndo();
+        cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties undo = runtimeProperties(call).getUndo();
         boolean exceedsUndo = undo != null && (entries.size() > undo.getMaxChangedFiles()
                 || totalBytes > undo.getMaxChangedBytes());
         boolean potentiallyIgnored = entries.stream().anyMatch(entry -> isPotentiallyIgnored(entry.relative()));

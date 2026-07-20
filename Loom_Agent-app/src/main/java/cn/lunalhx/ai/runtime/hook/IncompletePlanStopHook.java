@@ -51,19 +51,19 @@ public class IncompletePlanStopHook implements AgentHook {
             return AgentHookResult.proceed();
         }
 
-        AgentRuntimeProperties.StopHooksProperties stopHooks = properties.getStopHooks();
+        AgentContext agentContext = context.getAgentContext();
+        if (agentContext == null) {
+            return AgentHookResult.proceed();
+        }
+        cn.lunalhx.ai.domain.agent.model.valobj.StopHooksProperties stopHooks =
+                agentContext.runtimeProperties(properties).getStopHooks();
         if (stopHooks == null || !Boolean.TRUE.equals(stopHooks.getEnabled())) {
             return AgentHookResult.proceed();
         }
 
-        AgentRuntimeProperties.StopHooksProperties.IncompletePlanProperties incompletePlan =
+        cn.lunalhx.ai.domain.agent.model.valobj.StopHooksProperties.IncompletePlanProperties incompletePlan =
                 stopHooks.getIncompletePlan();
         if (incompletePlan == null || !Boolean.TRUE.equals(incompletePlan.getEnabled())) {
-            return AgentHookResult.proceed();
-        }
-
-        AgentContext agentContext = context.getAgentContext();
-        if (agentContext == null) {
             return AgentHookResult.proceed();
         }
 

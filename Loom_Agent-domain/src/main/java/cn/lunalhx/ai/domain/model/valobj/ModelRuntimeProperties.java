@@ -20,10 +20,28 @@ public class ModelRuntimeProperties {
     private Long retryBackoffInitialMs = 300L;
     private Long retryBackoffMaxMs = 3000L;
     private Integer maxMessageLength = 20000;
+    private String defaultModel;
     private List<String> allowedModels = new ArrayList<>(List.of("deepseek-v4-flash", "deepseek-v4-pro"));
     private ResilienceProperties resilience = new ResilienceProperties();
     private Map<String, ModelCapability> modelCapabilities = defaultCapabilities();
     private Map<String, ModelPricing> modelPricing = defaultPricing();
+
+    public synchronized void replaceFrom(ModelRuntimeProperties replacement) {
+        this.provider = replacement.provider;
+        this.providers = replacement.providers;
+        this.connectTimeoutMs = replacement.connectTimeoutMs;
+        this.firstTokenTimeoutMs = replacement.firstTokenTimeoutMs;
+        this.streamTimeoutMs = replacement.streamTimeoutMs;
+        this.retryMaxAttempts = replacement.retryMaxAttempts;
+        this.retryBackoffInitialMs = replacement.retryBackoffInitialMs;
+        this.retryBackoffMaxMs = replacement.retryBackoffMaxMs;
+        this.maxMessageLength = replacement.maxMessageLength;
+        this.defaultModel = replacement.defaultModel;
+        this.allowedModels = replacement.allowedModels;
+        this.resilience = replacement.resilience;
+        this.modelCapabilities = replacement.modelCapabilities;
+        this.modelPricing = replacement.modelPricing;
+    }
 
     public String normalizeModel(String requestedModel, String defaultModel) {
         String model = StringUtils.defaultIfBlank(requestedModel, defaultModel);
@@ -31,6 +49,10 @@ public class ModelRuntimeProperties {
             throw new ModelGatewayException(ModelErrorCode.INVALID_REQUEST, "不支持的模型：" + model, false, null, null);
         }
         return model;
+    }
+
+    public String resolvedDefaultModel() {
+        return StringUtils.defaultIfBlank(defaultModel, activeProvider().getDefaultModel());
     }
 
     public ModelCapability capability(String model) {

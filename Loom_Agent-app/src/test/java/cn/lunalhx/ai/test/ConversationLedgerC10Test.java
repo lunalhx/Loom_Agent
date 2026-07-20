@@ -28,6 +28,7 @@ import reactor.core.publisher.Mono;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
@@ -53,7 +54,7 @@ import static org.junit.Assert.*;
  */
 public class ConversationLedgerC10Test {
 
-    private AgentRuntimeProperties.ConversationLedgerProperties enabledConfig;
+    private cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties enabledConfig;
     private ConversationLedgerAppendService appendSvc;
     private ConversationLedgerInitializer initializer;
     private LedgerBootstrapService bootstrapService;
@@ -67,7 +68,7 @@ public class ConversationLedgerC10Test {
 
     @Before
     public void setUp() {
-        enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
+        enabledConfig = new cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties();
 
         appendSvc = new ConversationLedgerAppendService();
         initializer = new ConversationLedgerInitializer();
@@ -225,6 +226,36 @@ public class ConversationLedgerC10Test {
         assertTrue("blob has content", blobStore.read(artifact.getStorageUri()).length() > 0);
     }
 
+    @Test
+    public void oversizedToolPairBecomesOneReferenceAndHookSeesAtomicUnits() {
+        AgentContext ctx = createBootstrappedRun("c10-pair", "pair protection");
+        appendSvc.appendAssistant(ctx, "tool call",
+                ConversationLedgerInitializer.eventKey(ctx.getRunId(), "1", "assistant"));
+        appendSvc.appendToolResult(ctx, "tool result",
+                ConversationLedgerInitializer.eventKey(ctx.getRunId(), "1", "tool_result"));
+        AtomicBoolean hookCalled = new AtomicBoolean();
+        BeforeCompactionHook hook = (context, compacted, preserved) -> {
+            hookCalled.set(true);
+            assertEquals(1, compacted.size());
+            assertThat(compacted)
+                    .noneMatch(entry -> entry.stableType() == LedgerStableType.TOOL_RESULT
+                            || entry.stableType() == LedgerStableType.ASSISTANT_ACTION);
+            assertEquals(1, preserved.size());
+            assertThat(preserved.getFirst().eventKey()).startsWith("pair-summary:");
+        };
+        LedgerCompactionService service = new LedgerCompactionService(
+                new LedgerWatermark(3, 2), artifactRepository, blobStore,
+                null, null, 3, null, 0, List.of(hook));
+
+        LedgerCompactionResult result = service.compact(ctx);
+
+        assertTrue(hookCalled.get());
+        assertEquals(2, result.afterEntryCount());
+        assertThat(ctx.getConversationLedger().entries())
+                .noneMatch(entry -> entry.stableType() == LedgerStableType.TOOL_RESULT
+                        || entry.stableType() == LedgerStableType.ASSISTANT_ACTION);
+    }
+
     // ================================================================
     // 3. 阈值附近多轮不重复
     // ================================================================
@@ -312,15 +343,13 @@ public class ConversationLedgerC10Test {
         assertEquals("strategy is deterministic", "deterministic", result.strategy());
         assertNotNull("artifact exists", result.transcriptArtifactId());
 
-        // Verify the summary is in the ledger (last entry)
+        // The ledger contains only a lightweight reference; full summary is durable context.
         ConversationLedgerEntry se = summaryEntry(ctx);
         assertEquals(LedgerStableType.SYSTEM_NOTE, se.stableType());
-        assertThat(se.content()).contains("[Ledger Compaction Summary]");
-        assertThat(se.content()).contains("build a web app");
         assertThat(se.content()).contains(result.transcriptArtifactId());
-
-        // Recent tool/assistant actions referenced
-        assertThat(se.content()).contains("RecentActions");
+        assertThat(ctx.getContextSummaryText()).contains("[Ledger Compaction Summary]");
+        assertThat(ctx.getContextSummaryText()).contains("build a web app");
+        assertThat(ctx.getContextSummaryText()).contains("RecentActions");
     }
 
     // ================================================================
@@ -358,9 +387,8 @@ public class ConversationLedgerC10Test {
 
         assertTrue("compacted", result.compacted());
         assertEquals("deep_summary", result.strategy());
-        ConversationLedgerEntry se = summaryEntry(ctx);
-        assertThat(se.content()).contains("AI-generated summary");
-        assertThat(se.content()).contains(
+        assertThat(ctx.getContextSummaryText()).contains("AI-generated summary");
+        assertThat(ctx.getContextSummaryText()).contains(
                 "[Ledger Deep Compaction Summary — Generation 1]");
     }
 
@@ -396,9 +424,8 @@ public class ConversationLedgerC10Test {
 
         assertTrue("compacted despite deep failure", result.compacted());
         assertEquals("deep_summary_deterministic", result.strategy());
-        ConversationLedgerEntry se = summaryEntry(ctx);
-        assertThat(se.content()).contains("[Ledger Compaction Summary]");
-        assertThat(se.content()).contains("fallback task");
+        assertThat(ctx.getContextSummaryText()).contains("[Ledger Compaction Summary]");
+        assertThat(ctx.getContextSummaryText()).contains("fallback task");
         assertNotNull("artifact still created", result.transcriptArtifactId());
     }
 
@@ -777,8 +804,8 @@ public class ConversationLedgerC10Test {
         assertFalse("not depth guarded", r1.depthGuarded());
         ConversationLedgerEntry se1 = summaryEntry(ctx);
         assertEquals("entry compactionDepth=1", 1, se1.compactionDepth());
-        assertThat(se1.content()).contains("CompactionDepth: 1");
-        assertThat(se1.content()).contains("MaxInputCompactionDepth: 0");
+        assertThat(ctx.getContextSummaryText()).contains("CompactionDepth: 1");
+        assertThat(ctx.getContextSummaryText()).contains("MaxInputCompactionDepth: 0");
 
         // Round 2: compactionDepth should be 2
         fillEntries(ctx, 4);
@@ -822,8 +849,8 @@ public class ConversationLedgerC10Test {
 
         ConversationLedgerEntry se = summaryEntry(ctx);
         assertEquals("entry compactionDepth=4", 4, se.compactionDepth());
-        assertThat(se.content()).contains("CompactionDepth: 4");
-        assertThat(se.content()).contains("MaxAllowedCompactionDepth: 3");
+        assertThat(ctx.getContextSummaryText()).contains("CompactionDepth: 4");
+        assertThat(ctx.getContextSummaryText()).contains("MaxAllowedCompactionDepth: 3");
     }
 
     @Test
@@ -900,10 +927,9 @@ public class ConversationLedgerC10Test {
         assertEquals("deep_summary", result.strategy());
         assertEquals("depth=1", 1, result.compactionDepth());
 
-        ConversationLedgerEntry se = summaryEntry(ctx);
-        assertThat(se.content()).contains("CompactionDepth: 1");
-        assertThat(se.content()).contains("MaxInputCompactionDepth: 0");
-        assertThat(se.content()).contains("MaxAllowedCompactionDepth: 3");
+        assertThat(ctx.getContextSummaryText()).contains("CompactionDepth: 1");
+        assertThat(ctx.getContextSummaryText()).contains("MaxInputCompactionDepth: 0");
+        assertThat(ctx.getContextSummaryText()).contains("MaxAllowedCompactionDepth: 3");
     }
 
     @Test

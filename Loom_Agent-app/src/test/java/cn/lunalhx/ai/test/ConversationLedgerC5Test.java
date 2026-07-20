@@ -47,16 +47,16 @@ import static org.junit.Assert.*;
  */
 public class ConversationLedgerC5Test {
 
-    private AgentRuntimeProperties.ConversationLedgerProperties enabledConfig;
-    private AgentRuntimeProperties.ConversationLedgerProperties disabledConfig;
+    private cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties enabledConfig;
+    private cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties disabledConfig;
     private ConversationLedgerAppendService enabledService;
     private ConversationLedgerAppendService disabledService;
 
     @Before
     public void setUp() {
-        enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
+        enabledConfig = new cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties();
 
-        disabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
+        disabledConfig = new cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties();
 
         enabledService = new ConversationLedgerAppendService();
         disabledService = new ConversationLedgerAppendService();
@@ -237,7 +237,7 @@ public class ConversationLedgerC5Test {
                 new ToolSchemaValidator(new ObjectMapper()));
         ApprovalGateNode node = new ApprovalGateNode(registry,
                 new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, enabledService);
+                props);
 
         AgentContext ctx = basicContext("r-deny-1");
         ctx.ensureLedgerActive();
@@ -273,7 +273,7 @@ public class ConversationLedgerC5Test {
                 new ToolSchemaValidator(new ObjectMapper()));
         ApprovalGateNode node = new ApprovalGateNode(registry,
                 new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, null);
+                props);
 
         AgentContext ctx = basicContext("r-deny-null-1");
         ctx.setDecision(AgentDecision.builder()
@@ -299,7 +299,7 @@ public class ConversationLedgerC5Test {
                 new ToolSchemaValidator(new ObjectMapper()));
         ApprovalGateNode node = new ApprovalGateNode(registry,
                 new cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore(),
-                props, enabledService);
+                props);
 
         AgentContext ctx = basicContext("r-val-1");
         ctx.ensureLedgerActive();

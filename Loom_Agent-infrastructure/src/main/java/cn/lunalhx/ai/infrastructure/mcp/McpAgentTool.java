@@ -7,6 +7,8 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
+import cn.lunalhx.ai.domain.tool.model.ToolSource;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -72,6 +74,10 @@ public class McpAgentTool implements AgentTool {
         String inputSchema = buildInputSchema();
         return ToolSpec.builder()
                 .name(localName)
+                .readOnly(permissionLevel == ToolPermissionLevel.READ_ONLY)
+                .childVisibility(permissionLevel == ToolPermissionLevel.READ_ONLY
+                        ? ToolChildVisibility.ALL_ROLES : ToolChildVisibility.EDITOR_ONLY)
+                .source(ToolSource.MCP)
                 .description(description)
                 .inputSchema(inputSchema)
                 .build();

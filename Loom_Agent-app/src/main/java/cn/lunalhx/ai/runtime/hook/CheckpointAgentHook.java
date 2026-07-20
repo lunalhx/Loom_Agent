@@ -25,10 +25,12 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
 
+@Component
 @Order(400)
 public class CheckpointAgentHook implements AgentHook {
 

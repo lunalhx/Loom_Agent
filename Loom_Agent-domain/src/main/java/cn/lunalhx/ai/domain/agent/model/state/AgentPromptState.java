@@ -31,6 +31,10 @@ public final class AgentPromptState {
     private int memoryRecallChars;
     private String memoryRecallRenderedText;
 
+    // ---- incremental context summary (TODO7 Phase 2) ----
+    private String contextSummaryText;
+    private long contextSummaryThroughSequence;
+
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
@@ -60,6 +64,12 @@ public final class AgentPromptState {
     /** C10: Transcript artifact ID from the most recent ledger compaction. */
     public String ledgerBaselineArtifactId() { return ledgerBaselineArtifactId; }
 
+    /** TODO7 Phase 2: Full summary text from last compaction. */
+    public String contextSummaryText() { return contextSummaryText; }
+
+    /** TODO7 Phase 2: Highest ledger sequence covered by the summary. */
+    public long contextSummaryThroughSequence() { return contextSummaryThroughSequence; }
+
     /** Whether bootstrap has completed and the ledger is ready for model input. */
     public boolean ledgerReady() { return ledgerReady; }
 
@@ -86,6 +96,10 @@ public final class AgentPromptState {
     public void setLedgerBaselineArtifactId(String v) { this.ledgerBaselineArtifactId = v; }
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
+
+    // ---- incremental context summary mutators (TODO7 Phase 2) ----
+    public void setContextSummaryText(String v) { this.contextSummaryText = v; }
+    public void setContextSummaryThroughSequence(long v) { this.contextSummaryThroughSequence = v; }
 
     // ---- memory recall mutators (v6) ----
     public void setMemoryRecallExecuted(boolean v) { this.memoryRecallExecuted = v; }

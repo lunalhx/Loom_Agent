@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service.workspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
+import cn.lunalhx.ai.domain.common.LoomPaths;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import org.apache.commons.lang3.StringUtils;
 
@@ -16,8 +17,14 @@ public class AgentWorkspaceResolver {
 
     private final Path defaultWorkspace;
     private final List<Path> allowedRoots;
+    private final Path userHome;
 
     public AgentWorkspaceResolver(AgentRuntimeProperties properties) {
+        this(properties, LoomPaths.system().userHome());
+    }
+
+    public AgentWorkspaceResolver(AgentRuntimeProperties properties, Path userHome) {
+        this.userHome = userHome.toAbsolutePath().normalize();
         this.defaultWorkspace = toExistingDirectory(properties.getWorkspaceRoot(), "WORKSPACE_NOT_FOUND");
         this.allowedRoots = resolveAllowedRoots(properties);
         validateWorkspace(defaultWorkspace);
@@ -127,8 +134,7 @@ public class AgentWorkspaceResolver {
     }
 
     private boolean isTooBroad(Path workspace) {
-        Path home = Paths.get(System.getProperty("user.home")).toAbsolutePath().normalize();
-        return workspace.getParent() == null || workspace.equals(home);
+        return workspace.getParent() == null || workspace.equals(userHome);
     }
 
     private String displayName(Path workspace) {

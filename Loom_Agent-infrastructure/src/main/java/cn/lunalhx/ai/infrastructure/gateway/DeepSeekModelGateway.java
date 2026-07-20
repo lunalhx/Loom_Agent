@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.env.Environment;
-import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.Mono;
@@ -44,7 +43,6 @@ import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
 @Slf4j
-@Component
 public class DeepSeekModelGateway implements ModelGateway {
 
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";

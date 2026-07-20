@@ -56,6 +56,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
     @Override
     protected NodeResult doApply(AgentContext context) {
         AgentDecision decision = context.getDecision();
+        var skillToolPolicy = context.getActivatedSkillToolPolicy();
         ToolCall toolCall = ToolCall.builder()
                 .name(decision.getTool())
                 .toolCallId(toolCallId(context, decision))
@@ -70,6 +71,9 @@ public class ToolDispatchNode extends AbstractAgentNode {
                         : context.getActivatedSkills().stream()
                                 .map(cn.lunalhx.ai.domain.agent.model.entity.SkillActivation::name)
                                 .collect(Collectors.toList()))
+                .skillToolRestrictionActive(skillToolPolicy.restricted())
+                .allowedToolNames(List.copyOf(skillToolPolicy.allowedTools()))
+                .runtimeProperties(context.runtimeProperties(properties))
                 .build();
         ToolPolicyDecision policy = toolRegistry.policy(toolCall);
         boolean resumedApproval = StringUtils.equals(context.getApprovedTool(), decision.getTool());
@@ -86,6 +90,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
         context.setStep(context.getStep() + 1);
         context.setUnsafeResumeRequired(policy != null && (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM
+                || policy.getPermissionLevel() == ToolPermissionLevel.PERSISTENT_STATE_WRITE
                 || policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM));
 
         List<AgentEvent> events = new ArrayList<>();
@@ -103,8 +108,9 @@ public class ToolDispatchNode extends AbstractAgentNode {
         }
         context.setUnsafeResumeRequired(false);
         result = contextWindowManager.prepareToolResult(context, result);
-        if (!contextEnabled() && StringUtils.length(result.getObservation()) > properties.getObservationMaxChars()) {
-            result.setObservation(StringUtils.abbreviate(result.getObservation(), properties.getObservationMaxChars()));
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        if (!contextEnabled(context) && StringUtils.length(result.getObservation()) > runProperties.getObservationMaxChars()) {
+            result.setObservation(StringUtils.abbreviate(result.getObservation(), runProperties.getObservationMaxChars()));
             result.setTruncated(true);
         }
         if ("todo_write".equals(decision.getTool()) && result.isSuccess()) {
@@ -168,8 +174,9 @@ public class ToolDispatchNode extends AbstractAgentNode {
         }
     }
 
-    private boolean contextEnabled() {
-        return properties.getContext() != null && Boolean.TRUE.equals(properties.getContext().getEnabled());
+    private boolean contextEnabled(AgentContext context) {
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        return runProperties.getContext() != null && Boolean.TRUE.equals(runProperties.getContext().getEnabled());
     }
 
     private void trackExecutionState(AgentContext context, AgentDecision decision,

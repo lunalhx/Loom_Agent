@@ -61,20 +61,20 @@ public class IndexingAgentMemoryRepositoryTest {
     @Test
     public void shouldEnqueueDeleteOnArchive() {
         when(vectorIndex.available()).thenReturn(true);
-        when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(true);
+        when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED)).thenReturn(true);
 
-        boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
+        boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED);
         assertTrue(result);
-        verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
+        verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED);
         verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("DELETE"));
     }
 
     @Test
     public void shouldEnqueueDeleteOnDeleted() {
         when(vectorIndex.available()).thenReturn(true);
-        when(delegate.updateStatus("m1", MemoryStatus.DELETED, 1L)).thenReturn(true);
+        when(delegate.updateStatus("m1", MemoryStatus.DELETED)).thenReturn(true);
 
-        boolean result = repo.updateStatus("m1", MemoryStatus.DELETED, 1L);
+        boolean result = repo.updateStatus("m1", MemoryStatus.DELETED);
         assertTrue(result);
         verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("DELETE"));
     }
@@ -82,22 +82,22 @@ public class IndexingAgentMemoryRepositoryTest {
     @Test
     public void shouldNotEnqueueWhenUpdateStatusFails() {
         when(vectorIndex.available()).thenReturn(true);
-        when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED, 1L)).thenReturn(false);
+        when(delegate.updateStatus("m1", MemoryStatus.ARCHIVED)).thenReturn(false);
 
-        boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
+        boolean result = repo.updateStatus("m1", MemoryStatus.ARCHIVED);
         assertFalse(result);
-        verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED, 1L);
+        verify(delegate).updateStatus("m1", MemoryStatus.ARCHIVED);
         verify(embeddingJobDao, never()).insertOrIgnore(anyString(), anyString(), anyString());
     }
 
     @Test
     public void shouldEnqueueUpsertOnActivate() {
         when(vectorIndex.available()).thenReturn(true);
-        when(delegate.updateStatus("m1", MemoryStatus.ACTIVE, 1L)).thenReturn(true);
+        when(delegate.updateStatus("m1", MemoryStatus.ACTIVE)).thenReturn(true);
         AgentMemory mem = createMemory("m1", "test");
         when(delegate.findById("m1")).thenReturn(Optional.of(mem));
 
-        boolean result = repo.updateStatus("m1", MemoryStatus.ACTIVE, 1L);
+        boolean result = repo.updateStatus("m1", MemoryStatus.ACTIVE);
         assertTrue(result);
         verify(delegate).findById("m1");
         verify(embeddingJobDao).insertOrIgnore(anyString(), anyString(), eq("UPSERT"));
@@ -118,8 +118,8 @@ public class IndexingAgentMemoryRepositoryTest {
         repo.searchByKeywords("ws1", keywords, 10);
         verify(delegate).searchByKeywords("ws1", keywords, 10);
 
-        repo.updateUsage("m1", 2L);
-        verify(delegate).updateUsage("m1", 2L);
+        repo.updateUsage("m1");
+        verify(delegate).updateUsage("m1");
 
         repo.countActive("ws1");
         verify(delegate).countActive("ws1");

@@ -40,7 +40,7 @@ import static org.junit.Assert.*;
  */
 public class ConversationLedgerC9Test {
 
-    private AgentRuntimeProperties.ConversationLedgerProperties enabledConfig;
+    private cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties enabledConfig;
     private ConversationLedgerAppendService appendSvc;
     private ConversationLedgerInitializer initializer;
     private LedgerBootstrapService bootstrapService;
@@ -56,7 +56,7 @@ public class ConversationLedgerC9Test {
 
     @Before
     public void setUp() {
-        enabledConfig = new AgentRuntimeProperties.ConversationLedgerProperties();
+        enabledConfig = new cn.lunalhx.ai.domain.agent.model.valobj.ConversationLedgerProperties();
 
         appendSvc = new ConversationLedgerAppendService();
         initializer = new ConversationLedgerInitializer();
@@ -844,7 +844,7 @@ public class ConversationLedgerC9Test {
     }
 
     /** Adapter for step budget config. */
-    static class StepBudgetConfig extends AgentRuntimeProperties.StepBudgetProperties {
+    static class StepBudgetConfig extends cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties {
         // inherits all fields
     }
 }

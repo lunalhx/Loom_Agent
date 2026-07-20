@@ -1,22 +1,18 @@
 package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
-import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryVectorIndex;
 import cn.lunalhx.ai.domain.memory.service.MemoryExtractionService;
+import cn.lunalhx.ai.domain.memory.service.MemoryPersistenceService;
 import cn.lunalhx.ai.domain.memory.service.MemorySearchService;
 import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.IndexingAgentMemoryRepository;
-import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryGenerationJobRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.MybatisAgentMemoryRepository;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentMemoryEmbeddingJobDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentMemoryRevisionDao;
 import cn.lunalhx.ai.runtime.worker.MemoryArchiveWorker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -31,6 +27,7 @@ import org.springframework.context.event.EventListener;
 
 import javax.sql.DataSource;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -79,26 +76,6 @@ public class MemoryAutoConfig {
     }
 
     @Bean
-    public AgentMemoryGenerationJobRepository agentMemoryGenerationJobRepository(PersistenceProperties persistence,
-                                                                                  ObjectProvider<AgentMemoryGenerationJobDao> daoProvider) {
-        AgentMemoryGenerationJobDao dao = daoProvider.getIfAvailable();
-        return switch (persistence.getMode()) {
-            case MEMORY -> {
-                log.info("AgentMemoryGenerationJobRepository: InMemory (mode=memory)");
-                yield new InMemoryAgentMemoryGenerationJobRepository();
-            }
-            case SQLITE -> {
-                if (dao == null) {
-                    throw new IllegalStateException(
-                            "persistence mode=sqlite requires AgentMemoryGenerationJobDao, but MyBatis DAO is not available");
-                }
-                log.info("AgentMemoryGenerationJobRepository: MyBatis (mode=sqlite)");
-                yield new MybatisAgentMemoryGenerationJobRepository(dao);
-            }
-        };
-    }
-
-    @Bean
     public MemorySelectionService memorySelectionService(AgentMemoryRepository agentMemoryRepository,
                                                           MemoryProperties memoryProperties,
                                                           ObjectProvider<MemorySearchService> searchServiceProvider) {
@@ -118,6 +95,21 @@ public class MemoryAutoConfig {
                                                             TraceRecorder traceRecorder) {
         return new MemoryExtractionService(modelGateway, objectMapper,
                 memoryProperties.getExtractionModel(), traceRecorder);
+    }
+
+    @Bean
+    public MemoryPersistenceService memoryPersistenceService(AgentMemoryRepository agentMemoryRepository,
+                                                              MemoryProperties memoryProperties) {
+        return new MemoryPersistenceService(agentMemoryRepository, memoryProperties.getMaxActive());
+    }
+
+    @Bean(destroyMethod = "shutdownNow")
+    public ExecutorService memoryExtractionExecutor() {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "memory-extraction");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     @Bean

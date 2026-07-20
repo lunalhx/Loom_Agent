@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.model.BackgroundTaskStatus;
 import cn.lunalhx.ai.domain.tool.service.BackgroundTaskCancelService;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryBackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.tool.BackgroundProcessManager;
+import cn.lunalhx.ai.infrastructure.tool.SandboxEnvPolicy;
 import cn.lunalhx.ai.service.DefaultBackgroundTaskCancelService;
 import org.junit.Before;
 import org.junit.Rule;
@@ -13,6 +14,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.nio.file.Path;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -32,7 +34,9 @@ public class BackgroundTaskCancelServiceTest {
     public void setUp() throws Exception {
         taskRepository = new InMemoryBackgroundShellTaskRepository();
         Path logDir = temporaryFolder.newFolder("bg-logs").toPath();
-        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2, taskRepository);
+        SandboxEnvPolicy envPolicy = new SandboxEnvPolicy(
+                SandboxEnvPolicy.Mode.BLACKLIST, Set.of(), Set.of());
+        processManager = new BackgroundProcessManager(logDir, 120_000, 10_000, 600_000, 10, 5, 2, taskRepository, envPolicy);
         cancelService = new DefaultBackgroundTaskCancelService(taskRepository, processManager);
     }
 

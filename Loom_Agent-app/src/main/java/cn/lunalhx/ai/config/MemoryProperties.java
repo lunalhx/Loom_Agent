@@ -1,47 +1,28 @@
 package cn.lunalhx.ai.config;
 
-import lombok.Data;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryRuntimeProperties;
+import lombok.Getter;
+import lombok.Setter;
 
-@Data
-public class MemoryProperties {
+@Getter
+@Setter
+public class MemoryProperties extends MemoryRuntimeProperties {
 
     private boolean enabled = false;
-    private boolean useMemories = true;
-    private boolean generateMemories = true;
-    private int generationDelayMinutes = 1;
-    private boolean disableOnExternalContext = true;
-    private int maxActive = 200;
-    private int maxSelected = 4;
-    private int maxInjectedChars = 8000;
-    private String selectionModel;
-    private String extractionModel;
-    private int pinnedLimit = 4;
-    private double minRelevanceScore = 0.5;
-    private int archiveAfterUnusedDays = 90;
-    private int archiveMinImportance = 80;
-    private int cleanupIntervalHours = 24;
-    private WorkerConfig worker = new WorkerConfig();
     private VectorConfig vector = new VectorConfig();
 
-    @Data
-    public static class WorkerConfig {
-        private int pollIntervalSeconds = 30;
-        private int batchSize = 1;
-        private int leaseDurationSeconds = 300;
-        private int maxRetries = 3;
-        private int staleRecoverySeconds = 600;
-    }
-
-    @Data
+    @Getter
+    @Setter
     public static class VectorConfig {
-        private boolean enabled = true;
+        private boolean enabled = false;
         private String extensionPath;
         private String distanceMetric = "cosine";
         private int searchK = 50;
         private EmbeddingConfig embedding = new EmbeddingConfig();
     }
 
-    @Data
+    @Getter
+    @Setter
     public static class EmbeddingConfig {
         private String provider = "openai-compatible";
         private String baseUrl = "https://api.openai.com/v1";

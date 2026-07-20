@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 public class McpClientManager {
 
@@ -24,7 +25,7 @@ public class McpClientManager {
 
     private static final int MAX_TOOL_LIST_PAGES = 100;
 
-    private final McpClientProperties properties;
+    private McpClientProperties properties;
     private final McpJsonMapper jsonMapper;
     private final AgentMetrics metrics;
 
@@ -37,7 +38,7 @@ public class McpClientManager {
         this.metrics = metrics;
     }
 
-    public void initialize() {
+    public synchronized void initialize() {
         if (!properties.isEnabled()) {
             log.info("MCP client is disabled");
             return;
@@ -91,6 +92,27 @@ public class McpClientManager {
 
         this.tools.addAll(allTools);
         log.info("MCP client initialized: {} servers, {} tools total", connections.size(), tools.size());
+    }
+
+    public synchronized void reload(McpClientProperties replacement) {
+        reload(replacement, ignored -> { });
+    }
+
+    public synchronized void reload(McpClientProperties replacement,
+                                    Consumer<List<McpAgentTool>> beforeCommit) {
+        McpClientManager staging = new McpClientManager(replacement, jsonMapper, metrics);
+        try {
+            staging.initialize();
+            beforeCommit.accept(List.copyOf(staging.tools));
+            closeAll();
+            this.properties = replacement;
+            this.connections.putAll(staging.connections);
+            this.tools.addAll(staging.tools);
+            staging.connections.clear();
+            staging.tools.clear();
+        } finally {
+            staging.closeAll();
+        }
     }
 
     private List<McpSchema.Tool> discoverTools(McpSyncClient client, String serverAlias) {
@@ -207,7 +229,11 @@ public class McpClientManager {
         }
 
         // readOnlyHint cannot lower Loom-configured permission
-        // (so we ignore it here since Loom config always wins)
+        if (annotations != null && Boolean.TRUE.equals(annotations.readOnlyHint())
+                && level != ToolPermissionLevel.READ_ONLY) {
+            log.warn("MCP tool '{}' declares readOnlyHint=true but Loom permission is {}; Loom permission wins",
+                    tool.name(), level);
+        }
 
         return level;
     }
@@ -222,8 +248,8 @@ public class McpClientManager {
         };
     }
 
-    public List<McpAgentTool> tools() {
-        return Collections.unmodifiableList(tools);
+    public synchronized List<McpAgentTool> tools() {
+        return List.copyOf(tools);
     }
 
     public void close() {

@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.common.LoomPaths;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.sqlite.SQLiteConfig;
@@ -23,9 +24,9 @@ import java.nio.file.attribute.PosixFilePermissions;
 public class SqliteDataSourceConfig {
 
     @Bean
-    public DataSource dataSource(PersistenceProperties properties) {
-        Path dataDir = Path.of(properties.getDataDir()).toAbsolutePath().normalize();
-        Path database = dataDir.resolve("loom-agent.db");
+    public DataSource dataSource(PersistenceProperties properties, LoomPaths loomPaths) {
+        Path dataDir = loomPaths.resolveWorkspacePath(properties.getDataDir(), loomPaths.home());
+        Path database = dataDir.resolve(loomPaths.database().getFileName());
         prepareDataDirectory(dataDir);
 
         SQLiteConfig sqliteConfig = new SQLiteConfig();
@@ -54,9 +55,11 @@ public class SqliteDataSourceConfig {
     }
 
     @Bean
-    public FlywayMigrationStrategy sqliteFlywayMigrationStrategy(PersistenceProperties properties) {
+    public FlywayMigrationStrategy sqliteFlywayMigrationStrategy(PersistenceProperties properties,
+                                                                  LoomPaths loomPaths) {
         return flyway -> {
-            Path lockFile = Path.of(properties.getDataDir()).toAbsolutePath().normalize().resolve(".migration.lock");
+            Path lockFile = loomPaths.resolveWorkspacePath(properties.getDataDir(), loomPaths.home())
+                    .resolve(".migration.lock");
             try (FileChannel channel = FileChannel.open(lockFile,
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                  FileLock ignored = channel.lock()) {

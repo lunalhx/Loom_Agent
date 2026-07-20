@@ -15,7 +15,13 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
+import cn.lunalhx.ai.domain.tool.sandbox.Sandbox;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxLease;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxProvider;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxRequest;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
@@ -38,18 +44,28 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
 
     private final CommandExecutor commandExecutor;
     private final BackgroundProcessManager backgroundProcessManager;
+    private final SandboxProvider sandboxProvider;
 
     public RunShellTool(AgentRuntimeProperties properties, WorkspacePort workspacePort,
                         CommandExecutor commandExecutor, BackgroundProcessManager backgroundProcessManager) {
+        this(properties, workspacePort, commandExecutor, backgroundProcessManager, null);
+    }
+
+    @Autowired
+    public RunShellTool(AgentRuntimeProperties properties, WorkspacePort workspacePort,
+                        CommandExecutor commandExecutor, BackgroundProcessManager backgroundProcessManager,
+                        SandboxProvider sandboxProvider) {
         super(properties, workspacePort);
         this.commandExecutor = commandExecutor;
         this.backgroundProcessManager = backgroundProcessManager;
+        this.sandboxProvider = sandboxProvider;
     }
 
     @Override
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("run_shell")
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("在工作区沙箱内执行已分类命令。何时使用：构建、测试、受支持的 CLI 命令。Maven 测试请直接使用 `mvn -q -o test`，或使用 `mvn test -Dtest=TestClass` 选择测试；管道、重定向、逻辑操作等 shell 语法需高危确认后通过 shell 解释器执行，危险命令（sudo、破坏性删除、管道到解释器、敏感文件）直接拒绝。何时不要使用：Git 操作优先用 git_op，文件搜索用 find_files/code_search，文件删除用 delete_files。只读命令自动放行，写命令需确认，高危命令需高危确认。支持后台执行：设置 runInBackground=true 立即后台，或命令超过 foregroundYieldMs 未结束自动转后台。后台任务可通过 shell_task 工具查询、读取输出和取消。")
                 .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"minLength\":1,\"description\":\"要执行的 shell 命令\"},\"cwd\":{\"type\":\"string\",\"default\":\".\",\"description\":\"相对工作目录\"},\"timeoutMs\":{\"type\":\"integer\",\"minimum\":1,\"default\":120000,\"description\":\"超时毫秒，受系统配置上限限制\"},\"runInBackground\":{\"type\":\"boolean\",\"default\":false,\"description\":\"是否显式要求后台执行，不等待 yield 窗口\"},\"foregroundYieldMs\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":30000,\"default\":10000,\"description\":\"前台等待毫秒，超时未完成自动转后台\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
                 .build();
@@ -81,11 +97,11 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         }
 
         if (analysis.getExecutionMode() == ShellExecutionMode.SHELL_EXEC) {
-            if (isReadOnlyWildcardShellExec(analysis)) {
+            if (isReadOnlyWildcardShellExec(call, analysis)) {
                 return injectAnalysis(ToolPolicyDecision.readOnly(
                         "允许的只读 wildcard shell 命令 [wildcard_read_only]", command), analysis);
             }
-            String riskReason = buildShellExecRiskReason(analysis);
+            String riskReason = buildShellExecRiskReason(call, analysis);
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("shellAnalysis", analysis);
             return ToolPolicyDecision.builder()
@@ -146,7 +162,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         if (executable.contains("/")) {
             String basename = executable.substring(executable.lastIndexOf('/') + 1);
             if (!PATH_WHITELIST.contains(executable) && !PATH_WHITELIST.contains(basename)) {
-                if (isDenied(basename)) {
+                if (isDenied(call, basename)) {
                     return denyForCommand(basename, command);
                 }
                 return injectAnalysis(ToolPolicyDecision.highRiskConfirm(
@@ -154,7 +170,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             }
         }
 
-        if (isDenied(executable)) {
+        if (isDenied(call, executable)) {
             return denyForCommand(executable, command);
         }
 
@@ -167,19 +183,19 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return injectAnalysis(mavenPolicy(tokens, command), analysis);
         }
 
-        if (shellCommands().getReadOnly().contains(executable)) {
+        if (shellCommands(call).getReadOnly().contains(executable)) {
             return injectAnalysis(ToolPolicyDecision.readOnly("允许的只读 shell 命令", command), analysis);
         }
 
-        if (shellCommands().getWrite().contains(executable)) {
+        if (shellCommands(call).getWrite().contains(executable)) {
             return injectAnalysis(ToolPolicyDecision.writeConfirm("写命令需要人工确认", command), analysis);
         }
 
-        if (shellCommands().getHighRisk().contains(executable)) {
+        if (shellCommands(call).getHighRisk().contains(executable)) {
             return injectAnalysis(ToolPolicyDecision.highRiskConfirm("高危命令需要高危确认", command), analysis);
         }
 
-        String unknownLevel = shellCommands().getUnknownLevel();
+        String unknownLevel = shellCommands(call).getUnknownLevel();
         if ("HIGH_RISK_DENY".equalsIgnoreCase(unknownLevel)) {
             return injectAnalysis(ToolPolicyDecision.highRiskDeny("未分类 shell 命令：" + executable + " [ambiguous_shell]", command), analysis);
         }
@@ -196,6 +212,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             return failure("process_interrupted", "命令执行被中断", startedAt);
         }
         try {
+            AgentRuntimeProperties runProperties = runtimeProperties(call);
             ToolPolicyDecision policy = policy(call);
             if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_DENY) {
                 return failure("shell_command_rejected", policy.getRiskReason(), startedAt);
@@ -212,10 +229,10 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                     && call.getInput().path("runInBackground").asBoolean(false);
 
             long requestedTimeoutMs = call.getInput() == null
-                    ? properties.getShellTimeoutMs()
-                    : call.getInput().path("timeoutMs").asLong(properties.getShellTimeoutMs());
-            long maxTimeoutMs = properties.getShellMaxTimeoutMs() > 0
-                    ? properties.getShellMaxTimeoutMs() : 600_000L;
+                    ? runProperties.getShellTimeoutMs()
+                    : call.getInput().path("timeoutMs").asLong(runProperties.getShellTimeoutMs());
+            long maxTimeoutMs = runProperties.getShellMaxTimeoutMs() > 0
+                    ? runProperties.getShellMaxTimeoutMs() : 600_000L;
             long timeoutMs = Math.min(Math.max(1L, requestedTimeoutMs), maxTimeoutMs);
 
             long yieldMs = call.getInput() == null ? DEFAULT_FOREGROUND_YIELD_MS
@@ -226,7 +243,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             List<String> execTokens;
             String executionModeLabel;
             if (analysis != null && analysis.getExecutionMode() == ShellExecutionMode.SHELL_EXEC) {
-                String shellInterpreter = shellCommands().getShellInterpreter();
+                String shellInterpreter = shellCommands(call).getShellInterpreter();
                 if (shellInterpreter == null || shellInterpreter.isBlank()) {
                     shellInterpreter = "/bin/sh";
                 }
@@ -238,23 +255,25 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             }
 
             ShellOutputLimits limits = ShellOutputLimits.builder()
-                    .maxStdoutChars(properties.getShellMaxOutputChars())
-                    .maxStderrChars(properties.getShellMaxStderrChars())
+                    .maxStdoutChars(runProperties.getShellMaxOutputChars())
+                    .maxStderrChars(runProperties.getShellMaxStderrChars())
                     .build();
 
+            try (SandboxLease lease = acquireSandbox(call)) {
+                Sandbox sandbox = lease == null ? null : lease.sandbox();
             if (isMavenTestCommand(execTokens)) {
-                ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
+                ToolResult result = execute(sandbox, execTokens, cwd, timeoutMs, limits, startedAt);
                 result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
                         StringUtils.defaultString(result.getObservation()));
                 return enrichTestResult(result, execTokens, cwd, startedAt);
             }
 
             if (runInBackground && backgroundProcessManager != null) {
-                return startBackgroundTask(execTokens, cwd, timeoutMs, call, startedAt);
+                return startBackgroundTask(sandbox, execTokens, cwd, timeoutMs, call, startedAt);
             }
 
             if (yieldMs <= 0 || backgroundProcessManager == null) {
-                ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
+                ToolResult result = execute(sandbox, execTokens, cwd, timeoutMs, limits, startedAt);
                 result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
                         StringUtils.defaultString(result.getObservation()));
                 return enrichTestResult(result, execTokens, cwd, startedAt);
@@ -264,20 +283,21 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             if (timeoutMs > yieldMs) {
                 timeoutMs = yieldMs;
             }
-            ToolResult result = commandExecutor.run(execTokens, cwd, timeoutMs, limits, startedAt);
+            ToolResult result = execute(sandbox, execTokens, cwd, timeoutMs, limits, startedAt);
 
             if ("command_timeout".equals(result.getErrorCode())) {
-                return startBackgroundTask(execTokens, cwd, requestedTimeoutMs, call, startedAt);
+                return startBackgroundTask(sandbox, execTokens, cwd, requestedTimeoutMs, call, startedAt);
             }
             result.setObservation("ExecutionMode: " + executionModeLabel + "\n" +
                     StringUtils.defaultString(result.getObservation()));
             return enrichTestResult(result, execTokens, cwd, startedAt);
+            }
         } catch (Exception e) {
             return failure("run_shell_failed", e.getMessage(), startedAt);
         }
     }
 
-    private String buildShellExecRiskReason(ShellCommandAnalysis analysis) {
+    private String buildShellExecRiskReason(ToolCall call, ShellCommandAnalysis analysis) {
         StringBuilder sb = new StringBuilder("命令需要 shell 解释器执行");
         Set<ShellFeature> features = analysis.getFeatures();
         if (features != null && !features.isEmpty()) {
@@ -293,13 +313,13 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
             sb.append(" [ambiguous_shell]");
         }
         if (features != null && features.contains(ShellFeature.WILDCARD)
-                && primary != null && shellCommands().getReadOnly().contains(primary)) {
+                && primary != null && shellCommands(call).getReadOnly().contains(primary)) {
             sb.append(" [wildcard_read_only]");
         }
         return sb.toString();
     }
 
-    private boolean isReadOnlyWildcardShellExec(ShellCommandAnalysis analysis) {
+    private boolean isReadOnlyWildcardShellExec(ToolCall call, ShellCommandAnalysis analysis) {
         Set<ShellFeature> features = analysis.getFeatures();
         if (features == null || !features.contains(ShellFeature.WILDCARD)) {
             return false;
@@ -309,7 +329,7 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         }
         String primary = analysis.getPrimaryCommand();
         return primary != null
-                && shellCommands().getReadOnly().contains(primary)
+                && shellCommands(call).getReadOnly().contains(primary)
                 && Set.of("grep", "rg", "ls", "wc").contains(primary)
                 && !hasUnsafeWildcardToken(analysis.getRawCommand());
     }
@@ -393,19 +413,34 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         return decision;
     }
 
-    private ToolResult startBackgroundTask(List<String> tokens, Path cwd, long timeoutMs,
+    private ToolResult startBackgroundTask(Sandbox sandbox, List<String> tokens, Path cwd, long timeoutMs,
                                             ToolCall call, long startedAt) {
-        BackgroundProcessManager.BackgroundStartResult bgResult = backgroundProcessManager.startBackground(
-                tokens, cwd, timeoutMs,
-                call.getRunId(), call.getConversationId(),
-                call.getWorkspace() != null ? call.getWorkspace().getDisplayName() : null,
-                BackgroundLaunchMode.EXPLICIT);
-
-        if (!bgResult.started()) {
-            return failure(bgResult.errorCode(), bgResult.message(), startedAt);
+        boolean started;
+        String errorCode;
+        String message;
+        BackgroundShellTask task;
+        if (sandbox != null) {
+            var result = sandbox.startBackground(tokens, cwd, Map.of(), timeoutMs, call.getRunId(),
+                    call.getWorkspace() != null ? call.getWorkspace().getDisplayName() : null,
+                    BackgroundLaunchMode.EXPLICIT);
+            started = result.started();
+            errorCode = result.errorCode();
+            message = result.message();
+            task = result.task();
+        } else {
+            var result = backgroundProcessManager.startBackground(tokens, cwd, timeoutMs,
+                    call.getRunId(), call.getConversationId(),
+                    call.getWorkspace() != null ? call.getWorkspace().getDisplayName() : null,
+                    BackgroundLaunchMode.EXPLICIT);
+            started = result.started();
+            errorCode = result.errorCode();
+            message = result.message();
+            task = result.task();
         }
 
-        BackgroundShellTask task = bgResult.task();
+        if (!started) {
+            return failure(errorCode, message, startedAt);
+        }
 
         long elapsedMs = System.currentTimeMillis() - startedAt;
         String observation = "后台任务已启动\n"
@@ -421,6 +456,25 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
                 .truncated(false)
                 .elapsedMs(elapsedMs)
                 .build();
+    }
+
+    private SandboxLease acquireSandbox(ToolCall call) throws Exception {
+        if (sandboxProvider == null) {
+            return null;
+        }
+        Path root = workspaceRoot(call).toRealPath();
+        AgentRuntimeProperties runProperties = runtimeProperties(call);
+        return sandboxProvider.acquire(new SandboxRequest(root, call.getConversationId(),
+                runProperties.getShellMaxTimeoutMs(),
+                Set.copyOf(runProperties.getSandbox().getEnvAllowlist())));
+    }
+
+    private ToolResult execute(Sandbox sandbox, List<String> command, Path cwd, long timeoutMs,
+                               ShellOutputLimits limits, long startedAt) {
+        if (sandbox != null) {
+            return sandbox.execute(command, cwd, Map.of(), timeoutMs, limits, startedAt);
+        }
+        return commandExecutor.run(command, cwd, timeoutMs, limits, startedAt);
     }
 
     private ToolPolicyDecision gitPolicy(List<String> tokens, String command) {
@@ -547,8 +601,8 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         return null;
     }
 
-    private boolean isDenied(String executable) {
-        return shellCommands().getDeny().contains(executable);
+    private boolean isDenied(ToolCall call, String executable) {
+        return shellCommands(call).getDeny().contains(executable);
     }
 
     private ToolPolicyDecision denyForCommand(String executable, String command) {
@@ -563,9 +617,10 @@ public class RunShellTool extends FileSystemToolSupport implements AgentTool {
         return ToolPolicyDecision.highRiskDeny("禁止通过 shell 执行 " + executable, command);
     }
 
-    private AgentRuntimeProperties.ShellCommandProperties shellCommands() {
-        AgentRuntimeProperties.ShellCommandProperties sc = properties.getShellCommands();
-        return sc != null ? sc : new AgentRuntimeProperties.ShellCommandProperties();
+    private cn.lunalhx.ai.domain.agent.model.valobj.ShellCommandProperties shellCommands(ToolCall call) {
+        cn.lunalhx.ai.domain.agent.model.valobj.ShellCommandProperties sc =
+                runtimeProperties(call).getShellCommands();
+        return sc != null ? sc : new cn.lunalhx.ai.domain.agent.model.valobj.ShellCommandProperties();
     }
 
 }

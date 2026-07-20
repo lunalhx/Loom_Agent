@@ -30,6 +30,7 @@ public final class ModelRetryPolicy {
     }
 
     ModelRetryDecision decide(ModelAttemptState state, Throwable error, AgentContext context, boolean retryAllowed) {
+        ModelRuntimeProperties effectiveProperties = requestNormalizer.effectiveProperties(state.prompt());
         Throwable normalized = classifier.normalize(error, state.key().model());
         boolean retryable = retryAllowed && classifier.retryable(normalized);
 
@@ -37,7 +38,7 @@ public final class ModelRetryPolicy {
             return new ModelRetryDecision(ModelRetryDecision.Action.STOP, null, 0L, normalized, null, false);
         }
 
-        if (state.attemptNo() >= maxAttempts()) {
+        if (state.attemptNo() >= maxAttempts(effectiveProperties)) {
             return new ModelRetryDecision(ModelRetryDecision.Action.STOP, null, 0L, normalized, null, true);
         }
 
@@ -53,8 +54,8 @@ public final class ModelRetryPolicy {
             nextKey = requestNormalizer.key(nextPrompt);
         }
 
-        if (shouldFallback(state.key().model(), nextOverload)) {
-            String fallbackModel = resilience().getFallbackModel();
+        if (shouldFallback(effectiveProperties, state.key().model(), nextOverload)) {
+            String fallbackModel = resilience(effectiveProperties).getFallbackModel();
             try {
                 preflight.validateFallbackBudget(context, state.prompt(), fallbackModel);
             } catch (ModelGatewayException e) {
@@ -67,7 +68,7 @@ public final class ModelRetryPolicy {
             nextOverload = 0;
         }
 
-        long delayMs = retryDelayMs(state.attemptNo(), normalized);
+        long delayMs = retryDelayMs(effectiveProperties, state.attemptNo(), normalized);
         if (!preflight.canWait(state.prompt(), delayMs)) {
             ModelGatewayException timeoutError = classifier.deadlineExceeded(state.key().model());
             return new ModelRetryDecision(ModelRetryDecision.Action.STOP, null, 0L, timeoutError, null, false);
@@ -78,41 +79,46 @@ public final class ModelRetryPolicy {
         return new ModelRetryDecision(ModelRetryDecision.Action.RETRY, nextState, delayMs, null, fallbackSwitch, false);
     }
 
-    private long retryDelayMs(int attemptNo, Throwable error) {
+    private long retryDelayMs(ModelRuntimeProperties effectiveProperties,
+                              int attemptNo, Throwable error) {
         if (error instanceof ModelGatewayException exception && exception.getRetryAfterMs() != null) {
             return Math.max(0L, exception.getRetryAfterMs());
         }
-        long base = Math.min(backoffMaxMs(), backoffInitialMs() * (1L << Math.min(20, Math.max(0, attemptNo - 1))));
+        long base = Math.min(backoffMaxMs(effectiveProperties),
+                backoffInitialMs(effectiveProperties) * (1L << Math.min(20, Math.max(0, attemptNo - 1))));
         long jitter = Math.round(base * 0.25D);
         long delta = jitter <= 0 ? 0 : jitterSource.applyAsLong(jitter);
         return Math.max(0L, base + delta);
     }
 
-    private boolean shouldFallback(String currentModel, int consecutiveOverload) {
-        String fallbackModel = resilience().getFallbackModel();
-        return consecutiveOverload >= Math.max(1, resilience().getOverloadFallbackThreshold())
+    private boolean shouldFallback(ModelRuntimeProperties effectiveProperties,
+                                   String currentModel, int consecutiveOverload) {
+        String fallbackModel = resilience(effectiveProperties).getFallbackModel();
+        return consecutiveOverload >= Math.max(1,
+                resilience(effectiveProperties).getOverloadFallbackThreshold())
                 && StringUtils.isNotBlank(fallbackModel)
                 && !StringUtils.equals(currentModel, fallbackModel)
-                && properties.getAllowedModels().contains(fallbackModel);
+                && effectiveProperties.getAllowedModels().contains(fallbackModel);
     }
 
-    private int maxAttempts() {
-        return Math.max(1, resilience().getRetryMaxAttempts());
+    private int maxAttempts(ModelRuntimeProperties effectiveProperties) {
+        return Math.max(1, resilience(effectiveProperties).getRetryMaxAttempts());
     }
 
-    private long backoffInitialMs() {
-        return Math.max(1L, resilience().getRetryBackoffInitialMs());
+    private long backoffInitialMs(ModelRuntimeProperties effectiveProperties) {
+        return Math.max(1L, resilience(effectiveProperties).getRetryBackoffInitialMs());
     }
 
-    private long backoffMaxMs() {
-        return Math.max(backoffInitialMs(), resilience().getRetryBackoffMaxMs());
+    private long backoffMaxMs(ModelRuntimeProperties effectiveProperties) {
+        return Math.max(backoffInitialMs(effectiveProperties),
+                resilience(effectiveProperties).getRetryBackoffMaxMs());
     }
 
-    private ModelRuntimeProperties.ResilienceProperties resilience() {
-        if (properties.getResilience() == null) {
-            properties.setResilience(new ModelRuntimeProperties.ResilienceProperties());
-        }
-        return properties.getResilience();
+    private ModelRuntimeProperties.ResilienceProperties resilience(
+            ModelRuntimeProperties effectiveProperties) {
+        return effectiveProperties.getResilience() == null
+                ? new ModelRuntimeProperties.ResilienceProperties()
+                : effectiveProperties.getResilience();
     }
 
 }

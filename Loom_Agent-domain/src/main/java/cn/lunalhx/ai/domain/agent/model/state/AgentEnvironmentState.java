@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 
@@ -17,12 +18,14 @@ public final class AgentEnvironmentState {
     private String workspaceDisplayName;
     private List<ToolSpec> toolSpecs = new ArrayList<>();
     private boolean subAgentSpawnAllowed;
+    private AgentRunConfig runConfig;
 
     public Path resolvedWorkspace() { return resolvedWorkspace; }
     public WorkspaceRef workspace() { return workspace; }
     public String workspaceDisplayName() { return workspaceDisplayName; }
     public List<ToolSpec> toolSpecs() { return toolSpecs; }
     public boolean subAgentSpawnAllowed() { return subAgentSpawnAllowed; }
+    public AgentRunConfig runConfig() { return runConfig; }
 
     // -- package-private mutators for AgentContext delegation --
 
@@ -31,4 +34,5 @@ public final class AgentEnvironmentState {
     public void setWorkspaceDisplayName(String v) { this.workspaceDisplayName = v; }
     public void setToolSpecs(List<ToolSpec> v) { this.toolSpecs = v; }
     public void setSubAgentSpawnAllowed(boolean v) { this.subAgentSpawnAllowed = v; }
+    public void setRunConfig(AgentRunConfig v) { this.runConfig = v; }
 }

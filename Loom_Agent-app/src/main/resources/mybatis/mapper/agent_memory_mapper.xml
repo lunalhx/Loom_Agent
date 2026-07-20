@@ -48,7 +48,6 @@
         last_used_at = #{lastUsedAt},
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE memory_id = #{memoryId}
-          AND version = #{version} - 1
     </update>
 
     <select id="selectById" resultMap="AgentMemoryMap">
@@ -89,7 +88,6 @@
             last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
             version = version + 1
         WHERE memory_id = #{memoryId}
-          AND version = #{expectedVersion}
     </update>
 
     <select id="countActive" resultType="int">
@@ -103,7 +101,6 @@
         SET status = #{status},
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE memory_id = #{memoryId}
-          AND version = #{expectedVersion}
     </update>
 
     <select id="selectExpiredActive" resultMap="AgentMemoryMap">

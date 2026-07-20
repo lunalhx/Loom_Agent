@@ -29,7 +29,7 @@ public class ContextArtifactCleanupTaskTest {
     private InMemoryContextArtifactRepository artifactRepository;
     private InMemoryContextBlobStore blobStore;
     private ContextArtifactPurgeService purgeService;
-    private AgentRuntimeProperties.ContextProperties config;
+    private cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties config;
     private StubAgentLoopService agentLoopService;
 
     @Before
@@ -37,7 +37,7 @@ public class ContextArtifactCleanupTaskTest {
         artifactRepository = new InMemoryContextArtifactRepository();
         blobStore = new InMemoryContextBlobStore();
         purgeService = new ContextArtifactPurgeService(artifactRepository, blobStore);
-        config = new AgentRuntimeProperties.ContextProperties();
+        config = new cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties();
         config.setTranscriptRetentionHours(168);
         config.setTranscriptCleanupBatchSize(500);
         config.setTranscriptCleanupEnabled(true);

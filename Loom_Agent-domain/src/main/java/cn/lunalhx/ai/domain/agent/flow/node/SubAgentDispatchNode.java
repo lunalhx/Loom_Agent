@@ -61,8 +61,9 @@ public class SubAgentDispatchNode extends AbstractAgentNode {
         ToolResult toolResult = result.isSuccess()
                 ? ToolResult.success(result.getObservation(), result.isTruncated(), result.getElapsedMs())
                 : ToolResult.failure(result.getErrorCode(), result.getMessage(), result.getElapsedMs());
-        if (StringUtils.length(toolResult.getObservation()) > properties.getObservationMaxChars()) {
-            toolResult.setObservation(StringUtils.abbreviate(toolResult.getObservation(), properties.getObservationMaxChars()));
+        Integer observationMaxChars = context.runtimeProperties(properties).getObservationMaxChars();
+        if (StringUtils.length(toolResult.getObservation()) > observationMaxChars) {
+            toolResult.setObservation(StringUtils.abbreviate(toolResult.getObservation(), observationMaxChars));
             toolResult.setTruncated(true);
         }
         context.setToolResult(toolResult);

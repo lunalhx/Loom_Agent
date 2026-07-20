@@ -27,7 +27,7 @@ public class AgentSkillHttpQueryService {
     private final AgentRuntimeProperties agentRuntimeProperties;
 
     public List<SkillQueryResponse> querySkills(SkillQueryRequest request) {
-        AgentRuntimeProperties.SkillProperties skillProps = agentRuntimeProperties.getSkills();
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps = agentRuntimeProperties.getSkills();
         if (skillProps != null && Boolean.FALSE.equals(skillProps.getEnabled())) {
             return List.of();
         }

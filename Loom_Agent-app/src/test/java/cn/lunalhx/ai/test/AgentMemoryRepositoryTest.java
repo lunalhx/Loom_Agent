@@ -58,10 +58,8 @@ public class AgentMemoryRepositoryTest {
     @Test
     public void shouldUpdateStatus() {
         AgentMemory saved = repo.save(newMemory("ws-1", "hash-1", "run-1"));
-        long version = saved.getVersion();
-
-        assertTrue(repo.updateStatus(saved.getMemoryId(), MemoryStatus.ARCHIVED, version));
-        assertFalse("wrong version should fail", repo.updateStatus(saved.getMemoryId(), MemoryStatus.DELETED, version));
+        assertTrue(repo.updateStatus(saved.getMemoryId(), MemoryStatus.ARCHIVED));
+        assertTrue(repo.updateStatus(saved.getMemoryId(), MemoryStatus.DELETED));
     }
 
     @Test

@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -29,6 +30,8 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("list_dir")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("列出已知工作区目录内的文件和子目录结构。何时使用：浏览已知路径的目录内容时。何时不要使用：名称未知需要递归按模式匹配时请用 find_files，搜索文件内容请用 code_search。限制：最大深度 3 层。权限：只读自动放行")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
@@ -50,7 +53,7 @@ public class ListDirectoryTool extends FileSystemToolSupport implements AgentToo
                 return failure("not_directory", "不是目录：" + relative(call, path), startedAt);
             }
             int maxDepth = Math.max(1, Math.min(3, integer(call.getInput(), "maxDepth", 1)));
-            int limit = Math.max(1, properties.getSearchMaxResults());
+            int limit = Math.max(1, runtimeProperties(call).getSearchMaxResults());
 
             List<String> entries = new ArrayList<>();
             Files.walkFileTree(path, java.util.Set.of(), maxDepth, new FileVisitor<>() {

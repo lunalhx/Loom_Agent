@@ -25,7 +25,7 @@ public class ModelConfigController {
         ModelConfigResponse config = ModelConfigResponse.builder()
                 .provider(provider)
                 .baseUrl(active.getBaseUrl())
-                .model(active.getDefaultModel())
+                .model(modelRuntimeProperties.resolvedDefaultModel())
                 .temperature(active.getTemperature())
                 .maxTokens(active.getMaxTokens())
                 .apiKey(mask(active.getApiKey()))

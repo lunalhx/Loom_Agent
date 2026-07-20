@@ -521,17 +521,9 @@ public class ResilientModelGatewayTest {
                                          InMemoryTraceRecorder traceRecorder,
                                          int maxAttempts,
                                          int slidingWindowSize) {
-        ModelRuntimeProperties properties = new ModelRuntimeProperties();
-        properties.setFirstTokenTimeoutMs(500L);
-        properties.getResilience().setRetryMaxAttempts(maxAttempts);
-        properties.getResilience().setRetryBackoffInitialMs(1L);
-        properties.getResilience().setRetryBackoffMaxMs(2L);
-        properties.getResilience().setCircuitSlidingWindowSize(slidingWindowSize);
-        properties.getResilience().setCircuitOpenStateWaitMs(5000L);
-        properties.getResilience().setCircuitFailureRateThreshold(50.0F);
         return new ResilientModelGateway(
                 delegate,
-                properties,
+                properties(maxAttempts, slidingWindowSize),
                 traceRecorder,
                 new SimpleMeterRegistry(),
                 new MockEnvironment().withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash"));
@@ -557,6 +549,10 @@ public class ResilientModelGatewayTest {
         properties.getResilience().setCircuitSlidingWindowSize(slidingWindowSize);
         properties.getResilience().setCircuitOpenStateWaitMs(5000L);
         properties.getResilience().setCircuitFailureRateThreshold(50.0F);
+        ModelRuntimeProperties.ProviderConfig cfg = new ModelRuntimeProperties.ProviderConfig();
+        cfg.setDefaultModel("deepseek-v4-flash");
+        cfg.setMaxTokens(2048);
+        properties.getProviders().put("deepseek", cfg);
         return properties;
     }
 
@@ -565,17 +561,9 @@ public class ResilientModelGatewayTest {
                                          SimpleMeterRegistry meterRegistry,
                                          int maxAttempts,
                                          int slidingWindowSize) {
-        ModelRuntimeProperties properties = new ModelRuntimeProperties();
-        properties.setFirstTokenTimeoutMs(500L);
-        properties.getResilience().setRetryMaxAttempts(maxAttempts);
-        properties.getResilience().setRetryBackoffInitialMs(1L);
-        properties.getResilience().setRetryBackoffMaxMs(2L);
-        properties.getResilience().setCircuitSlidingWindowSize(slidingWindowSize);
-        properties.getResilience().setCircuitOpenStateWaitMs(5000L);
-        properties.getResilience().setCircuitFailureRateThreshold(50.0F);
         return new ResilientModelGateway(
                 delegate,
-                properties,
+                properties(maxAttempts, slidingWindowSize),
                 traceRecorder,
                 meterRegistry,
                 new MockEnvironment().withProperty("spring.ai.deepseek.chat.model", "deepseek-v4-flash"));

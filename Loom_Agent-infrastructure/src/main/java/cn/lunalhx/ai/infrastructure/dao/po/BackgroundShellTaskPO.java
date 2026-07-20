@@ -21,6 +21,7 @@ public class BackgroundShellTaskPO {
     private String errorMessage;
     private String stdoutFile;
     private String stderrFile;
+    private String envKeys;
     private long stdoutBytes;
     private long stderrBytes;
     private String startedAt;

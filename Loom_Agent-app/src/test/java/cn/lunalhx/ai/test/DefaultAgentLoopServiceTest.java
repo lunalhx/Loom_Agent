@@ -50,6 +50,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.tool.TodoWriteTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -119,7 +120,7 @@ public class DefaultAgentLoopServiceTest {
         assertTrue(prompts.get(1).contains("<untrusted_tool_output>"));
         assertTrue(prompts.get(1).contains("AgentLoopService.java:42"));
         assertTrue(prompts.get(2), prompts.get(2).contains("\"thought\":\"读取文件\""));
-        assertTrue(prompts.get(2).contains("42: public Flux<AgentEvent> ask"));
+        assertTrue(prompts.get(2).contains("42: public Flux&lt;AgentEvent&gt; ask"));
         assertEquals("AgentLoopService.ask 定义在 AgentLoopService.java，负责驱动 Agent Loop 并输出 SSE 事件。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
     }
@@ -694,7 +695,7 @@ public class DefaultAgentLoopServiceTest {
         assertEquals("汇总完成。",
                 events.stream().filter(event -> event.getType() == AgentEventType.ANSWER).findFirst().get().getAnswer());
         assertTrue(prompts.stream().anyMatch(prompt -> prompt.contains("spawn_agents")));
-        assertTrue(prompts.stream().anyMatch(prompt -> prompt.contains("\"type\":\"sub_agent_summary\"")));
+        assertTrue(prompts.stream().anyMatch(prompt -> prompt.contains("&quot;type&quot;:&quot;sub_agent_summary&quot;")));
     }
 
     @Test
@@ -1673,6 +1674,7 @@ public class DefaultAgentLoopServiceTest {
             public ToolSpec spec() {
                 return ToolSpec.builder()
                         .name(name)
+                        .childVisibility(ToolChildVisibility.ALL_ROLES)
                         .description(name)
                         .inputSchema("{}")
                         .build();
@@ -1691,6 +1693,7 @@ public class DefaultAgentLoopServiceTest {
             public ToolSpec spec() {
                 return ToolSpec.builder()
                         .name(name)
+                        .childVisibility(ToolChildVisibility.ALL_ROLES)
                         .description(name)
                         .inputSchema("{}")
                         .build();
@@ -1713,6 +1716,7 @@ public class DefaultAgentLoopServiceTest {
             public ToolSpec spec() {
                 return ToolSpec.builder()
                         .name(name)
+                        .childVisibility(ToolChildVisibility.ALL_ROLES)
                         .description(name)
                         .inputSchema("{}")
                         .build();

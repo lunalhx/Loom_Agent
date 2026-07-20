@@ -61,7 +61,11 @@ public final class StreamingModelCallExecutor {
         }
 
         long startedAt = System.currentTimeMillis();
-        long timeoutMs = Math.min(firstTokenTimeoutMs, preflight.remainingMs(state.prompt()));
+        long configuredTimeout = state.prompt().getRuntimeProperties() != null
+                && state.prompt().getRuntimeProperties().getFirstTokenTimeoutMs() != null
+                ? Math.max(1L, state.prompt().getRuntimeProperties().getFirstTokenTimeoutMs())
+                : firstTokenTimeoutMs;
+        long timeoutMs = Math.min(configuredTimeout, preflight.remainingMs(state.prompt()));
 
         return delegate.stream(state.prompt())
                 .timeout(Duration.ofMillis(timeoutMs))

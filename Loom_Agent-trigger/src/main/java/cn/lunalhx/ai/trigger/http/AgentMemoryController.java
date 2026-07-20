@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,12 +46,6 @@ public class AgentMemoryController {
         @Override public String code() { return "memory_gone"; }
         @Override public String defaultMessage() { return "记忆已删除"; }
         @Override public ErrorCategory category() { return ErrorCategory.GONE; }
-    };
-
-    private static final ErrorCode MEMORY_CONFLICT = new ErrorCode() {
-        @Override public String code() { return "memory_conflict"; }
-        @Override public String defaultMessage() { return "版本冲突"; }
-        @Override public ErrorCategory category() { return ErrorCategory.CONFLICT; }
     };
 
     @GetMapping("/memories")
@@ -108,18 +101,12 @@ public class AgentMemoryController {
 
     @PutMapping("/memories/{memoryId}")
     public Response<AgentMemory> updateMemory(@PathVariable String memoryId,
-                                               @RequestHeader(value = "X-Expected-Version", required = false) Long expectedVersion,
                                                @RequestBody Map<String, Object> body) {
         AgentMemory existing = memoryRepository.findById(memoryId)
                 .orElseThrow(() -> new ApplicationException(MEMORY_NOT_FOUND));
 
         if (existing.getStatus() == MemoryStatus.DELETED) {
             throw new ApplicationException(MEMORY_DELETED);
-        }
-
-        if (expectedVersion != null && expectedVersion != existing.getVersion()) {
-            throw new ApplicationException(MEMORY_CONFLICT,
-                    "版本冲突：expected=" + expectedVersion + ", actual=" + existing.getVersion());
         }
 
         MemoryType type = body.containsKey("type") ? MemoryType.valueOf((String) body.get("type")) : existing.getType();
@@ -157,7 +144,7 @@ public class AgentMemoryController {
         AgentMemory existing = memoryRepository.findById(memoryId)
                 .orElseThrow(() -> new ApplicationException(MEMORY_NOT_FOUND));
 
-        memoryRepository.updateStatus(memoryId, MemoryStatus.DELETED, existing.getVersion());
+        memoryRepository.updateStatus(memoryId, MemoryStatus.DELETED);
         return Response.success(null);
     }
 }

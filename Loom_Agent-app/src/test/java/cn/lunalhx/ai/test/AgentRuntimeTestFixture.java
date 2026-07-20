@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
@@ -296,7 +297,7 @@ public final class AgentRuntimeTestFixture {
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
                 effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer(),
-                new ModelRuntimeProperties());
+                testModelRuntimeProperties(props));
         ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
                 standardHookRegistry(props, null, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
@@ -321,7 +322,7 @@ public final class AgentRuntimeTestFixture {
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
                 effectiveAgentMetrics(), cwm, effectiveToolOutputSanitizer(),
-                new ModelRuntimeProperties());
+                testModelRuntimeProperties(props));
         ConversationLedgerAppendService ledgerAppendService = new ConversationLedgerAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
                 standardHookRegistry(props, inbox, effectiveApprovalStore, effectiveRunRepo, effectiveChkptRepo),
@@ -442,6 +443,28 @@ public final class AgentRuntimeTestFixture {
         properties.setToolTimeoutMs(1000L);
         properties.setObservationMaxChars(8000);
         properties.setMaxSteps(6);
+        return properties;
+    }
+
+    public static ModelRuntimeProperties testModelRuntimeProperties() {
+        return testModelRuntimeProperties(null);
+    }
+
+    public static ModelRuntimeProperties testModelRuntimeProperties(AgentRuntimeProperties agent) {
+        ModelRuntimeProperties properties = new ModelRuntimeProperties();
+        ModelRuntimeProperties.ProviderConfig cfg = new ModelRuntimeProperties.ProviderConfig();
+        cfg.setDefaultModel("deepseek-v4-flash");
+        cfg.setMaxTokens(2048);
+        properties.getProviders().put("deepseek", cfg);
+        String fallback = agent == null || agent.getModelRecovery() == null
+                ? null : agent.getModelRecovery().getContextFallbackModel();
+        if (fallback != null && !fallback.isBlank()) {
+            if (!properties.getAllowedModels().contains(fallback)) {
+                properties.getAllowedModels().add(fallback);
+            }
+            properties.getModelCapabilities().put(fallback,
+                    new ModelCapability(fallback, 2000000L, 384000, true, true));
+        }
         return properties;
     }
 

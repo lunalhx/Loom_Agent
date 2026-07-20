@@ -40,12 +40,7 @@ abstract class FileSystemToolSupport {
             throw new IOException(fieldName + " 不能为空");
         }
         Path root = workspaceRoot(call);
-        Path candidate = toCandidate(root, rawPath);
-        if (!Files.exists(candidate)) {
-            throw new IOException("路径不存在：" + rawPath);
-        }
-        Path realPath = candidate.toRealPath();
-        validateInsideWorkspace(root, realPath, rawPath);
+        Path realPath = WorkspacePathSanitizer.existing(root, rawPath);
         validateNotSensitive(root, realPath);
         return realPath;
     }
@@ -60,12 +55,7 @@ abstract class FileSystemToolSupport {
             throw new IOException(fieldName + " 不能为空");
         }
         Path root = workspaceRoot(call);
-        Path candidate = toCandidate(root, rawPath);
-        if (!Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("路径不存在或不是目录：" + rawPath);
-        }
-        Path realPath = candidate.toRealPath();
-        validateInsideWorkspace(root, realPath, rawPath);
+        Path realPath = WorkspacePathSanitizer.directory(root, rawPath);
         return realPath;
     }
 
@@ -75,23 +65,7 @@ abstract class FileSystemToolSupport {
             throw new IOException(fieldName + " 不能为空");
         }
         Path root = workspaceRoot(call);
-        Path candidate = toCandidate(root, rawPath);
-
-        // Walk up from candidate to find the nearest existing ancestor
-        Path nearestExisting = candidate;
-        while (nearestExisting != null && !Files.exists(nearestExisting)) {
-            nearestExisting = nearestExisting.getParent();
-        }
-        if (nearestExisting == null) {
-            throw new IOException("无法确定父目录：" + rawPath);
-        }
-        Path realAncestor = nearestExisting.toRealPath();
-        validateInsideWorkspace(root, realAncestor, rawPath);
-
-        // Rebuild the candidate from the verified real ancestor
-        Path relativeFromAncestor = nearestExisting.relativize(candidate);
-        Path normalized = realAncestor.resolve(relativeFromAncestor).normalize().toAbsolutePath();
-        validateInsideWorkspace(root, normalized, rawPath);
+        Path normalized = WorkspacePathSanitizer.writable(root, rawPath);
         validateNotSensitive(root, normalized);
         return normalized;
     }
@@ -188,7 +162,7 @@ abstract class FileSystemToolSupport {
             Path realPath = path.toRealPath();
             return Files.isRegularFile(realPath)
                     && realPath.startsWith(root)
-                    && Files.size(realPath) <= properties.getFileMaxBytes()
+                    && Files.size(realPath) <= runtimeProperties(call).getFileMaxBytes()
                     && !isSensitivePath(realPath)
                     && !isTraversalBlockedInPath(root, realPath);
         } catch (IOException e) {
@@ -220,8 +194,9 @@ abstract class FileSystemToolSupport {
 
     // ---- UTF-8 byte check ----
 
-    protected boolean exceedsUtf8Limit(String content) {
-        return content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > properties.getFileMaxBytes();
+    protected boolean exceedsUtf8Limit(ToolCall call, String content) {
+        return content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                > runtimeProperties(call).getFileMaxBytes();
     }
 
     protected ToolResult failure(String code, String message, long startedAt) {
@@ -232,23 +207,15 @@ abstract class FileSystemToolSupport {
         return System.currentTimeMillis() - startedAt;
     }
 
-    protected boolean timedOut(long startedAt) {
-        return elapsed(startedAt) > properties.getToolTimeoutMs();
+    protected boolean timedOut(ToolCall call, long startedAt) {
+        return elapsed(startedAt) > runtimeProperties(call).getToolTimeoutMs();
+    }
+
+    protected AgentRuntimeProperties runtimeProperties(ToolCall call) {
+        return call != null && call.getRuntimeProperties() != null
+                ? call.getRuntimeProperties() : properties;
     }
 
     // ---- internal ----
-
-    private Path toCandidate(Path root, String rawPath) {
-        Path raw = Path.of(rawPath);
-        return raw.isAbsolute()
-                ? raw.normalize().toAbsolutePath()
-                : root.resolve(raw).normalize().toAbsolutePath();
-    }
-
-    private void validateInsideWorkspace(Path root, Path path, String rawPath) throws IOException {
-        if (!path.toAbsolutePath().normalize().startsWith(root)) {
-            throw new IOException("路径越权：" + rawPath);
-        }
-    }
 
 }

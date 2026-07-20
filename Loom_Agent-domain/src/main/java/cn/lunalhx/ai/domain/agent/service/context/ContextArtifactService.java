@@ -30,16 +30,16 @@ class ContextArtifactService {
     }
 
     ToolResult prepareToolResult(AgentContext context, ToolResult result) {
-        if (result == null || !enabled()) {
+        if (result == null || !enabled(context)) {
             return result;
         }
         String observation = result.getObservation();
-        int threshold = positive(contextProperties().getPersistToolResultChars(), 12000);
+        int threshold = positive(contextProperties(context).getPersistToolResultChars(), 12000);
         if (StringUtils.length(observation) <= threshold) {
             return result;
         }
         ContextArtifact artifact = persist(context, ContextArtifactKind.TOOL_RESULT, observation,
-                positive(contextProperties().getToolPreviewChars(), 2000));
+                positive(contextProperties(context).getToolPreviewChars(), 2000));
         result.setObservation(renderArtifactReference(artifact));
         result.setTruncated(true);
         result.setArtifactId(artifact.getArtifactId());
@@ -58,7 +58,7 @@ class ContextArtifactService {
             }
         }
         ContextArtifact artifact = persist(context, ContextArtifactKind.TRANSCRIPT, transcript,
-                positive(contextProperties().getToolPreviewChars(), 2000));
+                positive(contextProperties(context).getToolPreviewChars(), 2000));
         context.setContextTranscriptArtifactId(artifact.getArtifactId());
         return artifact;
     }
@@ -117,7 +117,7 @@ class ContextArtifactService {
         String artifactId = "ctx-" + UUID.randomUUID();
         String safeContent = StringUtils.defaultString(content);
         String storageUri = blobStore.write(context.getRootRunId(), artifactId, safeContent);
-        int persistThreshold = positive(contextProperties().getPersistToolResultChars(), 12000);
+        int persistThreshold = positive(contextProperties(context).getPersistToolResultChars(), 12000);
         String preview = previewPrefix(content, previewChars, persistThreshold);
         ContextArtifact artifact = ContextArtifact.builder()
                 .artifactId(artifactId)
@@ -135,15 +135,16 @@ class ContextArtifactService {
         return artifactRepository.save(artifact);
     }
 
-    private boolean enabled() {
-        return Boolean.TRUE.equals(contextProperties().getEnabled());
+    private boolean enabled(AgentContext context) {
+        return Boolean.TRUE.equals(contextProperties(context).getEnabled());
     }
 
-    private AgentRuntimeProperties.ContextProperties contextProperties() {
-        if (properties.getContext() == null) {
-            properties.setContext(new AgentRuntimeProperties.ContextProperties());
+    private cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties contextProperties(AgentContext context) {
+        AgentRuntimeProperties effective = context.runtimeProperties(properties);
+        if (effective.getContext() == null) {
+            effective.setContext(new cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties());
         }
-        return properties.getContext();
+        return effective.getContext();
     }
 
     private int positive(Integer value, int fallback) {

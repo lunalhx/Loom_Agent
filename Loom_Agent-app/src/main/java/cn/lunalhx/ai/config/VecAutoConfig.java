@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Configuration;
 import javax.sql.DataSource;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnExpression("${loom.agent.long-term-memory.enabled:false} && ${loom.agent.long-term-memory.vector.enabled:true}")
+@ConditionalOnExpression("${loom.agent.long-term-memory.enabled:false} && ${loom.agent.long-term-memory.vector.enabled:false}")
 public class VecAutoConfig {
 
     private static final Logger log = LoggerFactory.getLogger(VecAutoConfig.class);

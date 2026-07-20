@@ -28,15 +28,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v5 — only durable state needed for recovery (v5 adds approvalGrants).
+ * Checkpoint snapshot v6 — only durable state needed for recovery (v6 adds incremental context summary).
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v4 adds execution verification state. Older snapshots with missing fields
- * restore with safe defaults, while v2 snapshots missing ledger fields
- * are re-initialized by the appropriate initializer node.
+ * <p>v5 adds approvalGrants. v6 adds contextSummaryText and contextSummaryThroughSequence.
+ * Older snapshots with missing fields restore with safe defaults, while v2 snapshots missing
+ * ledger fields are re-initialized by the appropriate initializer node.
  */
 @Data
 @Builder
@@ -44,7 +44,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 5;
+    private int schemaVersion = 6;
 
     // -- identity (durable) --
     private String runId;
@@ -162,6 +162,10 @@ public class AgentContextSnapshot {
     private Integer memoryRecallChars;
     private String memoryRecallRenderedText;
 
+    // -- incremental context summary (v6, TODO7 Phase 2) --
+    private String contextSummaryText;
+    private long contextSummaryThroughSequence;
+
     // ---- factory methods ----
 
     /** Defensive copy of ledger entries for snapshot isolation. */
@@ -185,7 +189,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(5)
+                .schemaVersion(6)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
@@ -285,6 +289,9 @@ public class AgentContextSnapshot {
                 .memoryRecallCount(context.getMemoryRecallCount())
                 .memoryRecallChars(context.getMemoryRecallChars())
                 .memoryRecallRenderedText(context.getMemoryRecallRenderedText())
+                // incremental context summary (TODO7 Phase 2)
+                .contextSummaryText(context.getContextSummaryText())
+                .contextSummaryThroughSequence(context.getContextSummaryThroughSequence())
                 .build();
     }
 
@@ -405,6 +412,15 @@ public class AgentContextSnapshot {
         context.setMemoryRecallCount(memoryRecallCount == null ? 0 : memoryRecallCount);
         context.setMemoryRecallChars(memoryRecallChars == null ? 0 : memoryRecallChars);
         context.setMemoryRecallRenderedText(memoryRecallRenderedText);
+
+        // incremental context summary (v6, TODO7 Phase 2) — null/0 for pre-v6 snapshots
+        if (schemaVersion < 6) {
+            context.setContextSummaryText(null);
+            context.setContextSummaryThroughSequence(0);
+        } else {
+            context.setContextSummaryText(contextSummaryText);
+            context.setContextSummaryThroughSequence(contextSummaryThroughSequence);
+        }
 
         return context;
     }

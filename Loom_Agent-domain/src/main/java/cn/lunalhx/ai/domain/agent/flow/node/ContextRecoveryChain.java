@@ -8,7 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import java.util.ArrayList;
 import java.util.List;
 
-final class ContextRecoveryChain {
+public class ContextRecoveryChain {
 
     private final List<ContextRecoveryStep> steps;
 
@@ -16,7 +16,7 @@ final class ContextRecoveryChain {
         this.steps = List.copyOf(steps);
     }
 
-    NodeResult execute(AgentContext context, String attemptedModel, int requestedMaxTokens, long deadlineEpochMs) {
+    public NodeResult execute(AgentContext context, String attemptedModel, int requestedMaxTokens, long deadlineEpochMs) {
         ContextRecoveryRequest request = new ContextRecoveryRequest(context, attemptedModel, requestedMaxTokens, deadlineEpochMs);
         List<AgentEvent> events = new ArrayList<>();
 

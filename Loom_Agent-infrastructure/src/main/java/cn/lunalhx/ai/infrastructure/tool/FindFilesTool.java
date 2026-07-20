@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -37,6 +38,8 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("find_files")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("按文件名 Glob 模式递归查找文件，返回相对路径列表。只匹配文件名/路径，不搜索文件内容。何时使用：已知文件名模式需要定位文件时。何时不要使用：搜索文件内容请用 code_search，浏览已知目录结构请用 list_dir。限制：自动跳过 .git/.idea/target/node_modules 等目录")
                 .inputSchema("{" +
                         "\"type\":\"object\"," +
@@ -81,9 +84,10 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
 
             int maxDepth = Math.max(MIN_MAX_DEPTH, Math.min(MAX_MAX_DEPTH,
                     integer(call.getInput(), "maxDepth", DEFAULT_MAX_DEPTH)));
-            int rawLimit = Math.max(1, integer(call.getInput(), "limit", properties.getSearchMaxResults()));
-            final int userLimit = Math.min(rawLimit, properties.getSearchMaxResults());
-            final int collectLimit = properties.getSearchMaxResults();
+            AgentRuntimeProperties runProperties = runtimeProperties(call);
+            int rawLimit = Math.max(1, integer(call.getInput(), "limit", runProperties.getSearchMaxResults()));
+            final int userLimit = Math.min(rawLimit, runProperties.getSearchMaxResults());
+            final int collectLimit = runProperties.getSearchMaxResults();
             boolean caseSensitive = call.getInput() != null
                     && call.getInput().has("caseSensitive")
                     && call.getInput().get("caseSensitive").asBoolean(false);
@@ -99,7 +103,7 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
             Files.walkFileTree(searchRoot, java.util.Set.of(), maxDepth, new FileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt)) {
+                    if (timedOut(call, startedAt)) {
                         timedOut[0] = true;
                         return FileVisitResult.TERMINATE;
                     }
@@ -111,7 +115,7 @@ public class FindFilesTool extends FileSystemToolSupport implements AgentTool {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (timedOut(startedAt)) {
+                    if (timedOut(call, startedAt)) {
                         timedOut[0] = true;
                         return FileVisitResult.TERMINATE;
                     }

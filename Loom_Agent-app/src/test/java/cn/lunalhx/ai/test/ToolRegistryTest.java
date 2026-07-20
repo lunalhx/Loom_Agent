@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ToolAssembler;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
@@ -130,6 +131,37 @@ public class ToolRegistryTest {
         } catch (IllegalStateException e) {
             assertTrue(e.getMessage().contains("dup"));
         }
+    }
+
+    @Test
+    public void assemblerReportsConflictingReadOnlyMetadata() {
+        AgentTool readOnly = makeToolWithReadOnly("conflict", true);
+        AgentTool writable = makeToolWithReadOnly("conflict", false);
+        try {
+            ToolAssembler.assemble(List.of(readOnly), List.of(writable));
+            fail("should have thrown for conflicting readOnly metadata");
+        } catch (IllegalStateException e) {
+            assertTrue(e.getMessage().contains("readOnly"));
+        }
+    }
+
+    private static AgentTool makeToolWithReadOnly(String name, boolean readOnly) {
+        return new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder()
+                        .name(name)
+                        .description("tool " + name)
+                        .inputSchema(VALID_SCHEMA)
+                        .readOnly(readOnly)
+                        .build();
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                return ToolResult.success("ok", false, 0L);
+            }
+        };
     }
 
     // ==================== 3. validation: illegal specs still fail ====================

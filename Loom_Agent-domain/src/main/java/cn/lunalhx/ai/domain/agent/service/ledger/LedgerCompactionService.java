@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
 
 /**
  * Ledger compaction service — triggers when the ledger entry count
@@ -60,6 +61,9 @@ public final class LedgerCompactionService {
     private final int maxCompactionDepth;
     private final ContextArtifactPurgeService purgeService;
     private final LedgerTranscriptRenderer renderer;
+    private final ToIntFunction<AgentContext> tokenEstimator;
+    private final int autoCompactTokenLimit;
+    private final List<BeforeCompactionHook> beforeCompactionHooks;
 
     public LedgerCompactionService(LedgerWatermark watermark,
                                     ContextArtifactRepository artifactRepository,
@@ -75,6 +79,30 @@ public final class LedgerCompactionService {
                                     DeepContextSummaryService deepSummaryService,
                                     ContextArtifactPurgeService purgeService,
                                     int maxCompactionDepth) {
+        this(watermark, artifactRepository, blobStore, deepSummaryService, purgeService, maxCompactionDepth, null, 0);
+    }
+
+    public LedgerCompactionService(LedgerWatermark watermark,
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore,
+                                    DeepContextSummaryService deepSummaryService,
+                                    ContextArtifactPurgeService purgeService,
+                                    int maxCompactionDepth,
+                                    ToIntFunction<AgentContext> tokenEstimator,
+                                    int autoCompactTokenLimit) {
+        this(watermark, artifactRepository, blobStore, deepSummaryService, purgeService,
+                maxCompactionDepth, tokenEstimator, autoCompactTokenLimit, List.of());
+    }
+
+    public LedgerCompactionService(LedgerWatermark watermark,
+                                    ContextArtifactRepository artifactRepository,
+                                    ContextBlobStore blobStore,
+                                    DeepContextSummaryService deepSummaryService,
+                                    ContextArtifactPurgeService purgeService,
+                                    int maxCompactionDepth,
+                                    ToIntFunction<AgentContext> tokenEstimator,
+                                    int autoCompactTokenLimit,
+                                    List<BeforeCompactionHook> beforeCompactionHooks) {
         this.watermark = Objects.requireNonNull(watermark, "watermark must not be null");
         this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository must not be null");
         this.blobStore = Objects.requireNonNull(blobStore, "blobStore must not be null");
@@ -82,6 +110,10 @@ public final class LedgerCompactionService {
         this.purgeService = purgeService;
         this.maxCompactionDepth = maxCompactionDepth;
         this.renderer = new LedgerTranscriptRenderer();
+        this.tokenEstimator = tokenEstimator;
+        this.autoCompactTokenLimit = autoCompactTokenLimit;
+        this.beforeCompactionHooks = beforeCompactionHooks == null
+                ? List.of() : List.copyOf(beforeCompactionHooks);
     }
 
     public LedgerCompactionService(LedgerWatermark watermark,
@@ -127,11 +159,17 @@ public final class LedgerCompactionService {
         microCompact(context, ledger);
 
         int entryCount = ledger.size();
-        if (entryCount <= watermark.highEntryCount()) {
-            return LedgerCompactionResult.notNeeded(entryCount, context.getGeneration());
+        int estimatedTokens = estimateTokens(context);
+        boolean tokenTriggered = tokenEstimator != null && autoCompactTokenLimit > 0
+                && estimatedTokens > autoCompactTokenLimit;
+        boolean entryCountTriggered = entryCount > watermark.highEntryCount();
+
+        if (!tokenTriggered && !entryCountTriggered) {
+            return LedgerCompactionResult.notNeeded(entryCount, context.getGeneration(),
+                    estimatedTokens, autoCompactTokenLimit);
         }
 
-        return compact(context);
+        return compact(context, estimatedTokens);
     }
 
     /**
@@ -198,6 +236,18 @@ public final class LedgerCompactionService {
         return value == null ? 0 : value;
     }
 
+    private int estimateTokens(AgentContext context) {
+        if (tokenEstimator == null) {
+            return -1;
+        }
+        try {
+            return tokenEstimator.applyAsInt(context);
+        } catch (Exception e) {
+            log.warn("Token estimation failed during compaction check: {}", e.getMessage());
+            return -1;
+        }
+    }
+
     /**
      * Force a compaction regardless of watermark.
      *
@@ -205,6 +255,10 @@ public final class LedgerCompactionService {
      * (e.g., on checkpoint/segment boundary).
      */
     public LedgerCompactionResult compact(AgentContext context) {
+        return compact(context, estimateTokens(context));
+    }
+
+    private LedgerCompactionResult compact(AgentContext context, int estimatedTokensBefore) {
         ConversationLedger ledger = context.getConversationLedger();
         if (ledger == null) {
             return LedgerCompactionResult.notNeeded(0, context.getGeneration());
@@ -218,6 +272,13 @@ public final class LedgerCompactionService {
                 .max().orElse(0);
         int nextDepth = maxInputDepth + 1;
         boolean depthGuarded = nextDepth > maxCompactionDepth;
+
+        TailSelection tailSelection = selectPreservedTail(oldEntries,
+                Math.max(1, watermark.lowEntryCount() - 1));
+        List<ConversationLedgerEntry> preservedEntries = tailSelection.entries();
+        int compactedCount = oldEntries.size() - tailSelection.originalEntryCount();
+        List<ConversationLedgerEntry> entriesToCompact = List.copyOf(oldEntries.subList(0, compactedCount));
+        invokeBeforeCompactionHooks(context, entriesToCompact, preservedEntries);
 
         // ---- 1. Persist transcript artifact ----
         String transcript = renderer.render(oldEntries);
@@ -245,14 +306,9 @@ public final class LedgerCompactionService {
 
         // ---- 3. Build new entry list: recent tail + summary ----
         // Summary goes LAST so sequence numbers are monotonic across the list.
-        int keepRecent = Math.max(1, watermark.lowEntryCount() - 1); // -1 for summary entry
-        int start = Math.max(0, oldEntries.size() - keepRecent);
-
-        List<ConversationLedgerEntry> newEntries = new ArrayList<>();
-        for (int i = start; i < oldEntries.size(); i++) {
-            newEntries.add(oldEntries.get(i));
-        }
-        newEntries.add(createSummaryEntry(ledger.nextSequence(), summary, artifact.getArtifactId(), nextDepth));
+        List<ConversationLedgerEntry> newEntries = new ArrayList<>(preservedEntries);
+        newEntries.add(createSummaryEntry(ledger.nextSequence(), artifact.getArtifactId(), nextDepth,
+                context.getGeneration() + 1));
 
         // ---- 4. Replace ledger entries ----
         ledger.replaceEntries(newEntries);
@@ -263,12 +319,19 @@ public final class LedgerCompactionService {
         context.setLedgerBaselineArtifactId(artifact.getArtifactId());
         context.setContextTranscriptArtifactId(artifact.getArtifactId());
 
+        // ---- 5b. Record incremental summary state for next compaction (TODO7 Phase 2) ----
+        context.setContextSummaryText(summary);
+        long summarizedThroughSequence = oldEntries.stream()
+                .mapToLong(ConversationLedgerEntry::sequence)
+                .max().orElse(-1L);
+        context.setContextSummaryThroughSequence(summarizedThroughSequence);
+
         // ---- 6. Purge obsolete TRANSCRIPT artifacts ----
         purgeObsoleteTranscripts(context, artifact.getArtifactId());
 
-        return LedgerCompactionResult.compactedWithDepth(newGen, beforeCount, newEntries.size(),
+        return LedgerCompactionResult.compactedWithTokens(newGen, beforeCount, newEntries.size(),
                 strategy, artifact.getArtifactId(), nextDepth, maxInputDepth,
-                maxCompactionDepth, depthGuarded);
+                maxCompactionDepth, depthGuarded, estimatedTokensBefore, autoCompactTokenLimit);
     }
 
     /**
@@ -312,6 +375,12 @@ public final class LedgerCompactionService {
         sb.append("CompactedTranscriptArtifactId: ").append(artifact.getArtifactId()).append('\n');
         sb.append("EntriesBeforeCompaction: ").append(oldEntries.size()).append('\n');
 
+        if (StringUtils.isNotBlank(context.getContextSummaryText())) {
+            sb.append("\n[Previous Summary]\n");
+            sb.append(context.getContextSummaryText());
+            sb.append("\n");
+        }
+
         // Summarize recent tool/assistant entries
         List<ConversationLedgerEntry> recent = oldEntries.stream()
                 .filter(e -> e.stableType() == LedgerStableType.ASSISTANT_ACTION
@@ -348,12 +417,33 @@ public final class LedgerCompactionService {
             throw new IllegalStateException("deep summary service is not available");
         }
 
-        // Convert ledger entries to string transcript entries for the deep summary service
-        List<String> transcriptEntries = renderAsTranscriptEntries(oldEntries);
+        // Check for incremental compaction
+        String previousSummary = context.getContextSummaryText();
+        long throughSeq = context.getContextSummaryThroughSequence();
 
-        DeepContextSummaryService.DeepSummaryResult result =
-                deepSummaryService.summarize(context, transcriptEntries,
-                        System.currentTimeMillis() + 30_000L);
+        // Filter entries for incremental: only new entries since last compaction,
+        // excluding compaction entries
+        List<ConversationLedgerEntry> entriesForSummary;
+        if (StringUtils.isNotBlank(previousSummary) && throughSeq > 0) {
+            entriesForSummary = oldEntries.stream()
+                    .filter(e -> e.sequence() > throughSeq)
+                    .filter(e -> e.eventKey() == null || !e.eventKey().startsWith("compaction:"))
+                    .toList();
+        } else {
+            entriesForSummary = oldEntries;
+        }
+
+        // Convert ledger entries to string transcript entries for the deep summary service
+        List<String> transcriptEntries = renderAsTranscriptEntries(entriesForSummary);
+
+        DeepContextSummaryService.DeepSummaryResult result;
+        if (StringUtils.isNotBlank(previousSummary) && throughSeq > 0) {
+            result = deepSummaryService.summarize(context, transcriptEntries,
+                    System.currentTimeMillis() + 30_000L, previousSummary);
+        } else {
+            result = deepSummaryService.summarize(context, transcriptEntries,
+                    System.currentTimeMillis() + 30_000L);
+        }
 
         if (result == null || StringUtils.isBlank(result.getSummary())) {
             throw new IllegalStateException("deep context summary returned empty result");
@@ -376,12 +466,106 @@ public final class LedgerCompactionService {
     /** Render ledger entries as a list of strings for the deep summary service. */
     private List<String> renderAsTranscriptEntries(List<ConversationLedgerEntry> entries) {
         List<String> result = new ArrayList<>();
-        for (ConversationLedgerEntry e : entries) {
-            result.add("[" + e.sequence() + "] " + e.role()
-                    + " (" + e.stableType().code() + "):\n"
-                    + StringUtils.abbreviate(e.content(), 4000));
+        for (int i = 0; i < entries.size(); i++) {
+            ConversationLedgerEntry entry = entries.get(i);
+            String rendered = renderTranscriptEntry(entry);
+            if (entry.stableType() == LedgerStableType.ASSISTANT_ACTION
+                    && i + 1 < entries.size()
+                    && isToolPair(entry, entries.get(i + 1))) {
+                rendered += "\n\n" + renderTranscriptEntry(entries.get(++i));
+            }
+            result.add(rendered);
         }
         return result;
+    }
+
+    private String renderTranscriptEntry(ConversationLedgerEntry entry) {
+        return "[" + entry.sequence() + "] " + entry.role()
+                + " (" + entry.stableType().code() + "):\n"
+                + StringUtils.abbreviate(entry.content(), 4000);
+    }
+
+    private TailSelection selectPreservedTail(
+            List<ConversationLedgerEntry> entries, int targetEntryCount) {
+        List<List<ConversationLedgerEntry>> units = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            ConversationLedgerEntry entry = entries.get(i);
+            if (entry.stableType() == LedgerStableType.ASSISTANT_ACTION
+                    && i + 1 < entries.size() && isToolPair(entry, entries.get(i + 1))) {
+                units.add(List.of(entry, entries.get(++i)));
+            } else {
+                units.add(List.of(entry));
+            }
+        }
+        List<ConversationLedgerEntry> selected = new ArrayList<>();
+        int count = 0;
+        int originalEntryCount = 0;
+        for (int i = units.size() - 1; i >= 0; i--) {
+            List<ConversationLedgerEntry> unit = units.get(i);
+            if (selected.isEmpty() && unit.size() > targetEntryCount) {
+                selected.add(summarizeOversizedUnit(unit));
+                originalEntryCount += unit.size();
+                break;
+            }
+            if (!selected.isEmpty() && count + unit.size() > targetEntryCount) {
+                break;
+            }
+            selected.addAll(0, unit);
+            count += unit.size();
+            originalEntryCount += unit.size();
+        }
+        return new TailSelection(List.copyOf(selected), originalEntryCount);
+    }
+
+    private record TailSelection(List<ConversationLedgerEntry> entries, int originalEntryCount) {
+    }
+
+    private ConversationLedgerEntry summarizeOversizedUnit(List<ConversationLedgerEntry> unit) {
+        ConversationLedgerEntry first = unit.getFirst();
+        ConversationLedgerEntry last = unit.getLast();
+        String correlation = eventCorrelation(first.eventKey());
+        String content = "[Atomic tool interaction compacted as one unit"
+                + (correlation.isBlank() ? "" : ": " + correlation)
+                + ". The complete call and result are stored in the transcript artifact.]";
+        return ConversationLedgerEntry.builder()
+                .sequence(last.sequence())
+                .role("user")
+                .content(content)
+                .stableType(LedgerStableType.SYSTEM_NOTE)
+                .eventKey("pair-summary:" + (correlation.isBlank() ? first.entryId() : correlation))
+                .toolName(first.toolName() != null ? first.toolName() : last.toolName())
+                .renderChars(content.length())
+                .compacted(true)
+                .compactionDepth(Math.max(first.compactionDepth(), last.compactionDepth()) + 1)
+                .build();
+    }
+
+    private boolean isToolPair(ConversationLedgerEntry assistant, ConversationLedgerEntry result) {
+        if (result.stableType() != LedgerStableType.TOOL_RESULT) {
+            return false;
+        }
+        return eventCorrelation(assistant.eventKey()).equals(eventCorrelation(result.eventKey()))
+                && !eventCorrelation(assistant.eventKey()).isBlank();
+    }
+
+    private String eventCorrelation(String eventKey) {
+        if (eventKey == null) {
+            return "";
+        }
+        int lastSeparator = eventKey.lastIndexOf(':');
+        return lastSeparator < 0 ? "" : eventKey.substring(0, lastSeparator);
+    }
+
+    private void invokeBeforeCompactionHooks(AgentContext context,
+                                             List<ConversationLedgerEntry> entriesToCompact,
+                                             List<ConversationLedgerEntry> preservedEntries) {
+        for (BeforeCompactionHook hook : beforeCompactionHooks) {
+            try {
+                hook.beforeCompaction(context, entriesToCompact, preservedEntries);
+            } catch (RuntimeException e) {
+                log.warn("Before-compaction hook failed: {}", e.getMessage());
+            }
+        }
     }
 
     // ================================================================
@@ -411,12 +595,14 @@ public final class LedgerCompactionService {
     // Internal: entry creation
     // ================================================================
 
-    private ConversationLedgerEntry createSummaryEntry(long sequence, String summary,
-                                                       String artifactId, int compactionDepth) {
+    private ConversationLedgerEntry createSummaryEntry(long sequence, String artifactId,
+                                                       int compactionDepth, int generation) {
         return ConversationLedgerEntry.builder()
                 .sequence(sequence)
                 .role("user")
-                .content(summary)
+                .content("[Context compressed to generation " + generation
+                        + ". Durable summary is injected separately. Transcript artifactId: "
+                        + artifactId + "]")
                 .stableType(LedgerStableType.SYSTEM_NOTE)
                 .eventKey("compaction:" + artifactId)
                 .compactionDepth(compactionDepth)

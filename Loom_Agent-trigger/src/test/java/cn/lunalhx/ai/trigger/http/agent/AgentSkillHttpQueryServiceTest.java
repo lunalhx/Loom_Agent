@@ -40,7 +40,7 @@ public class AgentSkillHttpQueryServiceTest {
 
     @Test
     public void skillsDisabledShouldReturnEmpty() {
-        AgentRuntimeProperties.SkillProperties skillProps = new AgentRuntimeProperties.SkillProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps = new cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties();
         skillProps.setEnabled(false);
         agentRuntimeProperties.setSkills(skillProps);
 
@@ -50,7 +50,7 @@ public class AgentSkillHttpQueryServiceTest {
 
     @Test
     public void skillsEnabledShouldDiscoverAndMap() {
-        AgentRuntimeProperties.SkillProperties skillProps = new AgentRuntimeProperties.SkillProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps = new cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties();
         skillProps.setEnabled(true);
         agentRuntimeProperties.setSkills(skillProps);
 
@@ -77,7 +77,7 @@ public class AgentSkillHttpQueryServiceTest {
 
     @Test
     public void trustStateProjectSkillShouldRequireApproval() {
-        AgentRuntimeProperties.SkillProperties skillProps = new AgentRuntimeProperties.SkillProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps = new cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties();
         skillProps.setEnabled(true);
         agentRuntimeProperties.setSkills(skillProps);
 
@@ -99,7 +99,7 @@ public class AgentSkillHttpQueryServiceTest {
 
     @Test
     public void nullRequestShouldNotFail() {
-        AgentRuntimeProperties.SkillProperties skillProps = new AgentRuntimeProperties.SkillProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps = new cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties();
         skillProps.setEnabled(true);
         agentRuntimeProperties.setSkills(skillProps);
 

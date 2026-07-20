@@ -18,11 +18,11 @@ public interface AgentMemoryRepository {
 
     List<AgentMemory> searchByKeywords(String workspaceKey, List<String> keywords, int limit);
 
-    boolean updateUsage(String memoryId, long expectedVersion);
+    boolean updateUsage(String memoryId);
 
     int countActive(String workspaceKey);
 
-    boolean updateStatus(String memoryId, MemoryStatus status, long expectedVersion);
+    boolean updateStatus(String memoryId, MemoryStatus status);
 
     List<AgentMemory> findByContentHash(String workspaceKey, String contentHash);
 

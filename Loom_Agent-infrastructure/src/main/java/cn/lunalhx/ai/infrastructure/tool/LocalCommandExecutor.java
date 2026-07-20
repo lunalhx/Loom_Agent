@@ -7,20 +7,25 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class LocalCommandExecutor implements CommandExecutor {
 
     private final BackgroundProcessManager processManager;
+    private final SandboxEnvPolicy envPolicy;
 
-    public LocalCommandExecutor(BackgroundProcessManager processManager) {
+    public LocalCommandExecutor(BackgroundProcessManager processManager, SandboxEnvPolicy envPolicy) {
         this.processManager = processManager;
+        this.envPolicy = envPolicy;
     }
 
     @Override
-    public ToolResult run(List<String> command, Path cwd, long timeoutMs, ShellOutputLimits limits, long startedAt) {
+    public ToolResult run(List<String> command, Path cwd, Map<String, String> extraEnv,
+                          long timeoutMs, ShellOutputLimits limits, long startedAt) {
         if (processManager != null) {
-            BackgroundProcessManager.SyncResult result = processManager.runSync(command, cwd, timeoutMs, limits, startedAt);
+            BackgroundProcessManager.SyncResult result = processManager.runSync(
+                    command, cwd, extraEnv, timeoutMs, limits, startedAt);
             return ToolResult.builder()
                     .success(result.success())
                     .errorCode(result.errorCode())
@@ -30,7 +35,7 @@ public class LocalCommandExecutor implements CommandExecutor {
                     .elapsedMs(result.elapsedMs())
                     .build();
         }
-        return SandboxProcessRunner.run(command, cwd, timeoutMs, limits, startedAt);
+        return SandboxProcessRunner.run(command, cwd, extraEnv, timeoutMs, limits, startedAt, envPolicy);
     }
 
 }

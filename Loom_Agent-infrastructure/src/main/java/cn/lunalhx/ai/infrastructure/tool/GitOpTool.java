@@ -10,28 +10,44 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxLease;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxProvider;
+import cn.lunalhx.ai.domain.tool.sandbox.SandboxRequest;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 @Component
 public class GitOpTool extends FileSystemToolSupport implements AgentTool {
 
     private final CommandExecutor commandExecutor;
+    private final SandboxProvider sandboxProvider;
 
     public GitOpTool(AgentRuntimeProperties properties, WorkspacePort workspacePort, CommandExecutor commandExecutor) {
+        this(properties, workspacePort, commandExecutor, null);
+    }
+
+    @Autowired
+    public GitOpTool(AgentRuntimeProperties properties, WorkspacePort workspacePort,
+                     CommandExecutor commandExecutor, SandboxProvider sandboxProvider) {
         super(properties, workspacePort);
         this.commandExecutor = commandExecutor;
+        this.sandboxProvider = sandboxProvider;
     }
 
     @Override
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("git_op")
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("执行受限 Git 操作；status/diff/log 自动放行，init/add/commit 需普通审批，push/reset/clean/rebase/checkout 需高危审批")
                 .inputSchema("{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":[\"status\",\"diff\",\"log\",\"init\",\"add\",\"commit\",\"push\",\"reset\",\"clean\",\"rebase\",\"checkout\"]}},\"required\":[\"operation\"],\"oneOf\":[{\"properties\":{\"operation\":{\"const\":\"status\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"diff\"},\"path\":{\"type\":\"string\",\"description\":\"可选相对路径\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"log\"},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":50,\"default\":10}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"init\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"add\"},\"path\":{\"type\":\"string\",\"description\":\"可选相对路径\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"commit\"},\"message\":{\"type\":\"string\",\"minLength\":1}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"push\"},\"remote\":{\"type\":\"string\",\"description\":\"可选 remote\"},\"refspec\":{\"type\":\"string\",\"description\":\"可选 refspec\"},\"force\":{\"type\":\"boolean\",\"default\":false}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"reset\"},\"branch\":{\"type\":\"string\",\"description\":\"可选分支\"},\"force\":{\"type\":\"boolean\",\"default\":false}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"clean\"},\"dryRun\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"rebase\"},\"branch\":{\"type\":\"string\",\"description\":\"可选分支\"}},\"additionalProperties\":false},{\"properties\":{\"operation\":{\"const\":\"checkout\"},\"branch\":{\"type\":\"string\",\"description\":\"可选分支\"},\"path\":{\"type\":\"string\",\"description\":\"可选相对路径\"}},\"additionalProperties\":false}]}")
                 .build();
@@ -61,12 +77,21 @@ public class GitOpTool extends FileSystemToolSupport implements AgentTool {
                 return failure("git_op_rejected", policy.getRiskReason(), startedAt);
             }
             List<String> command = buildCommand(call);
-            return commandExecutor.run(command, workspaceRoot(call), properties.getShellTimeoutMs(),
-                    ShellOutputLimits.builder()
-                            .maxStdoutChars(properties.getShellMaxOutputChars())
-                            .maxStderrChars(properties.getShellMaxStderrChars())
-                            .build(),
-                    startedAt);
+            Path workspace = workspaceRoot(call).toRealPath();
+            AgentRuntimeProperties runProperties = runtimeProperties(call);
+            ShellOutputLimits limits = ShellOutputLimits.builder()
+                            .maxStdoutChars(runProperties.getShellMaxOutputChars())
+                            .maxStderrChars(runProperties.getShellMaxStderrChars())
+                            .build();
+            if (sandboxProvider == null) {
+                return commandExecutor.run(command, workspace, runProperties.getShellTimeoutMs(), limits, startedAt);
+            }
+            try (SandboxLease lease = sandboxProvider.acquire(new SandboxRequest(workspace,
+                    call.getConversationId(), runProperties.getShellMaxTimeoutMs(),
+                    Set.copyOf(runProperties.getSandbox().getEnvAllowlist())))) {
+                return lease.sandbox().execute(command, workspace, Map.of(),
+                        runProperties.getShellTimeoutMs(), limits, startedAt);
+            }
         } catch (Exception e) {
             return failure("git_op_failed", e.getMessage(), startedAt);
         }

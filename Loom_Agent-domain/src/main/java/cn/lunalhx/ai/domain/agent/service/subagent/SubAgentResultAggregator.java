@@ -27,7 +27,7 @@ class SubAgentResultAggregator {
                                       List<SubAgentResult> results, long startedAt) {
         String observation = toObservation(parent, reason, results);
         boolean truncated = false;
-        int maxChars = positive(properties.getSubAgentSummaryMaxChars(), 12000);
+        int maxChars = positive(parent.runtimeProperties(properties).getSubAgentSummaryMaxChars(), 12000);
         if (StringUtils.length(observation) > maxChars) {
             observation = StringUtils.abbreviate(observation, maxChars);
             truncated = true;

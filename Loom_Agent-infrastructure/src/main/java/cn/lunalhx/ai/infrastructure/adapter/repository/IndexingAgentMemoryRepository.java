@@ -37,8 +37,8 @@ public class IndexingAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateStatus(String memoryId, MemoryStatus status, long expectedVersion) {
-        boolean ok = delegate.updateStatus(memoryId, status, expectedVersion);
+    public boolean updateStatus(String memoryId, MemoryStatus status) {
+        boolean ok = delegate.updateStatus(memoryId, status);
         if (ok && vectorIndex.available()) {
             if (status == MemoryStatus.ACTIVE) {
                 Optional<AgentMemory> mem = delegate.findById(memoryId);
@@ -74,7 +74,7 @@ public class IndexingAgentMemoryRepository implements AgentMemoryRepository {
     @Override public List<AgentMemory> findActive(String workspaceKey, int limit) { return delegate.findActive(workspaceKey, limit); }
     @Override public List<AgentMemory> findPinned(String workspaceKey, int limit) { return delegate.findPinned(workspaceKey, limit); }
     @Override public List<AgentMemory> searchByKeywords(String workspaceKey, List<String> keywords, int limit) { return delegate.searchByKeywords(workspaceKey, keywords, limit); }
-    @Override public boolean updateUsage(String memoryId, long expectedVersion) { return delegate.updateUsage(memoryId, expectedVersion); }
+    @Override public boolean updateUsage(String memoryId) { return delegate.updateUsage(memoryId); }
     @Override public int countActive(String workspaceKey) { return delegate.countActive(workspaceKey); }
     @Override public List<AgentMemory> findByContentHash(String workspaceKey, String contentHash) { return delegate.findByContentHash(workspaceKey, contentHash); }
     @Override public List<AgentMemory> findBySourceRunId(String sourceRunId) { return delegate.findBySourceRunId(sourceRunId); }

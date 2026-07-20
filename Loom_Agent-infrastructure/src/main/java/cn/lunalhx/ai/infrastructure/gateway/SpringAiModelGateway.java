@@ -23,9 +23,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.model.ModelOptionsUtils;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -48,17 +46,20 @@ public class SpringAiModelGateway implements ModelGateway {
     private final ObjectMapper objectMapper;
     private final PromptCacheDiagnosticHook diagnosticHook;
     private final ThreadPoolExecutor executor;
+    private final ChatModelFactoryRegistry factoryRegistry;
 
     public SpringAiModelGateway(ChatModel chatModel,
                                 ModelRuntimeProperties runtimeProperties,
                                 ObjectMapper objectMapper,
                                 PromptCacheDiagnosticHook diagnosticHook,
-                                ThreadPoolExecutor executor) {
+                                ThreadPoolExecutor executor,
+                                ChatModelFactoryRegistry factoryRegistry) {
         this.chatModel = chatModel;
         this.runtimeProperties = runtimeProperties;
         this.objectMapper = objectMapper;
         this.diagnosticHook = diagnosticHook != null ? diagnosticHook : new PromptCacheDiagnosticHook(null);
         this.executor = executor;
+        this.factoryRegistry = factoryRegistry;
     }
 
     @Override
@@ -74,14 +75,15 @@ public class SpringAiModelGateway implements ModelGateway {
     }
 
     private void executeStream(ChatPrompt prompt, FluxSink<ModelStreamChunk> sink) {
-        String provider = runtimeProperties.getProvider();
-        String resolvedModel = resolvedModel(prompt);
+        ModelRuntimeProperties effectiveProperties = effectiveProperties(prompt);
+        String provider = effectiveProperties.getProvider();
+        String resolvedModel = resolvedModel(prompt, effectiveProperties);
 
-        validateApiKey();
+        validateApiKey(effectiveProperties);
 
         Prompt springPrompt = toSpringAiPrompt(prompt);
-        Object options = buildOptions(prompt, true);
-        Prompt fullPrompt = new Prompt(springPrompt.getInstructions(), (org.springframework.ai.chat.prompt.ChatOptions) options);
+        org.springframework.ai.chat.prompt.ChatOptions options = buildOptions(prompt, true, effectiveProperties);
+        Prompt fullPrompt = new Prompt(springPrompt.getInstructions(), options);
 
         List<Map<String, String>> messages = extractMessages(springPrompt);
         String canonicalPayload = safeBuildCanonicalPayload(fullPrompt, (org.springframework.ai.chat.prompt.ChatOptions) options, resolvedModel);
@@ -122,14 +124,15 @@ public class SpringAiModelGateway implements ModelGateway {
     }
 
     private ModelChatResult executeComplete(ChatPrompt prompt) {
-        String provider = runtimeProperties.getProvider();
-        String resolvedModel = resolvedModel(prompt);
+        ModelRuntimeProperties effectiveProperties = effectiveProperties(prompt);
+        String provider = effectiveProperties.getProvider();
+        String resolvedModel = resolvedModel(prompt, effectiveProperties);
 
-        validateApiKey();
+        validateApiKey(effectiveProperties);
 
         Prompt springPrompt = toSpringAiPrompt(prompt);
-        Object options = buildOptions(prompt, false);
-        Prompt fullPrompt = new Prompt(springPrompt.getInstructions(), (org.springframework.ai.chat.prompt.ChatOptions) options);
+        org.springframework.ai.chat.prompt.ChatOptions options = buildOptions(prompt, false, effectiveProperties);
+        Prompt fullPrompt = new Prompt(springPrompt.getInstructions(), options);
 
         List<Map<String, String>> messages = extractMessages(springPrompt);
         String canonicalPayload = safeBuildCanonicalPayload(fullPrompt, (org.springframework.ai.chat.prompt.ChatOptions) options, resolvedModel);
@@ -155,8 +158,8 @@ public class SpringAiModelGateway implements ModelGateway {
         }
     }
 
-    private void validateApiKey() {
-        ModelRuntimeProperties.ProviderConfig activeProvider = runtimeProperties.activeProvider();
+    private void validateApiKey(ModelRuntimeProperties properties) {
+        ModelRuntimeProperties.ProviderConfig activeProvider = properties.activeProvider();
         if (StringUtils.isBlank(activeProvider.getApiKey())) {
             throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR,
                     "API Key 不能为空", false, null, null);
@@ -199,51 +202,16 @@ public class SpringAiModelGateway implements ModelGateway {
         };
     }
 
-    private Object buildOptions(ChatPrompt chatPrompt, boolean stream) {
-        String provider = runtimeProperties.getProvider();
-        if ("deepseek".equals(provider)) {
-            return buildDeepSeekOptions(chatPrompt);
-        }
-        if ("opencode-go".equals(provider)) {
-            return buildOpenAiOptions(chatPrompt, stream);
-        }
-        throw new ModelGatewayException(ModelErrorCode.CONFIG_ERROR,
-                "不支持的 provider: " + provider, false, null, null);
+    private org.springframework.ai.chat.prompt.ChatOptions buildOptions(ChatPrompt chatPrompt, boolean stream,
+                                                                        ModelRuntimeProperties properties) {
+        String provider = properties.getProvider();
+        return factoryRegistry.require(provider).createOptions(
+                properties.activeProvider(), chatPrompt, resolvedModel(chatPrompt, properties), stream);
     }
 
-    private DeepSeekChatOptions buildDeepSeekOptions(ChatPrompt chatPrompt) {
-        DeepSeekChatOptions.Builder builder = DeepSeekChatOptions.builder()
-                .model(resolvedModel(chatPrompt))
-                .temperature(chatPrompt.getTemperature() != null ? chatPrompt.getTemperature() : defaultTemperature())
-                .maxTokens(chatPrompt.getMaxTokens() != null ? chatPrompt.getMaxTokens() : defaultMaxTokens());
-
-        if (OutputFormat.JSON_OBJECT == chatPrompt.getOutputFormat()) {
-            builder.responseFormat(
-                    org.springframework.ai.deepseek.api.ResponseFormat.builder()
-                            .type(org.springframework.ai.deepseek.api.ResponseFormat.Type.JSON_OBJECT)
-                            .build());
-        }
-
-        return builder.build();
-    }
-
-    private OpenAiChatOptions buildOpenAiOptions(ChatPrompt chatPrompt, boolean stream) {
-        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
-                .model(resolvedModel(chatPrompt))
-                .temperature(chatPrompt.getTemperature() != null ? chatPrompt.getTemperature() : defaultTemperature())
-                .maxTokens(chatPrompt.getMaxTokens() != null ? chatPrompt.getMaxTokens() : defaultMaxTokens());
-
-        if (stream) {
-            builder.streamUsage(true);
-        }
-
-        if (OutputFormat.JSON_OBJECT == chatPrompt.getOutputFormat()) {
-            builder.responseFormat(org.springframework.ai.openai.api.ResponseFormat.builder()
-                    .type(org.springframework.ai.openai.api.ResponseFormat.Type.JSON_OBJECT)
-                    .build());
-        }
-
-        return builder.build();
+    private ModelRuntimeProperties effectiveProperties(ChatPrompt prompt) {
+        return prompt != null && prompt.getRuntimeProperties() != null
+                ? prompt.getRuntimeProperties() : runtimeProperties;
     }
 
     private ModelStreamChunk mapStreamChunk(ChatResponse response) {
@@ -342,20 +310,8 @@ public class SpringAiModelGateway implements ModelGateway {
         return result;
     }
 
-    private String resolvedModel(ChatPrompt chatPrompt) {
-        return StringUtils.defaultIfBlank(chatPrompt.getModel(), defaultModel());
-    }
-
-    private String defaultModel() {
-        return runtimeProperties.activeProvider().getDefaultModel();
-    }
-
-    private Double defaultTemperature() {
-        return runtimeProperties.activeProvider().getTemperature();
-    }
-
-    private Integer defaultMaxTokens() {
-        return runtimeProperties.activeProvider().getMaxTokens();
+    private String resolvedModel(ChatPrompt chatPrompt, ModelRuntimeProperties properties) {
+        return properties.normalizeModel(chatPrompt.getModel(), properties.resolvedDefaultModel());
     }
 
 }

@@ -21,11 +21,11 @@ public interface AgentMemoryDao {
 
     List<AgentMemoryPO> searchByKeywords(String workspaceKey, String searchTerm, int limit);
 
-    int updateUsage(@Param("memoryId") String memoryId, @Param("expectedVersion") long expectedVersion);
+    int updateUsage(@Param("memoryId") String memoryId);
 
     int countActive(String workspaceKey);
 
-    int updateStatus(String memoryId, String status, long expectedVersion);
+    int updateStatus(String memoryId, String status);
 
     List<AgentMemoryPO> selectByContentHash(String workspaceKey, String contentHash);
 

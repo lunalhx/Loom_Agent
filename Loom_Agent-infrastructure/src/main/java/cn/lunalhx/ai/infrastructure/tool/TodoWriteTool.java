@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -16,6 +17,8 @@ public class TodoWriteTool implements AgentTool {
     public ToolSpec spec() {
         return ToolSpec.builder()
                 .name("todo_write")
+                .readOnly(true)
+                .childVisibility(ToolChildVisibility.ALL_ROLES)
                 .description("更新当前 Agent 计划和子任务状态，不修改工作区文件。创建任务时如果目标文件(targets)或验证命令(verification.command)与已有任务相同，应使用已有 id 更新，不要换 wording 创建重复任务。")
                 .inputSchema("{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"任务ID，更新时用于匹配已有任务（不再支持用 content 匹配更新）\"},\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"任务内容，创建新任务时必填；不可用于匹配已有任务\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]},\"kind\":{\"type\":\"string\",\"enum\":[\"inspect\",\"edit\",\"verify\"],\"description\":\"任务类型\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"涉及的工作区相对文件路径\"},\"evidence\":{\"type\":\"string\",\"description\":\"可选完成证据\"},\"blocker\":{\"type\":\"string\",\"description\":\"可选阻塞原因\"},\"verification\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"passed\":{\"type\":\"boolean\"},\"exitCode\":{\"type\":\"integer\"},\"summary\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}")
                 .build();

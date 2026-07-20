@@ -19,7 +19,9 @@ final class ModelFallbackStep implements ContextRecoveryStep {
     @Override
     public ContextRecoveryTransition apply(ContextRecoveryRequest request, List<AgentEvent> accumulatedEvents) {
         AgentContext context = request.context();
-        String fallbackModel = properties.getResilience().getFallbackModel();
+        ModelRuntimeProperties runProperties = context.modelRuntimeProperties(properties);
+        String fallbackModel = runProperties.getResilience() == null
+                ? null : runProperties.getResilience().getFallbackModel();
         String attemptedModel = request.attemptedModel();
 
         if (StringUtils.isBlank(fallbackModel) || fallbackModel.equals(attemptedModel)) {

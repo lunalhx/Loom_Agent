@@ -77,6 +77,7 @@ public class MybatisBackgroundShellTaskRepository implements BackgroundShellTask
         po.setErrorMessage(t.getErrorMessage());
         po.setStdoutFile(t.getStdoutFile());
         po.setStderrFile(t.getStderrFile());
+        po.setEnvKeys(t.getEnvKeys() == null ? "" : String.join(",", t.getEnvKeys()));
         po.setStdoutBytes(t.getStdoutBytes());
         po.setStderrBytes(t.getStderrBytes());
         po.setStartedAt(t.getStartedAt() == null ? null : t.getStartedAt().toString());
@@ -102,6 +103,8 @@ public class MybatisBackgroundShellTaskRepository implements BackgroundShellTask
                 .errorMessage(po.getErrorMessage())
                 .stdoutFile(po.getStdoutFile())
                 .stderrFile(po.getStderrFile())
+                .envKeys(po.getEnvKeys() == null || po.getEnvKeys().isBlank()
+                        ? List.of() : List.of(po.getEnvKeys().split(",")))
                 .stdoutBytes(po.getStdoutBytes())
                 .stderrBytes(po.getStderrBytes())
                 .startedAt(po.getStartedAt() == null ? null : Instant.parse(po.getStartedAt()))

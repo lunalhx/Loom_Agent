@@ -37,11 +37,4 @@ public class ContextWindowManager {
         return components.tokenEstimator.estimateTokens(context);
     }
 
-    private AgentRuntimeProperties.ContextProperties contextProperties() {
-        return components.tokenEstimator.contextProperties();
-    }
-
-    private int positive(Integer value, int fallback) {
-        return components.tokenEstimator.positive(value, fallback);
-    }
 }

@@ -82,7 +82,7 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
                 return null;
             }
             String replaced = content.replace(oldText, newText);
-            if (exceedsUtf8Limit(replaced)) {
+            if (exceedsUtf8Limit(call, replaced)) {
                 return null;
             }
             return StructuredDiffBuilder.oldNew(relative(call, filePath), content, replaced);
@@ -133,7 +133,7 @@ public class ReplaceInFileTool extends FileSystemToolSupport implements AgentToo
             String replaced = content.replace(oldText, newText);
 
             // UTF-8 byte check on result
-            if (exceedsUtf8Limit(replaced)) {
+            if (exceedsUtf8Limit(call, replaced)) {
                 return failure("file_too_large", "替换后文件内容超过大小上限", startedAt);
             }
 

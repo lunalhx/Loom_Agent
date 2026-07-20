@@ -55,21 +55,16 @@ public final class ConversationLedgerAppendService {
 
     private static final int DEFAULT_SNIP_THRESHOLD = 8000;
 
-    private final int snipThreshold;
+    private final AgentRuntimeProperties properties;
 
     /** No-arg constructor (default threshold). Used by tests. */
     public ConversationLedgerAppendService() {
-        this.snipThreshold = DEFAULT_SNIP_THRESHOLD;
+        this.properties = null;
     }
 
     /** Constructor with runtime properties for configurable threshold. */
     public ConversationLedgerAppendService(AgentRuntimeProperties properties) {
-        if (properties != null && properties.getObservationMaxChars() != null
-                && properties.getObservationMaxChars() > 0) {
-            this.snipThreshold = properties.getObservationMaxChars();
-        } else {
-            this.snipThreshold = DEFAULT_SNIP_THRESHOLD;
-        }
+        this.properties = properties;
     }
 
     // ================================================================
@@ -107,7 +102,7 @@ public final class ConversationLedgerAppendService {
     public List<ConversationLedgerEntry> appendToolResult(
             AgentContext context, String rawOutput, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
-        SnipResult snipped = snip(rawOutput, null);
+        SnipResult snipped = snip(context, rawOutput, null);
         String wrapped = "<untrusted_tool_output>\n"
                 + snipped.output
                 + "\n</untrusted_tool_output>";
@@ -144,7 +139,7 @@ public final class ConversationLedgerAppendService {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
         boolean alreadyOffloaded = toolResult != null
                 && StringUtils.isNotBlank(toolResult.getArtifactId());
-        SnipResult snipped = snip(rawOutput, alreadyOffloaded ? null : toolResult);
+        SnipResult snipped = snip(context, rawOutput, alreadyOffloaded ? null : toolResult);
         String wrapped = "<untrusted_tool_output>\n"
                 + snipped.output
                 + "\n</untrusted_tool_output>";
@@ -237,7 +232,8 @@ public final class ConversationLedgerAppendService {
      * method is a no-op in that case. Callers should pass {@code null} for
      * {@code toolResult} when skipping this check.
      */
-    private SnipResult snip(String rawOutput, ToolResult toolResult) {
+    private SnipResult snip(AgentContext context, String rawOutput, ToolResult toolResult) {
+        int snipThreshold = threshold(context);
         int len = StringUtils.length(rawOutput);
         if (len <= snipThreshold) {
             return new SnipResult(rawOutput, false, len, len);
@@ -261,6 +257,14 @@ public final class ConversationLedgerAppendService {
                 + artifactRef;
 
         return new SnipResult(truncated, true, len, truncated.length());
+    }
+
+    private int threshold(AgentContext context) {
+        AgentRuntimeProperties effective = context == null || properties == null
+                ? properties : context.runtimeProperties(properties);
+        return effective != null && effective.getObservationMaxChars() != null
+                && effective.getObservationMaxChars() > 0
+                ? effective.getObservationMaxChars() : DEFAULT_SNIP_THRESHOLD;
     }
 
     // ================================================================

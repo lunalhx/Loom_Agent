@@ -30,8 +30,8 @@ public class UndoSessionCoordinatorTest {
         UndoSnapshotRepository snapshotRepository = mock(UndoSnapshotRepository.class);
         WorkspaceUndoLockRepository lockRepository = mock(WorkspaceUndoLockRepository.class);
         AgentWorkspaceResolver workspaceResolver = mock(AgentWorkspaceResolver.class);
-        AgentRuntimeProperties.UndoProperties config =
-                new AgentRuntimeProperties.UndoProperties();
+        cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config =
+                new cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties();
         UndoSessionCoordinator coordinator = new UndoSessionCoordinator(
                 snapshotPort, snapshotRepository, lockRepository, workspaceResolver, config);
 

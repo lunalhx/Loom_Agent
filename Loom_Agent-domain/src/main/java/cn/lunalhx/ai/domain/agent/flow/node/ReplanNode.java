@@ -107,9 +107,10 @@ public class ReplanNode extends AbstractAgentNode {
                         "Replan produced no applicable changes (round " + rounds + ")",
                         null, Map.of("noProgressRound", rounds, "reason", reason.name()));
             }
-            int maxRounds = properties.getStepBudget() != null
-                    ? Math.max(1, properties.getStepBudget().getNoProgressMaxRounds() == null
-                            ? 3 : properties.getStepBudget().getNoProgressMaxRounds())
+            AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+            int maxRounds = runProperties.getStepBudget() != null
+                    ? Math.max(1, runProperties.getStepBudget().getNoProgressMaxRounds() == null
+                            ? 3 : runProperties.getStepBudget().getNoProgressMaxRounds())
                     : 3;
             if (rounds >= maxRounds) {
                 context.setStopReason(AgentStopReason.NO_PROGRESS);
@@ -151,7 +152,8 @@ public class ReplanNode extends AbstractAgentNode {
 
     private List<TodoApplyResult> applyModelPlanDelta(AgentContext context, String promptText) {
         try {
-        long deadlineEpochMs = System.currentTimeMillis() + properties.getStepTimeoutMs();
+        long deadlineEpochMs = System.currentTimeMillis()
+                + context.runtimeProperties(properties).getStepTimeoutMs();
         int maxTokens = 0;
         ModelChatResult result = null;
         for (int attempt = 0; attempt < 2; attempt++) {
@@ -174,6 +176,7 @@ public class ReplanNode extends AbstractAgentNode {
                         .purpose(ModelCallPurpose.CONTROL_JSON)
                         .deadlineEpochMs(deadlineEpochMs)
                         .outputFormat(OutputFormat.JSON_OBJECT)
+                        .runtimeProperties(context.getRunConfig() == null ? null : context.getRunConfig().model())
                         .build();
                 try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
                     long remainingMs = Math.max(1L, deadlineEpochMs - System.currentTimeMillis());
@@ -197,7 +200,7 @@ public class ReplanNode extends AbstractAgentNode {
             }
             recordUsage(context, result);
             if (attempt == 0) {
-                maxTokens = escalatedMaxTokens();
+                maxTokens = escalatedMaxTokens(context);
             }
         }
         if (result == null || StringUtils.isBlank(result.getContent())) {
@@ -220,7 +223,7 @@ public class ReplanNode extends AbstractAgentNode {
                 todos = root.path("items");
             }
             if (!todos.isArray() || todos.isEmpty()) {
-                return List.of();
+                return null;
             }
             return context.getPlan().applyTodoWriteForReplan(
                     objectMapper.createObjectNode().set("todos", todos),
@@ -316,9 +319,10 @@ public class ReplanNode extends AbstractAgentNode {
                 || "max_tokens".equalsIgnoreCase(StringUtils.trimToEmpty(finishReason));
     }
 
-    private int escalatedMaxTokens() {
-        Integer value = properties.getModelRecovery() == null
-                ? null : properties.getModelRecovery().getEscalatedMaxTokens();
+    private int escalatedMaxTokens(AgentContext context) {
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        Integer value = runProperties.getModelRecovery() == null
+                ? null : runProperties.getModelRecovery().getEscalatedMaxTokens();
         return value == null || value <= 0 ? 8192 : value;
     }
 

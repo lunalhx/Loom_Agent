@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
@@ -50,10 +51,11 @@ final class FallbackModelStep implements ContextRecoveryStep {
     }
 
     private String selectFallbackModel(String attemptedModel, int requestedMaxTokens, AgentContext context) {
-        String fallbackModel = properties.getModelRecovery() == null
-                ? null : properties.getModelRecovery().getContextFallbackModel();
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
+        String fallbackModel = runProperties.getModelRecovery() == null
+                ? null : runProperties.getModelRecovery().getContextFallbackModel();
         if (StringUtils.isBlank(fallbackModel)
-                || !canUseContextFallback(attemptedModel, fallbackModel)) {
+                || !canUseContextFallback(attemptedModel, fallbackModel, context)) {
             return null;
         }
         if (!budgetCoordinator.checkFallbackModelBudget(context, AgentNodeNames.MODEL_CALL,
@@ -63,15 +65,21 @@ final class FallbackModelStep implements ContextRecoveryStep {
         return fallbackModel;
     }
 
-    private boolean canUseContextFallback(String currentModel, String fallbackModel) {
+    private boolean canUseContextFallback(String currentModel, String fallbackModel,
+                                          AgentContext context) {
         if (StringUtils.equals(currentModel, fallbackModel)) {
             return false;
         }
         ModelCapability current;
         ModelCapability fallback;
         try {
-            current = modelGateway.capability(currentModel);
-            fallback = modelGateway.capability(fallbackModel);
+            ModelRuntimeProperties runModel = context.modelRuntimeProperties(null);
+            String effectiveCurrentModel = runModel == null
+                    ? currentModel : StringUtils.defaultIfBlank(currentModel, runModel.resolvedDefaultModel());
+            current = runModel == null
+                    ? modelGateway.capability(effectiveCurrentModel) : runModel.capability(effectiveCurrentModel);
+            fallback = runModel == null
+                    ? modelGateway.capability(fallbackModel) : runModel.capability(fallbackModel);
         } catch (RuntimeException e) {
             return false;
         }

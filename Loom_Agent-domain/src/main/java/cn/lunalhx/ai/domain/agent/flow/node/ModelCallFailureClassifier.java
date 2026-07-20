@@ -7,9 +7,9 @@ import org.apache.commons.lang3.StringUtils;
 import java.net.http.HttpTimeoutException;
 import java.util.concurrent.TimeoutException;
 
-final class ModelCallFailureClassifier {
+public class ModelCallFailureClassifier {
 
-    enum Category {
+    public enum Category {
         BUDGET_EXCEEDED,
         TIMEOUT,
         CONTEXT_OVERFLOW,
@@ -17,7 +17,7 @@ final class ModelCallFailureClassifier {
         UNKNOWN
     }
 
-    Category classify(Throwable throwable) {
+    public Category classify(Throwable throwable) {
         if (hasErrorCode(throwable, ModelErrorCode.BUDGET_EXCEEDED)) {
             return Category.BUDGET_EXCEEDED;
         }
@@ -81,7 +81,7 @@ final class ModelCallFailureClassifier {
         return false;
     }
 
-    ModelGatewayException modelGatewayException(Throwable throwable) {
+    public ModelGatewayException modelGatewayException(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
             if (current instanceof ModelGatewayException exception) {
@@ -92,7 +92,7 @@ final class ModelCallFailureClassifier {
         return null;
     }
 
-    String attemptedModel(Throwable throwable) {
+    public String attemptedModel(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
             if (current instanceof ModelGatewayException exception

@@ -23,12 +23,12 @@ public class ContextArtifactCleanupTask {
     private final ContextArtifactRepository artifactRepository;
     private final ContextArtifactPurgeService purgeService;
     private final AgentLoopService agentLoopService;
-    private final AgentRuntimeProperties.ContextProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties config;
 
     public ContextArtifactCleanupTask(ContextArtifactRepository artifactRepository,
                                        ContextArtifactPurgeService purgeService,
                                        AgentLoopService agentLoopService,
-                                       AgentRuntimeProperties.ContextProperties config) {
+                                       cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties config) {
         this.artifactRepository = artifactRepository;
         this.purgeService = purgeService;
         this.agentLoopService = agentLoopService;

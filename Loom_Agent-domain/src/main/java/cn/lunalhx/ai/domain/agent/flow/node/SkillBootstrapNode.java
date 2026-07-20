@@ -62,7 +62,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
     @Override
     protected NodeResult doApply(AgentContext context) {
         // 1. Check if skill feature is enabled
-        if (skillRepository == null || !isSkillEnabled()) {
+        if (skillRepository == null || !isSkillEnabled(context)) {
             return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
 
@@ -126,9 +126,15 @@ public class SkillBootstrapNode extends AbstractAgentNode {
 
         // Check existence
         for (String name : uniqueNames) {
-            if (skillRepository.resolve(name, workspaceRoot) == null) {
+            SkillDescriptor descriptor = findInCatalog(catalog, name);
+            if (descriptor == null) {
                 return NodeResult.terminal(List.of(skillErrorEvent(context, "skill_not_found",
                         "Skill 不存在: " + name)));
+            }
+            String invalidTool = invalidAllowedTool(context, descriptor);
+            if (invalidTool != null) {
+                return NodeResult.terminal(List.of(skillErrorEvent(context, "skill_tool_not_found",
+                        "Skill " + name + " 声明了未知工具: " + invalidTool)));
             }
         }
 
@@ -138,7 +144,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
             if (isActivated(context, name)) {
                 continue;
             }
-            SkillDescriptor descriptor = skillRepository.resolve(name, workspaceRoot);
+            SkillDescriptor descriptor = findInCatalog(catalog, name);
             if (descriptor == null) {
                 continue;
             }
@@ -183,7 +189,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
      * Called during resume after batch project skill approval is granted.
      */
     public NodeResult completeActivation(AgentContext context) {
-        if (skillRepository == null || !isSkillEnabled()) {
+        if (skillRepository == null || !isSkillEnabled(context)) {
             return NodeResult.next(AgentNodeNames.MEMORY_RECALL, List.of());
         }
         Path workspaceRoot = context.getResolvedWorkspace();
@@ -203,7 +209,7 @@ public class SkillBootstrapNode extends AbstractAgentNode {
             if (isActivated(context, name)) {
                 continue;
             }
-            SkillDescriptor descriptor = skillRepository.resolve(name, workspaceRoot);
+            SkillDescriptor descriptor = findInCatalog(catalog, name);
             if (descriptor == null) {
                 log.warn("Approved skill not found during completeActivation: {}", name);
                 continue;
@@ -247,7 +253,9 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 descriptor.manifestSha256(),
                 snapshotArtifactId,
                 Instant.now(),
-                descriptor.resourceCount());
+                descriptor.resourceCount(),
+                descriptor.allowedTools(),
+                descriptor.allowedToolsDeclared());
 
         context.getActivatedSkills().add(activation);
 
@@ -285,6 +293,30 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 .build();
         artifactRepository.save(artifact);
         return artifactId;
+    }
+
+    private SkillDescriptor findInCatalog(SkillCatalog catalog, String name) {
+        if (catalog == null || catalog.skills() == null) {
+            return null;
+        }
+        return catalog.skills().stream()
+                .filter(skill -> skill.name().equals(name))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String invalidAllowedTool(AgentContext context, SkillDescriptor descriptor) {
+        if (!descriptor.allowedToolsDeclared()) {
+            return null;
+        }
+        java.util.Set<String> known = context.getToolSpecs() == null
+                ? java.util.Set.of()
+                : context.getToolSpecs().stream().map(cn.lunalhx.ai.domain.tool.model.ToolSpec::getName)
+                        .collect(java.util.stream.Collectors.toSet());
+        return descriptor.allowedTools().stream()
+                .filter(tool -> !known.contains(tool))
+                .findFirst()
+                .orElse(null);
     }
 
     private NodeResult createBatchApproval(AgentContext context, List<SkillDescriptor> skills, Path workspaceRoot) {
@@ -331,7 +363,8 @@ public class SkillBootstrapNode extends AbstractAgentNode {
                 .operationPreview(operationPreview)
                 .metadata(metadata)
                 .createdAt(now)
-                .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
+                .expiresAt(now.plusSeconds(Math.max(1L,
+                        context.runtimeProperties(properties).getApprovalTtlSeconds())))
                 .context(context)
                 .build();
         approvalStore.save(approval);
@@ -379,8 +412,9 @@ public class SkillBootstrapNode extends AbstractAgentNode {
         return context.getAgentRole() != null || context.getAgentDepth() > 0;
     }
 
-    private boolean isSkillEnabled() {
-        AgentRuntimeProperties.SkillProperties skillProps = properties.getSkills();
+    private boolean isSkillEnabled(AgentContext context) {
+        cn.lunalhx.ai.domain.agent.model.valobj.SkillProperties skillProps =
+                context.runtimeProperties(properties).getSkills();
         return skillProps == null || !Boolean.FALSE.equals(skillProps.getEnabled());
     }
 

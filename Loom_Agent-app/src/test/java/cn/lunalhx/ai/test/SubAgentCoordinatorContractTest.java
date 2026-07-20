@@ -22,6 +22,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -926,7 +927,8 @@ public class SubAgentCoordinatorContractTest {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
-                return ToolSpec.builder().name(name).description(name).inputSchema("{}").build();
+                return ToolSpec.builder().name(name).description(name).inputSchema("{}")
+                        .childVisibility(ToolChildVisibility.ALL_ROLES).build();
             }
 
             @Override
@@ -940,7 +942,8 @@ public class SubAgentCoordinatorContractTest {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
-                return ToolSpec.builder().name(name).description(name).inputSchema("{}").build();
+                return ToolSpec.builder().name(name).description(name).inputSchema("{}")
+                        .childVisibility(ToolChildVisibility.ALL_ROLES).build();
             }
 
             @Override

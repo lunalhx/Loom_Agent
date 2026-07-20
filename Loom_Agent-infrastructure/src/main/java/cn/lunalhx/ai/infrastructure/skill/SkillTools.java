@@ -7,6 +7,8 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ToolChildVisibility;
+import cn.lunalhx.ai.infrastructure.tool.WorkspacePathSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -45,65 +47,6 @@ public final class SkillTools {
         return Path.of("").toAbsolutePath();
     }
 
-    // ==================== ActivateSkillTool ====================
-
-    public static class ActivateSkillTool implements AgentTool {
-
-        private static final Logger log = LoggerFactory.getLogger(ActivateSkillTool.class);
-
-        private final SkillRepository skillRepository;
-
-        public ActivateSkillTool(SkillRepository skillRepository) {
-            this.skillRepository = skillRepository;
-        }
-
-        @Override
-        public ToolSpec spec() {
-            return ToolSpec.builder()
-                    .name("activate_skill")
-                    .description("Activate a skill by name. Activated skills provide specialized instructions and resources to the agent. Use to load project-specific or user-level skills.")
-                    .inputSchema("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Name of the skill to activate\"}},\"required\":[\"name\"],\"additionalProperties\":false}")
-                    .build();
-        }
-
-        @Override
-        public ToolPolicyDecision policy(ToolCall call) {
-            return ToolPolicyDecision.readOnly("激活 Skill 只读 skill 目录", "activate_skill");
-        }
-
-        @Override
-        public ToolResult call(ToolCall call) {
-            long startedAt = System.currentTimeMillis();
-            JsonNode input = call.getInput();
-            String name = input == null ? "" : input.path("name").asText("").strip();
-            if (StringUtils.isBlank(name)) {
-                return ToolResult.failure("activate_skill_name_required", "name 不能为空", elapsed(startedAt));
-            }
-
-            Path workspaceRoot = resolveWorkspaceRoot(call);
-            SkillDescriptor descriptor = skillRepository.resolve(name, workspaceRoot);
-            if (descriptor == null) {
-                return ToolResult.failure("activate_skill_not_found",
-                        "未找到名为 '" + name + "' 的 Skill。可用 skill 列表已注入 System Prompt。", elapsed(startedAt));
-            }
-
-            String content = skillRepository.readSkillContent(descriptor);
-            String preview = StringUtils.abbreviate(content, 500);
-
-            return ToolResult.success(
-                    "skill_activation_pending\n"
-                            + "name=" + name + "\n"
-                            + "source=" + descriptor.source().name().toLowerCase() + "\n"
-                            + "manifestSha256=" + descriptor.manifestSha256() + "\n"
-                            + "preview:\n" + preview + "\n",
-                    false, elapsed(startedAt));
-        }
-
-        private long elapsed(long startedAt) {
-            return System.currentTimeMillis() - startedAt;
-        }
-    }
-
     // ==================== ReadSkillResourceTool ====================
 
     public static class ReadSkillResourceTool implements AgentTool {
@@ -118,6 +61,8 @@ public final class SkillTools {
         public ToolSpec spec() {
             return ToolSpec.builder()
                     .name("read_skill_resource")
+                    .readOnly(true)
+                    .childVisibility(ToolChildVisibility.ALL_ROLES)
                     .description("Read a text resource from an activated skill's snapshot. Use to access skill-provided scripts, templates, or reference files.")
                     .inputSchema("{\"type\":\"object\",\"properties\":{\"skill\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Skill name\"},\"path\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Relative path to the resource within the skill directory\"},\"offset\":{\"type\":\"integer\",\"minimum\":0,\"default\":0,\"description\":\"Character offset to start reading from\"},\"maxChars\":{\"type\":\"integer\",\"minimum\":1,\"default\":8000,\"description\":\"Maximum characters to read\"}},\"required\":[\"skill\",\"path\"],\"additionalProperties\":false}")
                     .build();
@@ -232,12 +177,6 @@ public final class SkillTools {
                         "未找到名为 '" + skillName + "' 的 Skill", elapsed(startedAt));
             }
 
-            Path destPath = workspaceRoot.resolve(destination).normalize();
-            if (!destPath.startsWith(workspaceRoot.normalize())) {
-                return ToolResult.failure("copy_skill_resource_path_escape",
-                        "destination 必须在工作区内", elapsed(startedAt));
-            }
-
             byte[] content = skillRepository.readResourceBytes(descriptor, path);
             if (content.length == 0 && !path.endsWith("/")) {
                 return ToolResult.failure("copy_skill_resource_empty",
@@ -245,11 +184,13 @@ public final class SkillTools {
             }
 
             try {
+                Path destPath = WorkspacePathSanitizer.writable(workspaceRoot, destination);
                 if (Files.exists(destPath) && !overwrite) {
                     return ToolResult.failure("copy_skill_resource_exists",
                             "destination 已存在，如需覆盖请设置 overwrite=true: " + destination, elapsed(startedAt));
                 }
                 Files.createDirectories(destPath.getParent());
+                destPath = WorkspacePathSanitizer.writable(workspaceRoot, destination);
                 if (overwrite) {
                     Files.write(destPath, content);
                 } else {
@@ -318,21 +259,6 @@ public final class SkillTools {
             }
 
             Path workspaceRoot = resolveWorkspaceRoot(call);
-            Path skillDir = workspaceRoot.resolve(projectSkillsDir).resolve(name).normalize();
-            Path skillFile = skillDir.resolve(SKILL_FILE);
-
-            // Path must stay within workspace
-            if (!skillDir.startsWith(workspaceRoot.normalize())) {
-                return ToolResult.failure("create_skill_path_escape",
-                        "技能路径必须在工作区内", elapsed(startedAt));
-            }
-
-            if (Files.exists(skillFile)) {
-                return ToolResult.failure("create_skill_already_exists",
-                        "Skill '" + name + "' 已存在，不能重复创建", elapsed(startedAt));
-            }
-
-            // Build SKILL.md with frontmatter
             String sha256hex = DigestUtils.sha256Hex(content.getBytes(StandardCharsets.UTF_8));
             String skillMd = "---\n"
                     + "name: " + name + "\n"
@@ -342,7 +268,15 @@ public final class SkillTools {
                     + content + "\n";
 
             try {
+                String relativeSkillFile = Path.of(projectSkillsDir).resolve(name).resolve(SKILL_FILE).toString();
+                Path skillFile = WorkspacePathSanitizer.writable(workspaceRoot, relativeSkillFile);
+                if (Files.exists(skillFile)) {
+                    return ToolResult.failure("create_skill_already_exists",
+                            "Skill '" + name + "' 已存在，不能重复创建", elapsed(startedAt));
+                }
+                Path skillDir = skillFile.getParent();
                 Files.createDirectories(skillDir);
+                skillFile = WorkspacePathSanitizer.writable(workspaceRoot, relativeSkillFile);
                 Files.writeString(skillFile, skillMd, StandardCharsets.UTF_8);
                 log.info("Skill created: {} -> {}", name, skillFile);
                 return ToolResult.success(

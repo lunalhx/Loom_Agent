@@ -37,11 +37,11 @@ public class UndoSnapshotAgentHook implements AgentHook {
 
     private final UndoSessionCoordinator coordinator;
     private final UndoSnapshotRepository snapshotRepository;
-    private final AgentRuntimeProperties.UndoProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config;
 
     public UndoSnapshotAgentHook(UndoSessionCoordinator coordinator,
                                   UndoSnapshotRepository snapshotRepository,
-                                  AgentRuntimeProperties.UndoProperties config) {
+                                  cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config) {
         this.coordinator = coordinator;
         this.snapshotRepository = snapshotRepository;
         this.config = config;

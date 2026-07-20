@@ -8,15 +8,22 @@ import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
+import cn.lunalhx.ai.domain.agent.flow.middleware.BudgetMiddleware;
+import cn.lunalhx.ai.domain.agent.flow.middleware.DynamicContextMiddleware;
+import cn.lunalhx.ai.domain.agent.flow.middleware.ErrorRecoveryMiddleware;
+import cn.lunalhx.ai.domain.agent.flow.middleware.ModelCallMiddlewareAssembler;
+import cn.lunalhx.ai.domain.agent.flow.middleware.SummarizationMiddleware;
+import cn.lunalhx.ai.domain.agent.flow.node.ModelCallFailureClassifier;
+import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
+import cn.lunalhx.ai.domain.agent.flow.node.RecoveryChainFactory;
+import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FailNode;
 import cn.lunalhx.ai.domain.agent.flow.node.FinalAnswerNode;
 import cn.lunalhx.ai.domain.agent.flow.node.InstructionGateNode;
-import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PlannerNode;
-import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanGuardNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ReplanNode;
 import cn.lunalhx.ai.domain.agent.flow.node.MemoryRecallNode;
@@ -29,12 +36,12 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentCoordinator;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
-import cn.lunalhx.ai.domain.agent.service.prompt.ModelCallServices;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionService;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
+import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -126,6 +133,35 @@ public class AgentFlowFactory {
         BudgetGuard budgetGuard = runtime.budgetGuard();
         ContextWindowManager contextWindowManager = runtime.contextWindowManager();
 
+        // ---- Phase 2: Middleware chain ----
+        SummarizationMiddleware summarizationMiddleware =
+                new SummarizationMiddleware(ledgerCompactionService);
+        DynamicContextMiddleware dynamicContextMiddleware =
+                new DynamicContextMiddleware(ledgerAppendService);
+        cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory middlewarePromptFactory =
+                new cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory();
+        BudgetMiddleware budgetMiddleware =
+                new BudgetMiddleware(budgetGuard, properties, middlewarePromptFactory::budgetInput);
+        ErrorRecoveryMiddleware errorRecoveryMiddleware =
+                new ErrorRecoveryMiddleware(
+                        RecoveryChainFactory.createRecoveryChain(
+                                properties, modelGateway,
+                                new cn.lunalhx.ai.domain.agent.flow.node.ModelPromptFactory(),
+                                budgetGuard, traceRecorder, ledgerCompactionService),
+                        RecoveryChainFactory.createModelErrorRecoveryChain(
+                                ledgerAppendService,
+                                runtime.modelRuntimeProperties(),
+                                ledgerCompactionService),
+                        new ModelCallFailureClassifier(),
+                        properties,
+                        traceRecorder);
+        ModelCallMiddlewareAssembler assembler =
+                new ModelCallMiddlewareAssembler(
+                        summarizationMiddleware,
+                        dynamicContextMiddleware,
+                        errorRecoveryMiddleware,
+                        budgetMiddleware);
+
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new SkillBootstrapNode(skillRepository, state.approvalStore(),
                         contextArtifactRepository, contextBlobStore, properties),
@@ -136,12 +172,11 @@ public class AgentFlowFactory {
                         new RenderPromptResources(skillRepository,
                                 contextArtifactRepository, contextBlobStore),
                         new LedgerPromptServices(bootstrapService,
-                                new cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder(),
+                                new StablePrefixBuilder(),
                                 ledgerCompactionService)),
-                new ModelCallNode(modelGateway, properties,
-                        new ModelCallServices(traceRecorder, budgetGuard,
-                                contextWindowManager, ledgerAppendService,
-                                runtime.modelRuntimeProperties(), ledgerCompactionService)),
+                new ModelCallNode(assembler, properties, ledgerAppendService,
+                        new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
+                                modelGateway, budgetGuard, traceRecorder)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
                 new InstructionGateNode(),
                 new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),

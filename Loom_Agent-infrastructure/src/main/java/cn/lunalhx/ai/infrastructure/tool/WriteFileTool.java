@@ -80,7 +80,7 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
                 }
                 oldText = Files.readString(targetPath, StandardCharsets.UTF_8);
             }
-            if (exceedsUtf8Limit(content)) {
+            if (exceedsUtf8Limit(call, content)) {
                 return null;
             }
             return StructuredDiffBuilder.oldNew(relative(call, targetPath), oldText, content);
@@ -121,7 +121,7 @@ public class WriteFileTool extends FileSystemToolSupport implements AgentTool {
             }
 
             // UTF-8 byte check (both approval preview and execution)
-            if (exceedsUtf8Limit(content)) {
+            if (exceedsUtf8Limit(call, content)) {
                 return failure("file_too_large", "写入内容超过文件大小上限", startedAt);
             }
 

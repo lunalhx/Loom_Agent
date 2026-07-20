@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextArtifactRepository
 import cn.lunalhx.ai.domain.agent.adapter.port.context.ContextBlobStore;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.MemoryStoreProperties;
+import cn.lunalhx.ai.domain.common.LoomPaths;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
@@ -117,10 +118,20 @@ public class PersistenceAutoConfig {
     @Bean
     public ContextBlobStore contextBlobStore(PersistenceProperties persistence,
                                               AgentRuntimeProperties agentRuntimeProperties,
-                                              MemoryStoreProperties memoryStoreProperties) {
+                                              MemoryStoreProperties memoryStoreProperties,
+                                              LoomPaths loomPaths) {
         return selectByMode(persistence, "ContextBlobStore", "InMemory", "LocalFile",
                 () -> new InMemoryContextBlobStore(memoryStoreProperties),
-                () -> new LocalFileContextBlobStore(agentRuntimeProperties.getContext().getStorageRoot()));
+                () -> new LocalFileContextBlobStore(loomPaths.resolveWorkspacePath(
+                        agentRuntimeProperties.getContext().getStorageRoot(),
+                        loomPaths.contextArtifacts()).toString()));
+    }
+
+    public ContextBlobStore contextBlobStore(PersistenceProperties persistence,
+                                              AgentRuntimeProperties agentRuntimeProperties,
+                                              MemoryStoreProperties memoryStoreProperties) {
+        return contextBlobStore(persistence, agentRuntimeProperties, memoryStoreProperties,
+                LoomPaths.system());
     }
 
     @Bean

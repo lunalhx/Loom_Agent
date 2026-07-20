@@ -16,13 +16,11 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
-import cn.lunalhx.ai.domain.agent.service.ledger.LedgerCompactionResult;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.RenderPromptResources;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import org.apache.commons.lang3.StringUtils;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -67,15 +65,7 @@ public class RenderPromptNode extends AbstractAgentNode {
             return NodeResult.next(AgentNodeNames.FAIL, List.of());
         }
 
-        // ---- Ledger compaction (single-track: micro + watermark) ----
-        List<AgentEvent> compactEvents = new ArrayList<>();
-        LedgerCompactionResult ledgerResult = compactLedgerIfNeeded(context);
-        if (ledgerResult.compacted()) {
-            compactEvents.add(ledgerCompactEvent(context, ledgerResult));
-        }
-
-        return NodeResult.next(AgentNodeNames.MODEL_CALL,
-                compactEvents.isEmpty() ? List.of() : compactEvents);
+        return NodeResult.next(AgentNodeNames.MODEL_CALL, List.of());
     }
 
     private String readSkillContentCached(AgentContext context, SkillActivation activation) {
@@ -99,44 +89,6 @@ public class RenderPromptNode extends AbstractAgentNode {
             }
         }
         return "";
-    }
-
-    // ================================================================
-    // Ledger compaction
-    // ================================================================
-
-    /**
-     * Run ledger compaction if the entry count exceeds the high watermark.
-     *
-     * <p>Returns a non-null result; caller checks {@code compacted()}.
-     */
-    private LedgerCompactionResult compactLedgerIfNeeded(AgentContext context) {
-        try {
-            return this.ledgerServices.compactionService().compactIfNeeded(context);
-        } catch (Exception e) {
-            // Bounded failure — ledger compaction failure must not interrupt the agent.
-            return LedgerCompactionResult.notNeeded(
-                    context.getConversationLedger() != null ? context.getConversationLedger().size() : 0,
-                    context.getGeneration());
-        }
-    }
-
-    private AgentEvent ledgerCompactEvent(AgentContext context, LedgerCompactionResult result) {
-        return event(context, AgentEventType.CONTEXT_COMPACTED)
-                .message("Ledger compacted before model call")
-                .metadata(Map.of(
-                        "compactionType", "ledger",
-                        "generation", result.generation(),
-                        "beforeEntryCount", result.beforeEntryCount(),
-                        "afterEntryCount", result.afterEntryCount(),
-                        "strategy", result.strategy() == null ? "" : result.strategy(),
-                        "transcriptArtifactId", result.transcriptArtifactId() == null
-                                ? "" : result.transcriptArtifactId(),
-                        "compactionDepth", result.compactionDepth(),
-                        "maxInputCompactionDepth", result.maxInputCompactionDepth(),
-                        "maxAllowedCompactionDepth", result.maxAllowedCompactionDepth(),
-                        "depthGuarded", result.depthGuarded()))
-                .build();
     }
 
     // ================================================================
@@ -187,7 +139,7 @@ public class RenderPromptNode extends AbstractAgentNode {
                 context.getAgentRole(),
                 context.isSubAgentSpawnAllowed(),
                 pathScope,
-                context.getToolSpecs(),
+                context.getActivatedSkillToolPolicy().filter(context.getToolSpecs()),
                 context.getSkillCatalogText(),
                 activatedSkills,
                 skillContents);

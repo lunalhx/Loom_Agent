@@ -45,13 +45,13 @@ public class MaxStepContinuationStopHook implements AgentHook {
             return AgentHookResult.proceed();
         }
 
-        AgentRuntimeProperties.StepBudgetProperties stepBudget = properties.getStepBudget();
-        if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
-            return AgentHookResult.proceed();
-        }
-
         AgentContext agentContext = context.getAgentContext();
         if (agentContext == null) {
+            return AgentHookResult.proceed();
+        }
+        cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget =
+                agentContext.runtimeProperties(properties).getStepBudget();
+        if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
             return AgentHookResult.proceed();
         }
 

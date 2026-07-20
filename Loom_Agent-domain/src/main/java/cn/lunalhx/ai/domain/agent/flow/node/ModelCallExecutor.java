@@ -29,15 +29,18 @@ final class ModelCallExecutor {
     }
 
     ModelCallResult execute(AgentContext context, String requestedModel, int requestedMaxTokens,
-                            long deadlineEpochMs, int escalatedMaxTokens) {
+                            long deadlineEpochMs, int escalatedMaxTokens,
+                            boolean initialBudgetChecked) {
         boolean escalated = false;
         int currentMaxTokens = requestedMaxTokens;
 
         while (true) {
-            BudgetCheckResult check = budgetCoordinator.checkBeforeModelCall(context,
-                    AgentNodeNames.MODEL_CALL, requestedModel, currentMaxTokens);
-            if (!budgetCoordinator.isAllowed(check)) {
-                return ModelCallResult.budgetBlocked(check);
+            if (!initialBudgetChecked || escalated) {
+                BudgetCheckResult check = budgetCoordinator.checkBeforeModelCall(context,
+                        AgentNodeNames.MODEL_CALL, requestedModel, currentMaxTokens);
+                if (!budgetCoordinator.isAllowed(check)) {
+                    return ModelCallResult.budgetBlocked(check);
+                }
             }
 
             ChatPrompt prompt = promptFactory.build(context, requestedModel, currentMaxTokens, deadlineEpochMs);

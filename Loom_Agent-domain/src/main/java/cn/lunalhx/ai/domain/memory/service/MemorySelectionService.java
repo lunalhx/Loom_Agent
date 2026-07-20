@@ -1,5 +1,8 @@
 package cn.lunalhx.ai.domain.memory.service;
 
+import cn.lunalhx.ai.domain.common.UntrustedContentSanitizer;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryRuntimeProperties;
+
 import cn.lunalhx.ai.domain.memory.adapter.port.AgentMemoryRepository;
 import cn.lunalhx.ai.domain.memory.model.entity.AgentMemory;
 import cn.lunalhx.ai.domain.memory.model.valobj.MemorySearchHit;
@@ -46,11 +49,23 @@ public class MemorySelectionService {
     }
 
     public SelectionResult select(String workspaceKey, String question) {
+        return select(workspaceKey, question, null);
+    }
+
+    public SelectionResult select(String workspaceKey, String question,
+                                  MemoryRuntimeProperties runtimeProperties) {
         try {
-            List<MemorySearchHit> pinnedHits = getPinnedHits(workspaceKey);
+            int selectedLimit = runtimeProperties == null ? maxSelected : runtimeProperties.getMaxSelected();
+            int injectedCharLimit = runtimeProperties == null
+                    ? maxInjectedChars : runtimeProperties.getMaxInjectedChars();
+            double relevanceThreshold = runtimeProperties == null
+                    ? minRelevanceScore : runtimeProperties.getMinRelevanceScore();
+            int configuredPinnedLimit = runtimeProperties == null
+                    ? pinnedLimit : runtimeProperties.getPinnedLimit();
+            List<MemorySearchHit> pinnedHits = getPinnedHits(workspaceKey, configuredPinnedLimit);
 
             if (question == null || question.isBlank()) {
-                return buildResult(pinnedHits, Collections.emptyList());
+                return buildResult(pinnedHits, Collections.emptyList(), selectedLimit, injectedCharLimit);
             }
 
             List<MemorySearchHit> candidateHits;
@@ -59,7 +74,7 @@ public class MemorySelectionService {
                     .collect(Collectors.toSet());
 
             if (searchService != null) {
-                List<MemorySearchHit> searchHits = searchService.search(workspaceKey, question, maxSelected * 2);
+                List<MemorySearchHit> searchHits = searchService.search(workspaceKey, question, selectedLimit * 2);
                 candidateHits = searchHits.stream()
                         .filter(h -> h.memory().getStatus() == MemoryStatus.ACTIVE)
                         .filter(h -> !pinnedIds.contains(h.memory().getMemoryId()))
@@ -79,13 +94,13 @@ public class MemorySelectionService {
             }
 
             candidateHits = candidateHits.stream()
-                    .filter(h -> h.comprehensiveScore() >= minRelevanceScore)
+                    .filter(h -> h.comprehensiveScore() >= relevanceThreshold)
                     .sorted(Comparator.comparingDouble(MemorySearchHit::comprehensiveScore).reversed())
                     .collect(Collectors.toList());
 
             candidateHits = deduplicateByTitleKeyword(candidateHits);
 
-            return buildResult(pinnedHits, candidateHits);
+            return buildResult(pinnedHits, candidateHits, selectedLimit, injectedCharLimit);
         } catch (Exception e) {
             log.warn("Memory selection failed, returning empty result. workspace={}, question={}: {}",
                     workspaceKey, question != null ? question.substring(0, Math.min(50, question.length())) : null,
@@ -94,27 +109,29 @@ public class MemorySelectionService {
         }
     }
 
-    private List<MemorySearchHit> getPinnedHits(String workspaceKey) {
+    private List<MemorySearchHit> getPinnedHits(String workspaceKey, int configuredPinnedLimit) {
         if (memoryRepository == null) {
             return Collections.emptyList();
         }
-        List<AgentMemory> pinned = memoryRepository.findPinned(workspaceKey, pinnedLimit);
+        List<AgentMemory> pinned = memoryRepository.findPinned(workspaceKey, configuredPinnedLimit);
         return pinned.stream()
                 .map(m -> new MemorySearchHit(m, 1.0, MemorySearchHit.SOURCE_PINNED))
                 .collect(Collectors.toList());
     }
 
     private SelectionResult buildResult(List<MemorySearchHit> pinnedHits,
-                                         List<MemorySearchHit> candidateHits) {
+                                         List<MemorySearchHit> candidateHits,
+                                         int selectedLimit,
+                                         int injectedCharLimit) {
         List<MemorySearchHit> selectedHits = new ArrayList<>(pinnedHits);
         int charCount = totalChars(pinnedHits);
 
         for (MemorySearchHit hit : candidateHits) {
-            if (selectedHits.size() >= maxSelected) {
+            if (selectedHits.size() >= selectedLimit) {
                 break;
             }
             int hitChars = charCount(hit);
-            int remaining = maxInjectedChars - WRAPPER_OVERHEAD - charCount;
+            int remaining = injectedCharLimit - WRAPPER_OVERHEAD - charCount;
             if (remaining <= 0) {
                 break;
             }
@@ -216,10 +233,10 @@ public class MemorySelectionService {
             if (m.isPinned()) {
                 sb.append("[PINNED] ");
             }
-            sb.append(m.getTitle() != null ? m.getTitle() : "").append("\n");
-            sb.append(m.getSummary() != null ? m.getSummary() : "").append("\n");
+            sb.append(escapeMemoryField(m.getTitle())).append("\n");
+            sb.append(escapeMemoryField(m.getSummary())).append("\n");
             if (m.getBody() != null && !m.getBody().isBlank()) {
-                sb.append(m.getBody()).append("\n");
+                sb.append(escapeMemoryField(m.getBody())).append("\n");
             }
             if (guidance != null && !guidance.isBlank()) {
                 sb.append(guidance).append("\n");
@@ -230,6 +247,13 @@ public class MemorySelectionService {
         String body = sb.toString();
         body = body.replace("</long_term_memories>", "&lt;/long_term_memories>");
         return body + "</long_term_memories>";
+    }
+
+    private static String escapeMemoryField(String value) {
+        if (value == null) {
+            return "";
+        }
+        return UntrustedContentSanitizer.escapeXml(value);
     }
 
     private String typeGuidance(MemoryType type) {

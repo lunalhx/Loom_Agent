@@ -35,7 +35,7 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
                     .filter(m -> workspaceKey.equals(m.getWorkspaceKey()) && m.getStatus() == MemoryStatus.ACTIVE)
                     .count();
             if (activeCount >= maxActive) {
-                findWeakestCandidate(workspaceKey).ifPresent(w -> updateStatus(w.getMemoryId(), MemoryStatus.ARCHIVED, w.getVersion()));
+                findWeakestCandidate(workspaceKey).ifPresent(w -> updateStatus(w.getMemoryId(), MemoryStatus.ARCHIVED));
             }
         }
         String id = memory.getMemoryId() != null ? memory.getMemoryId() : UUID.randomUUID().toString();
@@ -103,9 +103,9 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateUsage(String memoryId, long expectedVersion) {
+    public boolean updateUsage(String memoryId) {
         AgentMemory m = store.get(memoryId);
-        if (m == null || m.getVersion() != expectedVersion) return false;
+        if (m == null) return false;
         store.put(memoryId, AgentMemory.builder()
                 .memoryId(m.getMemoryId())
                 .workspaceKey(m.getWorkspaceKey())
@@ -137,9 +137,9 @@ public class InMemoryAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateStatus(String memoryId, MemoryStatus status, long expectedVersion) {
+    public boolean updateStatus(String memoryId, MemoryStatus status) {
         AgentMemory existing = store.get(memoryId);
-        if (existing == null || existing.getVersion() != expectedVersion) {
+        if (existing == null) {
             return false;
         }
         AgentMemory updated = AgentMemory.builder()

@@ -7,7 +7,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.context.ContextArtifact;
 import cn.lunalhx.ai.domain.agent.service.context.ContextArtifactPurgeService;
 import cn.lunalhx.ai.infrastructure.dao.AgentContextArtifactDao;
-import cn.lunalhx.ai.infrastructure.dao.AgentMemoryGenerationJobDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
@@ -31,7 +30,6 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
     private final AgentContextArtifactDao artifactDao;
     private final AgentPendingApprovalDao approvalDao;
     private final AgentUndoSnapshotDao undoSnapshotDao;
-    private final AgentMemoryGenerationJobDao memoryJobDao;
     private final ContextArtifactPurgeService purgeService;
     private final WorkspaceSnapshotPort workspaceSnapshotPort;
     private final ContextArtifactRepository artifactRepository;
@@ -44,7 +42,6 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
             AgentContextArtifactDao artifactDao,
             AgentPendingApprovalDao approvalDao,
             AgentUndoSnapshotDao undoSnapshotDao,
-            AgentMemoryGenerationJobDao memoryJobDao,
             ContextArtifactPurgeService purgeService,
             WorkspaceSnapshotPort workspaceSnapshotPort,
             ContextArtifactRepository artifactRepository) {
@@ -55,7 +52,6 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
         this.artifactDao = artifactDao;
         this.approvalDao = approvalDao;
         this.undoSnapshotDao = undoSnapshotDao;
-        this.memoryJobDao = memoryJobDao;
         this.purgeService = purgeService;
         this.workspaceSnapshotPort = workspaceSnapshotPort;
         this.artifactRepository = artifactRepository;
@@ -67,18 +63,13 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
         List<String> runIds = runs.stream().map(AgentRun::getRunId).toList();
         List<String> rootRunIds = runs.stream().map(AgentRun::getRootRunId).filter(id -> id != null).distinct().toList();
 
-        // 1. Cancel memory generation jobs
-        if (!runIds.isEmpty()) {
-            memoryJobDao.cancelBySourceRunIds(runIds);
-        }
-
-        // 2. Delete context artifact files via purgeService strict
+        // 1. Delete context artifact files via purgeService strict
         List<ContextArtifact> artifacts = artifactRepository.listByConversationId(conversationId);
         for (ContextArtifact artifact : artifacts) {
             purgeService.purgeArtifactStrict(artifact);
         }
 
-        // 3. Delete undo snapshot Git refs
+        // 2. Delete undo snapshot Git refs
         List<AgentUndoSnapshotPO> snapshots = undoSnapshotDao.selectByConversationId(conversationId);
         for (AgentUndoSnapshotPO snapshot : snapshots) {
             if (snapshot.getWorkspace() != null) {
@@ -90,7 +81,7 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
             }
         }
 
-        // 4. Delete database records in order
+        // 3. Delete database records in order
         approvalDao.deleteByConversationId(conversationId);
         artifactDao.deleteByConversationId(conversationId);
 
@@ -102,9 +93,6 @@ public class MybatisConversationPurgeHandler implements ConversationPurgeHandler
         }
         if (!rootRunIds.isEmpty()) {
             traceEventDao.deleteByRootRunIds(rootRunIds);
-        }
-        if (!runIds.isEmpty()) {
-            memoryJobDao.deleteBySourceRunIds(runIds);
         }
         undoSnapshotDao.deleteByConversationId(conversationId);
         runDao.deleteByConversationId(conversationId);

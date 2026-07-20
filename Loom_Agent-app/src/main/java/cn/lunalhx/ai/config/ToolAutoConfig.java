@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
+import cn.lunalhx.ai.domain.tool.service.ToolAssembler;
 import cn.lunalhx.ai.domain.agent.adapter.port.SkillRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.BackgroundShellTaskRepository;
@@ -25,7 +26,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Configuration(proxyBeanMethods = false)
@@ -40,24 +40,19 @@ public class ToolAutoConfig {
     public ToolRegistry toolRegistry(List<AgentTool> tools,
                                      ObjectProvider<McpClientManager> mcpClientManagerProvider,
                                      ToolSchemaValidator schemaValidator) {
-        List<AgentTool> allTools = new ArrayList<>(tools);
-        McpClientManager mcpManager = mcpClientManagerProvider.getIfAvailable();
-        if (mcpManager != null) {
-            allTools.addAll(mcpManager.tools());
-        }
-        return new ToolRegistry(allTools, schemaValidator);
+        return new ToolRegistry(collectAllTools(tools, mcpClientManagerProvider), schemaValidator);
     }
 
     @Bean
-    public RoleToolRegistryFactory roleToolRegistryFactory(List<AgentTool> tools,
-                                                            ObjectProvider<McpClientManager> mcpClientManagerProvider,
+    public RoleToolRegistryFactory roleToolRegistryFactory(ToolRegistry toolRegistry,
                                                             ToolSchemaValidator schemaValidator) {
-        List<AgentTool> allTools = new ArrayList<>(tools);
+        return new RoleToolRegistryFactory(toolRegistry, schemaValidator);
+    }
+
+    private List<AgentTool> collectAllTools(List<AgentTool> tools,
+                                            ObjectProvider<McpClientManager> mcpClientManagerProvider) {
         McpClientManager mcpManager = mcpClientManagerProvider.getIfAvailable();
-        if (mcpManager != null) {
-            allTools.addAll(mcpManager.tools());
-        }
-        return new RoleToolRegistryFactory(allTools, schemaValidator);
+        return ToolAssembler.assemble(tools, mcpManager == null ? List.of() : mcpManager.tools());
     }
 
     @Bean

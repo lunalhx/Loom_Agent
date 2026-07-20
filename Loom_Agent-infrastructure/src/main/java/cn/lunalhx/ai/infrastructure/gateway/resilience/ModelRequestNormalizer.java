@@ -43,6 +43,7 @@ public final class ModelRequestNormalizer {
                 .purpose(source.getPurpose())
                 .deadlineEpochMs(source.getDeadlineEpochMs())
                 .messages(source.getMessages())
+                .runtimeProperties(source.getRuntimeProperties())
                 .build();
     }
 
@@ -66,21 +67,28 @@ public final class ModelRequestNormalizer {
                 .purpose(source.getPurpose())
                 .deadlineEpochMs(source.getDeadlineEpochMs())
                 .messages(source.getMessages())
+                .runtimeProperties(source.getRuntimeProperties())
                 .build();
     }
 
     public ModelCallKey key(ChatPrompt prompt) {
-        String model = StringUtils.defaultIfBlank(prompt.getModel(), defaultModel());
+        ModelRuntimeProperties effective = effectiveProperties(prompt);
+        String model = effective.normalizeModel(prompt.getModel(), effective.resolvedDefaultModel());
         String capability = StringUtils.defaultIfBlank(prompt.getCapability(), ModelCapabilities.STREAM_CHAT);
-        return new ModelCallKey(providerName(), model, capability);
+        return new ModelCallKey(effective.getProvider(), model, capability);
     }
 
     String defaultModel() {
-        return properties.activeProvider().getDefaultModel();
+        return properties.resolvedDefaultModel();
     }
 
     int defaultMaxTokens() {
         ModelRuntimeProperties.ProviderConfig active = properties.activeProvider();
+        return active.getMaxTokens() != null ? active.getMaxTokens() : DEFAULT_MAX_TOKENS;
+    }
+
+    int defaultMaxTokens(ChatPrompt prompt) {
+        ModelRuntimeProperties.ProviderConfig active = effectiveProperties(prompt).activeProvider();
         return active.getMaxTokens() != null ? active.getMaxTokens() : DEFAULT_MAX_TOKENS;
     }
 
@@ -90,14 +98,20 @@ public final class ModelRequestNormalizer {
     }
 
     private ChatPrompt normalize(ChatPrompt prompt, String fallback) {
+        ModelRuntimeProperties effective = effectiveProperties(prompt);
         prompt.setCapability(StringUtils.defaultIfBlank(prompt.getCapability(), fallback));
-        prompt.setModel(StringUtils.defaultIfBlank(prompt.getModel(), defaultModel()));
+        prompt.setModel(effective.normalizeModel(prompt.getModel(), effective.resolvedDefaultModel()));
         if (prompt.getPurpose() == null) {
             prompt.setPurpose(prompt.getOutputFormat() == OutputFormat.JSON_OBJECT
                     ? ModelCallPurpose.CONTROL_JSON
                     : ModelCallPurpose.FINAL_TEXT);
         }
         return prompt;
+    }
+
+    ModelRuntimeProperties effectiveProperties(ChatPrompt prompt) {
+        return prompt != null && prompt.getRuntimeProperties() != null
+                ? prompt.getRuntimeProperties() : properties;
     }
 
     private String providerName() {

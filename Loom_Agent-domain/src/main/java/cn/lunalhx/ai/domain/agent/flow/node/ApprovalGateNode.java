@@ -7,9 +7,13 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentPlanItem;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
+import cn.lunalhx.ai.domain.agent.model.entity.SkillActivation;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -44,10 +48,12 @@ public class ApprovalGateNode extends AbstractAgentNode {
 
     @Override
     protected NodeResult doApply(AgentContext context) {
+        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         ToolResult planGuardFailure = planGuardFailure(context);
         if (planGuardFailure != null) {
             return validationFailure(context, planGuardFailure);
         }
+        var skillToolPolicy = context.getActivatedSkillToolPolicy();
         ToolPolicyDecision policy = toolRegistry.policy(ToolCall.builder()
                 .name(context.getDecision().getTool())
                 .input(context.getDecision().getInput())
@@ -56,6 +62,11 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .runId(context.getRunId())
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
+                .activeSkillNames(context.getActivatedSkills() == null ? List.of()
+                        : context.getActivatedSkills().stream().map(SkillActivation::name).toList())
+                .skillToolRestrictionActive(skillToolPolicy.restricted())
+                .allowedToolNames(List.copyOf(skillToolPolicy.allowedTools()))
+                .runtimeProperties(context.runtimeProperties(properties))
                 .build());
         if (policy != null && policy.hasValidationFailure()) {
             return validationFailure(context, policy);
@@ -67,7 +78,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
             return deny(context, policy);
         }
         // Check run-scoped approval grants for matching commands
-        AgentRuntimeProperties.ShellCommandProperties sc = properties.getShellCommands();
+        cn.lunalhx.ai.domain.agent.model.valobj.ShellCommandProperties sc = runProperties.getShellCommands();
         boolean grantsEnabled = sc == null || Boolean.TRUE.equals(sc.getSessionGrantsEnabled());
         if (grantsEnabled && "run_shell".equals(context.getDecision().getTool())) {
             JsonNode toolInput = context.getDecision().getInput();
@@ -76,9 +87,12 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
             }
         }
-        String mode = StringUtils.defaultString(properties.getPermissionMode(), "SANDBOX").toUpperCase();
+        String mode = StringUtils.defaultString(runProperties.getPermissionMode(), "SANDBOX").toUpperCase();
         if ("BYPASS".equals(mode)) {
             return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+        }
+        if (policy.getPermissionLevel() == ToolPermissionLevel.PERSISTENT_STATE_WRITE) {
+            return requireApproval(context, policy);
         }
         if ("ACCEPT_EDITS".equals(mode)) {
             if (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM) {
@@ -86,7 +100,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
             }
         }
         if (policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM) {
-            String highRiskPolicy = StringUtils.defaultString(properties.getHighRiskPolicy(), "CONFIRM").toUpperCase();
+            String highRiskPolicy = StringUtils.defaultString(runProperties.getHighRiskPolicy(), "CONFIRM").toUpperCase();
             return switch (highRiskPolicy) {
                 case "DENY" -> deny(context, policy);
                 case "ALLOW" -> NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
@@ -104,6 +118,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
     private NodeResult validationFailure(AgentContext context, ToolResult result) {
         context.runtime().advanceStep();
         context.setToolResult(result);
+        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)
@@ -118,12 +133,12 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .input(context.getDecision().getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
-        return NodeResult.next(AgentNodeNames.OBSERVATION, events);
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
     }
 
     public ToolResult planGuardFailure(AgentContext context) {
-        AgentRuntimeProperties.ExecutionGuardProperties guards =
-                properties.getExecutionGuards();
+        cn.lunalhx.ai.domain.agent.model.valobj.ExecutionGuardProperties guards =
+                context.runtimeProperties(properties).getExecutionGuards();
         if (guards == null || !Boolean.TRUE.equals(guards.getPlanBeforeWrite())) {
             return null;
         }
@@ -198,7 +213,8 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .policyFingerprint(policy.getPolicyFingerprint())
                 .metadata(policy.getMetadata())
                 .createdAt(now)
-                .expiresAt(now.plusSeconds(Math.max(1L, properties.getApprovalTtlSeconds())))
+                .expiresAt(now.plusSeconds(Math.max(1L,
+                        context.runtimeProperties(properties).getApprovalTtlSeconds())))
                 .context(context)
                 .approvalScope("ONCE")
                 .approvedPattern(null)
@@ -248,6 +264,7 @@ public class ApprovalGateNode extends AbstractAgentNode {
             result.setDetails(policy.getMetadata());
         }
         context.setToolResult(result);
+        appendToolResultToLedger(context, result);
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.POLICY_DENIED)
@@ -261,7 +278,22 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .observation(result.getObservation())
                 .metadata(policy.getMetadata())
                 .build());
-        return NodeResult.next(AgentNodeNames.OBSERVATION, events);
+        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, events);
+    }
+
+    private void appendToolResultToLedger(AgentContext context, ToolResult result) {
+        ConversationLedger ledger = context.getConversationLedger();
+        if (ledger == null) {
+            return;
+        }
+        String eventKey = ConversationLedgerInitializer.eventKey(
+                context.getRunId(), String.valueOf(context.getStep()), "tool_result");
+        String rawOutput = result != null ? result.getObservation() : "";
+        if (rawOutput == null) {
+            rawOutput = "";
+        }
+        String wrapped = "<untrusted_tool_output>\n" + rawOutput + "\n</untrusted_tool_output>";
+        ledger.appendWithEventKey("user", wrapped, LedgerStableType.TOOL_RESULT, eventKey);
     }
 
 }

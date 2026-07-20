@@ -61,14 +61,46 @@ public class MemoryExtractionService {
     }
 
     public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs) {
+        return extract(payload, deadlineEpochMs, null);
+    }
+
+    public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs,
+                                     AgentContext agentContext) {
+        return extract(payload, deadlineEpochMs, agentContext,
+                MemorySignalDetector.detectCorrection(payload.getQuestion()),
+                MemorySignalDetector.detectReinforcement(payload.getQuestion()), null);
+    }
+
+    public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs,
+                                     AgentContext agentContext, String requestedModel) {
+        if (requestedModel == null || requestedModel.isBlank()) {
+            return extract(payload, deadlineEpochMs, agentContext);
+        }
+        return extract(payload, deadlineEpochMs, agentContext,
+                MemorySignalDetector.detectCorrection(payload.getQuestion()),
+                MemorySignalDetector.detectReinforcement(payload.getQuestion()), requestedModel);
+    }
+
+    public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs,
+                                     AgentContext agentContext, boolean correctionDetected,
+                                     boolean reinforcementDetected) {
+        return extract(payload, deadlineEpochMs, agentContext, correctionDetected,
+                reinforcementDetected, null);
+    }
+
+    public ExtractionResult extract(MemoryExtractionPayload payload, long deadlineEpochMs,
+                                     AgentContext agentContext, boolean correctionDetected,
+                                     boolean reinforcementDetected, String requestedModel) {
         ChatPrompt prompt = ChatPrompt.builder()
                 .capability(ModelCapabilities.COMPLETE_AGENT_DECISION)
                 .purpose(ModelCallPurpose.MEMORY_EXTRACTION)
                 .outputFormat(OutputFormat.JSON_OBJECT)
-                .model(extractionModel != null && !extractionModel.isBlank() ? extractionModel : null)
+                .model(requestedModel != null && !requestedModel.isBlank()
+                        ? requestedModel
+                        : extractionModel != null && !extractionModel.isBlank() ? extractionModel : null)
                 .temperature(0.0)
                 .deadlineEpochMs(deadlineEpochMs)
-                .systemPrompt(buildSystemPrompt())
+                .systemPrompt(buildSystemPrompt(correctionDetected, reinforcementDetected))
                 .message(buildUserMessage(payload))
                 .build();
 
@@ -80,7 +112,7 @@ public class MemoryExtractionService {
             return ExtractionResult.retryable("Model call failed: " + truncate(e.getMessage(), MAX_ERROR_MSG_LENGTH));
         }
 
-        recordUsage(result);
+        recordUsage(result, agentContext);
 
         if (result == null || result.getContent() == null || result.getContent().isBlank()) {
             return ExtractionResult.retryable("Empty or null model response");
@@ -89,17 +121,20 @@ public class MemoryExtractionService {
         return parseResponse(result.getContent());
     }
 
-    private void recordUsage(ModelChatResult result) {
+    private void recordUsage(ModelChatResult result, AgentContext agentContext) {
         if (traceRecorder == null || result == null) {
             return;
         }
-        // Memory extraction 是后台 worker 调起的，没有真实 Agent 上下文。
-        // 构造一个最小可用的合成上下文，让现有 recordModelUsage 写入 model_usage 事件并保留 hit/miss。
-        String syntheticRunId = "memory-extraction-" + UUID.randomUUID();
-        AgentContext context = new AgentContext();
-        context.setRunId(syntheticRunId);
-        context.setRootRunId(syntheticRunId);
-        context.setTraceId(syntheticRunId);
+        AgentContext context = agentContext;
+        if (context == null) {
+            // 没有真实 Agent 上下文（例如直接被测试或后台逻辑调用），
+            // 构造一个最小可用的合成上下文，让现有 recordModelUsage 写入 model_usage 事件并保留 hit/miss。
+            String syntheticRunId = "memory-extraction-" + UUID.randomUUID();
+            context = new AgentContext();
+            context.setRunId(syntheticRunId);
+            context.setRootRunId(syntheticRunId);
+            context.setTraceId(syntheticRunId);
+        }
         // getCurrentSpanId() / getParentSpanId() 在新 AgentContext 上为 null，
         // recordModelUsage 仅把它们原样透传给 AgentTraceEvent，对最终 JSON 无影响。
         Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, NODE,
@@ -213,8 +248,8 @@ public class MemoryExtractionService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    private String buildSystemPrompt() {
-        return """
+    private String buildSystemPrompt(boolean correctionDetected, boolean reinforcementDetected) {
+        StringBuilder prompt = new StringBuilder("""
                 You are a memory extraction system. Your task is to analyze a conversation between a user and an AI \
                 agent and extract structured, long-term memories that will be useful across future sessions.
 
@@ -249,7 +284,16 @@ public class MemoryExtractionService {
                     }
                   ]
                 }
-                """;
+                """);
+        if (correctionDetected) {
+            prompt.append("\nIMPORTANT: 检测到用户纠正信号。优先提取错误及纠正后的正确做法，")
+                    .append("并将其保存为 PITFALL（importance >= 80）；相似内容应更新而非重复创建。");
+        }
+        if (reinforcementDetected) {
+            prompt.append("\nIMPORTANT: 检测到用户正向强化信号。优先提取用户确认的做法、风格或偏好，")
+                    .append("并将其保存为 PREFERENCE（importance >= 70）。");
+        }
+        return prompt.toString();
     }
 
     private String buildUserMessage(MemoryExtractionPayload payload) {

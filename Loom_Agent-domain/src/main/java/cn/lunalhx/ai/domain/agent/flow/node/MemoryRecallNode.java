@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.MemoryRuntimeProperties;
 import cn.lunalhx.ai.domain.memory.service.MemorySelectionService;
 import cn.lunalhx.ai.domain.memory.service.WorkspaceKeyUtil;
 import org.slf4j.Logger;
@@ -43,8 +44,17 @@ public class MemoryRecallNode extends AbstractAgentNode {
         if (context.isMemoryRecallExecuted()) {
             return NodeResult.next(AgentNodeNames.START, List.of());
         }
+        if (memorySelectionService == null) {
+            context.setMemoryRecallExecuted(true);
+            return NodeResult.next(AgentNodeNames.START, List.of());
+        }
 
         try {
+            MemoryRuntimeProperties memoryProperties = context.memoryRuntimeProperties(null);
+            if (memoryProperties != null && !memoryProperties.isUseMemories()) {
+                context.setMemoryRecallExecuted(true);
+                return NodeResult.next(AgentNodeNames.START, List.of());
+            }
             String workspacePath = context.getWorkspace() != null ? context.getWorkspace().getLocation() : null;
             if (workspacePath == null) {
                 context.setMemoryRecallExecuted(true);
@@ -55,7 +65,8 @@ public class MemoryRecallNode extends AbstractAgentNode {
             String question = context.getQuestion();
 
             long startedAt = System.currentTimeMillis();
-            MemorySelectionService.SelectionResult result = memorySelectionService.select(workspaceKey, question);
+            MemorySelectionService.SelectionResult result = memorySelectionService.select(
+                    workspaceKey, question, memoryProperties);
             long elapsedMs = System.currentTimeMillis() - startedAt;
 
             List<AgentEvent> events = new ArrayList<>();

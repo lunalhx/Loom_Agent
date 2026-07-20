@@ -22,12 +22,12 @@ public class UndoSnapshotCleanupTask {
     private final UndoSnapshotRepository snapshotRepository;
     private final WorkspaceUndoLockRepository lockRepository;
     private final WorkspaceSnapshotPort snapshotPort;
-    private final AgentRuntimeProperties.UndoProperties config;
+    private final cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config;
 
     public UndoSnapshotCleanupTask(UndoSnapshotRepository snapshotRepository,
                                     WorkspaceUndoLockRepository lockRepository,
                                     WorkspaceSnapshotPort snapshotPort,
-                                    AgentRuntimeProperties.UndoProperties config) {
+                                    cn.lunalhx.ai.domain.agent.model.valobj.UndoProperties config) {
         this.snapshotRepository = snapshotRepository;
         this.lockRepository = lockRepository;
         this.snapshotPort = snapshotPort;

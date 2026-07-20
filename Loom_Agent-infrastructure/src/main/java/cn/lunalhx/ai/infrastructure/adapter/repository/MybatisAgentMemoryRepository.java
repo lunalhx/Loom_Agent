@@ -33,17 +33,14 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
             if (maxActive > 0 && dao.countActive(po.getWorkspaceKey()) >= maxActive) {
                 AgentMemoryPO weakest = dao.selectWeakestCandidate(po.getWorkspaceKey());
                 if (weakest != null) {
-                    dao.updateStatus(weakest.getMemoryId(), "ARCHIVED", weakest.getVersion());
+                    dao.updateStatus(weakest.getMemoryId(), "ARCHIVED");
                 }
             }
             po.setMemoryId(memory.getMemoryId() != null ? memory.getMemoryId() : UUID.randomUUID().toString());
             po.setVersion(1L);
             dao.insert(po);
         } else {
-            int rows = dao.update(po);
-            if (rows == 0) {
-                throw new IllegalStateException("Optimistic lock conflict for memory " + memory.getMemoryId());
-            }
+            dao.update(po);
         }
         return toEntity(dao.selectById(po.getMemoryId()));
     }
@@ -79,8 +76,8 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateUsage(String memoryId, long expectedVersion) {
-        return dao.updateUsage(memoryId, expectedVersion) > 0;
+    public boolean updateUsage(String memoryId) {
+        return dao.updateUsage(memoryId) > 0;
     }
 
     @Override
@@ -89,8 +86,8 @@ public class MybatisAgentMemoryRepository implements AgentMemoryRepository {
     }
 
     @Override
-    public boolean updateStatus(String memoryId, MemoryStatus status, long expectedVersion) {
-        return dao.updateStatus(memoryId, status.name(), expectedVersion) > 0;
+    public boolean updateStatus(String memoryId, MemoryStatus status) {
+        return dao.updateStatus(memoryId, status.name()) > 0;
     }
 
     @Override

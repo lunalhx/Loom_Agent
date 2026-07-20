@@ -168,4 +168,22 @@ public class LocalFileContextBlobStoreTest {
         String content = store.read(uri);
         assertEquals("safe", content);
     }
+
+    @Test
+    public void symbolicLinksCannotEscapeStorageRoot() throws Exception {
+        Path outside = Files.createTempDirectory("blob-store-outside-");
+        try {
+            Files.createSymbolicLink(tempDir.resolve("linked-root"), outside);
+            try {
+                store.write("linked-root", "artifact", "secret");
+                fail("Should have rejected a symbolic-link directory");
+            } catch (IllegalStateException e) {
+                assertTrue(e.getCause() instanceof IllegalArgumentException);
+            }
+            assertFalse(Files.exists(outside.resolve("artifact.txt")));
+        } finally {
+            Files.deleteIfExists(tempDir.resolve("linked-root"));
+            Files.deleteIfExists(outside);
+        }
+    }
 }

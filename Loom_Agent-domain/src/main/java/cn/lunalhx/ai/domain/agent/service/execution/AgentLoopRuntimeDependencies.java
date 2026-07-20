@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -25,7 +26,8 @@ public record AgentLoopRuntimeDependencies(
         AgentMetrics agentMetrics,
         ContextWindowManager contextWindowManager,
         ToolOutputSanitizer toolOutputSanitizer,
-        ModelRuntimeProperties modelRuntimeProperties
+        ModelRuntimeProperties modelRuntimeProperties,
+        AgentRuntimeConfigSource runtimeConfigSource
 ) {
     public AgentLoopRuntimeDependencies {
         Objects.requireNonNull(properties, "properties must not be null");
@@ -35,5 +37,19 @@ public record AgentLoopRuntimeDependencies(
         Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         Objects.requireNonNull(toolOutputSanitizer, "toolOutputSanitizer must not be null");
         Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
+        Objects.requireNonNull(runtimeConfigSource, "runtimeConfigSource must not be null");
+    }
+
+    public AgentLoopRuntimeDependencies(AgentRuntimeProperties properties,
+                                        TraceRecorder traceRecorder,
+                                        BudgetGuard budgetGuard,
+                                        AgentMetrics agentMetrics,
+                                        ContextWindowManager contextWindowManager,
+                                        ToolOutputSanitizer toolOutputSanitizer,
+                                        ModelRuntimeProperties modelRuntimeProperties) {
+        this(properties, traceRecorder, budgetGuard, agentMetrics, contextWindowManager,
+                toolOutputSanitizer, modelRuntimeProperties,
+                () -> cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig.startup(
+                        properties, modelRuntimeProperties));
     }
 }

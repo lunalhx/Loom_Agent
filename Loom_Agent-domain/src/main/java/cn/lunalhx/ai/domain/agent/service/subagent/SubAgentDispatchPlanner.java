@@ -18,10 +18,11 @@ class SubAgentDispatchPlanner {
     }
 
     SubAgentPlanResult plan(AgentContext parent) {
-        if (!Boolean.TRUE.equals(properties.getSubAgentEnabled())) {
+        AgentRuntimeProperties runProperties = parent.runtimeProperties(properties);
+        if (!Boolean.TRUE.equals(runProperties.getSubAgentEnabled())) {
             return SubAgentPlanResult.error("sub_agent_disabled", "子 Agent 功能未启用");
         }
-        if (parent.getAgentDepth() >= positive(properties.getSubAgentMaxDepth(), 1)) {
+        if (parent.getAgentDepth() >= positive(runProperties.getSubAgentMaxDepth(), 1)) {
             return SubAgentPlanResult.error("sub_agent_depth_exceeded", "已达到子 Agent 最大派生深度");
         }
 
@@ -29,7 +30,7 @@ class SubAgentDispatchPlanner {
         if (request.errorCode() != null) {
             return SubAgentPlanResult.error(request.errorCode(), request.errorMessage());
         }
-        if (request.tasks().size() > positive(properties.getSubAgentMaxChildren(), 6)) {
+        if (request.tasks().size() > positive(runProperties.getSubAgentMaxChildren(), 6)) {
             return SubAgentPlanResult.error("sub_agent_too_many_tasks", "子任务数量超过上限");
         }
         if (containsEditor(request.tasks()) && (request.tasks().size() > 1 || request.requestedConcurrency() > 1)) {
@@ -38,8 +39,8 @@ class SubAgentDispatchPlanner {
         }
 
         int concurrency = Math.max(1, Math.min(request.requestedConcurrency(),
-                positive(properties.getSubAgentMaxConcurrency(), 4)));
-        long timeoutMs = positive(properties.getSubAgentTimeoutMs(), 60000L);
+                positive(runProperties.getSubAgentMaxConcurrency(), 4)));
+        long timeoutMs = positive(runProperties.getSubAgentTimeoutMs(), 60000L);
 
         return SubAgentPlanResult.success(new SubAgentDispatchPlan(
                 request.reason(), request.tasks(), concurrency, timeoutMs));
