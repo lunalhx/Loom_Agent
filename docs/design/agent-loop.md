@@ -288,3 +288,120 @@ curl -N \
 ```
 
 恢复顺序固定为：一次 reactive compact → 更大上下文模型 → 分块深度摘要 → 根 Agent 等待用户输入。恢复阶段写入 checkpoint，重新连接不会重置或重复已执行阶段；子 Agent 不直接询问用户，恢复耗尽后返回 `CONTEXT_OVERFLOW`。
+
+## 上下文压缩（Context Compaction）
+
+Agent 在长时间运行中会积累大量对话历史，超出模型上下文窗口。压缩系统通过三层机制控制上下文大小，核心数据结构是 `ConversationLedger`（仅追加的对话账本，每条记录有单调递增的 `sequence` 编号）。
+
+### 数据结构：ConversationLedger
+
+`ConversationLedger` 是一个仅追加的对话记录结构，与 `DynamicText` 独立——它记录对话结构用于幂等检查、诊断和压缩，不影响当前 prompt 渲染。每条 `ConversationLedgerEntry` 包含：
+
+- `sequence`：单调递增序号
+- `role` / `content`：消息角色和内容
+- `stableType`：稳定类型（`USER_TASK`、`ASSISTANT_ACTION`、`TOOL_RESULT`、`SYSTEM_NOTE` 等）
+- `eventKey`：用于去重的事件键
+- `compactionDepth`：该条目经历的压缩深度
+- `artifactId`：关联的持久化产物 ID
+- `microCompacted`：是否已被微压缩
+
+账本通过 `eventKey` 去重——相同 eventKey 不会产生重复条目。`replaceEntries()` 是唯一能删除条目的操作，仅供压缩使用。
+
+### 三层压缩机制
+
+#### 第 1 层：主动压缩（Proactive Compaction）
+
+**触发点**：每次模型调用前，`SummarizationMiddleware` 在 `ModelCallNode` 中执行。
+
+**触发条件**（`LedgerCompactionService.compactIfNeeded()`）：
+- 账本条目数超过高水位（默认 200 条），或
+- 估算 token 数超过 `autoCompactTokenLimit`（默认 64000）
+
+**压缩流程**（`LedgerCompactionService.compact()`）：
+
+1. **保存转录产物**：将当前所有账本条目的完整文本渲染为 transcript，持久化到 blob 存储，生成 `ContextArtifact`（`TRANSCRIPT` 类型）
+2. **构建摘要**：
+   - 优先尝试 LLM 驱动的深度摘要（`DeepContextSummaryService`）
+   - 如果深度摘要失败或 `DeepContextSummaryService` 不可用，回退到确定性摘要
+   - 如果压缩深度超过 `maxCompactionDepth`（默认 3），跳过 LLM，直接使用确定性摘要（`depthGuarded`）
+3. **替换账本条目**：新条目列表 = `[保留的最近 N 条] + [摘要条目]`
+   - 保留尾部使用"单元"逻辑：将 `ASSISTANT_ACTION` + `TOOL_RESULT` 成对保持在一起
+   - 如果单个单元超过目标条目数，压缩为一条 `SYSTEM_NOTE`：`[Atomic tool interaction compacted as one unit]`
+4. **递增 generation**：`context.incrementGeneration()`，记录 `lastCompactionGeneration`
+5. **清理旧转录产物**：删除本次压缩之前的 `TRANSCRIPT` 类型 artifact
+
+**水位线机制**（`LedgerWatermark`）：
+- 高水位（`highEntryCount`）：默认 200，超过触发压缩
+- 低水位（`lowEntryCount`）：默认 50，压缩后条目数 ≤ 低水位
+- 压缩后条目数 ≤ 低水位 < 高水位，自然防止重复触发
+
+**Generation 语义**：每次压缩递增 `generation`。摘要对当前 generation 冻结，直到下次压缩创建新的 generation。这保证了前缀稳定性——同一 generation 内 prompt 前缀不变。
+
+#### 第 2 层：响应式恢复（Reactive Recovery）
+
+**触发点**：`ErrorRecoveryMiddleware` 在模型调用失败时介入。
+
+**链 A：上下文溢出恢复**（`CONTEXT_OVERFLOW` 错误）：
+```
+ReactiveCompactStep → FallbackModelStep → DeepSummaryStep → ExhaustedStep
+```
+- `ReactiveCompactStep`：强制压缩（不分青红皂白），状态设为 `REACTIVE_COMPACTED`，重新渲染 prompt
+- `FallbackModelStep`：切换到更大上下文窗口的模型重试
+- `DeepSummaryStep`：如果未超过 `maxCompactionDepth`，强制深度摘要压缩
+- `ExhaustedStep`：恢复耗尽，根 Agent 返回 `user_input_required` 等待用户输入
+
+**链 B：模型错误恢复**（解析/格式错误）：
+```
+FormatReminderStep → ModelFallbackStep → ContextSimplifyStep → ModelErrorExhaustedStep
+```
+- `ContextSimplifyStep`：压缩账本减小上下文，重新渲染 prompt 后重试
+
+恢复阶段通过 `ContextRecoveryStage` 状态机追踪：`NONE → REACTIVE_COMPACTED → FALLBACK_MODEL_SELECTED → DEEP_SUMMARY_APPLIED → WAITING_USER_INPUT`。checkpoint 保证重连后不重复执行已完成的阶段。
+
+#### 第 3 层：微压缩（Micro-Compaction）
+
+**触发点**：每次 `compactIfNeeded()` 调用时无条件执行（在检查水位线之前）。
+
+**机制**：将旧的 `TOOL_RESULT` 条目（最近 4 条之后的、有 `artifactId` 的）替换为 `<persisted-output>` XML 引用：
+
+```xml
+<persisted-output artifactId="..." kind="tool_result" originalChars="..." />
+This tool result was compacted. Use context_recall get with this artifactId when exact output is needed.
+```
+
+微压缩**不递增 generation**，不改变条目数量和序列号——它是纯内容级别的优化，保留账本结构完整性。
+
+### 摘要策略
+
+| 策略 | 触发条件 |
+|---|---|
+| `deep_summary` | LLM 深度摘要成功（首选路径） |
+| `deep_summary_deterministic` | LLM 摘要抛异常，回退到确定性摘要 |
+| `deterministic` | 没有 `DeepContextSummaryService` 可用 |
+| `deterministic_depth_guarded` | 压缩深度超过 `maxCompactionDepth`（默认 3），跳过 LLM |
+
+### 深度摘要（DeepContextSummaryService）
+
+LLM 驱动的摘要引擎，将对话转录分块后逐块调用模型生成摘要：
+
+1. **分块**：按 `deepSummaryChunkTokenLimit`（默认 12000 tokens）将转录条目打包
+2. **多轮摘要**：每轮对每个 chunk 调用 LLM，合并结果后再分块，直到只剩一个 chunk
+3. **增量模式**：如果已有上次压缩的摘要（`contextSummaryText`），只对新条目做增量合并，而非重新摘要全部历史
+4. **调用限制**：最多 `deepSummaryMaxCalls` 次（默认 8），输出最多 `deepSummaryMaxOutputTokens` tokens（默认 2048）
+5. **模型选择**：优先使用 `deepSummaryModel`，回退到 `contextFallbackModel`
+
+### 配置参数
+
+| 参数 | 默认值 | 环境变量 | 说明 |
+|---|---|---|---|
+| `compaction-high-watermark` | 200 | — | 账本条目数超过此值触发压缩 |
+| `compaction-low-watermark` | 50 | — | 压缩至这么多条目（含摘要条目） |
+| `maxCompactionDepth` | 3 | — | 嵌套压缩最大代数（深度保护） |
+| `auto-compact-token-limit` | 64000 | `AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT` | 基于 token 数的替代触发阈值 |
+| `deep-summary-model` | 空 | `AGENT_CONTEXT_DEEP_SUMMARY_MODEL` | 摘要用 LLM 模型 |
+| `deep-summary-chunk-token-limit` | 12000 | `AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT` | 每个摘要块最大 token 数 |
+| `deep-summary-max-calls` | 8 | `AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS` | 每次摘要最多 LLM 调用次数 |
+| `deep-summary-max-output-tokens` | 2048 | `AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS` | 每次 LLM 摘要调用最大输出 token |
+| `context-safety-margin-tokens` | 4096 | `AGENT_CONTEXT_SAFETY_MARGIN_TOKENS` | 上下文窗口安全余量 |
+| `reactive-compact-max-attempts` | 1 | `AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS` | 响应式压缩最大尝试次数 |
+| `reactive-keep-recent-entries` | 5 | `AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES` | 响应式压缩保留的最近条目数 |
