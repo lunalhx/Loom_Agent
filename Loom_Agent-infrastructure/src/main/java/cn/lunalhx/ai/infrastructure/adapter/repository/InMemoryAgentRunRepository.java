@@ -59,7 +59,7 @@ public class InMemoryAgentRunRepository implements AgentRunRepository {
         }
         return runs.values().stream()
                 .filter(run -> parentRunId.equals(run.getParentRunId()))
-                .sorted(Comparator.comparing(run -> run.getChildOrdinal() == null ? 0 : run.getChildOrdinal()))
+                .sorted(Comparator.comparing(cn.lunalhx.ai.domain.agent.model.entity.AgentRun::getCreatedAt))
                 .toList();
     }
 

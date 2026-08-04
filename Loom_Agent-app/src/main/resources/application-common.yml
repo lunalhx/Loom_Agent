@@ -104,27 +104,7 @@ loom:
     file-max-bytes: ${AGENT_FILE_MAX_BYTES:200000}
     search-max-results: ${AGENT_SEARCH_MAX_RESULTS:50}
     approval-ttl-seconds: ${AGENT_APPROVAL_TTL_SECONDS:900}
-    shell-timeout-ms: ${AGENT_SHELL_TIMEOUT_MS:120000}
-    shell-max-output-chars: ${AGENT_SHELL_MAX_OUTPUT_CHARS:12000}
-    shell-max-stderr-chars: ${AGENT_SHELL_MAX_STDERR_CHARS:4000}
-    high-risk-policy: ${AGENT_HIGH_RISK_POLICY:CONFIRM}
-    permission-mode: ${AGENT_PERMISSION_MODE:SANDBOX}
-    allowed-shell-commands: ${AGENT_ALLOWED_SHELL_COMMANDS:mvn,./mvnw,git,pwd,ls,rg}
-    shell-commands:
-      shell-syntax-level: ${AGENT_SHELL_SYNTAX_LEVEL:HIGH_RISK_CONFIRM}
-      shell-interpreter: ${AGENT_SHELL_INTERPRETER:/bin/sh}
-      session-grants-enabled: ${AGENT_SHELL_SESSION_GRANTS_ENABLED:true}
-      read-only: ${AGENT_SHELL_READ_ONLY:pwd,ls,cat,head,tail,wc,grep,sort,uniq,which,file,du,df,echo,rg}
-      write: ${AGENT_SHELL_WRITE:mkdir,cp,mv,touch,chmod,date,printf}
-      high-risk: ${AGENT_SHELL_HIGH_RISK:curl,wget,npm,yarn,pip,pip3,docker,ssh,scp,rsync,chown,kill,systemctl,sed,awk,tar,zip,unzip}
-      deny: ${AGENT_SHELL_DENY:rm,rmdir}
-      unknown-level: ${AGENT_SHELL_UNKNOWN_LEVEL:WRITE_CONFIRM}
-    sub-agent-enabled: ${AGENT_SUB_AGENT_ENABLED:true}
-    sub-agent-max-children: ${AGENT_SUB_AGENT_MAX_CHILDREN:6}
-    sub-agent-max-concurrency: ${AGENT_SUB_AGENT_MAX_CONCURRENCY:4}
-    sub-agent-max-depth: ${AGENT_SUB_AGENT_MAX_DEPTH:1}
-    sub-agent-timeout-ms: ${AGENT_SUB_AGENT_TIMEOUT_MS:60000}
-    sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
+    approval-policy: ${AGENT_APPROVAL_POLICY:ask}
     context:
       enabled: ${AGENT_CONTEXT_ENABLED:true}
       storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${LOOM_DATA_DIR:${user.home}/.loom-agent}/context-artifacts}
@@ -132,44 +112,20 @@ loom:
       tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
       keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
       max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
-      auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
-      reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
-      reactive-keep-recent-entries: ${AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES:5}
-      context-safety-margin-tokens: ${AGENT_CONTEXT_SAFETY_MARGIN_TOKENS:4096}
-      summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
-      deep-summary-model: ${AGENT_CONTEXT_DEEP_SUMMARY_MODEL:}
-      deep-summary-chunk-token-limit: ${AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT:12000}
-      deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
-      deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
+      context-reduction-enabled: ${AGENT_CONTEXT_REDUCTION_ENABLED:true}
+      total-budget-chars: ${AGENT_CONTEXT_TOTAL_BUDGET_CHARS:12000}
+      prefix-budget-chars: ${AGENT_CONTEXT_PREFIX_BUDGET_CHARS:3600}
+      prefix-floor-chars: ${AGENT_CONTEXT_PREFIX_FLOOR_CHARS:900}
+      memory-budget-chars: ${AGENT_CONTEXT_MEMORY_BUDGET_CHARS:1600}
+      memory-floor-chars: ${AGENT_CONTEXT_MEMORY_FLOOR_CHARS:400}
+      relevant-memory-budget-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_BUDGET_CHARS:1200}
+      relevant-memory-floor-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_FLOOR_CHARS:300}
+      history-budget-chars: ${AGENT_CONTEXT_HISTORY_BUDGET_CHARS:5200}
+      history-floor-chars: ${AGENT_CONTEXT_HISTORY_FLOOR_CHARS:1300}
+      recent-history-items: ${AGENT_CONTEXT_RECENT_HISTORY_ITEMS:6}
+      relevant-memory-limit: ${AGENT_CONTEXT_RELEVANT_MEMORY_LIMIT:3}
     persistence:
       mode: ${AGENT_PERSISTENCE_MODE:sqlite}
-    long-term-memory:
-      enabled: ${AGENT_MEMORY_ENABLED:true}
-      max-selected: ${AGENT_MEMORY_MAX_SELECTED:4}
-      max-injected-chars: ${AGENT_MEMORY_MAX_INJECTED_CHARS:8000}
-      vector:
-        enabled: ${AGENT_MEMORY_VECTOR_ENABLED:false}
-        search-k: ${AGENT_MEMORY_VECTOR_SEARCH_K:50}
-        embedding:
-          base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-          api-key: ${EMBEDDING_API_KEY:${DASHSCOPE_API_KEY:}}
-          model: ${EMBEDDING_MODEL:text-embedding-v4}
-          dimensions: ${EMBEDDING_DIMENSIONS:1024}
-          timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
-          batch-size: ${EMBEDDING_BATCH_SIZE:64}
-    memory-store:
-      ttl-seconds: ${AGENT_MEMORY_STORE_TTL_SECONDS:3600}
-      max-runs: ${AGENT_MEMORY_STORE_MAX_RUNS:1000}
-      max-approvals: ${AGENT_MEMORY_STORE_MAX_APPROVALS:1000}
-      max-trace-runs: ${AGENT_MEMORY_STORE_MAX_TRACE_RUNS:1000}
-      max-trace-events-per-run: ${AGENT_MEMORY_STORE_MAX_TRACE_EVENTS_PER_RUN:1000}
-      max-checkpoint-runs: ${AGENT_MEMORY_STORE_MAX_CHECKPOINT_RUNS:1000}
-      max-checkpoints-per-run: ${AGENT_MEMORY_STORE_MAX_CHECKPOINTS_PER_RUN:5}
-      max-context-artifacts: ${AGENT_MEMORY_STORE_MAX_CONTEXT_ARTIFACTS:2000}
-      max-context-blobs: ${AGENT_MEMORY_STORE_MAX_CONTEXT_BLOBS:2000}
-      max-budget-states: ${AGENT_MEMORY_STORE_MAX_BUDGET_STATES:1000}
-      max-sub-agent-inboxes: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_INBOXES:1000}
-      max-sub-agent-messages-per-run: ${AGENT_MEMORY_STORE_MAX_SUB_AGENT_MESSAGES_PER_RUN:10}
     model-recovery:
       escalated-max-tokens: ${AGENT_MODEL_ESCALATED_MAX_TOKENS:8192}
       continuation-max-attempts: ${AGENT_MODEL_CONTINUATION_MAX_ATTEMPTS:3}
@@ -187,17 +143,7 @@ loom:
       max-segments: ${AGENT_STEP_BUDGET_MAX_SEGMENTS:5}
       child-max-segments: ${AGENT_STEP_BUDGET_CHILD_MAX_SEGMENTS:2}
       max-total-steps: ${AGENT_STEP_BUDGET_MAX_TOTAL_STEPS:150}
-      same-action-max-repeats: ${AGENT_STEP_BUDGET_SAME_ACTION_MAX_REPEATS:2}
-      same-failure-max-repeats: ${AGENT_STEP_BUDGET_SAME_FAILURE_MAX_REPEATS:2}
-      no-progress-max-rounds: ${AGENT_STEP_BUDGET_NO_PROGRESS_MAX_ROUNDS:3}
-    execution-guards:
-      plan-before-write: ${AGENT_PLAN_BEFORE_WRITE:true}
-      verification-after-write: ${AGENT_VERIFICATION_AFTER_WRITE:true}
-      max-verification-continuations: ${AGENT_VERIFICATION_MAX_CONTINUATIONS:2}
-    conversation-ledger:
-      compaction-high-watermark: 200
-      compaction-low-watermark: 50
-  http:
+    http:
     stream-limit:
       enabled: ${LOOM_HTTP_STREAM_LIMIT_ENABLED:true}
       max-client-states: ${LOOM_HTTP_STREAM_LIMIT_MAX_CLIENT_STATES:10000}

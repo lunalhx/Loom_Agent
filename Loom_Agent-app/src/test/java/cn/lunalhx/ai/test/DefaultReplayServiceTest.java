@@ -69,7 +69,7 @@ public class DefaultReplayServiceTest {
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
 
-        assertEquals(6, snapshot.getSchemaVersion());
+        assertEquals(8, snapshot.getSchemaVersion());
         // Snapshots exclude transient prompt/model output; restore re-injects toolSpecs etc.
         AgentContext restored = snapshot.restore();
         assertNull(restored.getModelOutput());

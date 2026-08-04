@@ -7,21 +7,17 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
-import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.networknt.schema.Schema;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -30,17 +26,16 @@ public class DecisionNode extends AbstractAgentNode {
     private final ObjectMapper objectMapper;
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
     private final DecisionParser decisionParser;
-    private volatile Schema spawnAgentsSchema;
 
     public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
         this(objectMapper, toolRegistry, properties, null);
     }
 
     public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry,
-                       AgentRuntimeProperties properties,
-                       ConversationLedgerAppendService ledgerAppendService) {
+                        AgentRuntimeProperties properties,
+                        ConversationHistoryAppendService ledgerAppendService) {
         super(AgentNodeNames.DECISION, List.of("modelOutput", "parseErrors", "registeredTools", "decision"));
         this.objectMapper = objectMapper;
         this.toolRegistry = toolRegistry;
@@ -65,23 +60,12 @@ public class DecisionNode extends AbstractAgentNode {
             if ("final".equals(decision.getType())) {
                 return NodeResult.next(AgentNodeNames.FINAL_ANSWER, List.of());
             }
-            // Validate tool is visible in current context's toolSpecs
             if (!isToolVisible(context, decision.getTool())) {
                 return unknownTool(context, decision);
             }
-            if (!context.getActivatedSkillToolPolicy().allows(decision.getTool())) {
-                return skillToolNotAllowed(context, decision);
-            }
-            // Validate input against schema
             ToolInputValidationResult validation = validateInput(decision);
             if (!validation.valid()) {
                 return invalidInput(context, decision, validation);
-            }
-            if (SubAgentToolSpecs.SPAWN_AGENTS.equals(decision.getTool())) {
-                if (context.isSubAgentSpawnAllowed()) {
-                    return NodeResult.next(AgentNodeNames.SUB_AGENT_DISPATCH, List.of());
-                }
-                return unavailableSubAgentTool(context, decision);
             }
             return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
         } catch (DecisionParseException e) {
@@ -106,20 +90,17 @@ public class DecisionNode extends AbstractAgentNode {
         int fallbackThreshold = runProperties.getParseErrorFallbackModelThreshold() == null
                 ? 1 : runProperties.getParseErrorFallbackModelThreshold();
         if (context.getParseErrors() > fallbackThreshold && context.getRecoveryModelOverride() == null) {
-            // Use the fallback model from ModelRecoveryProperties, or hardcode deepseek-v4-pro
             String fallbackModel = runProperties.getModelRecovery() != null
                     && runProperties.getModelRecovery().getContextFallbackModel() != null
                     ? runProperties.getModelRecovery().getContextFallbackModel()
                     : "deepseek-v4-pro";
             context.setRecoveryModelOverride(fallbackModel);
         }
-        // Build a repair-focused error message for the model, varying on repeat
         String repairMsg = e.toModelMessage();
         String guidance;
         if (context.getParseErrors() == 1) {
             guidance = "请只输出一个合法的 action 或 final JSON 对象。";
         } else {
-            // Vary the repair hint on repeated errors per PLAN.md §4.1
             guidance = "你已经连续 " + context.getParseErrors() + " 次输出非法 JSON。"
                     + "请检查并修复以下问题后重试：确保输出是纯 JSON（不含 markdown 代码块或额外文字），"
                     + "type 必须是 \"action\" 或 \"final\"，所有字符串必须用双引号。"
@@ -133,7 +114,7 @@ public class DecisionNode extends AbstractAgentNode {
                     "Attempt " + context.getParseErrors() + "/" + (maxAttempts + 1) + "\n"
                             + "Error: " + e.getMessage() + "\n"
                             + "RawOutput:\n" + truncateModelOutput(context),
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
                             String.valueOf(Math.max(1, context.getStep())),
                             "parse_error_note:" + context.getParseErrors()));
         }
@@ -165,23 +146,7 @@ public class DecisionNode extends AbstractAgentNode {
                     new ToolInputValidationResult.FieldError("", "type", "input 必须是 JSON 对象")
             ));
         }
-        if (SubAgentToolSpecs.SPAWN_AGENTS.equals(decision.getTool())) {
-            return validateSpawnAgents(input);
-        }
         return toolRegistry.validateInput(decision.getTool(), input);
-    }
-
-    private ToolInputValidationResult validateSpawnAgents(JsonNode input) {
-        if (spawnAgentsSchema == null) {
-            synchronized (this) {
-                if (spawnAgentsSchema == null) {
-                    ToolSchemaValidator validator = new ToolSchemaValidator(objectMapper);
-                    spawnAgentsSchema = validator.compile(SubAgentToolSpecs.spawnAgentsSpec().getInputSchema());
-                }
-            }
-        }
-        ToolSchemaValidator validator = new ToolSchemaValidator(objectMapper);
-        return validator.validateWithSchema(SubAgentToolSpecs.SPAWN_AGENTS, spawnAgentsSchema, input);
     }
 
     private NodeResult unknownTool(AgentContext context, AgentDecision decision) {
@@ -191,24 +156,10 @@ public class DecisionNode extends AbstractAgentNode {
         if (ledgerAppendService != null) {
             ledgerAppendService.appendToolResult(context,
                     "Success: false\nObservation:\n未知工具：" + decision.getTool(),
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
                             String.valueOf(context.getStep()), "unknown_tool"));
         }
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
-    }
-
-    private NodeResult skillToolNotAllowed(AgentContext context, AgentDecision decision) {
-        context.setStep(context.getStep() + 1);
-        String message = "当前激活的 Skill 不允许调用工具：" + decision.getTool();
-        context.setToolResult(ToolResult.failure("skill_tool_not_allowed", message, 0L));
-        appendStep(context, false);
-        if (ledgerAppendService != null) {
-            ledgerAppendService.appendToolResult(context,
-                    "Success: false\nErrorCode: skill_tool_not_allowed\nObservation:\n" + message,
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
-                            String.valueOf(context.getStep()), "skill_tool_not_allowed"));
-        }
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
+        return NodeResult.next(AgentNodeNames.OBSERVATION, observationEvents(context));
     }
 
     private NodeResult invalidInput(AgentContext context, AgentDecision decision, ToolInputValidationResult validation) {
@@ -222,23 +173,10 @@ public class DecisionNode extends AbstractAgentNode {
         if (ledgerAppendService != null) {
             ledgerAppendService.appendToolResult(context,
                     "Success: false\nErrorCode: invalid_tool_input\nObservation:\n" + errorDetail,
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
                             String.valueOf(context.getStep()), "invalid_input"));
         }
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
-    }
-
-    private NodeResult unavailableSubAgentTool(AgentContext context, AgentDecision decision) {
-        context.setStep(context.getStep() + 1);
-        context.setToolResult(ToolResult.failure("sub_agent_unavailable", "当前上下文不允许派生子 Agent", 0L));
-        appendStep(context, false);
-        if (ledgerAppendService != null) {
-            ledgerAppendService.appendToolResult(context,
-                    "Success: false\nObservation:\n当前上下文不允许派生子 Agent",
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
-                            String.valueOf(context.getStep()), "sub_agent_unavailable"));
-        }
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
+        return NodeResult.next(AgentNodeNames.OBSERVATION, observationEvents(context));
     }
 
     private void appendParseErrorToLedger(AgentContext context) {
@@ -249,9 +187,7 @@ public class DecisionNode extends AbstractAgentNode {
                 context.getModelOutput(),
                 context.getParseErrors(),
                 context.runtimeProperties(properties).getParseErrorMaxAttempts());
-        // Each parse error within the same step uses a distinct event key
-        // (the attempt counter makes it unique)
-        String eventKey = ConversationLedgerInitializer.eventKey(
+        String eventKey = ConversationHistoryInitializer.eventKey(
                 context.getRunId(),
                 String.valueOf(Math.max(1, context.getStep())),
                 "parse_error:" + context.getParseErrors());

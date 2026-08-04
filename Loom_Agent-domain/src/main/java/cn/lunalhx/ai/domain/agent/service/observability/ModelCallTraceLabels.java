@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.agent.service.observability;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 
 import java.util.HashMap;
@@ -65,10 +64,8 @@ public final class ModelCallTraceLabels {
         if (context == null) {
             return "none";
         }
-        AgentRole role = context.getAgentRole();
         boolean isSub = context.getParentRunId() != null;
-        String name = role == null ? "none" : role.name();
-        return isSub ? name + ".sub" : name;
+        return isSub ? "delegate" : "root";
     }
 
     public static String callSiteTag(String node) {

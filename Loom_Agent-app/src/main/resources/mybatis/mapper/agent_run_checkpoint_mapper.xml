@@ -8,7 +8,6 @@
         <result column="version" property="version"/>
         <result column="current_node" property="currentNode"/>
         <result column="context_json" property="contextJson"/>
-        <result column="plan_json" property="planJson"/>
         <result column="last_tool_execution_json" property="lastToolExecutionJson"/>
         <result column="reason" property="reason"/>
         <result column="create_time" property="createTime"/>
@@ -17,9 +16,9 @@
     <select id="insertNext" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO"
             resultType="java.lang.Long" affectData="true" flushCache="true">
         INSERT INTO agent_run_checkpoint
-        (run_id, version, current_node, context_json, plan_json, last_tool_execution_json, reason)
+        (run_id, version, current_node, context_json, last_tool_execution_json, reason)
         SELECT #{runId}, COALESCE(MAX(version), 0) + 1, #{currentNode}, #{contextJson},
-               #{planJson}, #{lastToolExecutionJson}, #{reason}
+               #{lastToolExecutionJson}, #{reason}
         FROM agent_run_checkpoint
         WHERE run_id = #{runId}
         RETURNING version

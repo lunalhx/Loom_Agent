@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Mutable environment state: workspace resolution, tool specs, and sub-agent capability.
+ * Mutable environment state: workspace resolution, tool specs, allowlist and approval policy.
  */
 public final class AgentEnvironmentState {
 
@@ -17,22 +17,23 @@ public final class AgentEnvironmentState {
     private WorkspaceRef workspace;
     private String workspaceDisplayName;
     private List<ToolSpec> toolSpecs = new ArrayList<>();
-    private boolean subAgentSpawnAllowed;
+    private List<String> allowedTools;
+    private String approvalPolicy;
     private AgentRunConfig runConfig;
 
     public Path resolvedWorkspace() { return resolvedWorkspace; }
     public WorkspaceRef workspace() { return workspace; }
     public String workspaceDisplayName() { return workspaceDisplayName; }
     public List<ToolSpec> toolSpecs() { return toolSpecs; }
-    public boolean subAgentSpawnAllowed() { return subAgentSpawnAllowed; }
+    public List<String> allowedTools() { return allowedTools; }
+    public String approvalPolicy() { return approvalPolicy; }
     public AgentRunConfig runConfig() { return runConfig; }
-
-    // -- package-private mutators for AgentContext delegation --
 
     public void setResolvedWorkspace(Path v) { this.resolvedWorkspace = v; }
     public void setWorkspace(WorkspaceRef v) { this.workspace = v; }
     public void setWorkspaceDisplayName(String v) { this.workspaceDisplayName = v; }
     public void setToolSpecs(List<ToolSpec> v) { this.toolSpecs = v; }
-    public void setSubAgentSpawnAllowed(boolean v) { this.subAgentSpawnAllowed = v; }
+    public void setAllowedTools(List<String> v) { this.allowedTools = v; }
+    public void setApprovalPolicy(String v) { this.approvalPolicy = v; }
     public void setRunConfig(AgentRunConfig v) { this.runConfig = v; }
 }

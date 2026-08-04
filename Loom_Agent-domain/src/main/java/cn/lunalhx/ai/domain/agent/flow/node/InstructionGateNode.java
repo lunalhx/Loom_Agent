@@ -55,7 +55,7 @@ public class InstructionGateNode extends AbstractAgentNode {
     private boolean isWritableTool(String toolName) {
         return ToolOperation.isWorkspaceWrite(toolName)
                 || "run_shell".equals(toolName)
-                || "git_op".equals(toolName);
+                ;
     }
 
     String loadInstructionsChain(Path workspace, String pathScope) {

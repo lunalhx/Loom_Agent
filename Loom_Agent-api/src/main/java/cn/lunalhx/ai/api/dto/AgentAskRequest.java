@@ -39,8 +39,11 @@ public class AgentAskRequest {
 
     private Boolean includeTrace;
 
-    @Size(max = 20, message = "skills 最多 20 个")
-    private List<@Size(max = 64, message = "skill name 最长 64 个字符") String> skills;
+    @Pattern(regexp = "^(ask|auto|never)$", message = "approvalPolicy 只能是 ask/auto/never")
+    private String approvalPolicy;
+
+    @Size(max = 7, message = "allowedTools 最多 7 个")
+    private List<@Size(max = 64, message = "tool name 最长 64 个字符") String> allowedTools;
 
     @Size(max = 128, message = "model 最长 128 个字符")
     private String model;

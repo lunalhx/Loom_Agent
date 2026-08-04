@@ -12,8 +12,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
@@ -26,15 +26,15 @@ public class ModelCallNode extends AbstractAgentNode {
 
     private final ModelCallMiddlewareChain chain;
     private final AgentRuntimeProperties properties;
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
     private final ModelPromptFactory promptFactory;
     private final ModelCallBudgetCoordinator budgetCoordinator;
 
     public ModelCallNode(ModelCallMiddlewareAssembler assembler,
                          AgentRuntimeProperties properties,
-                         ConversationLedgerAppendService ledgerAppendService,
+                         ConversationHistoryAppendService ledgerAppendService,
                          ModelCallTerminalDeps terminalDeps) {
-        super(AgentNodeNames.MODEL_CALL, List.of("stablePrefix", "conversationLedger", "requestId", "conversationId"));
+        super(AgentNodeNames.MODEL_CALL, List.of("stablePrefix", "conversationHistory", "requestId", "conversationId"));
         this.promptFactory = new ModelPromptFactory();
         this.budgetCoordinator = new ModelCallBudgetCoordinator(
                 terminalDeps.budgetGuard(), terminalDeps.traceRecorder(), promptFactory);
@@ -64,7 +64,7 @@ public class ModelCallNode extends AbstractAgentNode {
                 resetContextRecovery(context);
                 context.resetModelCallRetryCount();
                 context.recovery().setModelErrorRecoveryAttempted(false);
-                String eventKey = ConversationLedgerInitializer.eventKey(
+                String eventKey = ConversationHistoryInitializer.eventKey(
                         context.getRunId(), String.valueOf(context.getStep() + 1), "assistant");
                 ledgerAppendService.appendAssistant(
                         context, context.getModelOutput(), eventKey);
@@ -101,7 +101,8 @@ public class ModelCallNode extends AbstractAgentNode {
         ModelCallResult result = executor.execute(context, ctx.getRequestModel(),
                 ctx.getMaxTokens() == null ? 0 : ctx.getMaxTokens(),
                 ctx.getDeadlineEpochMs() == null ? 0L : ctx.getDeadlineEpochMs(),
-                ctx.getEscalatedMaxTokens() == null ? 8192 : ctx.getEscalatedMaxTokens(), true);
+                ctx.getEscalatedMaxTokens() == null ? 8192 : ctx.getEscalatedMaxTokens(), true,
+                ctx.getPreparedView());
 
         if (result.isSuccess()) {
             context.setModelOutput(result.chatResult().getContent());
@@ -135,10 +136,8 @@ public class ModelCallNode extends AbstractAgentNode {
         context.setContextRecoveryStage(ContextRecoveryStage.NONE);
         context.setReactiveCompactAttempts(0);
         context.setRecoveryModelOverride(null);
-        if (!Objects.equals(context.getContextTranscriptArtifactId(),
-                context.getLedgerBaselineArtifactId())) {
-            context.setContextTranscriptArtifactId(null);
-        }
+        context.setContextTranscriptArtifactId(null);
         context.setContextBlockedReason(null);
+        context.setFloorRetryPending(false);
     }
 }

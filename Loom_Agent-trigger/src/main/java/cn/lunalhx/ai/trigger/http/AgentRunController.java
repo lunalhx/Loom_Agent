@@ -6,14 +6,10 @@ import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
 import cn.lunalhx.ai.api.dto.AgentRunStatusResponse;
 import cn.lunalhx.ai.api.dto.AgentRuntimeInfoResponse;
-import cn.lunalhx.ai.api.dto.UndoExecuteRequest;
-import cn.lunalhx.ai.api.dto.UndoExecuteResponse;
-import cn.lunalhx.ai.api.dto.UndoStatusResponse;
 import cn.lunalhx.ai.api.response.Response;
 import cn.lunalhx.ai.trigger.http.agent.AgentRequestMapper;
 import cn.lunalhx.ai.trigger.http.agent.AgentRunHttpQueryService;
 import cn.lunalhx.ai.trigger.http.agent.AgentSseResponder;
-import cn.lunalhx.ai.trigger.http.agent.AgentUndoHttpService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -40,7 +36,6 @@ public class AgentRunController {
     private final AgentRequestMapper requestMapper;
     private final AgentSseResponder sseResponder;
     private final AgentRunHttpQueryService runHttpQueryService;
-    private final AgentUndoHttpService undoHttpService;
 
     @GetMapping("/runtime")
     public Response<AgentRuntimeInfoResponse> runtime() {
@@ -87,16 +82,5 @@ public class AgentRunController {
                 resolvedIncludeChildren,
                 () -> runHttpQueryService.replayTimeline(runId, resolvedIncludeChildren)
         );
-    }
-
-    @GetMapping("/runs/{runId}/undo")
-    public Response<UndoStatusResponse> undoStatus(@PathVariable String runId) {
-        return undoHttpService.query(runId);
-    }
-
-    @PostMapping("/runs/{runId}/undo")
-    public Response<UndoExecuteResponse> undoExecute(@PathVariable String runId,
-                                                       @RequestBody UndoExecuteRequest request) {
-        return undoHttpService.execute(runId, request);
     }
 }

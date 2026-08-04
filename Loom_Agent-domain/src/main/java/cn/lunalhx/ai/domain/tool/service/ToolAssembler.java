@@ -26,8 +26,8 @@ public final class ToolAssembler {
                 String name = spec == null ? null : spec.getName();
                 AgentTool existing = assembled.putIfAbsent(name, tool);
                 if (existing != null) {
-                    if (existing.spec().isReadOnly() != spec.isReadOnly()) {
-                        throw new IllegalStateException("工具 " + name + " 的 readOnly 声明冲突");
+                    if (existing.isRisky() != tool.isRisky()) {
+                        throw new IllegalStateException("工具 " + name + " 的 risky 声明冲突");
                     }
                     throw new IllegalStateException("重复的工具名：" + name);
                 }

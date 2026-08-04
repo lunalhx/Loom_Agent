@@ -130,15 +130,18 @@ loom:
       tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
       keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
       max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
-      auto-compact-token-limit: ${AGENT_CONTEXT_AUTO_COMPACT_TOKEN_LIMIT:64000}
-      reactive-compact-max-attempts: ${AGENT_CONTEXT_REACTIVE_COMPACT_MAX_ATTEMPTS:1}
-      reactive-keep-recent-entries: ${AGENT_CONTEXT_REACTIVE_KEEP_RECENT_ENTRIES:5}
-      context-safety-margin-tokens: ${AGENT_CONTEXT_SAFETY_MARGIN_TOKENS:4096}
-      summary-max-chars: ${AGENT_CONTEXT_SUMMARY_MAX_CHARS:6000}
-      deep-summary-model: ${AGENT_CONTEXT_DEEP_SUMMARY_MODEL:}
-      deep-summary-chunk-token-limit: ${AGENT_CONTEXT_DEEP_SUMMARY_CHUNK_TOKEN_LIMIT:12000}
-      deep-summary-max-calls: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_CALLS:8}
-      deep-summary-max-output-tokens: ${AGENT_CONTEXT_DEEP_SUMMARY_MAX_OUTPUT_TOKENS:2048}
+      context-reduction-enabled: ${AGENT_CONTEXT_REDUCTION_ENABLED:true}
+      total-budget-chars: ${AGENT_CONTEXT_TOTAL_BUDGET_CHARS:12000}
+      prefix-budget-chars: ${AGENT_CONTEXT_PREFIX_BUDGET_CHARS:3600}
+      prefix-floor-chars: ${AGENT_CONTEXT_PREFIX_FLOOR_CHARS:1200}
+      memory-budget-chars: ${AGENT_CONTEXT_MEMORY_BUDGET_CHARS:1600}
+      memory-floor-chars: ${AGENT_CONTEXT_MEMORY_FLOOR_CHARS:400}
+      relevant-memory-budget-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_BUDGET_CHARS:1200}
+      relevant-memory-floor-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_FLOOR_CHARS:300}
+      history-budget-chars: ${AGENT_CONTEXT_HISTORY_BUDGET_CHARS:5200}
+      history-floor-chars: ${AGENT_CONTEXT_HISTORY_FLOOR_CHARS:1500}
+      recent-history-items: ${AGENT_CONTEXT_RECENT_HISTORY_ITEMS:6}
+      relevant-memory-limit: ${AGENT_CONTEXT_RELEVANT_MEMORY_LIMIT:3}
     persistence:
       mode: ${AGENT_PERSISTENCE_MODE:memory}
     long-term-memory:
@@ -192,9 +195,6 @@ loom:
       plan-before-write: ${AGENT_PLAN_BEFORE_WRITE:true}
       verification-after-write: ${AGENT_VERIFICATION_AFTER_WRITE:true}
       max-verification-continuations: ${AGENT_VERIFICATION_MAX_CONTINUATIONS:2}
-    conversation-ledger:
-      compaction-high-watermark: 200
-      compaction-low-watermark: 50
 
 mybatis:
   mapper-locations: classpath:/mybatis/mapper/*.xml

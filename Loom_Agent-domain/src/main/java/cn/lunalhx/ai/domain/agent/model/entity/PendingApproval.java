@@ -1,7 +1,5 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
-import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalRecordState;
@@ -14,6 +12,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * A pending approval for a risky loom-code tool call. Risky tools are uniformly
+ * shown as {@code RISKY}; content diff and stale-approval fingerprints are removed.
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -29,11 +31,8 @@ public class PendingApproval {
     private String workspaceDisplayName;
     private String tool;
     private Map<String, Object> input;
-    private ToolPermissionLevel permissionLevel;
     private String riskReason;
     private String operationPreview;
-    private ApprovalDiff diff;
-    private String policyFingerprint;
     private Map<String, Object> metadata;
     private Instant createdAt;
     private Instant expiresAt;
@@ -41,8 +40,6 @@ public class PendingApproval {
     @Builder.Default
     private ApprovalRecordState state = ApprovalRecordState.PENDING;
     private ApprovalDecision decision;
-    private String approvalScope;
-    private String approvedPattern;
     private String decisionReason;
 
     public boolean expired(Instant now) {

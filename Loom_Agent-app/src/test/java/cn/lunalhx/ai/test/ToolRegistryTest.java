@@ -1,23 +1,18 @@
 package cn.lunalhx.ai.test;
 
-import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import cn.lunalhx.ai.domain.tool.service.ToolAssembler;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -28,13 +23,11 @@ public class ToolRegistryTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // ---- helpers ----
-
-    private static AgentTool makeTool(String name, String description, String schema) {
+    private static AgentTool makeTool(String name, String description, String schema, boolean risky) {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
-                return ToolSpec.builder().name(name).description(description).inputSchema(schema).build();
+                return ToolSpec.builder().name(name).description(description).inputSchema(schema).risky(risky).build();
             }
 
             @Override
@@ -45,326 +38,72 @@ public class ToolRegistryTest {
     }
 
     private static AgentTool makeTool(String name) {
-        return makeTool(name, "tool " + name, VALID_SCHEMA);
-    }
-
-    // ==================== 1. deterministic ordering ====================
-
-    @Test
-    public void shuffledCollectionProducesIdenticalSpecs() {
-        List<AgentTool> order1 = List.of(
-                makeTool("zebra"),
-                makeTool("alpha"),
-                makeTool("gamma"),
-                makeTool("beta")
-        );
-        // Reverse insertion order
-        List<AgentTool> order2 = List.of(
-                makeTool("beta"),
-                makeTool("gamma"),
-                makeTool("alpha"),
-                makeTool("zebra")
-        );
-        // Arbitrary shuffle
-        List<AgentTool> order3 = List.of(
-                makeTool("gamma"),
-                makeTool("zebra"),
-                makeTool("beta"),
-                makeTool("alpha")
-        );
-
-        ToolRegistry r1 = new ToolRegistry(order1, new ToolSchemaValidator(mapper));
-        ToolRegistry r2 = new ToolRegistry(order2, new ToolSchemaValidator(mapper));
-        ToolRegistry r3 = new ToolRegistry(order3, new ToolSchemaValidator(mapper));
-
-        List<ToolSpec> specs1 = r1.specs();
-        List<ToolSpec> specs2 = r2.specs();
-        List<ToolSpec> specs3 = r3.specs();
-
-        // All should be in natural order: alpha, beta, gamma, zebra
-        List<String> expected = List.of("alpha", "beta", "gamma", "zebra");
-        assertEquals(expected, specs1.stream().map(ToolSpec::getName).toList());
-        assertEquals(expected, specs2.stream().map(ToolSpec::getName).toList());
-        assertEquals(expected, specs3.stream().map(ToolSpec::getName).toList());
+        return makeTool(name, "tool " + name, VALID_SCHEMA, false);
     }
 
     @Test
-    public void naturalOrderIsLexicographic() {
-        // Verify that natural (String.compareTo) order is used, not anything else
+    public void registryKeepsExplicitInsertionOrder() {
         List<AgentTool> tools = List.of(
-                makeTool("B_tool"),   // uppercase B (ASCII 66)
-                makeTool("a_tool"),   // lowercase a (ASCII 97)
-                makeTool("1_tool"),   // digit (ASCII 49)
-                makeTool("_tool")     // underscore (ASCII 95)
-        );
-
+                makeTool("run_shell"), makeTool("read_file"), makeTool("list_files"));
         ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
-        List<String> names = registry.specs().stream().map(ToolSpec::getName).toList();
-
-        // String.compareTo: '1'(49) < 'B'(66) < '_'(95) < 'a'(97)
-        assertEquals(List.of("1_tool", "B_tool", "_tool", "a_tool"), names);
+        List<ToolSpec> specs = registry.specs();
+        assertEquals("run_shell", specs.get(0).getName());
+        assertEquals("read_file", specs.get(1).getName());
+        assertEquals("list_files", specs.get(2).getName());
     }
 
     @Test
-    public void singleToolSpecsIsConsistent() {
-        ToolRegistry r = new ToolRegistry(List.of(makeTool("only")), new ToolSchemaValidator(mapper));
-        assertEquals(List.of("only"), r.specs().stream().map(ToolSpec::getName).toList());
+    public void containsChecksKnownTool() {
+        ToolRegistry registry = new ToolRegistry(List.of(makeTool("search")), new ToolSchemaValidator(mapper));
+        assertTrue(registry.contains("search"));
+        assertFalse(registry.contains("unknown"));
     }
 
     @Test
-    public void emptyToolCollectionProducesEmptySpecs() {
-        ToolRegistry r = new ToolRegistry(List.of(), new ToolSchemaValidator(mapper));
-        assertTrue(r.specs().isEmpty());
-    }
-
-    // ==================== 2. validation: duplicate names still fail ====================
-
-    @Test
-    public void duplicateNameThrows() {
-        List<AgentTool> tools = List.of(
-                makeTool("dup", "first", VALID_SCHEMA),
-                makeTool("dup", "second", VALID_SCHEMA)
-        );
-        try {
-            new ToolRegistry(tools, new ToolSchemaValidator(mapper));
-            fail("should have thrown for duplicate tool name");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("dup"));
-        }
+    public void validateInputAcceptsValidArgs() {
+        ToolRegistry registry = new ToolRegistry(List.of(makeTool("read_file")), new ToolSchemaValidator(mapper));
+        var result = registry.validateInput("read_file", mapper.createObjectNode().put("p", "x"));
+        assertTrue(result.valid());
     }
 
     @Test
-    public void assemblerReportsConflictingReadOnlyMetadata() {
-        AgentTool readOnly = makeToolWithReadOnly("conflict", true);
-        AgentTool writable = makeToolWithReadOnly("conflict", false);
-        try {
-            ToolAssembler.assemble(List.of(readOnly), List.of(writable));
-            fail("should have thrown for conflicting readOnly metadata");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("readOnly"));
-        }
-    }
-
-    private static AgentTool makeToolWithReadOnly(String name, boolean readOnly) {
-        return new AgentTool() {
-            @Override
-            public ToolSpec spec() {
-                return ToolSpec.builder()
-                        .name(name)
-                        .description("tool " + name)
-                        .inputSchema(VALID_SCHEMA)
-                        .readOnly(readOnly)
-                        .build();
-            }
-
-            @Override
-            public ToolResult call(ToolCall call) {
-                return ToolResult.success("ok", false, 0L);
-            }
-        };
-    }
-
-    // ==================== 3. validation: illegal specs still fail ====================
-
-    @Test
-    public void nullNameThrows() {
-        AgentTool tool = makeTool(null, "desc", VALID_SCHEMA);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for null name");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("工具名不能为空"));
-        }
-    }
-
-    @Test
-    public void blankNameThrows() {
-        AgentTool tool = makeTool("   ", "desc", VALID_SCHEMA);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for blank name");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("工具名不能为空"));
-        }
-    }
-
-    @Test
-    public void emptyNameThrows() {
-        AgentTool tool = makeTool("", "desc", VALID_SCHEMA);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for empty name");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("工具名不能为空"));
-        }
-    }
-
-    @Test
-    public void nullDescriptionThrows() {
-        AgentTool tool = makeTool("t", null, VALID_SCHEMA);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for null description");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("description"));
-        }
-    }
-
-    @Test
-    public void blankDescriptionThrows() {
-        AgentTool tool = makeTool("t", "  ", VALID_SCHEMA);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for blank description");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("description"));
-        }
-    }
-
-    @Test
-    public void nullSchemaThrows() {
-        AgentTool tool = makeTool("t", "desc", null);
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for null schema");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("Schema"));
-        }
-    }
-
-    @Test
-    public void blankSchemaThrows() {
-        AgentTool tool = makeTool("t", "desc", "");
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for blank schema");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("Schema"));
-        }
-    }
-
-    @Test
-    public void invalidSchemaThrows() {
-        AgentTool tool = makeTool("t", "desc", "not valid json schema");
-        try {
-            new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-            fail("should have thrown for invalid schema");
-        } catch (Exception e) {
-            // ToolSchemaValidator.compile throws on invalid schema
-        }
-    }
-
-    // ==================== 4. RenderPromptNode tool directory equivalence ====================
-
-    @Test
-    public void renderPromptToolDirectoryIsDeterministic() {
-        // Same tools, different injection orders → identical tool directory text
-
-        List<AgentTool> orderA = List.of(
-                makeTool("write", "Write a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"),
-                makeTool("read", "Read a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"),
-                makeTool("delete", "Delete a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}")
-        );
-
-        List<AgentTool> orderB = List.of(
-                makeTool("delete", "Delete a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"),
-                makeTool("read", "Read a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"),
-                makeTool("write", "Write a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}")
-        );
-
-        String promptA = renderWithToolSpecs(orderA);
-        String promptB = renderWithToolSpecs(orderB);
-
-        // Extract the "可用工具：" section from both prompts
-        String toolsA = extractToolSection(promptA);
-        String toolsB = extractToolSection(promptB);
-
-        assertNotNull("prompt A should contain tool section", toolsA);
-        assertNotNull("prompt B should contain tool section", toolsB);
-        assertEquals("tool directory must be character-identical regardless of insertion order",
-                toolsA, toolsB);
-    }
-
-    @Test
-    public void renderPromptToolDirectoryGolden() {
-        // Golden test: known tool set produces known sorted directory text
-
-        List<AgentTool> tools = List.of(
-                makeTool("search", "Search the codebase",
-                        "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}}}"),
-                makeTool("read", "Read a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}"),
-                makeTool("list", "List directory",
-                        "{\"type\":\"object\",\"properties\":{\"dir\":{\"type\":\"string\"}}}")
-        );
-
-        String prompt = renderWithToolSpecs(tools);
-        String toolSection = extractToolSection(prompt);
-
-        // Expected: sorted by name → list, read, search
-        String expected =
-                "- list: List directory input={\"properties\":{\"dir\":{\"type\":\"string\"}},\"type\":\"object\"}\n" +
-                "- read: Read a file input={\"properties\":{\"path\":{\"type\":\"string\"}},\"type\":\"object\"}\n" +
-                "- search: Search the codebase input={\"properties\":{\"q\":{\"type\":\"string\"}},\"type\":\"object\"}";
-
-        assertEquals(expected, toolSection);
-    }
-
-    // ==================== 5. all methods use the same frozen map ====================
-
-    @Test
-    public void containsUsesSameMapAsSpecs() {
-        List<AgentTool> tools = List.of(
-                makeTool("zulu"),
-                makeTool("alpha")
-        );
-        ToolRegistry r = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
-        assertTrue(r.contains("alpha"));
-        assertTrue(r.contains("zulu"));
-        // specs returns sorted names
-        assertEquals(List.of("alpha", "zulu"), r.specs().stream().map(ToolSpec::getName).toList());
-    }
-
-    @Test
-    public void unknownToolInLookupMethodsReturnsCorrectErrors() {
-        ToolRegistry r = new ToolRegistry(List.of(makeTool("known")), new ToolSchemaValidator(mapper));
-
-        // validate
-        var result = r.validateInput("unknown", mapper.createObjectNode());
+    public void validateInputRejectsUnknownTool() {
+        ToolRegistry registry = new ToolRegistry(List.of(), new ToolSchemaValidator(mapper));
+        var result = registry.validateInput("nope", mapper.createObjectNode());
+        assertFalse(result.valid());
         assertEquals("unknown_tool", result.errors().get(0).keyword());
-
-        // call
-        var callResult = r.call(ToolCall.builder().name("unknown").input(mapper.createObjectNode()).build());
-        assertEquals("unknown_tool", callResult.getErrorCode());
-
-        // policy
-        var policy = r.policy(ToolCall.builder().name("unknown").input(mapper.createObjectNode()).build());
-        assertEquals(cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel.HIGH_RISK_DENY, policy.getPermissionLevel());
     }
 
-    // ==================== helpers ====================
-
-    private String renderWithToolSpecs(List<AgentTool> tools) {
-        ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
-        return new StablePrefixBuilder().build(
-                null, false, null, registry.specs(), null, List.of(), java.util.Map.of())
-                .frozenContent();
+    @Test
+    public void callUnknownToolReturnsFailure() {
+        ToolRegistry registry = new ToolRegistry(List.of(), new ToolSchemaValidator(mapper));
+        var result = registry.call(ToolCall.builder().name("unknown").input(mapper.createObjectNode()).build());
+        assertEquals("unknown_tool", result.getErrorCode());
     }
 
-    private static String extractToolSection(String prompt) {
-        String marker = "可用工具：\n";
-        int start = prompt.indexOf(marker);
-        if (start < 0) return null;
-        start += marker.length();
-        int end = prompt.indexOf("\n\n", start);
-        if (end < 0) end = prompt.indexOf("\n用户问题：", start);
-        if (end < 0) end = prompt.length();
-        return prompt.substring(start, end).stripTrailing();
+    @Test
+    public void callKnownToolReturnsSuccess() {
+        ToolRegistry registry = new ToolRegistry(List.of(makeTool("read_file")), new ToolSchemaValidator(mapper));
+        var result = registry.call(ToolCall.builder().name("read_file").input(mapper.createObjectNode()).build());
+        assertTrue(result.isSuccess());
+        assertEquals("ok", result.getObservation());
+    }
+
+    @Test
+    public void riskyToolReported() {
+        ToolRegistry registry = new ToolRegistry(
+                List.of(makeTool("run_shell", "d", VALID_SCHEMA, true)), new ToolSchemaValidator(mapper));
+        assertTrue(registry.isRisky("run_shell"));
+        assertFalse(registry.isRisky("nope"));
+    }
+
+    @Test
+    public void duplicateToolNameThrows() {
+        try {
+            new ToolRegistry(List.of(makeTool("read_file"), makeTool("read_file")), new ToolSchemaValidator(mapper));
+            fail("expected duplicate tool name to throw");
+        } catch (IllegalStateException expected) {
+            // expected
+        }
     }
 }

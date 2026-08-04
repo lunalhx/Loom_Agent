@@ -59,7 +59,7 @@ final class FallbackModelStep implements ContextRecoveryStep {
             return null;
         }
         if (!budgetCoordinator.checkFallbackModelBudget(context, AgentNodeNames.MODEL_CALL,
-                fallbackModel, requestedMaxTokens)) {
+                fallbackModel, requestedMaxTokens, null)) {
             return null;
         }
         return fallbackModel;

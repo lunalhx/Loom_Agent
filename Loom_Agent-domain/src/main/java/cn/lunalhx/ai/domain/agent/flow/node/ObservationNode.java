@@ -6,8 +6,9 @@ import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.context.WorkingContextMemoryService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -24,17 +25,19 @@ public class ObservationNode extends AbstractAgentNode {
     private final ToolOutputSanitizer sanitizer;
     private final TraceRecorder traceRecorder;
     private final AgentMetrics agentMetrics;
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
+    private final WorkingContextMemoryService workingMemoryService;
 
     public ObservationNode(ToolOutputSanitizer sanitizer,
                            TraceRecorder traceRecorder,
                            AgentMetrics agentMetrics,
-                           ConversationLedgerAppendService ledgerAppendService) {
+                           ConversationHistoryAppendService ledgerAppendService) {
         super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "step"));
         this.sanitizer = sanitizer;
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
         this.ledgerAppendService = ledgerAppendService;
+        this.workingMemoryService = new WorkingContextMemoryService();
     }
 
     @Override
@@ -51,13 +54,15 @@ public class ObservationNode extends AbstractAgentNode {
 
         ToolOutputSanitization sanitization = sanitizeObservation(context, toolName, rawObservation);
 
+        workingMemoryService.onToolResult(context, toolName, result);
+
         if (ledgerAppendService != null) {
-            String eventKey = ConversationLedgerInitializer.eventKey(
+            String eventKey = ConversationHistoryInitializer.eventKey(
                     context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
             ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result, toolName, eventKey);
         }
 
-        return NodeResult.next(AgentNodeNames.REPLAN_GUARD, observationEvents(context));
+        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
     }
 
     private ToolOutputSanitization sanitizeObservation(AgentContext context, String toolName,

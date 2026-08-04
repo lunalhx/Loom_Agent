@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -19,10 +21,17 @@ public class ToolResult {
     private String errorCode;
     private String message;
     private long elapsedMs;
-    private String artifactId;
-    private Integer originalChars;
-    private Integer retainedChars;
-    private String sha256;
+
+    // ---- loom-code authoritative metadata ----
+    private String toolStatus;
+    private String toolErrorCode;
+    private String securityEventType;
+    private String riskLevel;
+    private Boolean readOnly;
+    private List<String> affectedPaths;
+    private Boolean workspaceChanged;
+    private String workspaceFingerprint;
+    private List<String> diffSummary;
     private Map<String, Object> details;
 
     public static ToolResult success(String observation, boolean truncated, long elapsedMs) {
@@ -31,6 +40,7 @@ public class ToolResult {
                 .observation(observation)
                 .truncated(truncated)
                 .elapsedMs(elapsedMs)
+                .toolStatus("ok")
                 .build();
     }
 
@@ -41,7 +51,12 @@ public class ToolResult {
                 .message(message)
                 .observation("tool_error: " + errorCode + " - " + message)
                 .elapsedMs(elapsedMs)
+                .toolStatus("error")
+                .toolErrorCode(errorCode)
                 .build();
     }
 
+    public List<String> affectedPathsSafe() {
+        return affectedPaths == null ? List.of() : affectedPaths;
+    }
 }

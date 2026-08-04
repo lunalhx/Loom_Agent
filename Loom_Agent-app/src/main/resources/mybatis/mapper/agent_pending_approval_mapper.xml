@@ -12,11 +12,8 @@
         <result column="workspace_display_name" property="workspaceDisplayName"/>
         <result column="tool" property="tool"/>
         <result column="input_json" property="inputJson"/>
-        <result column="permission_level" property="permissionLevel"/>
         <result column="risk_reason" property="riskReason"/>
         <result column="operation_preview" property="operationPreview"/>
-        <result column="diff_json" property="diffJson"/>
-        <result column="policy_fingerprint" property="policyFingerprint"/>
         <result column="metadata_json" property="metadataJson"/>
         <result column="context_json" property="contextJson"/>
         <result column="created_at" property="createdAt"/>
@@ -32,11 +29,11 @@
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO">
         INSERT INTO agent_pending_approval
         (approval_id, run_id, request_id, conversation_id, resolved_workspace, workspace_display_name,
-         tool, input_json, permission_level, risk_reason, operation_preview, diff_json, policy_fingerprint, metadata_json,
+         tool, input_json, risk_reason, operation_preview, metadata_json,
          context_json, created_at, expires_at, consumed, state, decision, decision_reason)
         VALUES
         (#{approvalId}, #{runId}, #{requestId}, #{conversationId}, #{resolvedWorkspace}, #{workspaceDisplayName},
-         #{tool}, #{inputJson}, #{permissionLevel}, #{riskReason}, #{operationPreview}, #{diffJson}, #{policyFingerprint},
+         #{tool}, #{inputJson}, #{riskReason}, #{operationPreview},
          #{metadataJson}, #{contextJson}, #{createdAt}, #{expiresAt}, #{consumed},
          COALESCE(#{state}, 'PENDING'), #{decision}, #{decisionReason})
         ON CONFLICT(approval_id) DO NOTHING

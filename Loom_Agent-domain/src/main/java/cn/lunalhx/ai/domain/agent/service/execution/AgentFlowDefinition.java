@@ -11,17 +11,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 节点图装配定义（Phase 2 §二）。
- *
- * <p>不可变描述 Agent Loop 的节点集合、Hook 注册表、工具规格列表以及是否启用子 Agent。
- * 构造时对 Map/List 做防御性复制，保留节点插入顺序，校验节点名称不重复，
- * 且至少包含 {@code START} 和 {@code FAIL}。
+ * Immutable description of the agent loop node graph.
  */
 public record AgentFlowDefinition(
         Map<String, AgentNode> nodes,
         AgentHookRegistry hookRegistry,
-        List<ToolSpec> toolSpecs,
-        boolean subAgentAvailable
+        List<ToolSpec> toolSpecs
 ) {
     public AgentFlowDefinition {
         Objects.requireNonNull(nodes, "nodes must not be null");

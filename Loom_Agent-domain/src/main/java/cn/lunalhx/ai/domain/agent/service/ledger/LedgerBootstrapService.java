@@ -1,9 +1,9 @@
 package cn.lunalhx.ai.domain.agent.service.ledger;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
-import cn.lunalhx.ai.domain.agent.model.valobj.LedgerStableType;
+import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 
 import java.util.Objects;
 
@@ -36,11 +36,11 @@ import java.util.Objects;
  */
 public final class LedgerBootstrapService {
 
-    private final ConversationLedgerAppendService appendService;
-    private final ConversationLedgerInitializer initializer;
+    private final ConversationHistoryAppendService appendService;
+    private final ConversationHistoryInitializer initializer;
 
-    public LedgerBootstrapService(ConversationLedgerAppendService appendService,
-                                   ConversationLedgerInitializer initializer) {
+    public LedgerBootstrapService(ConversationHistoryAppendService appendService,
+                                   ConversationHistoryInitializer initializer) {
         this.appendService = Objects.requireNonNull(appendService, "appendService must not be null");
         this.initializer = Objects.requireNonNull(initializer, "initializer must not be null");
     }
@@ -93,7 +93,7 @@ public final class LedgerBootstrapService {
         // Append config change marker to ledger (with full StablePrefix fingerprints)
         String note = ControlUpdateTexts.renderConfigChangeNote(
                 existing.fingerprint(), candidate.fingerprint(), newGen);
-        String eventKey = ConversationLedgerInitializer.eventKey(
+        String eventKey = ConversationHistoryInitializer.eventKey(
                 context.getRunId(), "config_change", "generation_" + newGen);
         appendService.appendControlUpdate(context, note, eventKey);
 
@@ -111,7 +111,7 @@ public final class LedgerBootstrapService {
         String note = "[Migration] Ledger initialized without prior StablePrefix. "
                 + "New generation " + newGen
                 + " started with current configuration.";
-        String eventKey = ConversationLedgerInitializer.eventKey(
+        String eventKey = ConversationHistoryInitializer.eventKey(
                 context.getRunId(), "migrate", "generation_" + newGen);
         appendService.appendControlUpdate(context, note, eventKey);
     }
@@ -126,14 +126,14 @@ public final class LedgerBootstrapService {
             return;
         }
         String text = ControlUpdateTexts.renderContinuation(pending);
-        String eventKey = ConversationLedgerInitializer.eventKey(
+        String eventKey = ConversationHistoryInitializer.eventKey(
                 context.getRunId(), "continuation", "user_input");
         appendService.appendUserInput(context, text, eventKey);
         context.setPendingContinuation(null);
     }
 
     /** Exposed for testing. */
-    ConversationLedgerAppendService appendService() {
+    ConversationHistoryAppendService appendService() {
         return appendService;
     }
 }

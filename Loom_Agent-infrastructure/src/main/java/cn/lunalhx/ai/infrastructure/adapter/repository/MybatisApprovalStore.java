@@ -6,8 +6,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalRecordState;
-import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.infrastructure.dao.AgentPendingApprovalDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentPendingApprovalPO;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -97,11 +95,8 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
         po.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
         po.setTool(approval.getTool());
         po.setInputJson(writeJson(approval.getInput()));
-        po.setPermissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name());
         po.setRiskReason(approval.getRiskReason());
         po.setOperationPreview(approval.getOperationPreview());
-        po.setDiffJson(writeJson(approval.getDiff()));
-        po.setPolicyFingerprint(approval.getPolicyFingerprint());
         po.setMetadataJson(writeJson(approval.getMetadata()));
         po.setContextJson(writeJson(approval.getContext() == null ? null : AgentContextSnapshot.from(approval.getContext())));
         po.setCreatedAt(approval.getCreatedAt());
@@ -127,11 +122,8 @@ public class MybatisApprovalStore implements PersistentApprovalStore {
                 .tool(po.getTool())
                 .input(readJson(po.getInputJson(), new TypeReference<Map<String, Object>>() {
                 }))
-                .permissionLevel(po.getPermissionLevel() == null ? null : ToolPermissionLevel.valueOf(po.getPermissionLevel()))
                 .riskReason(po.getRiskReason())
                 .operationPreview(po.getOperationPreview())
-                .diff(readJson(po.getDiffJson(), ApprovalDiff.class))
-                .policyFingerprint(po.getPolicyFingerprint())
                 .metadata(readJson(po.getMetadataJson(), new TypeReference<Map<String, Object>>() {
                 }))
                 .createdAt(po.getCreatedAt())

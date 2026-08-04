@@ -14,10 +14,8 @@ public class AgentRunPO {
     private String rootRunId;
     private String requestId;
     private String conversationId;
-    private String agentRole;
     private String runKind;
     private Integer depth;
-    private Integer childOrdinal;
     private String question;
     private String workspace;
     private String status;

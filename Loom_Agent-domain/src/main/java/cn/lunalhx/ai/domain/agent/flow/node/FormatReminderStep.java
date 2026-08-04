@@ -3,8 +3,8 @@ package cn.lunalhx.ai.domain.agent.flow.node;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import java.util.List;
 
 final class FormatReminderStep implements ContextRecoveryStep {
@@ -15,13 +15,13 @@ final class FormatReminderStep implements ContextRecoveryStep {
             "如果是 action，必须包含 \"tool\" 和 \"args\" 字段。" +
             "如果是 final，必须包含 \"answer\" 字段。";
 
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
 
     FormatReminderStep() {
         this(null);
     }
 
-    FormatReminderStep(ConversationLedgerAppendService ledgerAppendService) {
+    FormatReminderStep(ConversationHistoryAppendService ledgerAppendService) {
         this.ledgerAppendService = ledgerAppendService;
     }
 
@@ -30,7 +30,7 @@ final class FormatReminderStep implements ContextRecoveryStep {
         AgentContext context = request.context();
         if (ledgerAppendService != null) {
             ledgerAppendService.appendSystemNote(context, FORMAT_REMINDER,
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
                             String.valueOf(Math.max(1, context.getStep())), "format_reminder"));
         }
         AgentEvent event = AgentEvent.builder()

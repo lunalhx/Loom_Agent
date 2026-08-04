@@ -6,21 +6,21 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
 public class FinalAnswerNode extends AbstractAgentNode {
 
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
 
     public FinalAnswerNode() {
         this(null);
     }
 
-    public FinalAnswerNode(ConversationLedgerAppendService ledgerAppendService) {
+    public FinalAnswerNode(ConversationHistoryAppendService ledgerAppendService) {
         super(AgentNodeNames.FINAL_ANSWER, List.of("decision.answer", "step"));
         this.ledgerAppendService = ledgerAppendService;
     }
@@ -32,7 +32,7 @@ public class FinalAnswerNode extends AbstractAgentNode {
         context.setStopReason(AgentStopReason.FINAL_ANSWER);
         if (ledgerAppendService != null) {
             ledgerAppendService.appendSystemNote(context, answer,
-                    ConversationLedgerInitializer.eventKey(context.getRunId(),
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
                             String.valueOf(context.getStep()), "final_answer"));
         }
         return NodeResult.terminal(List.of(

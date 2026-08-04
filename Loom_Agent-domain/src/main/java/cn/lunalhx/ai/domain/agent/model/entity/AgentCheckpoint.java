@@ -17,7 +17,6 @@ public class AgentCheckpoint {
     private Long version;
     private String currentNode;
     private AgentContextSnapshot contextSnapshot;
-    private AgentPlan plan;
     private String lastToolExecutionJson;
     private String reason;
     private Instant createdAt;

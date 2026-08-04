@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.trigger.http.AgentApprovalController;
 import cn.lunalhx.ai.trigger.http.GlobalExceptionHandler;
@@ -158,7 +157,6 @@ public class AgentApprovalControllerContractTest {
         PendingApproval approval = PendingApproval.builder()
                 .approvalId("ap-1").runId("r-1").requestId("req-1").conversationId("c-1")
                 .workspaceDisplayName("ws").tool("write_file")
-                .permissionLevel(ToolPermissionLevel.WRITE_CONFIRM)
                 .riskReason("r").operationPreview("p")
                 .expiresAt(Instant.now().plusSeconds(60)).build();
         when(store.find("ap-1")).thenReturn(Optional.of(approval));

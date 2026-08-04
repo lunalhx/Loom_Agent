@@ -51,20 +51,13 @@ public class DynamicText {
     }
 
     public void appendToolResult(int step, String sourceNode, AgentDecision decision, ToolResult result, String content) {
-        DynamicTextEntry entry = newEntry(step,
+        append(step,
                 DynamicTextRole.TOOL_RESULT,
                 sourceNode,
                 "Tool Result",
                 decision == null ? null : decision.getTool(),
                 decision == null ? null : String.valueOf(decision.getInputView()),
                 content);
-        if (result != null) {
-            entry.setArtifactId(result.getArtifactId());
-            entry.setOriginalChars(result.getOriginalChars());
-            entry.setRenderChars(StringUtils.length(content));
-        }
-        entries.add(entry);
-        version++;
     }
 
     private void append(int step,

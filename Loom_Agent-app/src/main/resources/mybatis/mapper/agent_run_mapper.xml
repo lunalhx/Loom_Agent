@@ -9,10 +9,8 @@
         <result column="root_run_id" property="rootRunId"/>
         <result column="request_id" property="requestId"/>
         <result column="conversation_id" property="conversationId"/>
-        <result column="agent_role" property="agentRole"/>
         <result column="run_kind" property="runKind"/>
         <result column="depth" property="depth"/>
-        <result column="child_ordinal" property="childOrdinal"/>
         <result column="question" property="question"/>
         <result column="workspace" property="workspace"/>
         <result column="status" property="status"/>
@@ -29,20 +27,18 @@
 
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
         INSERT INTO agent_run
-        (run_id, parent_run_id, root_run_id, request_id, conversation_id, agent_role, run_kind, depth, child_ordinal,
+        (run_id, parent_run_id, root_run_id, request_id, conversation_id, run_kind, depth,
          question, workspace, status, current_node, step, checkpoint_version, summary_json, blocked_reason, used_tokens, estimated_cost)
         VALUES
-        (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{agentRole}, #{runKind}, #{depth}, #{childOrdinal},
+        (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{runKind}, #{depth},
          #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson}, #{blockedReason}, #{usedTokens}, #{estimatedCost})
         ON CONFLICT(run_id) DO UPDATE SET
         parent_run_id = excluded.parent_run_id,
         root_run_id = excluded.root_run_id,
         request_id = excluded.request_id,
         conversation_id = excluded.conversation_id,
-        agent_role = excluded.agent_role,
         run_kind = excluded.run_kind,
         depth = excluded.depth,
-        child_ordinal = excluded.child_ordinal,
         question = excluded.question,
         workspace = excluded.workspace,
         status = excluded.status,

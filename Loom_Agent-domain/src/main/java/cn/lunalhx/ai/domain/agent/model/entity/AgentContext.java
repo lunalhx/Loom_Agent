@@ -9,18 +9,13 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentPromptState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ActivatedSkillToolPolicy;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
-import cn.lunalhx.ai.domain.agent.model.valobj.MemoryRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
@@ -54,11 +49,10 @@ public class AgentContext {
     private AgentApprovalState approval;
     private AgentBudgetState budget;
     private AgentRecoveryState recovery;
-    private AgentSkillState skill;
     private AgentTraceState trace;
 
     public AgentContext() {
-        this.identity = new AgentIdentity(null, null, null, null, null, null, 0, 0);
+        this.identity = new AgentIdentity(null, null, null, null, null, 0);
         this.runDefinition = new AgentRunDefinition(null, null, 0, 1, 0);
         this.environment = new AgentEnvironmentState();
         this.runtime = new AgentRuntimeState();
@@ -67,7 +61,6 @@ public class AgentContext {
         this.approval = new AgentApprovalState();
         this.budget = new AgentBudgetState();
         this.recovery = new AgentRecoveryState();
-        this.skill = new AgentSkillState();
         this.trace = new AgentTraceState();
     }
 
@@ -82,7 +75,6 @@ public class AgentContext {
     public AgentApprovalState approval() { return approval; }
     public AgentBudgetState budget() { return budget; }
     public AgentRecoveryState recovery() { return recovery; }
-    public AgentSkillState skill() { return skill; }
     public AgentTraceState trace() { return trace; }
 
     // ==================== identity delegates ====================
@@ -97,12 +89,8 @@ public class AgentContext {
     public void setRequestId(String v) { identity = identity.withRequestId(v); }
     public String getConversationId() { return identity.conversationId(); }
     public void setConversationId(String v) { identity = identity.withConversationId(v); }
-    public AgentRole getAgentRole() { return identity.agentRole(); }
-    public void setAgentRole(AgentRole v) { identity = identity.withAgentRole(v); }
     public int getAgentDepth() { return identity.agentDepth(); }
     public void setAgentDepth(int v) { identity = identity.withAgentDepth(v); }
-    public int getChildOrdinal() { return identity.childOrdinal(); }
-    public void setChildOrdinal(int v) { identity = identity.withChildOrdinal(v); }
 
     // ==================== runDefinition delegates ====================
 
@@ -127,8 +115,10 @@ public class AgentContext {
     public void setWorkspaceDisplayName(String v) { environment.setWorkspaceDisplayName(v); }
     public List<ToolSpec> getToolSpecs() { return environment.toolSpecs(); }
     public void setToolSpecs(List<ToolSpec> v) { environment.setToolSpecs(v); }
-    public boolean isSubAgentSpawnAllowed() { return environment.subAgentSpawnAllowed(); }
-    public void setSubAgentSpawnAllowed(boolean v) { environment.setSubAgentSpawnAllowed(v); }
+    public List<String> getAllowedTools() { return environment.allowedTools(); }
+    public void setAllowedTools(List<String> v) { environment.setAllowedTools(v); }
+    public String getApprovalPolicy() { return environment.approvalPolicy(); }
+    public void setApprovalPolicy(String v) { environment.setApprovalPolicy(v); }
     public AgentRunConfig getRunConfig() { return environment.runConfig(); }
     public void setRunConfig(AgentRunConfig v) { environment.setRunConfig(v); }
     public AgentRuntimeProperties runtimeProperties(AgentRuntimeProperties fallback) {
@@ -136,9 +126,6 @@ public class AgentContext {
     }
     public ModelRuntimeProperties modelRuntimeProperties(ModelRuntimeProperties fallback) {
         return environment.runConfig() == null ? fallback : environment.runConfig().model();
-    }
-    public MemoryRuntimeProperties memoryRuntimeProperties(MemoryRuntimeProperties fallback) {
-        return environment.runConfig() == null ? fallback : environment.runConfig().agent().getLongTermMemory();
     }
 
     // ==================== runtime delegates ====================
@@ -173,20 +160,6 @@ public class AgentContext {
     public void setSegmentStartStep(int v) { runtime.setSegmentStartStep(v); }
     public int getStopHookContinuationCount() { return runtime.stopHookContinuationCount(); }
     public void setStopHookContinuationCount(int v) { runtime.setStopHookContinuationCount(v); }
-    public String getLastActionFingerprint() { return runtime.lastActionFingerprint(); }
-    public void setLastActionFingerprint(String v) { runtime.setLastActionFingerprint(v); }
-    public int getSameActionRepeats() { return runtime.sameActionRepeats(); }
-    public void setSameActionRepeats(int v) { runtime.setSameActionRepeats(v); }
-    public String getLastFailureFingerprint() { return runtime.lastFailureFingerprint(); }
-    public void setLastFailureFingerprint(String v) { runtime.setLastFailureFingerprint(v); }
-    public int getSameFailureRepeats() { return runtime.sameFailureRepeats(); }
-    public void setSameFailureRepeats(int v) { runtime.setSameFailureRepeats(v); }
-    public boolean isRepeatedFailureReplanAttempted() { return runtime.repeatedFailureReplanAttempted(); }
-    public void setRepeatedFailureReplanAttempted(boolean v) { runtime.setRepeatedFailureReplanAttempted(v); }
-    public int getReplanAttemptsForFailure() { return runtime.replanAttemptsForFailure(); }
-    public void setReplanAttemptsForFailure(int v) { runtime.setReplanAttemptsForFailure(v); }
-    public int getNoProgressRounds() { return runtime.noProgressRounds(); }
-    public void setNoProgressRounds(int v) { runtime.setNoProgressRounds(v); }
     public boolean isCodeReadObserved() { return runtime.codeReadObserved(); }
     public void setCodeReadObserved(boolean v) { runtime.setCodeReadObserved(v); }
     public int getLastWriteStep() { return runtime.lastWriteStep(); }
@@ -213,8 +186,8 @@ public class AgentContext {
     public void setModelOutput(String v) { prompt.setModelOutput(v); }
 
     // ---- conversation ledger delegates (C1) ----
-    public ConversationLedger getConversationLedger() { return prompt.conversationLedger(); }
-    public void setConversationLedger(ConversationLedger v) { prompt.setConversationLedger(v); }
+    public ConversationHistory getConversationHistory() { return prompt.conversationHistory(); }
+    public void setConversationHistory(ConversationHistory v) { prompt.setConversationHistory(v); }
     public StablePrefix getStablePrefix() { return prompt.stablePrefix(); }
     public void setStablePrefix(StablePrefix v) { prompt.setStablePrefix(v); }
     public int getGeneration() { return prompt.generation(); }
@@ -223,10 +196,18 @@ public class AgentContext {
     public void setLastLedgerPlanVersion(int v) { prompt.setLastLedgerPlanVersion(v); }
     public String getConfigFingerprint() { return prompt.configFingerprint(); }
     public void setConfigFingerprint(String v) { prompt.setConfigFingerprint(v); }
-    public int getLastCompactionGeneration() { return prompt.lastCompactionGeneration(); }
-    public void setLastCompactionGeneration(int v) { prompt.setLastCompactionGeneration(v); }
-    public String getLedgerBaselineArtifactId() { return prompt.ledgerBaselineArtifactId(); }
-    public void setLedgerBaselineArtifactId(String v) { prompt.setLedgerBaselineArtifactId(v); }
+    public cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory getWorkingMemory() {
+        return prompt.workingMemory();
+    }
+    public void setWorkingMemory(cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory v) {
+        prompt.setWorkingMemory(v);
+    }
+    public cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory workingMemoryOrCreate() {
+        if (prompt.workingMemory() == null) {
+            prompt.setWorkingMemory(new cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory());
+        }
+        return prompt.workingMemory();
+    }
     public boolean isLedgerActive() { return prompt.isLedgerActive(); }
     public boolean isLedgerReady() { return prompt.ledgerReady(); }
     public void setLedgerReady(boolean v) { prompt.setLedgerReady(v); }
@@ -235,36 +216,12 @@ public class AgentContext {
     public void ensureLedgerActive() { prompt.ensureLedgerActive(); }
     public int incrementGeneration() { return prompt.incrementGeneration(); }
 
-    // ---- memory recall delegates (v6) ----
-    public boolean isMemoryRecallExecuted() { return prompt.memoryRecallExecuted(); }
-    public void setMemoryRecallExecuted(boolean v) { prompt.setMemoryRecallExecuted(v); }
-    public List<String> getMemoryRecallIds() { return prompt.memoryRecallIds(); }
-    public void setMemoryRecallIds(List<String> v) { prompt.setMemoryRecallIds(v); }
-    public int getMemoryRecallCount() { return prompt.memoryRecallCount(); }
-    public void setMemoryRecallCount(int v) { prompt.setMemoryRecallCount(v); }
-    public int getMemoryRecallChars() { return prompt.memoryRecallChars(); }
-    public void setMemoryRecallChars(int v) { prompt.setMemoryRecallChars(v); }
-    public String getMemoryRecallRenderedText() { return prompt.memoryRecallRenderedText(); }
-    public void setMemoryRecallRenderedText(String v) { prompt.setMemoryRecallRenderedText(v); }
-
-    // ---- incremental context summary delegates (TODO7 Phase 2) ----
-    public String getContextSummaryText() { return prompt.contextSummaryText(); }
-    public void setContextSummaryText(String v) { prompt.setContextSummaryText(v); }
-    public long getContextSummaryThroughSequence() { return prompt.contextSummaryThroughSequence(); }
-    public void setContextSummaryThroughSequence(long v) { prompt.setContextSummaryThroughSequence(v); }
-
     // ==================== action delegates ====================
 
     public AgentDecision getDecision() { return action.decision(); }
     public void setDecision(AgentDecision v) { action.setDecision(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
-    public AgentPlan getPlan() { return action.plan(); }
-    public void setPlan(AgentPlan v) { action.setPlan(v); }
-    public ReplanReason getReplanReason() { return action.replanReason(); }
-    public void setReplanReason(ReplanReason v) { action.setReplanReason(v); }
-    public String getReplanMessage() { return action.replanMessage(); }
-    public void setReplanMessage(String v) { action.setReplanMessage(v); }
 
     // ==================== approval delegates ====================
 
@@ -336,24 +293,8 @@ public class AgentContext {
     public void setContextTranscriptArtifactId(String v) { recovery.setContextTranscriptArtifactId(v); }
     public String getContextBlockedReason() { return recovery.contextBlockedReason(); }
     public void setContextBlockedReason(String v) { recovery.setContextBlockedReason(v); }
-
-    // ==================== skill delegates ====================
-
-    public List<String> getRequestedSkills() { return skill.requestedSkills(); }
-    public void setRequestedSkills(List<String> v) { skill.setRequestedSkills(v); }
-    public SkillCatalog getAvailableSkillCatalog() { return skill.availableSkillCatalog(); }
-    public void setAvailableSkillCatalog(SkillCatalog v) { skill.setAvailableSkillCatalog(v); }
-    public List<SkillActivation> getActivatedSkills() { return skill.activatedSkills(); }
-    public void setActivatedSkills(List<SkillActivation> v) { skill.setActivatedSkills(v); }
-    public ActivatedSkillToolPolicy getActivatedSkillToolPolicy() {
-        return ActivatedSkillToolPolicy.from(skill.activatedSkills());
-    }
-    public String getSkillCatalogText() { return skill.skillCatalogText(); }
-    public void setSkillCatalogText(String v) { skill.setSkillCatalogText(v); }
-    public List<String> getApprovedSkillNames() { return skill.approvedSkillNames(); }
-    public void setApprovedSkillNames(List<String> v) { skill.setApprovedSkillNames(v); }
-    public List<String> getRejectedSkillNames() { return skill.rejectedSkillNames(); }
-    public void setRejectedSkillNames(List<String> v) { skill.setRejectedSkillNames(v); }
+    public boolean isFloorRetryPending() { return recovery.floorRetryPending(); }
+    public void setFloorRetryPending(boolean v) { recovery.setFloorRetryPending(v); }
 
     // ==================== trace delegates ====================
 

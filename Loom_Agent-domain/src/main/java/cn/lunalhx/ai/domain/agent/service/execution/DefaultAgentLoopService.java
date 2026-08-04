@@ -18,8 +18,6 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
-import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
-import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator.WorkspaceUndoBusyException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -36,7 +34,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import cn.lunalhx.ai.domain.tool.sandbox.SandboxProvider;
 
 @Slf4j
 public class DefaultAgentLoopService implements AgentLoopService {
@@ -45,28 +42,18 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, AgentNode> nodes;
     private final AgentLoopComponents components;
     private final Executor executor;
-    private final UndoSessionCoordinator undoCoordinator;
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
-    private final SandboxProvider sandboxProvider;
 
     // ==================== 生产构造器 ====================
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor, ConversationExecutionGuard executionGuard) {
-        this(assembly, executor, executionGuard, null);
-    }
-
-    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
-                            ConversationExecutionGuard executionGuard,
-                            SandboxProvider sandboxProvider) {
         this.properties = assembly.properties();
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
         this.executor = executor;
-        this.undoCoordinator = assembly.undoCoordinator();
         this.executionGuard = executionGuard;
-        this.sandboxProvider = sandboxProvider;
     }
 
     // ==================== 公共入口 ====================
@@ -93,21 +80,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
             try {
                 emit(sink, List.of(components.eventFactory().runStarted(context)));
-                if (undoCoordinator != null) {
-                    undoCoordinator.onRunStart(context);
-                }
                 try {
                     components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
-                    runLoop(context, AgentNodeNames.SKILL_BOOTSTRAP, sink);
-                } catch (WorkspaceUndoBusyException e) {
-                    emit(sink, List.of(components.eventFactory().workspaceUndoBusy(context, e)));
-                    components.nodeLifecycle().persistFailure(context, events -> emit(sink, events));
-                    sink.complete();
-                    return;
+                    runLoop(context, AgentNodeNames.START, sink);
                 } catch (Exception e) {
-                    if (undoCoordinator != null) {
-                        undoCoordinator.onRunFailed(context);
-                    }
                     throw e;
                 }
             } finally {
@@ -258,9 +234,6 @@ public class DefaultAgentLoopService implements AgentLoopService {
         for (String runId : runIds) {
             cancelRun(runId);
         }
-        if (sandboxProvider != null) {
-            sandboxProvider.endConversation(conversationId);
-        }
     }
 
     @Override
@@ -312,21 +285,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
             return;
         }
 
-        if (undoCoordinator != null && plan.context() != null) {
-            String resumeError = undoCoordinator.onRunResume(plan.context());
-            if (resumeError != null) {
-                emit(sink, List.of(components.eventFactory().agentError()));
-                sink.complete();
-                return;
-            }
-        }
-
         try {
             runLoop(plan.context(), plan.startNode(), sink);
         } catch (Exception e) {
-            if (undoCoordinator != null) {
-                undoCoordinator.onRunFailed(plan.context());
-            }
             throw e;
         }
     }

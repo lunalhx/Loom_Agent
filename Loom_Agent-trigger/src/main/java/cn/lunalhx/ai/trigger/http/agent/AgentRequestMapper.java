@@ -113,8 +113,9 @@ public class AgentRequestMapper {
                 .maxSteps(request.getMaxSteps())
                 .maxSegments(request.getMaxSegments())
                 .includeTrace(request.getIncludeTrace())
-                .skills(request.getSkills())
                 .model(request.getModel())
+                .allowedTools(request.getAllowedTools())
+                .approvalPolicy(request.getApprovalPolicy())
                 .build();
         return Result.success(question);
     }

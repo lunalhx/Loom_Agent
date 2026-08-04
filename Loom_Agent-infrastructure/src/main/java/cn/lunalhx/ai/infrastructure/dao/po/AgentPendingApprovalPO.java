@@ -16,11 +16,8 @@ public class AgentPendingApprovalPO {
     private String workspaceDisplayName;
     private String tool;
     private String inputJson;
-    private String permissionLevel;
     private String riskReason;
     private String operationPreview;
-    private String diffJson;
-    private String policyFingerprint;
     private String metadataJson;
     private String contextJson;
     private Instant createdAt;

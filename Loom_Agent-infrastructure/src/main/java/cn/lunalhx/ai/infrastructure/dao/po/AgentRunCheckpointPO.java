@@ -12,7 +12,6 @@ public class AgentRunCheckpointPO {
     private Long version;
     private String currentNode;
     private String contextJson;
-    private String planJson;
     private String lastToolExecutionJson;
     private String reason;
     private Instant createTime;

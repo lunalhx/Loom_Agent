@@ -27,12 +27,15 @@ final class ModelCallBudgetCoordinator {
     }
 
     BudgetCheckResult checkBeforeModelCall(AgentContext context, String nodeName, String requestedModel,
-                                           int requestedMaxTokens) {
+                                           int requestedMaxTokens,
+                                           cn.lunalhx.ai.domain.agent.service.context.PreparedContextView view) {
         if (budgetGuard == null) {
             return null;
         }
+        String input = view != null ? view.budgetText()
+                : (promptFactory != null ? "" : String.valueOf(context.getQuestion()));
         return budgetGuard.checkBeforeModelCall(context, nodeName, requestedModel,
-                ModelCallPurpose.CONTROL_JSON, promptFactory.budgetInput(context), requestedMaxTokens);
+                ModelCallPurpose.CONTROL_JSON, input, requestedMaxTokens);
     }
 
     boolean isAllowed(BudgetCheckResult check) {
@@ -48,12 +51,14 @@ final class ModelCallBudgetCoordinator {
         context.runtime().fail(AgentStopReason.BUDGET_EXCEEDED, "budget_exceeded", reason);
     }
 
-    boolean checkFallbackModelBudget(AgentContext context, String nodeName, String fallbackModel, int requestedMaxTokens) {
+    boolean checkFallbackModelBudget(AgentContext context, String nodeName, String fallbackModel, int requestedMaxTokens,
+                                     cn.lunalhx.ai.domain.agent.service.context.PreparedContextView view) {
         if (budgetGuard == null) {
             return true;
         }
+        String input = view != null ? view.budgetText() : String.valueOf(context.getQuestion());
         BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context, nodeName, fallbackModel,
-                ModelCallPurpose.CONTROL_JSON, compactedBudgetInput(context), Math.max(0, requestedMaxTokens));
+                ModelCallPurpose.CONTROL_JSON, input, Math.max(0, requestedMaxTokens));
         return check.isAllowed();
     }
 
@@ -76,17 +81,5 @@ final class ModelCallBudgetCoordinator {
             traceRecorder.recordModelGatewayEvent(context, eventType, nodeName, "success", 0L,
                     eventType, null, metadata);
         }
-    }
-
-    private String compactedBudgetInput(AgentContext context) {
-        StringBuilder input = new StringBuilder(StringUtils.defaultString(context.getQuestion()));
-        if (context.getPlan() != null) {
-            input.append(context.getPlan().render());
-        }
-        input.append(promptFactory.budgetInput(context));
-        context.getToolSpecs().forEach(spec -> input.append(spec.getName())
-                .append(spec.getDescription())
-                .append(spec.getInputSchema()));
-        return input.toString();
     }
 }

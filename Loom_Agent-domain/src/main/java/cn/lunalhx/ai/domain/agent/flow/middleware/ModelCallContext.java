@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.flow.middleware;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.service.context.PreparedContextView;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -18,6 +19,7 @@ public class ModelCallContext {
     private Long deadlineEpochMs;
     private Integer escalatedMaxTokens;
     private List<AgentEvent> events;
+    private PreparedContextView preparedView;
 
     public ModelCallContext() {
         this.events = new ArrayList<>();

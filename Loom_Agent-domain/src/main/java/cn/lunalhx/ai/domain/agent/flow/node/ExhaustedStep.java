@@ -21,7 +21,7 @@ final class ExhaustedStep implements ContextRecoveryStep {
     public ContextRecoveryTransition apply(ContextRecoveryRequest request, List<AgentEvent> accumulatedEvents) {
         AgentContext context = request.context();
 
-        if (context.getAgentRole() == null) {
+        if (context.getParentRunId() == null) {
             context.setContextRecoveryStage(ContextRecoveryStage.WAITING_USER_INPUT);
             context.setContextBlockedReason("context_overflow: automatic recovery exhausted"
                     + (StringUtils.isBlank(context.getContextTranscriptArtifactId())

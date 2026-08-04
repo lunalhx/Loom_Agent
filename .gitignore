@@ -54,5 +54,8 @@ data/
 *.db-shm
 *.db-journal
 
+### Loom-code durable memory (workspace-scoped) ###
+.loom-code/
+
 ### Deepwork session state ###
 .slim/deepwork/

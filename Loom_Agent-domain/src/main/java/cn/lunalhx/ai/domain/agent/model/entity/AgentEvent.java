@@ -2,7 +2,6 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,10 +23,6 @@ public class AgentEvent {
     private String conversationId;
     private String workspace;
     private String parentRunId;
-    private String subAgentRunId;
-    private String subAgentTaskId;
-    private String subAgentRole;
-    private String subAgentStatus;
     private Long elapsedMs;
     private Integer step;
     private String node;
@@ -38,10 +33,8 @@ public class AgentEvent {
     private String toolCallId;
     private Map<String, Object> input;
     private String approvalId;
-    private String permissionLevel;
     private String riskReason;
     private String operationPreview;
-    private ApprovalDiff diff;
     private Instant expiresAt;
     private String observation;
     private Boolean truncated;
@@ -50,7 +43,6 @@ public class AgentEvent {
     private Integer stepCount;
     private String code;
     private String message;
-    private Map<String, Object> plan;
     private Long checkpointVersion;
     private Boolean recoverable;
     private Map<String, Object> metadata;

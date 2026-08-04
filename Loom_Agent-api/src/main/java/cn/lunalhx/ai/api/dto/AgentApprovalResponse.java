@@ -21,10 +21,8 @@ public class AgentApprovalResponse {
     private String workspace;
     private String tool;
     private Map<String, Object> input;
-    private String permissionLevel;
     private String riskReason;
     private String operationPreview;
-    private DiffPayload diff;
     private Map<String, Object> metadata;
     private String expiresAt;
 

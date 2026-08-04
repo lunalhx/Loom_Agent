@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.service.observability.ModelCallTraceLabels;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
@@ -10,40 +9,31 @@ import org.junit.Test;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/**
- * ModelCallTraceLabels 是 trace metadata 的唯一来源：
- * 五个低基数标签（model / capability / purpose / node / agentRole）必须完整且仅当真实存在时填充，
- * 不能引入 runId / requestId / conversationId / 用户输入等高基数字段。
- */
 public class ModelCallTraceLabelsTest {
 
     @Test
-    public void buildUsageMetadataShouldEncodeSubAgentInAgentRole() {
-        AgentContext subContext = new AgentContext();
-        subContext.setAgentRole(AgentRole.REVIEWER);
-        subContext.setParentRunId("parent-run");
+    public void agentRoleTagShouldDistinguishRootAndDelegate() {
+        AgentContext root = new AgentContext();
+        assertEquals("root", ModelCallTraceLabels.agentRoleTag(root));
 
-        Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(
-                subContext, "sub_agent_dispatch", "complete.agent_decision",
-                ModelCallPurpose.CONTROL_JSON, "deepseek-v4-flash", null, null);
-
-        assertEquals("REVIEWER.sub", metadata.get("agentRole"));
+        AgentContext sub = new AgentContext();
+        sub.setParentRunId("parent-1");
+        assertEquals("delegate", ModelCallTraceLabels.agentRoleTag(sub));
     }
 
     @Test
-    public void agentRoleTagShouldDistinguishRootAndSub() {
-        AgentContext root = new AgentContext();
-        root.setAgentRole(AgentRole.EDITOR);
-        assertEquals("EDITOR", ModelCallTraceLabels.agentRoleTag(root));
+    public void buildUsageMetadataShouldEncodeDelegateInAgentRole() {
+        AgentContext subContext = new AgentContext();
+        subContext.setParentRunId("parent-run");
 
-        AgentContext sub = new AgentContext();
-        sub.setAgentRole(AgentRole.EDITOR);
-        sub.setParentRunId("parent-1");
-        assertEquals("EDITOR.sub", ModelCallTraceLabels.agentRoleTag(sub));
+        Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(
+                subContext, "model_call", "complete.agent_decision",
+                ModelCallPurpose.CONTROL_JSON, "deepseek-v4-flash", null, null);
+
+        assertEquals("delegate", metadata.get("agentRole"));
     }
 
     @Test
@@ -52,7 +42,6 @@ public class ModelCallTraceLabelsTest {
         context.setRunId("run-1");
         context.setRequestId("req-1");
         context.setConversationId("conv-1");
-        context.setAgentRole(AgentRole.EXPLORER);
 
         Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(
                 context, "model_call", "complete.agent_decision",

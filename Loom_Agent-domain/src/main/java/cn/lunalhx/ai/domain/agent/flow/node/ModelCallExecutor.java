@@ -30,20 +30,20 @@ final class ModelCallExecutor {
 
     ModelCallResult execute(AgentContext context, String requestedModel, int requestedMaxTokens,
                             long deadlineEpochMs, int escalatedMaxTokens,
-                            boolean initialBudgetChecked) {
+                            boolean initialBudgetChecked, cn.lunalhx.ai.domain.agent.service.context.PreparedContextView view) {
         boolean escalated = false;
         int currentMaxTokens = requestedMaxTokens;
 
         while (true) {
             if (!initialBudgetChecked || escalated) {
                 BudgetCheckResult check = budgetCoordinator.checkBeforeModelCall(context,
-                        AgentNodeNames.MODEL_CALL, requestedModel, currentMaxTokens);
+                        AgentNodeNames.MODEL_CALL, requestedModel, currentMaxTokens, view);
                 if (!budgetCoordinator.isAllowed(check)) {
                     return ModelCallResult.budgetBlocked(check);
                 }
             }
 
-            ChatPrompt prompt = promptFactory.build(context, requestedModel, currentMaxTokens, deadlineEpochMs);
+            ChatPrompt prompt = promptFactory.build(context, requestedModel, currentMaxTokens, deadlineEpochMs, view);
             ModelChatResult result;
             try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
                 long remainingMs = Math.max(1L, deadlineEpochMs - System.currentTimeMillis());

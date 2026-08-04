@@ -1,6 +1,5 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import lombok.AllArgsConstructor;
@@ -22,10 +21,8 @@ public class AgentRun {
     private String rootRunId;
     private String requestId;
     private String conversationId;
-    private AgentRole agentRole;
     private AgentRunKind runKind;
     private Integer depth;
-    private Integer childOrdinal;
     private String question;
     private String workspace;
     private AgentRunStatus status;

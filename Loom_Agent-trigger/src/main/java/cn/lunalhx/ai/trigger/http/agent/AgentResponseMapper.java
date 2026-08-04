@@ -6,11 +6,6 @@ import cn.lunalhx.ai.api.dto.AgentReplayResponse;
 import cn.lunalhx.ai.api.dto.AgentStreamEvent;
 import cn.lunalhx.ai.api.dto.AgentTraceEventDTO;
 import cn.lunalhx.ai.api.dto.AgentTraceTimelineResponse;
-import cn.lunalhx.ai.api.dto.DiffHunkPayload;
-import cn.lunalhx.ai.api.dto.DiffLinePayload;
-import cn.lunalhx.ai.api.dto.DiffPayload;
-import cn.lunalhx.ai.api.dto.DiffStatsPayload;
-import cn.lunalhx.ai.api.dto.InlineDiffPartPayload;
 import cn.lunalhx.ai.api.dto.TokenUsageDTO;
 import cn.lunalhx.ai.api.dto.AgentUsageSummaryDTO;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -19,11 +14,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
-import cn.lunalhx.ai.domain.tool.model.ApprovalDiff;
-import cn.lunalhx.ai.domain.tool.model.DiffHunk;
-import cn.lunalhx.ai.domain.tool.model.DiffLine;
-import cn.lunalhx.ai.domain.tool.model.DiffStats;
-import cn.lunalhx.ai.domain.tool.model.InlineDiffPart;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -45,10 +35,6 @@ public class AgentResponseMapper {
                 .conversationId(event.getConversationId())
                 .workspace(event.getWorkspace())
                 .parentRunId(event.getParentRunId())
-                .subAgentRunId(event.getSubAgentRunId())
-                .subAgentTaskId(event.getSubAgentTaskId())
-                .subAgentRole(event.getSubAgentRole())
-                .subAgentStatus(event.getSubAgentStatus())
                 .elapsedMs(event.getElapsedMs())
                 .step(event.getStep())
                 .node(event.getNode())
@@ -58,10 +44,8 @@ public class AgentResponseMapper {
                 .toolCallId(event.getToolCallId())
                 .input(event.getInput())
                 .approvalId(event.getApprovalId())
-                .permissionLevel(event.getPermissionLevel())
                 .riskReason(event.getRiskReason())
                 .operationPreview(event.getOperationPreview())
-                .diff(toDiffPayload(event.getDiff()))
                 .expiresAt(event.getExpiresAt() == null ? null : event.getExpiresAt().toString())
                 .observation(event.getObservation())
                 .truncated(event.getTruncated())
@@ -70,7 +54,6 @@ public class AgentResponseMapper {
                 .stepCount(event.getStepCount())
                 .code(event.getCode())
                 .message(event.getMessage())
-                .plan(event.getPlan())
                 .checkpointVersion(event.getCheckpointVersion())
                 .recoverable(event.getRecoverable())
                 .metadata(event.getMetadata())
@@ -89,10 +72,8 @@ public class AgentResponseMapper {
                 .workspace(approval.getWorkspaceDisplayName())
                 .tool(approval.getTool())
                 .input(approval.getInput())
-                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
-                .diff(toDiffPayload(approval.getDiff()))
                 .metadata(approval.getMetadata())
                 .expiresAt(approval.getExpiresAt() == null ? null : approval.getExpiresAt().toString())
                 .build();
@@ -179,77 +160,6 @@ public class AgentResponseMapper {
                 .replayable(event.getReplayable())
                 .sensitiveRedacted(event.getSensitiveRedacted())
                 .createdAt(event.getCreatedAt() == null ? null : event.getCreatedAt().toString())
-                .build();
-    }
-
-    private DiffPayload toDiffPayload(ApprovalDiff diff) {
-        if (diff == null) {
-            return null;
-        }
-        return DiffPayload.builder()
-                .format(diff.getFormat())
-                .path(diff.getPath())
-                .oldText(diff.getOldText())
-                .newText(diff.getNewText())
-                .unifiedDiff(diff.getUnifiedDiff())
-                .editable(diff.getEditable())
-                .hunks(toDiffHunks(diff.getHunks()))
-                .stats(toDiffStats(diff.getStats()))
-                .build();
-    }
-
-    private List<DiffHunkPayload> toDiffHunks(List<DiffHunk> hunks) {
-        if (hunks == null) {
-            return null;
-        }
-        return hunks.stream()
-                .map(hunk -> DiffHunkPayload.builder()
-                        .oldStart(hunk.getOldStart())
-                        .oldLines(hunk.getOldLines())
-                        .newStart(hunk.getNewStart())
-                        .newLines(hunk.getNewLines())
-                        .lines(toDiffLines(hunk.getLines()))
-                        .build())
-                .toList();
-    }
-
-    private List<DiffLinePayload> toDiffLines(List<DiffLine> lines) {
-        if (lines == null) {
-            return null;
-        }
-        return lines.stream()
-                .map(line -> DiffLinePayload.builder()
-                        .type(line.getType())
-                        .oldLineNumber(line.getOldLineNumber())
-                        .newLineNumber(line.getNewLineNumber())
-                        .text(line.getText())
-                        .pairId(line.getPairId())
-                        .foldedCount(line.getFoldedCount())
-                        .inlineDiff(toInlineDiff(line.getInlineDiff()))
-                        .build())
-                .toList();
-    }
-
-    private List<InlineDiffPartPayload> toInlineDiff(List<InlineDiffPart> parts) {
-        if (parts == null) {
-            return null;
-        }
-        return parts.stream()
-                .map(part -> InlineDiffPartPayload.builder()
-                        .type(part.getType())
-                        .text(part.getText())
-                        .build())
-                .toList();
-    }
-
-    private DiffStatsPayload toDiffStats(DiffStats stats) {
-        if (stats == null) {
-            return null;
-        }
-        return DiffStatsPayload.builder()
-                .added(stats.getAdded())
-                .removed(stats.getRemoved())
-                .modified(stats.getModified())
                 .build();
     }
 

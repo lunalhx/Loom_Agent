@@ -3,20 +3,20 @@ package cn.lunalhx.ai.domain.agent.service.context;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
-import cn.lunalhx.ai.domain.agent.model.entity.ConversationLedger;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,23 +25,20 @@ public final class AgentContextFactory {
     private final AgentRuntimeProperties properties;
     private final AgentWorkspaceResolver workspaceResolver;
     private final List<ToolSpec> toolSpecs;
-    private final boolean subAgentAvailable;
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
     private final AgentRuntimeConfigSource runtimeConfigSource;
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
-                               List<ToolSpec> toolSpecs,
-                               boolean subAgentAvailable) {
-        this(properties, workspaceResolver, toolSpecs, subAgentAvailable, null);
+                               List<ToolSpec> toolSpecs) {
+        this(properties, workspaceResolver, toolSpecs, null);
     }
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
                                List<ToolSpec> toolSpecs,
-                               boolean subAgentAvailable,
-                               ConversationLedgerAppendService ledgerAppendService) {
-        this(properties, workspaceResolver, toolSpecs, subAgentAvailable, ledgerAppendService,
+                               ConversationHistoryAppendService ledgerAppendService) {
+        this(properties, workspaceResolver, toolSpecs, ledgerAppendService,
                 () -> AgentRunConfig.startup(properties,
                         new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties()));
     }
@@ -49,13 +46,11 @@ public final class AgentContextFactory {
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
                                List<ToolSpec> toolSpecs,
-                               boolean subAgentAvailable,
-                               ConversationLedgerAppendService ledgerAppendService,
+                               ConversationHistoryAppendService ledgerAppendService,
                                AgentRuntimeConfigSource runtimeConfigSource) {
         this.properties = properties;
         this.workspaceResolver = workspaceResolver;
         this.toolSpecs = List.copyOf(toolSpecs);
-        this.subAgentAvailable = subAgentAvailable;
         this.ledgerAppendService = ledgerAppendService;
         this.runtimeConfigSource = runtimeConfigSource;
     }
@@ -69,7 +64,6 @@ public final class AgentContextFactory {
         if (StringUtils.isBlank(question.getConversationId())) {
             context.setConversationId(UUID.randomUUID().toString());
         }
-        context.setRequestedSkills(question.getSkills());
         return context;
     }
 
@@ -88,9 +82,7 @@ public final class AgentContextFactory {
         context.setRootRunId(rootRunId);
         context.setRequestId(requestId);
         context.setConversationId(question.getConversationId());
-        context.setAgentRole(question.getAgentRole());
         context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
-        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
         context.setQuestion(StringUtils.trim(question.getQuestion()));
         context.setPathScope(question.getPathScope());
         context.setResolvedWorkspace(workspace.getRoot());
@@ -101,46 +93,27 @@ public final class AgentContextFactory {
         context.setStartedAt(Instant.now());
         context.setStep(0);
         context.setParseErrors(0);
-        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
-        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
-        if (context.isSubAgentSpawnAllowed()) {
-            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        context.setToolSpecs(specs);
+        context.setToolSpecs(toolSpecs);
+        context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
+        context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         initStepBudget(context, question);
 
-        // ---- C9R: Restore ledger/prefix/generation, defer bootstrap to RenderPromptNode ----
         if (previous != null) {
-            // Restore ledger from previous snapshot
             if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
-                context.setConversationLedger(ConversationLedger.fromPersisted(
-                        new java.util.ArrayList<>(previous.getLedgerEntries()),
+                context.setConversationHistory(ConversationHistory.fromPersisted(
+                        new ArrayList<>(previous.getLedgerEntries()),
                         previous.getLedgerNextSequence()));
             }
-
-            // Restore stable prefix and generation
             if (previous.getStablePrefix() != null) {
                 context.setStablePrefix(previous.getStablePrefix());
                 context.setGeneration(Math.max(0, previous.getGeneration()));
             }
-
-            // Restore memory recall state (prevent re-recall on continuation)
-            if (Boolean.TRUE.equals(previous.getMemoryRecallExecuted())) {
-                context.setMemoryRecallExecuted(true);
-                context.setMemoryRecallIds(previous.getMemoryRecallIds());
-                context.setMemoryRecallCount(previous.getMemoryRecallCount() == null ? 0 : previous.getMemoryRecallCount());
-                context.setMemoryRecallChars(previous.getMemoryRecallChars() == null ? 0 : previous.getMemoryRecallChars());
-                context.setMemoryRecallRenderedText(previous.getMemoryRecallRenderedText());
-            }
         }
 
-        // Defer ledger append to bootstrap
-        // Store as pending — bootstrap will append after any config change marker
         context.setPendingContinuation(context.getQuestion());
 
-        context.setRequestedSkills(question.getSkills());
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }
@@ -154,9 +127,7 @@ public final class AgentContextFactory {
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
         context.setRequestId(StringUtils.defaultIfBlank(question.getRequestId(), UUID.randomUUID().toString()));
         context.setConversationId(StringUtils.defaultIfBlank(question.getConversationId(), UUID.randomUUID().toString()));
-        context.setAgentRole(question.getAgentRole());
         context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
-        context.setChildOrdinal(question.getChildOrdinal() == null ? 0 : question.getChildOrdinal());
         context.setQuestion(StringUtils.trim(question.getQuestion()));
         context.setPathScope(question.getPathScope());
         context.setResolvedWorkspace(workspace.getRoot());
@@ -165,16 +136,39 @@ public final class AgentContextFactory {
         AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         context.setMaxSteps(question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps());
         context.setStartedAt(Instant.now());
-        context.setSubAgentSpawnAllowed(shouldAllowSubAgents(question, context));
-        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
-        if (context.isSubAgentSpawnAllowed()) {
-            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        context.setToolSpecs(specs);
+        context.setToolSpecs(toolSpecs);
+        context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
+        context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         initStepBudget(context, question);
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }
+    }
+
+    private List<String> normalizeAllowedTools(List<String> allowedTools) {
+        if (allowedTools == null || allowedTools.isEmpty()) {
+            return null;
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String name : allowedTools) {
+            if (name != null) {
+                String trimmed = name.trim();
+                if (!trimmed.isEmpty()) {
+                    normalized.add(trimmed);
+                }
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    private String resolveApprovalPolicy(AgentQuestion question, AgentRuntimeProperties runProperties) {
+        if (question.getApprovalPolicy() != null && !question.getApprovalPolicy().isBlank()) {
+            String p = question.getApprovalPolicy().trim();
+            if ("ask".equalsIgnoreCase(p) || "auto".equalsIgnoreCase(p) || "never".equalsIgnoreCase(p)) {
+                return p.toLowerCase();
+            }
+        }
+        return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
     }
 
     private void initStepBudget(AgentContext context, AgentQuestion question) {
@@ -207,14 +201,7 @@ public final class AgentContextFactory {
         restoreWorkspace(context, workspace);
         context.setStartedAt(Instant.now());
         context.setCheckpointVersion(checkpointVersion);
-        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
-        // re-inject toolSpecs and sub-agent capability from current configuration
-        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
-        if (context.isSubAgentSpawnAllowed()) {
-            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        context.setToolSpecs(specs);
-        // C9R: Config fingerprint check moved to LedgerBootstrapService in RenderPromptNode
+        context.setToolSpecs(toolSpecs);
         return context;
     }
 
@@ -225,24 +212,8 @@ public final class AgentContextFactory {
         context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
         context.setStartedAt(Instant.now());
         context.setPendingApprovalId(null);
-        context.setSubAgentSpawnAllowed(context.isSubAgentSpawnAllowed() && subAgentAvailable);
-        List<ToolSpec> specs = new java.util.ArrayList<>(toolSpecs);
-        if (context.isSubAgentSpawnAllowed()) {
-            specs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        context.setToolSpecs(specs);
-        // C9R: Config fingerprint check moved to LedgerBootstrapService
+        context.setToolSpecs(toolSpecs);
         return context;
-    }
-
-    private boolean shouldAllowSubAgents(AgentQuestion question, AgentContext context) {
-        boolean requested = question.getSubAgentSpawnAllowed() == null || Boolean.TRUE.equals(question.getSubAgentSpawnAllowed());
-        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-        return requested
-                && subAgentAvailable
-                && Boolean.TRUE.equals(runProperties.getSubAgentEnabled())
-                && context.getAgentDepth() < Math.max(1,
-                runProperties.getSubAgentMaxDepth() == null ? 1 : runProperties.getSubAgentMaxDepth());
     }
 
     private void restoreWorkspace(AgentContext context, String workspace) {
@@ -250,50 +221,5 @@ public final class AgentContextFactory {
         context.setResolvedWorkspace(resolved.getRoot());
         context.setWorkspace(resolved.getWorkspace());
         context.setWorkspaceDisplayName(resolved.getDisplayName());
-    }
-
-    // ================================================================
-    // Deprecated: computeConfigFingerprint kept only for test compat.
-    // Generation decisions now use StablePrefix.fingerprint().
-    // ================================================================
-
-    /**
-     * @deprecated Use {@code StablePrefix.fingerprint()} for generation decisions.
-     */
-    @Deprecated
-    public String computeConfigFingerprint() {
-        StringBuilder sb = new StringBuilder();
-        List<ToolSpec> allSpecs = new java.util.ArrayList<>(toolSpecs);
-        if (subAgentAvailable) {
-            allSpecs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        allSpecs.sort(java.util.Comparator.comparing(ToolSpec::getName));
-        for (ToolSpec spec : allSpecs) {
-            sb.append(spec.getName()).append(':')
-                    .append(spec.getDescription()).append(':')
-                    .append(spec.getInputSchema() == null ? "{}" : spec.getInputSchema())
-                    .append(';');
-        }
-        return DigestUtils.sha256Hex(sb.toString());
-    }
-
-    /**
-     * @deprecated Use {@code StablePrefix.fingerprint()} for generation decisions.
-     */
-    @Deprecated
-    public String computeConfigFingerprint(List<ToolSpec> overrideSpecs, boolean subAgentAvail) {
-        StringBuilder sb = new StringBuilder();
-        List<ToolSpec> allSpecs = new java.util.ArrayList<>(overrideSpecs);
-        if (subAgentAvail) {
-            allSpecs.add(SubAgentToolSpecs.spawnAgentsSpec());
-        }
-        allSpecs.sort(java.util.Comparator.comparing(ToolSpec::getName));
-        for (ToolSpec spec : allSpecs) {
-            sb.append(spec.getName()).append(':')
-                    .append(spec.getDescription()).append(':')
-                    .append(spec.getInputSchema() == null ? "{}" : spec.getInputSchema())
-                    .append(';');
-        }
-        return DigestUtils.sha256Hex(sb.toString());
     }
 }

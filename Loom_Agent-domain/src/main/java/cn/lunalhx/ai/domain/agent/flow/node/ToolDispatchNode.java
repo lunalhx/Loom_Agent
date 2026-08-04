@@ -11,52 +11,38 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.PlanItemVerification;
-import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationLedgerInitializer;
-import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
-import cn.lunalhx.ai.domain.tool.model.ToolOperation;
-import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.codec.digest.DigestUtils;
 
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 public class ToolDispatchNode extends AbstractAgentNode {
 
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
     private final AgentHookRegistry hookRegistry;
-    private final ContextWindowManager contextWindowManager;
-    private final ConversationLedgerAppendService ledgerAppendService;
+    private final ConversationHistoryAppendService ledgerAppendService;
 
     public ToolDispatchNode(ToolRegistry toolRegistry,
                             AgentRuntimeProperties properties,
                             AgentHookRegistry hookRegistry,
-                            ContextWindowManager contextWindowManager,
-                            ConversationLedgerAppendService ledgerAppendService) {
+                            ConversationHistoryAppendService ledgerAppendService) {
         super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input", "step"));
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
-        this.contextWindowManager = Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
         AgentDecision decision = context.getDecision();
-        var skillToolPolicy = context.getActivatedSkillToolPolicy();
         ToolCall toolCall = ToolCall.builder()
                 .name(decision.getTool())
                 .toolCallId(toolCallId(context, decision))
@@ -66,32 +52,10 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .runId(context.getRunId())
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
-                .approvedPolicyFingerprint(context.getApprovedPolicyFingerprint())
-                .activeSkillNames(context.getActivatedSkills() == null ? List.of()
-                        : context.getActivatedSkills().stream()
-                                .map(cn.lunalhx.ai.domain.agent.model.entity.SkillActivation::name)
-                                .collect(Collectors.toList()))
-                .skillToolRestrictionActive(skillToolPolicy.restricted())
-                .allowedToolNames(List.copyOf(skillToolPolicy.allowedTools()))
                 .runtimeProperties(context.runtimeProperties(properties))
                 .build();
-        ToolPolicyDecision policy = toolRegistry.policy(toolCall);
-        boolean resumedApproval = StringUtils.equals(context.getApprovedTool(), decision.getTool());
-        String currentPolicyFingerprint = policy == null ? null : policy.getPolicyFingerprint();
-        boolean fingerprintedApproval = resumedApproval
-                && (StringUtils.isNotBlank(context.getApprovedPolicyFingerprint())
-                || StringUtils.isNotBlank(currentPolicyFingerprint));
-        if (fingerprintedApproval
-                && !StringUtils.equals(context.getApprovedPolicyFingerprint(), currentPolicyFingerprint)) {
-            clearApprovedPolicy(context);
-            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
-        }
-        clearApprovedPolicy(context);
 
         context.setStep(context.getStep() + 1);
-        context.setUnsafeResumeRequired(policy != null && (policy.getPermissionLevel() == ToolPermissionLevel.WRITE_CONFIRM
-                || policy.getPermissionLevel() == ToolPermissionLevel.PERSISTENT_STATE_WRITE
-                || policy.getPermissionLevel() == ToolPermissionLevel.HIGH_RISK_CONFIRM));
 
         List<AgentEvent> events = new ArrayList<>();
         events.addAll(hookRegistry.trigger(AgentHookEvent.BEFORE_TOOL, AgentHookContext.builder()
@@ -102,22 +66,6 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .build()));
 
         ToolResult result = toolRegistry.call(toolCall);
-        if (resumedApproval && "approval_stale".equals(result.getErrorCode())) {
-            context.setUnsafeResumeRequired(false);
-            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, events);
-        }
-        context.setUnsafeResumeRequired(false);
-        result = contextWindowManager.prepareToolResult(context, result);
-        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-        if (!contextEnabled(context) && StringUtils.length(result.getObservation()) > runProperties.getObservationMaxChars()) {
-            result.setObservation(StringUtils.abbreviate(result.getObservation(), runProperties.getObservationMaxChars()));
-            result.setTruncated(true);
-        }
-        if ("todo_write".equals(decision.getTool()) && result.isSuccess()) {
-            result = applyTodoWrite(context, result);
-            appendPlanSnapshotIfChanged(context);
-        }
-        trackExecutionState(context, decision, result);
         context.setToolResult(result);
 
         events.add(event(context, AgentEventType.THOUGHT)
@@ -132,12 +80,6 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .input(decision.getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
-        if ("todo_write".equals(decision.getTool()) && result.isSuccess() && context.getPlan() != null) {
-            events.add(event(context, AgentEventType.PLAN_UPDATED)
-                    .step(context.getStep())
-                    .plan(context.getPlan().toView())
-                    .build());
-        }
         events.addAll(hookRegistry.trigger(AgentHookEvent.AFTER_TOOL, AgentHookContext.builder()
                 .agentContext(context)
                 .node(name())
@@ -148,111 +90,12 @@ public class ToolDispatchNode extends AbstractAgentNode {
         return NodeResult.next(AgentNodeNames.OBSERVATION, events);
     }
 
-    private void clearApprovedPolicy(AgentContext context) {
-        context.setApprovedTool(null);
-        context.setApprovedPolicyFingerprint(null);
-    }
-
     private String toolCallId(AgentContext context, AgentDecision decision) {
         String input = decision.getInput() == null ? "" : decision.getInput().toString();
         return DigestUtils.sha256Hex(
                 context.getRunId() + "|" + (context.getStep() + 1)
                         + "|" + decision.getTool() + "|" + input)
                 .substring(0, 24);
-    }
-
-    private ToolResult applyTodoWrite(AgentContext context, ToolResult original) {
-        try {
-            if (context.getPlan() == null) {
-                context.setPlan(new cn.lunalhx.ai.domain.agent.model.entity.AgentPlan());
-            }
-            int submittedTodos = context.getDecision().getInput().path("todos").size();
-            context.getPlan().applyTodoWrite(context.getDecision().getInput());
-            return ToolResult.success("Updated " + submittedTodos + " planned tasks", false, original.getElapsedMs());
-        } catch (Exception e) {
-            return ToolResult.failure("todo_write_failed", e.getMessage(), original.getElapsedMs());
-        }
-    }
-
-    private boolean contextEnabled(AgentContext context) {
-        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-        return runProperties.getContext() != null && Boolean.TRUE.equals(runProperties.getContext().getEnabled());
-    }
-
-    private void trackExecutionState(AgentContext context, AgentDecision decision,
-                                     ToolResult result) {
-        String tool = decision == null ? null : decision.getTool();
-        if (result != null && result.isSuccess() && ToolOperation.isRead(tool)) {
-            context.setCodeReadObserved(true);
-            LinkedHashSet<String> read = new LinkedHashSet<>(context.getReadFiles());
-            read.addAll(ToolOperation.inputPaths(decision.getInput()));
-            context.setReadFiles(read);
-        }
-        if (result != null && result.isSuccess()
-                && ToolOperation.isWorkspaceWrite(tool)) {
-            context.setLastWriteStep(context.getStep());
-            context.setLastTestPassed(null);
-            context.setLastTestExitCode(null);
-            context.setChangedSincePassingTest(true);
-            LinkedHashSet<String> touched = new LinkedHashSet<>(context.getTouchedFiles());
-            touched.addAll(ToolOperation.inputPaths(decision.getInput()));
-            context.setTouchedFiles(touched);
-        }
-        if (result != null && result.getDetails() != null
-                && "TEST".equals(result.getDetails().get("operationKind"))) {
-            context.setLastTestStep(context.getStep());
-            context.setLastTestPassed(result.isSuccess());
-            if (result.isSuccess()) {
-                context.setChangedSincePassingTest(false);
-            }
-            Number exitCode = result.getDetails().get("exitCode") instanceof Number n ? n : null;
-            if (exitCode == null) {
-                exitCode = result.isSuccess() ? 0 : 1;
-            }
-            context.setLastTestExitCode(exitCode.intValue());
-            if (context.getPlan() != null) {
-                var verifyItem = context.getPlan().activeVerifyItem();
-                if (verifyItem != null) {
-                    String command = decision.getInput() != null
-                            ? decision.getInput().path("command").asText("")
-                            : null;
-                    if (StringUtils.isBlank(command)) {
-                        command = tool;
-                    }
-                    int exitCodeVal = exitCode != null ? exitCode.intValue() : (result.isSuccess() ? 0 : 1);
-                    verifyItem.setVerification(PlanItemVerification.builder()
-                            .command(command)
-                            .passed(result.isSuccess())
-                            .exitCode(exitCodeVal)
-                            .summary(result.isSuccess()
-                                    ? "passed"
-                                    : "failed: " + StringUtils.abbreviate(result.getObservation(), 100))
-                            .build());
-                    verifyItem.setEvidence(result.isSuccess()
-                            ? "测试通过 (exit code " + exitCodeVal + ")"
-                            : "测试失败 (exit code " + exitCodeVal + ")");
-                    verifyItem.setUpdateTime(Instant.now());
-                }
-            }
-        }
-    }
-
-    private void appendPlanSnapshotIfChanged(AgentContext context) {
-        if (ledgerAppendService == null) {
-            return;
-        }
-        if (context.getPlan() == null) {
-            return;
-        }
-        int currentVersion = context.getPlan().getVersion();
-        if (currentVersion <= context.getLastLedgerPlanVersion()) {
-            return;
-        }
-        String text = ControlUpdateTexts.renderPlanSnapshot(context.getPlan());
-        String eventKey = ConversationLedgerInitializer.eventKey(
-                context.getRunId(), "plan", "v" + currentVersion);
-        ledgerAppendService.appendControlUpdate(context, text, eventKey);
-        context.setLastLedgerPlanVersion(currentVersion);
     }
 
 }

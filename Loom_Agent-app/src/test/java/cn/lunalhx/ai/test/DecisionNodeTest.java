@@ -6,12 +6,9 @@ import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.service.subagent.SubAgentToolSpecs;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
-import cn.lunalhx.ai.domain.tool.model.ToolPolicyDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
@@ -39,11 +36,6 @@ public class DecisionNodeTest {
             }
 
             @Override
-            public ToolPolicyDecision policy(ToolCall call) {
-                return ToolPolicyDecision.readOnly("test", name);
-            }
-
-            @Override
             public ToolResult call(ToolCall call) {
                 return ToolResult.success("ok", false, 0L);
             }
@@ -66,7 +58,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertNotNull(ctx.getToolResult());
         assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
         assertTrue(ctx.getToolResult().getObservation().contains("cmd"));
@@ -86,7 +78,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
     }
 
@@ -104,7 +96,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
     }
 
@@ -178,7 +170,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
         assertTrue(ctx.getToolResult().getObservation().contains("unknown"));
     }
@@ -198,7 +190,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
     }
 
@@ -269,26 +261,6 @@ public class DecisionNodeTest {
         node.apply(ctx);
 
         assertEquals(240, ctx.getDecision().getReason().length());
-    }
-
-    // ---- Spawn agents ----
-
-    @Test
-    public void spawnAgentsWithInvalidInputFailsValidation() {
-        ToolRegistry registry = new ToolRegistry(List.of(), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setSubAgentSpawnAllowed(true);
-        ctx.setModelOutput(
-                "{\"type\":\"action\",\"tool\":\"spawn_agents\",\"input\":{\"reason\":\"test\",\"returnMode\":\"summary_only\"}}");
-        ctx.setToolSpecs(List.of(SubAgentToolSpecs.spawnAgentsSpec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
-        assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
     }
 
     // ---- Helper ----
@@ -381,7 +353,7 @@ public class DecisionNodeTest {
         NodeResult result = node.apply(ctx);
 
         // Normalization succeeded but schema validation should fail
-        assertEquals(AgentNodeNames.REPLAN_GUARD, result.getNextNode());
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
     }
 

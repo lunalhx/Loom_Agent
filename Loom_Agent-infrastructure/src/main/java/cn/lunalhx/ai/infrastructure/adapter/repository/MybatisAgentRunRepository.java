@@ -3,7 +3,6 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationSummary;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunDao;
@@ -66,10 +65,8 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
         po.setRootRunId(run.getRootRunId());
         po.setRequestId(run.getRequestId());
         po.setConversationId(run.getConversationId());
-        po.setAgentRole(run.getAgentRole() == null ? null : run.getAgentRole().name());
         po.setRunKind(run.getRunKind() == null ? null : run.getRunKind().name());
         po.setDepth(run.getDepth());
-        po.setChildOrdinal(run.getChildOrdinal());
         po.setQuestion(run.getQuestion());
         po.setWorkspace(run.getWorkspace());
         po.setStatus(run.getStatus() == null ? null : run.getStatus().name());
@@ -90,10 +87,8 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .rootRunId(po.getRootRunId())
                 .requestId(po.getRequestId())
                 .conversationId(po.getConversationId())
-                .agentRole(po.getAgentRole() == null ? null : AgentRole.valueOf(po.getAgentRole()))
                 .runKind(po.getRunKind() == null ? null : AgentRunKind.valueOf(po.getRunKind()))
                 .depth(po.getDepth())
-                .childOrdinal(po.getChildOrdinal())
                 .question(po.getQuestion())
                 .workspace(po.getWorkspace())
                 .status(po.getStatus() == null ? null : AgentRunStatus.valueOf(po.getStatus()))

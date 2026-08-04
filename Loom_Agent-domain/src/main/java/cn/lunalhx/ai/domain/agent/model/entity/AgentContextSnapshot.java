@@ -7,13 +7,10 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRole;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
-import cn.lunalhx.ai.domain.agent.model.valobj.ReplanReason;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
@@ -28,15 +25,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v6 — only durable state needed for recovery (v6 adds incremental context summary).
+ * Checkpoint snapshot v7 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v5 adds approvalGrants. v6 adds contextSummaryText and contextSummaryThroughSequence.
- * Older snapshots with missing fields restore with safe defaults, while v2 snapshots missing
- * ledger fields are re-initialized by the appropriate initializer node.
+ * <p>v7 removes all legacy compression state (compaction depth/generation, durable summary,
+ * Transcript artifacts) and adds working context memory. Only v7 snapshots are recoverable;
+ * v6 and earlier are rejected at restore time.
  */
 @Data
 @Builder
@@ -44,7 +41,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 6;
+    private int schemaVersion = 7;
 
     // -- identity (durable) --
     private String runId;
@@ -52,9 +49,7 @@ public class AgentContextSnapshot {
     private String rootRunId;
     private String requestId;
     private String conversationId;
-    private AgentRole agentRole;
     private Integer agentDepth;
-    private Integer childOrdinal;
 
     // -- run definition (durable) --
     private String question;
@@ -82,13 +77,6 @@ public class AgentContextSnapshot {
     private Integer segmentIndex;
     private Integer segmentStartStep;
     private Integer stopHookContinuationCount;
-    private String lastActionFingerprint;
-    private Integer sameActionRepeats;
-    private String lastFailureFingerprint;
-    private Integer sameFailureRepeats;
-    private Boolean repeatedFailureReplanAttempted;
-    private Integer replanAttemptsForFailure;
-    private Integer noProgressRounds;
     private Boolean codeReadObserved;
     private Integer lastWriteStep;
     private Integer lastTestStep;
@@ -102,9 +90,6 @@ public class AgentContextSnapshot {
     // -- action (durable) --
     private AgentDecision decision;
     private ToolResult toolResult;
-    private AgentPlan plan;
-    private ReplanReason replanReason;
-    private String replanMessage;
 
     // -- approval (durable) --
     private Boolean unsafeResumeRequired;
@@ -130,18 +115,12 @@ public class AgentContextSnapshot {
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
 
-    // -- skill (durable subset; catalog and catalog text re-injected) --
-    private List<String> requestedSkills;
-    private List<SkillActivation> activatedSkills;
-    private List<String> approvedSkillNames;
-    private List<String> rejectedSkillNames;
-
     // -- trace (only root identity; span IDs are transient) --
     private String traceId;
     private Long traceSequenceNo;
 
-    // -- conversation ledger (v3) --
-    private List<ConversationLedgerEntry> ledgerEntries;
+    // -- conversation history (v3) --
+    private List<ConversationHistoryEntry> ledgerEntries;
     private long ledgerNextSequence;
     private StablePrefix stablePrefix;
     private int generation;
@@ -151,26 +130,14 @@ public class AgentContextSnapshot {
      *  Used on continuation/resume to detect config drift and trigger generation bumps. */
     private String configFingerprint;
 
-    // -- ledger compaction (C10) --
-    private int lastCompactionGeneration;
-    private String ledgerBaselineArtifactId;
-
-    // -- memory recall (v6) --
-    private Boolean memoryRecallExecuted;
-    private List<String> memoryRecallIds;
-    private Integer memoryRecallCount;
-    private Integer memoryRecallChars;
-    private String memoryRecallRenderedText;
-
-    // -- incremental context summary (v6, TODO7 Phase 2) --
-    private String contextSummaryText;
-    private long contextSummaryThroughSequence;
+    // -- working context memory (v7) --
+    private cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory workingMemory;
 
     // ---- factory methods ----
 
     /** Defensive copy of ledger entries for snapshot isolation. */
-    private static List<ConversationLedgerEntry> captureLedgerEntries(AgentContext context) {
-        ConversationLedger ledger = context.prompt().conversationLedger();
+    private static List<ConversationHistoryEntry> captureLedgerEntries(AgentContext context) {
+        ConversationHistory ledger = context.prompt().conversationHistory();
         if (ledger == null || ledger.isEmpty()) {
             return null;
         }
@@ -185,20 +152,17 @@ public class AgentContextSnapshot {
         AgentApprovalState approval = context.approval();
         AgentBudgetState budget = context.budget();
         AgentRecoveryState recovery = context.recovery();
-        AgentSkillState skill = context.skill();
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(6)
+                .schemaVersion(8)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
                 .rootRunId(id.rootRunId())
                 .requestId(id.requestId())
                 .conversationId(id.conversationId())
-                .agentRole(id.agentRole())
                 .agentDepth(id.agentDepth())
-                .childOrdinal(id.childOrdinal())
                 // run definition
                 .question(def.question())
                 .pathScope(def.pathScope())
@@ -221,13 +185,6 @@ public class AgentContextSnapshot {
                 .segmentIndex(runtime.segmentIndex())
                 .segmentStartStep(runtime.segmentStartStep())
                 .stopHookContinuationCount(runtime.stopHookContinuationCount())
-                .lastActionFingerprint(runtime.lastActionFingerprint())
-                .sameActionRepeats(runtime.sameActionRepeats())
-                .lastFailureFingerprint(runtime.lastFailureFingerprint())
-                .sameFailureRepeats(runtime.sameFailureRepeats())
-                .repeatedFailureReplanAttempted(runtime.repeatedFailureReplanAttempted())
-                .replanAttemptsForFailure(runtime.replanAttemptsForFailure())
-                .noProgressRounds(runtime.noProgressRounds())
                 .codeReadObserved(runtime.codeReadObserved())
                 .lastWriteStep(runtime.lastWriteStep())
                 .lastTestStep(runtime.lastTestStep())
@@ -240,9 +197,6 @@ public class AgentContextSnapshot {
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
-                .plan(action.plan())
-                .replanReason(action.replanReason())
-                .replanMessage(action.replanMessage())
                 // approval
                 .unsafeResumeRequired(approval.unsafeResumeRequired())
                 .pendingApprovalId(approval.pendingApprovalId())
@@ -264,34 +218,19 @@ public class AgentContextSnapshot {
                 .recoveryModelOverride(recovery.recoveryModelOverride())
                 .contextTranscriptArtifactId(recovery.contextTranscriptArtifactId())
                 .contextBlockedReason(recovery.contextBlockedReason())
-                // skill
-                .requestedSkills(skill.requestedSkills() == null ? null : new ArrayList<>(skill.requestedSkills()))
-                .activatedSkills(skill.activatedSkills() == null ? null : new ArrayList<>(skill.activatedSkills()))
-                .approvedSkillNames(skill.approvedSkillNames() == null ? null : new ArrayList<>(skill.approvedSkillNames()))
-                .rejectedSkillNames(skill.rejectedSkillNames() == null ? null : new ArrayList<>(skill.rejectedSkillNames()))
                 // trace
                 .traceId(trace.traceId())
                 .traceSequenceNo(trace.traceSequenceNo())
                 // conversation ledger (v3)
                 .ledgerEntries(captureLedgerEntries(context))
-                .ledgerNextSequence(context.prompt().conversationLedger() != null
-                        ? context.prompt().conversationLedger().nextSequence() : 0)
+                .ledgerNextSequence(context.prompt().conversationHistory() != null
+                        ? context.prompt().conversationHistory().nextSequence() : 0)
                 .stablePrefix(context.prompt().stablePrefix())
                 .generation(context.prompt().generation())
                 // config fingerprint (C9)
                 .configFingerprint(context.prompt().configFingerprint())
-                // ledger compaction (C10)
-                .lastCompactionGeneration(context.prompt().lastCompactionGeneration())
-                .ledgerBaselineArtifactId(context.prompt().ledgerBaselineArtifactId())
-                // memory recall
-                .memoryRecallExecuted(context.isMemoryRecallExecuted())
-                .memoryRecallIds(context.getMemoryRecallIds() == null ? null : new ArrayList<>(context.getMemoryRecallIds()))
-                .memoryRecallCount(context.getMemoryRecallCount())
-                .memoryRecallChars(context.getMemoryRecallChars())
-                .memoryRecallRenderedText(context.getMemoryRecallRenderedText())
-                // incremental context summary (TODO7 Phase 2)
-                .contextSummaryText(context.getContextSummaryText())
-                .contextSummaryThroughSequence(context.getContextSummaryThroughSequence())
+                // working memory (v7)
+                .workingMemory(context.getWorkingMemory())
                 .build();
     }
 
@@ -304,9 +243,7 @@ public class AgentContextSnapshot {
         context.setRootRunId(rootRunId);
         context.setRequestId(requestId);
         context.setConversationId(conversationId);
-        context.setAgentRole(agentRole);
         context.setAgentDepth(agentDepth == null ? 0 : agentDepth);
-        context.setChildOrdinal(childOrdinal == null ? 0 : childOrdinal);
 
         // run definition
         context.setQuestion(question);
@@ -332,13 +269,6 @@ public class AgentContextSnapshot {
         context.setSegmentIndex(segmentIndex == null ? 0 : segmentIndex);
         context.setSegmentStartStep(segmentStartStep == null ? 0 : segmentStartStep);
         context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
-        context.setLastActionFingerprint(lastActionFingerprint);
-        context.setSameActionRepeats(sameActionRepeats == null ? 0 : sameActionRepeats);
-        context.setLastFailureFingerprint(lastFailureFingerprint);
-        context.setSameFailureRepeats(sameFailureRepeats == null ? 0 : sameFailureRepeats);
-        context.setRepeatedFailureReplanAttempted(Boolean.TRUE.equals(repeatedFailureReplanAttempted));
-        context.setReplanAttemptsForFailure(replanAttemptsForFailure == null ? 0 : replanAttemptsForFailure);
-        context.setNoProgressRounds(noProgressRounds == null ? 0 : noProgressRounds);
         context.setCodeReadObserved(Boolean.TRUE.equals(codeReadObserved));
         context.setLastWriteStep(lastWriteStep == null ? 0 : lastWriteStep);
         context.setLastTestStep(lastTestStep == null ? 0 : lastTestStep);
@@ -356,9 +286,6 @@ public class AgentContextSnapshot {
         // action
         context.setDecision(decision);
         context.setToolResult(toolResult);
-        context.setPlan(plan);
-        context.setReplanReason(replanReason);
-        context.setReplanMessage(replanMessage);
 
         // approval
         context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
@@ -384,43 +311,20 @@ public class AgentContextSnapshot {
         context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
         context.setContextBlockedReason(contextBlockedReason);
 
-        // skill
-        context.setRequestedSkills(requestedSkills == null ? null : new ArrayList<>(requestedSkills));
-        context.setActivatedSkills(activatedSkills == null ? null : new ArrayList<>(activatedSkills));
-        context.setApprovedSkillNames(approvedSkillNames == null ? null : new ArrayList<>(approvedSkillNames));
-        context.setRejectedSkillNames(rejectedSkillNames == null ? null : new ArrayList<>(rejectedSkillNames));
-
         // trace
         context.setTraceId(traceId);
         context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
 
         // conversation ledger (v3) — defensive reconstruct
         if (ledgerEntries != null && !ledgerEntries.isEmpty()) {
-            context.setConversationLedger(ConversationLedger.fromPersisted(
+            context.setConversationHistory(ConversationHistory.fromPersisted(
                     new ArrayList<>(ledgerEntries), ledgerNextSequence));
         }
         // stablePrefix is immutable — safe to share
         context.setStablePrefix(stablePrefix);
         context.setGeneration(generation);
         context.setConfigFingerprint(configFingerprint);
-        context.setLastCompactionGeneration(lastCompactionGeneration);
-        context.setLedgerBaselineArtifactId(ledgerBaselineArtifactId);
-
-        // memory recall
-        context.setMemoryRecallExecuted(Boolean.TRUE.equals(memoryRecallExecuted));
-        context.setMemoryRecallIds(memoryRecallIds == null ? null : new ArrayList<>(memoryRecallIds));
-        context.setMemoryRecallCount(memoryRecallCount == null ? 0 : memoryRecallCount);
-        context.setMemoryRecallChars(memoryRecallChars == null ? 0 : memoryRecallChars);
-        context.setMemoryRecallRenderedText(memoryRecallRenderedText);
-
-        // incremental context summary (v6, TODO7 Phase 2) — null/0 for pre-v6 snapshots
-        if (schemaVersion < 6) {
-            context.setContextSummaryText(null);
-            context.setContextSummaryThroughSequence(0);
-        } else {
-            context.setContextSummaryText(contextSummaryText);
-            context.setContextSummaryThroughSequence(contextSummaryThroughSequence);
-        }
+        context.setWorkingMemory(workingMemory);
 
         return context;
     }

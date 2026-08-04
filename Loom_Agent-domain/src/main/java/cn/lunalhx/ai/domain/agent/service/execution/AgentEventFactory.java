@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
-import cn.lunalhx.ai.domain.agent.service.undo.UndoSessionCoordinator;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
 
@@ -56,7 +55,6 @@ public final class AgentEventFactory {
                 .workspace(context.getWorkspaceDisplayName())
                 .parentRunId(context.getParentRunId())
                 .checkpointVersion(context.getCheckpointVersion())
-                .plan(context.getPlan() == null ? null : context.getPlan().toView())
                 .build();
     }
 
@@ -72,7 +70,6 @@ public final class AgentEventFactory {
                 .tool(approval.getTool())
                 .input(approval.getInput())
                 .approvalId(approval.getApprovalId())
-                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
                 .riskReason(approval.getRiskReason())
                 .operationPreview(approval.getOperationPreview())
                 .metadata(approval.getMetadata())
@@ -81,24 +78,7 @@ public final class AgentEventFactory {
     }
 
     public AgentEvent highRiskApprovalRequired(AgentContext context, PendingApproval approval) {
-        return AgentEvent.builder()
-                .type(AgentEventType.HIGH_RISK_APPROVAL_REQUIRED)
-                .runId(context.getRunId())
-                .requestId(context.getRequestId())
-                .conversationId(context.getConversationId())
-                .workspace(approval.getWorkspaceDisplayName())
-                .parentRunId(context.getParentRunId())
-                .step(context.getStep() + 1)
-                .tool(approval.getTool())
-                .input(approval.getInput())
-                .approvalId(approval.getApprovalId())
-                .permissionLevel(approval.getPermissionLevel() == null ? null : approval.getPermissionLevel().name())
-                .riskReason(approval.getRiskReason())
-                .operationPreview(approval.getOperationPreview())
-                .diff(approval.getDiff())
-                .metadata(approval.getMetadata())
-                .expiresAt(approval.getExpiresAt())
-                .build();
+        return approvalRequired(context, approval);
     }
 
     public AgentEvent pausedForApproval(AgentContext context) {
@@ -128,7 +108,6 @@ public final class AgentEventFactory {
                 .metadata(Map.of(
                         "allowedActions", List.of("CONTINUE", "ABORT"),
                         "recoveryStage", ContextRecoveryStage.WAITING_USER_INPUT.name(),
-                        "transcriptArtifactId", StringUtils.defaultString(context.getContextTranscriptArtifactId()),
                         "blockedReason", StringUtils.defaultString(context.getContextBlockedReason())))
                 .build();
     }
@@ -234,29 +213,8 @@ public final class AgentEventFactory {
                 .build();
     }
 
-    public AgentEvent workspaceUndoBusy(AgentContext context, UndoSessionCoordinator.WorkspaceUndoBusyException e) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("workspace", e.getWorkspace());
-        if (e.getHolderRunId() != null) {
-            metadata.put("holderRunId", e.getHolderRunId());
-        }
-        if (e.getLockExpiresAt() != null) {
-            metadata.put("lockExpiresAt", e.getLockExpiresAt().toString());
-        }
-        return AgentEvent.builder()
-                .type(AgentEventType.ERROR)
-                .runId(context == null ? null : context.getRunId())
-                .requestId(context == null ? null : context.getRequestId())
-                .conversationId(context == null ? null : context.getConversationId())
-                .workspace(e.getWorkspace())
-                .code(AgentErrorCode.WORKSPACE_UNDO_BUSY.code())
-                .message(AgentErrorCode.WORKSPACE_UNDO_BUSY.defaultMessage())
-                .metadata(metadata)
-                .build();
-    }
-
     public AgentEvent conversationBusy(String conversationId, String runId, String requestId,
-                                     String holderRunId, String operation, Instant startedAt) {
+                                       String holderRunId, String operation, Instant startedAt) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (holderRunId != null) {
             metadata.put("holderRunId", holderRunId);

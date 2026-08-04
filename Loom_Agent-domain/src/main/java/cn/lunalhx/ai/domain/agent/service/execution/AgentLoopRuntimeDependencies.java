@@ -6,25 +6,15 @@ import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
-import cn.lunalhx.ai.domain.agent.service.context.ContextWindowManager;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.util.Objects;
 
-/**
- * Agent Loop 运行策略、观测和上下文管理相关依赖。
- *
- * <p>Phase 2 依赖分组：新生产路径只允许通过此 record 传递运行时依赖。
- * {@code Executor} 不放入此 record（父/子 Agent 使用不同执行方式）。
- *
- * @see AgentLoopStateDependencies
- */
 public record AgentLoopRuntimeDependencies(
         AgentRuntimeProperties properties,
         TraceRecorder traceRecorder,
         BudgetGuard budgetGuard,
         AgentMetrics agentMetrics,
-        ContextWindowManager contextWindowManager,
         ToolOutputSanitizer toolOutputSanitizer,
         ModelRuntimeProperties modelRuntimeProperties,
         AgentRuntimeConfigSource runtimeConfigSource
@@ -34,7 +24,6 @@ public record AgentLoopRuntimeDependencies(
         Objects.requireNonNull(traceRecorder, "traceRecorder must not be null");
         Objects.requireNonNull(budgetGuard, "budgetGuard must not be null");
         Objects.requireNonNull(agentMetrics, "agentMetrics must not be null");
-        Objects.requireNonNull(contextWindowManager, "contextWindowManager must not be null");
         Objects.requireNonNull(toolOutputSanitizer, "toolOutputSanitizer must not be null");
         Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
         Objects.requireNonNull(runtimeConfigSource, "runtimeConfigSource must not be null");
@@ -44,11 +33,10 @@ public record AgentLoopRuntimeDependencies(
                                         TraceRecorder traceRecorder,
                                         BudgetGuard budgetGuard,
                                         AgentMetrics agentMetrics,
-                                        ContextWindowManager contextWindowManager,
                                         ToolOutputSanitizer toolOutputSanitizer,
                                         ModelRuntimeProperties modelRuntimeProperties) {
-        this(properties, traceRecorder, budgetGuard, agentMetrics, contextWindowManager,
-                toolOutputSanitizer, modelRuntimeProperties,
+        this(properties, traceRecorder, budgetGuard, agentMetrics, toolOutputSanitizer,
+                modelRuntimeProperties,
                 () -> cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig.startup(
                         properties, modelRuntimeProperties));
     }

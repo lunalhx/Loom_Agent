@@ -3,7 +3,6 @@ package cn.lunalhx.ai.infrastructure.adapter.repository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentPlan;
 import cn.lunalhx.ai.infrastructure.dao.AgentRunCheckpointDao;
 import cn.lunalhx.ai.infrastructure.dao.po.AgentRunCheckpointPO;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,7 +37,6 @@ public class MybatisAgentCheckpointRepository implements AgentCheckpointReposito
         po.setVersion(checkpoint.getVersion());
         po.setCurrentNode(checkpoint.getCurrentNode());
         po.setContextJson(writeJson(checkpoint.getContextSnapshot()));
-        po.setPlanJson(writeJson(checkpoint.getPlan()));
         po.setLastToolExecutionJson(checkpoint.getLastToolExecutionJson());
         po.setReason(checkpoint.getReason());
         return po;
@@ -50,7 +48,6 @@ public class MybatisAgentCheckpointRepository implements AgentCheckpointReposito
                 .version(po.getVersion())
                 .currentNode(po.getCurrentNode())
                 .contextSnapshot(readJson(po.getContextJson(), AgentContextSnapshot.class))
-                .plan(readJson(po.getPlanJson(), AgentPlan.class))
                 .lastToolExecutionJson(po.getLastToolExecutionJson())
                 .reason(po.getReason())
                 .createdAt(po.getCreateTime())

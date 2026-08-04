@@ -16,7 +16,6 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.TraceCost;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
-import cn.lunalhx.ai.domain.tool.model.ToolPermissionLevel;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -50,10 +49,6 @@ public class AgentResponseMapperTest {
                 .conversationId("c-1")
                 .workspace("/tmp")
                 .parentRunId("p-1")
-                .subAgentRunId("sub-1")
-                .subAgentTaskId("task-1")
-                .subAgentRole("role")
-                .subAgentStatus("running")
                 .elapsedMs(100L)
                 .step(3)
                 .node("model_call")
@@ -62,7 +57,6 @@ public class AgentResponseMapperTest {
                 .tool("write_file")
                 .input(Map.of("k", "v"))
                 .approvalId("ap-1")
-                .permissionLevel("WRITE_CONFIRM")
                 .riskReason("risk")
                 .operationPreview("preview")
                 .expiresAt(Instant.now())
@@ -73,7 +67,6 @@ public class AgentResponseMapperTest {
                 .stepCount(5)
                 .code("0000")
                 .message("ok")
-                .plan(Map.of("plan", "p"))
                 .checkpointVersion(1L)
                 .metadata(Map.of("meta", "m"))
                 .build();
@@ -84,10 +77,6 @@ public class AgentResponseMapperTest {
         assertEquals("c-1", dto.getConversationId());
         assertEquals("/tmp", dto.getWorkspace());
         assertEquals("p-1", dto.getParentRunId());
-        assertEquals("sub-1", dto.getSubAgentRunId());
-        assertEquals("task-1", dto.getSubAgentTaskId());
-        assertEquals("role", dto.getSubAgentRole());
-        assertEquals("running", dto.getSubAgentStatus());
         assertEquals(Long.valueOf(100L), dto.getElapsedMs());
         assertEquals(Integer.valueOf(3), dto.getStep());
         assertEquals("model_call", dto.getNode());
@@ -96,7 +85,6 @@ public class AgentResponseMapperTest {
         assertEquals("write_file", dto.getTool());
         assertEquals(Map.of("k", "v"), dto.getInput());
         assertEquals("ap-1", dto.getApprovalId());
-        assertEquals("WRITE_CONFIRM", dto.getPermissionLevel());
         assertEquals("risk", dto.getRiskReason());
         assertEquals("preview", dto.getOperationPreview());
         assertNotNull(dto.getExpiresAt());
@@ -107,7 +95,6 @@ public class AgentResponseMapperTest {
         assertEquals(Integer.valueOf(5), dto.getStepCount());
         assertEquals("0000", dto.getCode());
         assertEquals("ok", dto.getMessage());
-        assertEquals(Map.of("plan", "p"), dto.getPlan());
         assertEquals(Long.valueOf(1L), dto.getCheckpointVersion());
         assertEquals(Map.of("meta", "m"), dto.getMetadata());
     }
@@ -136,7 +123,6 @@ public class AgentResponseMapperTest {
                 .approvalId("ap-1").runId("r-1").requestId("req-1").conversationId("c-1")
                 .workspaceDisplayName("ws").tool("write_file")
                 .input(Map.of("path", "a.txt"))
-                .permissionLevel(ToolPermissionLevel.WRITE_CONFIRM)
                 .riskReason("risk").operationPreview("preview")
                 .metadata(Map.of("deletePreview", Map.of("fileCount", 1)))
                 .expiresAt(Instant.now())
@@ -150,7 +136,6 @@ public class AgentResponseMapperTest {
         assertEquals("ws", dto.getWorkspace());
         assertEquals("write_file", dto.getTool());
         assertEquals(Map.of("path", "a.txt"), dto.getInput());
-        assertEquals("WRITE_CONFIRM", dto.getPermissionLevel());
         assertEquals("risk", dto.getRiskReason());
         assertEquals("preview", dto.getOperationPreview());
         assertEquals(Map.of("deletePreview", Map.of("fileCount", 1)), dto.getMetadata());
@@ -158,10 +143,10 @@ public class AgentResponseMapperTest {
     }
 
     @Test
-    public void toApprovalResponseNullPermissionLevelShouldMapToNull() {
+    public void toApprovalResponseMinimalFieldsMapCorrectly() {
         PendingApproval approval = PendingApproval.builder().approvalId("ap-1").build();
         AgentApprovalResponse dto = mapper.toApprovalResponse(approval);
-        assertNull(dto.getPermissionLevel());
+        assertEquals("PENDING", dto.getStatus());
     }
 
     // ===== toTraceTimeline =====
@@ -246,7 +231,6 @@ public class AgentResponseMapperTest {
         assertEquals(BigDecimal.valueOf(0.01), result.get("inputCost"));
         assertEquals(BigDecimal.valueOf(0.02), result.get("outputCost"));
         assertEquals(BigDecimal.valueOf(0.03), result.get("totalCost"));
-        // LinkedHashMap preserves insertion order
         String[] keys = result.keySet().toArray(new String[0]);
         assertEquals("inputCost", keys[0]);
         assertEquals("outputCost", keys[1]);
