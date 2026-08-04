@@ -27,7 +27,7 @@ public class ContextManagerTest {
         ctx.setRunId("cm-test");
         ctx.setQuestion("原始问题");
         ctx.ensureLedgerActive();
-        ctx.setStablePrefix(new StablePrefix("prefix-content", "fp"));
+        ctx.setStablePrefix(new StablePrefix("prefix-content", "fp", null, null, null, null));
         ctx.setLedgerReady(true);
         return ctx;
     }
@@ -51,7 +51,8 @@ public class ContextManagerTest {
         assertFalse(messages.isEmpty());
         ChatMessage last = messages.get(messages.size() - 1);
         assertEquals("user", last.getRole());
-        assertEquals("补充说明", last.getContent());
+        assertTrue(last.getContent().endsWith("补充说明"));
+        assertTrue(last.getContent().startsWith("Current user request:"));
         // The current request must not appear again in the history projection.
         long occurrences = messages.stream()
                 .filter(m -> m.getContent() != null && m.getContent().contains("补充说明"))
@@ -67,7 +68,7 @@ public class ContextManagerTest {
 
         ContextBuildResult result = manager.build(ctx);
         ChatMessage last = result.messages().get(result.messages().size() - 1);
-        assertEquals("初始任务", last.getContent());
+        assertTrue(last.getContent().endsWith("初始任务"));
     }
 
     // ---- 2. Tool pair merging ----
@@ -149,7 +150,7 @@ public class ContextManagerTest {
         assertFalse(result.metadata().reductionEnabled());
         // current request is still present and last.
         ChatMessage last = result.messages().get(result.messages().size() - 1);
-        assertEquals("任务", last.getContent());
+        assertTrue(last.getContent().endsWith("任务"));
     }
 
     // ---- 6. Build does not mutate history ----
@@ -178,6 +179,6 @@ public class ContextManagerTest {
         ContextBuildResult result = manager.buildFloorPressed(ctx);
         assertTrue(result.metadata().currentRequestPreserved());
         ChatMessage last = result.messages().get(result.messages().size() - 1);
-        assertEquals("很长的请求".repeat(500), last.getContent());
+        assertTrue(last.getContent().endsWith("很长的请求".repeat(500)));
     }
 }

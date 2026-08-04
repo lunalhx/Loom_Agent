@@ -51,23 +51,44 @@ public final class ContextBuildResult {
         return new ContextBuildResult("", List.of(), new ContextRenderMetadata(), true, reason);
     }
 
-    /** Per-section metadata for one render. */
+    /**
+     * Per-section render metrics plus the ordered reduction log.
+     *
+     * <p>{@code sections} holds, for each of the five fixed sections, the raw
+     * length, the budget, and the final rendered length. {@code reductionLog}
+     * records each actual trimming step in order (e.g.
+     * {@code ["relevant_memory->floor", "history->floor"]}).
+     */
+    public record SectionMetrics(int rawChars, int budgetChars, int renderedChars) {
+    }
+
     public record ContextRenderMetadata(
             int totalChars,
             int totalBudgetChars,
+            boolean overBudget,
             Map<String, Integer> sectionRawChars,
+            Map<String, Integer> sectionBudgetChars,
             Map<String, Integer> sectionRenderedChars,
-            List<String> reductions,
+            List<String> sectionOrder,
+            List<String> reductionLog,
             boolean reductionEnabled,
             int historyMerged,
             int historySummarized,
+            int historyDeduped,
+            int summaryReuseCount,
             int relevantMemorySelected,
             String currentRequest,
             boolean currentRequestPreserved,
             int currentRequestChars) {
 
         public ContextRenderMetadata() {
-            this(0, 0, Map.of(), Map.of(), List.of(), true, 0, 0, 0, "", false, 0);
+            this(0, 0, false, Map.of(), Map.of(), Map.of(), List.of(), List.of(), true,
+                    0, 0, 0, 0, 0, "", false, 0);
         }
+
+        // Backward-compatible accessors used by existing tests / middleware.
+        public List<String> reductions() { return reductionLog; }
+        public Map<String, Integer> rawChars() { return sectionRawChars; }
+        public Map<String, Integer> renderedChars() { return sectionRenderedChars; }
     }
 }

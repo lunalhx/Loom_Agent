@@ -59,7 +59,10 @@ public class ObservationNode extends AbstractAgentNode {
         if (ledgerAppendService != null) {
             String eventKey = ConversationHistoryInitializer.eventKey(
                     context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
-            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result, toolName, eventKey);
+            String toolInputJson = context.getDecision() != null && context.getDecision().getInput() != null
+                    ? context.getDecision().getInput().toString() : null;
+            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result,
+                    toolName, toolInputJson, eventKey);
         }
 
         return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));

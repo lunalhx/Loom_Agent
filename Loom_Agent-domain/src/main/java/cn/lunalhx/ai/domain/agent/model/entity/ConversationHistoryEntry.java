@@ -29,6 +29,7 @@ public final class ConversationHistoryEntry {
     private final ConversationEntryType stableType;
     private final String eventKey;
     private final String toolName;
+    private final String toolInputJson;
     private final String artifactId;
     private final Integer originalChars;
     private final Integer renderChars;
@@ -41,6 +42,7 @@ public final class ConversationHistoryEntry {
         this.stableType = Objects.requireNonNull(builder.stableType, "stableType must not be null");
         this.eventKey = builder.eventKey;
         this.toolName = builder.toolName;
+        this.toolInputJson = builder.toolInputJson;
         this.artifactId = builder.artifactId;
         this.originalChars = builder.originalChars;
         this.renderChars = builder.renderChars;
@@ -55,6 +57,7 @@ public final class ConversationHistoryEntry {
             @JsonProperty("stableType") ConversationEntryType stableType,
             @JsonProperty("eventKey") String eventKey,
             @JsonProperty("toolName") String toolName,
+            @JsonProperty("toolInputJson") String toolInputJson,
             @JsonProperty("artifactId") String artifactId,
             @JsonProperty("originalChars") Integer originalChars,
             @JsonProperty("renderChars") Integer renderChars) {
@@ -65,6 +68,7 @@ public final class ConversationHistoryEntry {
         this.stableType = Objects.requireNonNull(stableType, "stableType must not be null");
         this.eventKey = eventKey;
         this.toolName = toolName;
+        this.toolInputJson = toolInputJson;
         this.artifactId = artifactId;
         this.originalChars = originalChars;
         this.renderChars = renderChars;
@@ -81,6 +85,7 @@ public final class ConversationHistoryEntry {
     public ConversationEntryType stableType() { return stableType; }
     public String eventKey() { return eventKey; }
     public String toolName() { return toolName; }
+    public String toolInputJson() { return toolInputJson; }
     public String artifactId() { return artifactId; }
     public Integer originalChars() { return originalChars; }
     public Integer renderChars() { return renderChars; }
@@ -96,6 +101,7 @@ public final class ConversationHistoryEntry {
                 && stableType == that.stableType
                 && Objects.equals(eventKey, that.eventKey)
                 && Objects.equals(toolName, that.toolName)
+                && Objects.equals(toolInputJson, that.toolInputJson)
                 && Objects.equals(artifactId, that.artifactId)
                 && Objects.equals(originalChars, that.originalChars)
                 && Objects.equals(renderChars, that.renderChars);
@@ -104,7 +110,7 @@ public final class ConversationHistoryEntry {
     @Override
     public int hashCode() {
         return Objects.hash(entryId, sequence, role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars);
+                toolName, toolInputJson, artifactId, originalChars, renderChars);
     }
 
     @Override
@@ -125,6 +131,7 @@ public final class ConversationHistoryEntry {
         private ConversationEntryType stableType;
         private String eventKey;
         private String toolName;
+        private String toolInputJson;
         private String artifactId;
         private Integer originalChars;
         private Integer renderChars;
@@ -136,6 +143,7 @@ public final class ConversationHistoryEntry {
         public Builder stableType(ConversationEntryType v) { this.stableType = v; return this; }
         public Builder eventKey(String v) { this.eventKey = v; return this; }
         public Builder toolName(String v) { this.toolName = v; return this; }
+        public Builder toolInputJson(String v) { this.toolInputJson = v; return this; }
         public Builder artifactId(String v) { this.artifactId = v; return this; }
         public Builder originalChars(Integer v) { this.originalChars = v; return this; }
         public Builder renderChars(Integer v) { this.renderChars = v; return this; }

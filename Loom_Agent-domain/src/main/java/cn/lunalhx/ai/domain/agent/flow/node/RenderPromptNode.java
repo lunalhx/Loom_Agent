@@ -68,12 +68,26 @@ public class RenderPromptNode extends AbstractAgentNode {
             pathScope = null;
         }
         String workspaceFactsText = buildWorkspaceFacts(context);
+        String workspaceFingerprint = buildWorkspaceFingerprint(context);
         return this.ledgerServices.prefixBuilder().build(
                 isDelegate,
                 delegateAllowed,
                 pathScope,
                 context.getToolSpecs(),
-                workspaceFactsText);
+                workspaceFactsText,
+                workspaceFingerprint);
+    }
+
+    private String buildWorkspaceFingerprint(AgentContext context) {
+        try {
+            if (context.getResolvedWorkspace() == null) {
+                return null;
+            }
+            WorkspaceFacts.Facts facts = WorkspaceFacts.build(context.getResolvedWorkspace(), null);
+            return facts.workspaceFingerprint();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String buildWorkspaceFacts(AgentContext context) {

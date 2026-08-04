@@ -106,12 +106,6 @@ loom:
     approval-ttl-seconds: ${AGENT_APPROVAL_TTL_SECONDS:900}
     approval-policy: ${AGENT_APPROVAL_POLICY:ask}
     context:
-      enabled: ${AGENT_CONTEXT_ENABLED:true}
-      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${LOOM_DATA_DIR:${user.home}/.loom-agent}/context-artifacts}
-      persist-tool-result-chars: ${AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS:12000}
-      tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
-      keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
-      max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
       context-reduction-enabled: ${AGENT_CONTEXT_REDUCTION_ENABLED:true}
       total-budget-chars: ${AGENT_CONTEXT_TOTAL_BUDGET_CHARS:12000}
       prefix-budget-chars: ${AGENT_CONTEXT_PREFIX_BUDGET_CHARS:3600}

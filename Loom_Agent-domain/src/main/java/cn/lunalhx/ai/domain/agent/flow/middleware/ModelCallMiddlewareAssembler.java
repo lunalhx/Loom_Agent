@@ -24,8 +24,8 @@ public class ModelCallMiddlewareAssembler {
         Objects.requireNonNull(terminal, "terminal must not be null");
         return new ModelCallMiddlewareChain(
                 List.of(
-                        contextReductionMiddleware,
                         dynamicContextMiddleware,
+                        contextReductionMiddleware,
                         errorRecoveryMiddleware,
                         budgetMiddleware
                 ),

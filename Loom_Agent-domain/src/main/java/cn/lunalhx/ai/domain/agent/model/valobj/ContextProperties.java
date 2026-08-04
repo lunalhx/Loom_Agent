@@ -1,16 +1,19 @@
 package cn.lunalhx.ai.domain.agent.model.valobj;
 
-import cn.lunalhx.ai.domain.common.LoomPaths;
 import lombok.Data;
 
+/**
+ * Character-budget context-reduction configuration for the fixed five-section
+ * send view (prefix → memory → relevant_memory → history → current_request).
+ *
+ * <p>Only the settings actually consumed by the reduction pipeline are kept:
+ * the reduction switch, total budget, the four trimmed-section budgets/floors,
+ * the recent-history window, and the relevant-memory limit. Legacy storage,
+ * artifact, tool-preview, dynamic-entry and transcript-cleanup settings have
+ * been removed.
+ */
 @Data
 public class ContextProperties {
-    private Boolean enabled = true;
-    private String storageRoot = LoomPaths.system().contextArtifacts().toString();
-    private Integer persistToolResultChars = 12000;
-    private Integer toolPreviewChars = 2000;
-    private Integer keepRecentToolResults = 4;
-    private Integer maxDynamicEntries = 60;
     private Boolean contextReductionEnabled = true;
     private Integer totalBudgetChars = 12000;
     private Integer prefixBudgetChars = 3600;
@@ -23,8 +26,4 @@ public class ContextProperties {
     private Integer historyFloorChars = 1300;
     private Integer recentHistoryItems = 6;
     private Integer relevantMemoryLimit = 3;
-    private Integer transcriptRetentionHours = 168;
-    private Integer transcriptCleanupIntervalMs = 3600000;
-    private Integer transcriptCleanupBatchSize = 500;
-    private Boolean transcriptCleanupEnabled = true;
 }

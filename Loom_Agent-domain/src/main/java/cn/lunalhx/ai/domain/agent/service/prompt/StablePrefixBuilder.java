@@ -82,6 +82,21 @@ public final class StablePrefixBuilder {
                               String pathScope,
                               List<ToolSpec> toolSpecs,
                               String workspaceFactsText) {
+        return build(isDelegate, delegateAllowed, pathScope, toolSpecs, workspaceFactsText, null);
+    }
+
+    /**
+     * Build a {@link StablePrefix} including workspace/tool/runtime signatures.
+     *
+     * @param workspaceFingerprint structural workspace identity, or null when the
+     *                             caller has not captured one yet
+     */
+    public StablePrefix build(boolean isDelegate,
+                              boolean delegateAllowed,
+                              String pathScope,
+                              List<ToolSpec> toolSpecs,
+                              String workspaceFactsText,
+                              String workspaceFingerprint) {
         StringBuilder sb = new StringBuilder();
         appendRoleProtocol(sb, isDelegate, delegateAllowed, pathScope);
         appendActionFinalExamples(sb);
@@ -91,7 +106,40 @@ public final class StablePrefixBuilder {
 
         String frozenContent = sb.toString();
         String fingerprint = DigestUtils.sha256Hex(frozenContent);
-        return new StablePrefix(frozenContent, fingerprint);
+        String toolSignature = toolSignature(toolSpecs);
+        String runtimeSignature = runtimeSignature(isDelegate, delegateAllowed, pathScope);
+        return new StablePrefix(frozenContent, fingerprint,
+                workspaceFingerprint, toolSignature, runtimeSignature, System.currentTimeMillis());
+    }
+
+    /**
+     * Deterministic hash over the sorted tool catalog: name, description,
+     * normalized input schema, and risky attribute.
+     */
+    public static String toolSignature(List<ToolSpec> toolSpecs) {
+        if (toolSpecs == null || toolSpecs.isEmpty()) {
+            return DigestUtils.sha256Hex("tools:none");
+        }
+        StringBuilder sb = new StringBuilder();
+        List<ToolSpec> ordered = new ArrayList<>(toolSpecs);
+        ordered.sort(Comparator.comparing(ToolSpec::getName));
+        for (ToolSpec spec : ordered) {
+            sb.append(spec.getName()).append('\n')
+                    .append(spec.getDescription()).append('\n')
+                    .append(normalizeSchema(spec.getInputSchema())).append('\n')
+                    .append(spec.isRisky()).append('\n');
+        }
+        return DigestUtils.sha256Hex(sb.toString());
+    }
+
+    /**
+     * Deterministic hash over execution constraints: main/delegate identity,
+     * delegate-allowance, and path scope.
+     */
+    public static String runtimeSignature(boolean isDelegate, boolean delegateAllowed, String pathScope) {
+        return DigestUtils.sha256Hex((isDelegate ? "delegate" : "main")
+                + "\n" + delegateAllowed
+                + "\n" + StringUtils.defaultString(pathScope));
     }
 
     private void appendRoleProtocol(StringBuilder sb, boolean isDelegate,

@@ -108,7 +108,7 @@ public final class ConversationHistoryAppendService {
                 + "\n</untrusted_tool_output>";
         return appendWithMetadata(context, "user", wrapped,
                 ConversationEntryType.TOOL_RESULT, eventKey,
-                null, null, snipped.originalChars, snipped.renderChars);
+                null, null, null, snipped.originalChars, snipped.renderChars);
     }
 
     /**
@@ -135,6 +135,34 @@ public final class ConversationHistoryAppendService {
     public List<ConversationHistoryEntry> appendToolResult(
             AgentContext context, String rawOutput, ToolResult toolResult,
             String toolName, String eventKey) {
+        return appendToolResult(context, rawOutput, toolResult, toolName, null, eventKey);
+    }
+
+    /**
+     * Append a tool result with artifact metadata and normalized tool input.
+     *
+     * <p>When a {@link ToolResult} carries an {@code artifactId} (large output
+     * persisted to blob store), the metadata is recorded on the ledger entry
+     * so that micro-compaction can later replace the full content with a stable
+     * {@code <persisted-output>} reference. The prompt content is still the
+     * wrapped raw output — metadata does not affect prompt rendering.
+     *
+     * <p>The optional {@code toolInputJson} is the normalized tool-call input
+     * (read path, shell command, etc.) used by old-history compression to fold
+     * repeated reads and summarize shell commands. It is not part of the prompt
+     * body.
+     *
+     * @param context       the agent context with an active ledger
+     * @param rawOutput     the raw tool output (text), already rendered for prompt
+     * @param toolResult    the tool result carrying artifact metadata (may be null)
+     * @param toolName      the tool name (may be null)
+     * @param toolInputJson the normalized tool input JSON (may be null)
+     * @param eventKey      deterministic idempotency key
+     * @return immutable snapshot of the ledger after append
+     */
+    public List<ConversationHistoryEntry> appendToolResult(
+            AgentContext context, String rawOutput, ToolResult toolResult,
+            String toolName, String toolInputJson, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
         SnipResult snipped = snip(context, rawOutput, null);
         String wrapped = "<untrusted_tool_output>\n"
@@ -142,7 +170,7 @@ public final class ConversationHistoryAppendService {
                 + "\n</untrusted_tool_output>";
         return appendWithMetadata(context, "user", wrapped,
                 ConversationEntryType.TOOL_RESULT, eventKey,
-                toolName, null, snipped.originalChars, snipped.renderChars);
+                toolName, toolInputJson, null, snipped.originalChars, snipped.renderChars);
     }
 
     /**
@@ -253,13 +281,13 @@ public final class ConversationHistoryAppendService {
             AgentContext context, String role, String content,
             ConversationEntryType stableType, String eventKey) {
         return appendWithMetadata(context, role, content, stableType, eventKey,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private List<ConversationHistoryEntry> appendWithMetadata(
             AgentContext context, String role, String content,
             ConversationEntryType stableType, String eventKey,
-            String toolName, String artifactId,
+            String toolName, String toolInputJson, String artifactId,
             Integer originalChars, Integer renderChars) {
         Objects.requireNonNull(context, "context must not be null");
 
@@ -267,7 +295,7 @@ public final class ConversationHistoryAppendService {
         ConversationHistory ledger = context.getConversationHistory();
 
         ledger.appendWithEventKey(role, content, stableType, eventKey,
-                toolName, artifactId, originalChars, renderChars);
+                toolName, toolInputJson, artifactId, originalChars, renderChars);
         return ledger.entries();
     }
 }

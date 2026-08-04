@@ -35,7 +35,7 @@ public class ContextReductionBenchmarkTest {
         AgentContext ctx = new AgentContext();
         ctx.setQuestion("x".repeat(requestChars));
         ctx.ensureLedgerActive();
-        ctx.setStablePrefix(new StablePrefix("p".repeat(400), "fp"));
+        ctx.setStablePrefix(new StablePrefix("p".repeat(400), "fp", null, null, null, null));
         ctx.setLedgerReady(true);
 
         ConversationHistory h = ctx.getConversationHistory();

@@ -24,6 +24,15 @@ final class StartupConfigValidator {
             throw new IllegalStateException(
                     "ledger 已是唯一提示词路径，conversation-ledger.enabled/shadow-enabled 配置已删除");
         }
+        if (environment.containsProperty("loom.agent.context.storage-root")
+                || environment.containsProperty("loom.agent.context.persist-tool-result-chars")
+                || environment.containsProperty("loom.agent.context.tool-preview-chars")
+                || environment.containsProperty("loom.agent.context.keep-recent-tool-results")
+                || environment.containsProperty("loom.agent.context.max-dynamic-entries")) {
+            throw new IllegalStateException(
+                    "上下文压缩已改为字符预算模型，storage-root/persist-tool-result-chars/tool-preview-chars/"
+                            + "keep-recent-tool-results/max-dynamic-entries 配置已删除");
+        }
         if ("none".equalsIgnoreCase(environment.getProperty("spring.ai.model.chat", "deepseek"))
                 || "none".equalsIgnoreCase(model.getProvider())) {
             return;

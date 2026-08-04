@@ -70,16 +70,22 @@ public class ContextReductionMiddleware implements ModelCallMiddleware {
 
     private AgentEvent buildReductionEvent(AgentContext context, ContextBuildResult result) {
         ContextBuildResult.ContextRenderMetadata m = result.metadata();
+        int rawTotal = m.sectionRawChars().values().stream().mapToInt(Integer::intValue).sum();
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("mode", "render_only");
-        metadata.put("promptRawChars", m.totalChars());
+        metadata.put("promptRawChars", rawTotal);
         metadata.put("promptRenderedChars", m.totalChars());
         metadata.put("promptBudgetChars", m.totalBudgetChars());
-        metadata.put("sectionBudgets", m.sectionRawChars());
+        metadata.put("promptOverBudget", m.overBudget());
+        metadata.put("sectionOrder", m.sectionOrder());
+        metadata.put("sectionBudgets", m.sectionBudgetChars());
+        metadata.put("sectionRawChars", m.sectionRawChars());
         metadata.put("sectionRenderedChars", m.sectionRenderedChars());
-        metadata.put("budgetReductions", m.reductions());
+        metadata.put("budgetReductions", m.reductionLog());
         metadata.put("historyMerged", m.historyMerged());
         metadata.put("historySummarized", m.historySummarized());
+        metadata.put("historyDeduped", m.historyDeduped());
+        metadata.put("summaryReuseCount", m.summaryReuseCount());
         metadata.put("relevantMemorySelected", m.relevantMemorySelected());
         metadata.put("currentRequestChars", m.currentRequestChars());
         metadata.put("currentRequestPreserved", m.currentRequestPreserved());

@@ -11,22 +11,16 @@ import java.util.Objects;
  * Unified ledger bootstrap executed before every model call in
  * {@code RenderPromptNode}.
  *
- * <h3>Flow</h3>
+ * <p>This is now purely an initializer + prefix refresher:
  * <ol>
- *   <li>Build candidate StablePrefix from current config (tools, skills, role,
- *       path scope, spawn capability).</li>
- *   <li>New conversation (no ledger): init with candidate prefix, generation=0,
- *       append user_task.</li>
- *   <li>No stored StablePrefix (legacy v2 or uninitialized): bump generation,
- *       write migration marker, set candidate as new prefix.</li>
- *   <li>Stored StablePrefix exists:
- *     <ul>
- *       <li>Same fingerprint: keep prefix and generation.</li>
- *       <li>Different fingerprint: generation+1, immediately set candidate as
- *           new StablePrefix, append [{@code [Config Change]}] note.</li>
- *     </ul>
- *   </li>
- *   <li>Apply pending continuation (if any).</li>
+ *   <li>New conversation (no ledger): initialize with the candidate prefix,
+ *       append the raw user question as a {@code USER_TASK}.</li>
+ *   <li>Existing ledger with a compatible StablePrefix (same workspace, tool
+ *       and runtime signatures): reuse it — ordinary git status or doc churn
+ *       does NOT rebuild the prefix, bump generation, or append history noise.</li>
+ *   <li>Legacy two-field prefix or changed signatures: rebuild the prefix and
+ *       replace it. No {@code [Config Change]} history entry is written.</li>
+ *   <li>Consume any pending continuation as raw {@code USER_INPUT}.</li>
  *   <li>Set {@code ledgerReady = true}.</li>
  * </ol>
  *
@@ -48,9 +42,6 @@ public final class LedgerBootstrapService {
     /**
      * Bootstrap the ledger state for the given context using the candidate
      * StablePrefix built from current configuration.
-     *
-     * @param context  the agent context
-     * @param candidate StablePrefix built from current tools, skills, role, etc.
      */
     public void bootstrap(AgentContext context, StablePrefix candidate) {
         Objects.requireNonNull(context, "context must not be null");
@@ -63,72 +54,33 @@ public final class LedgerBootstrapService {
     }
 
     private void doBootstrap(AgentContext context, StablePrefix candidate) {
-        // ---- Case 1: New conversation (no ledger) ----
         if (!context.isLedgerActive()) {
             initializer.initializeNewConversation(context, candidate);
+            applyPendingContinuationIfPresent(context);
             return;
         }
 
         StablePrefix existing = context.getStablePrefix();
-
-        // ---- Case 2: No existing StablePrefix (v2 snapshot or uninitialized) ----
-        if (existing == null) {
-            migrateFromNoPrefix(context, candidate);
-            applyPendingContinuationIfPresent(context);
-            return;
+        if (existing == null || existing.isLegacyTwoField() || !existing.matches(candidate)) {
+            // Rebuild the prefix and replace it. No generation bump, no [Config Change] noise.
+            context.setStablePrefix(candidate);
         }
-
-        // ---- Case 3: Existing StablePrefix — compare fingerprints ----
-        if (candidate.fingerprint().equals(existing.fingerprint())) {
-            // Same config — keep prefix and generation
-            applyPendingContinuationIfPresent(context);
-            return;
-        }
-
-        // ---- Case 4: Config changed — new generation with new prefix ----
-        int newGen = context.getGeneration() + 1;
-        context.setGeneration(newGen);
-        context.setStablePrefix(candidate); // immediately use new prefix
-
-        // Append config change marker to ledger (with full StablePrefix fingerprints)
-        String note = ControlUpdateTexts.renderConfigChangeNote(
-                existing.fingerprint(), candidate.fingerprint(), newGen);
-        String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(), "config_change", "generation_" + newGen);
-        appendService.appendControlUpdate(context, note, eventKey);
 
         applyPendingContinuationIfPresent(context);
     }
 
     /**
-     * Migrate when no StablePrefix exists (v2 snapshot, or ledger without prefix).
-     */
-    private void migrateFromNoPrefix(AgentContext context, StablePrefix candidate) {
-        int newGen = context.getGeneration() + 1;
-        context.setGeneration(newGen);
-        context.setStablePrefix(candidate);
-
-        String note = "[Migration] Ledger initialized without prior StablePrefix. "
-                + "New generation " + newGen
-                + " started with current configuration.";
-        String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(), "migrate", "generation_" + newGen);
-        appendService.appendControlUpdate(context, note, eventKey);
-    }
-
-    /**
      * If a pending continuation was set by {@code createContinuation}, append it
-     * to the ledger now (after any config change marker) and clear the pending.
+     * to the ledger as raw {@code USER_INPUT} and clear the pending.
      */
     private void applyPendingContinuationIfPresent(AgentContext context) {
         String pending = context.getPendingContinuation();
         if (pending == null || pending.isEmpty()) {
             return;
         }
-        String text = ControlUpdateTexts.renderContinuation(pending);
         String eventKey = ConversationHistoryInitializer.eventKey(
                 context.getRunId(), "continuation", "user_input");
-        appendService.appendUserInput(context, text, eventKey);
+        appendService.appendUserInput(context, pending, eventKey);
         context.setPendingContinuation(null);
     }
 

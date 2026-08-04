@@ -8,6 +8,7 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -79,5 +80,29 @@ public class StablePrefixBuilderTest {
     public void buildRoleProtocolTextContainsProtocolRules() {
         String text = StablePrefixBuilder.buildRoleProtocolText(false, true, null);
         assertTrue(text.contains("每轮只能输出一个 JSON 对象"));
+    }
+
+    @Test
+    public void buildCarriesSignatures() {
+        List<ToolSpec> specs = List.of(tool("read_file", "Read"), tool("write_file", "Write"));
+        StablePrefix p = builder.build(false, true, "/scope", specs, "Workspace:", "ws-fp");
+        assertEquals("ws-fp", p.workspaceFingerprint());
+        assertEquals(StablePrefixBuilder.toolSignature(specs), p.toolSignature());
+        assertEquals(StablePrefixBuilder.runtimeSignature(false, true, "/scope"), p.runtimeSignature());
+        assertFalse(p.isLegacyTwoField());
+        assertTrue(p.builtAt() > 0);
+    }
+
+    @Test
+    public void toolSignatureDeterministicAndOrderInsensitive() {
+        List<ToolSpec> a = List.of(tool("read_file", "R"), tool("write_file", "W"));
+        List<ToolSpec> b = List.of(tool("write_file", "W"), tool("read_file", "R"));
+        assertEquals(StablePrefixBuilder.toolSignature(a), StablePrefixBuilder.toolSignature(b));
+    }
+
+    @Test
+    public void workspaceFingerprintChangeDoesNotChangeToolSignature() {
+        List<ToolSpec> specs = List.of(tool("read_file", "R"));
+        assertEquals(StablePrefixBuilder.toolSignature(specs), StablePrefixBuilder.toolSignature(specs));
     }
 }

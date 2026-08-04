@@ -8,7 +8,6 @@ import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties;
-import cn.lunalhx.ai.domain.common.UntrustedContentSanitizer;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 
 import java.util.ArrayList;
@@ -17,40 +16,45 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Builds a temporary, section-budgeted send view of the model context each
- * round, mirroring loom-code's {@code ContextManager}.
+ * Public facade for building a temporary, section-budgeted send view of the
+ * model context each round, mirroring loom-code's {@code ContextManager}.
  *
  * <p>Fixed section order: {@code prefix → memory → relevant_memory → history →
- * current_request}. The raw {@code ConversationHistory} is NEVER mutated;
- * every build produces an immutable {@link ContextBuildResult}.
+ * current_request}. The raw {@code ConversationHistory} is NEVER mutated; every
+ * build produces an immutable {@link ContextBuildResult}.
  *
- * <p>Section budgets (chars) and floors default to loom-code values and are
- * configured via {@code ContextProperties}. When {@code contextReductionEnabled}
- * is false, sections are sent without trimming (current request still last).
+ * <p>The four dynamic sections are always emitted as four {@code user} messages
+ * with stable {@code Memory:}/{@code Relevant memory:}/{@code Transcript:}/
+ * {@code Current user request:} headers; the {@code prefix} is the single
+ * system prompt. Section budgets (chars) and floors default to loom-code values
+ * and are configured via {@code ContextProperties}. When
+ * {@code contextReductionEnabled} is false, sections are sent without trimming
+ * (current request still last).
  */
 public final class ContextManager {
 
+    private static final List<String> SECTION_ORDER =
+            List.of("prefix", "memory", "relevant_memory", "history", "current_request");
+
     private final AgentRuntimeProperties properties;
+    private final HistoryRenderer historyRenderer;
+    private final RelevantMemorySelector relevantSelector;
 
     public ContextManager(AgentRuntimeProperties properties) {
         this.properties = properties == null ? new AgentRuntimeProperties() : properties;
+        this.historyRenderer = new HistoryRenderer();
+        this.relevantSelector = new RelevantMemorySelector();
     }
 
     public ContextBuildResult build(AgentContext context) {
         ContextProperties cfg = contextProperties(context);
         boolean reductionEnabled = Boolean.TRUE.equals(cfg.getContextReductionEnabled());
 
-        String prefix = renderPrefix(context);
-        String memory = renderMemory(context);
-        String relevantMemory = renderRelevantMemory(context);
-        HistoryRender history = renderHistory(context);
-        String currentRequest = renderCurrentRequest(context);
-
+        Sections raw = renderSections(context, cfg);
         if (!reductionEnabled) {
-            return assembleRaw(prefix, memory, relevantMemory, history.text(), currentRequest, context);
+            return assembleRaw(raw, context);
         }
-
-        return assembleBudgeted(prefix, memory, relevantMemory, history, currentRequest, context, cfg);
+        return assembleBudgeted(raw, context, cfg);
     }
 
     /** Budget estimation text used by {@code BudgetMiddleware}. */
@@ -66,53 +70,71 @@ public final class ContextManager {
      */
     public ContextBuildResult buildFloorPressed(AgentContext context) {
         ContextProperties cfg = contextProperties(context);
-        String prefix = renderPrefix(context);
-        String memory = renderMemory(context);
-        String relevantMemory = renderRelevantMemory(context);
-        HistoryRender history = renderHistory(context);
-        String currentRequest = renderCurrentRequest(context);
+        Sections raw = renderSections(context, cfg);
 
-        String trimmedPrefix = toFloor(prefix, positive(cfg.getPrefixFloorChars(), 1200), "prefix");
-        String trimmedMemory = toFloor(memory, positive(cfg.getMemoryFloorChars(), 400), "memory");
-        String trimmedRelevant = toFloor(relevantMemory, positive(cfg.getRelevantMemoryFloorChars(), 300), "relevant_memory");
-        String trimmedHistory = toFloor(history.text(), positive(cfg.getHistoryFloorChars(), 1500), "history");
+        int prefixFloor = positive(cfg.getPrefixFloorChars(), 900);
+        int memoryFloor = positive(cfg.getMemoryFloorChars(), 400);
+        int relevantFloor = positive(cfg.getRelevantMemoryFloorChars(), 300);
+        int historyFloor = positive(cfg.getHistoryFloorChars(), 1300);
 
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.builder().role("user").content(trimmedMemory).build());
-        messages.add(ChatMessage.builder().role("user").content(trimmedRelevant).build());
-        messages.add(ChatMessage.builder().role("user").content(trimmedHistory).build());
-        messages.add(ChatMessage.builder().role("user").content(currentRequest).build());
+        String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixFloor);
+        String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryFloor);
+        String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantFloor);
+        String trimmedHistory = TextUtil.clipHeadTail(raw.historyText, historyFloor);
+
+        int total = TextUtil.length(trimmedPrefix) + TextUtil.length(trimmedMemory)
+                + TextUtil.length(trimmedRelevant) + TextUtil.length(trimmedHistory)
+                + TextUtil.length(raw.currentRequest);
+
+        Map<String, Integer> rawChars = sectionRawChars(raw);
+        Map<String, Integer> budget = sectionBudgetChars(cfg);
+        Map<String, Integer> rendered = new LinkedHashMap<>();
+        rendered.put("prefix", TextUtil.length(trimmedPrefix));
+        rendered.put("memory", TextUtil.length(trimmedMemory));
+        rendered.put("relevant_memory", TextUtil.length(trimmedRelevant));
+        rendered.put("history", TextUtil.length(trimmedHistory));
+        rendered.put("current_request", TextUtil.length(raw.currentRequest));
 
         ContextBuildResult.ContextRenderMetadata metadata =
                 new ContextBuildResult.ContextRenderMetadata(
-                        trimmedPrefix.length() + trimmedMemory.length() + trimmedRelevant.length()
-                                + trimmedHistory.length() + currentRequest.length(),
-                        positive(cfg.getTotalBudgetChars(), 12000),
-                        Map.of("prefix", prefix.length(), "memory", memory.length(),
-                                "relevant_memory", relevantMemory.length(),
-                                "history", history.text().length(),
-                                "current_request", currentRequest.length()),
-                        Map.of("prefix", trimmedPrefix.length(), "memory", trimmedMemory.length(),
-                                "relevant_memory", trimmedRelevant.length(),
-                                "history", trimmedHistory.length(),
-                                "current_request", currentRequest.length()),
-                        List.of("floor_pressure"), true, history.merged(), history.summarized(), 0,
-                        currentRequest, true, currentRequest.length());
+                        total, positive(cfg.getTotalBudgetChars(), 12000), false,
+                        rawChars, budget, rendered, SECTION_ORDER,
+                        List.of("floor_pressure"), true,
+                        raw.historyResult.merged(), raw.historyResult.summarized(),
+                        raw.historyResult.deduped(), raw.historyResult.summaryReuse(),
+                        raw.relevantSelected,
+                        raw.currentRequest, true, TextUtil.length(raw.currentRequest));
+
+        List<ChatMessage> messages = messages(
+                trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
         return new ContextBuildResult(trimmedPrefix, messages, metadata, false, null);
     }
 
-    private String toFloor(String value, int floor, String section) {
-        if (value == null || value.length() <= floor) {
-            return value == null ? "" : value;
-        }
-        int head = (int) (floor * 0.75);
-        int tail = floor - head;
-        return value.substring(0, head) + "\n[...] " + value.substring(value.length() - tail);
-    }
+    // ================================================================
+    // Section rendering
+    // ================================================================
 
-    // ================================================================
-    // Section builders
-    // ================================================================
+    private Sections renderSections(AgentContext context, ContextProperties cfg) {
+        String prefix = renderPrefix(context);
+        String memory = renderMemory(context);
+        int currentRequestIndex = currentRequestEntryIndex(context);
+        String currentRequest = renderCurrentRequest(context);
+        boolean reductionEnabled = Boolean.TRUE.equals(cfg.getContextReductionEnabled());
+        List<RelevantMemorySelector.ScoredNote> selected = relevantSelector.select(
+                context.getWorkingMemory(), currentRequest,
+                positive(cfg.getRelevantMemoryLimit(), 3));
+        String relevantMemory = renderRelevantMemory(selected,
+                positive(cfg.getRelevantMemoryBudgetChars(), 1200));
+        int historyBudget = reductionEnabled
+                ? positive(cfg.getHistoryBudgetChars(), 5200) : Integer.MAX_VALUE;
+        HistoryRenderer.HistoryResult historyResult = historyRenderer.render(
+                context.getConversationHistory(), currentRequestIndex,
+                positive(cfg.getRecentHistoryItems(), 6),
+                historyBudget,
+                context.getWorkingMemory(), reductionEnabled);
+        return new Sections(prefix, memory, relevantMemory, historyResult.text(),
+                currentRequest, historyResult, selected.size());
+    }
 
     private String renderPrefix(AgentContext context) {
         StablePrefix stablePrefix = context.getStablePrefix();
@@ -122,9 +144,9 @@ public final class ContextManager {
     private String renderMemory(AgentContext context) {
         WorkingContextMemory wm = context.getWorkingMemory();
         if (wm == null || wm.isEmpty()) {
-            return "Working memory: - none";
+            return "Memory: - none";
         }
-        StringBuilder sb = new StringBuilder("Working memory:\n");
+        StringBuilder sb = new StringBuilder("Memory:\n");
         if (wm.taskSummary() != null) {
             sb.append("- task: ").append(wm.taskSummary()).append('\n');
         }
@@ -136,82 +158,45 @@ public final class ContextManager {
                     .append("  summary: ").append(fs.summary()).append('\n');
         }
         if (!wm.notes().isEmpty()) {
-            for (String note : wm.notes()) {
-                sb.append("- note: ").append(note).append('\n');
-            }
+            sb.append("- note count: ").append(wm.notes().size()).append('\n');
         }
         return sb.toString();
     }
 
-    private String renderRelevantMemory(AgentContext context) {
-        WorkingContextMemory wm = context.getWorkingMemory();
-        if (wm == null || (wm.notes().isEmpty() && wm.fileSummaries().isEmpty())) {
+    private String renderRelevantMemory(List<RelevantMemorySelector.ScoredNote> selected, int budgetChars) {
+        if (selected == null || selected.isEmpty()) {
             return "Relevant memory: - none";
         }
-        ContextProperties cfg = contextProperties(context);
-        int limit = positive(cfg.getRelevantMemoryLimit(), 3);
+        int perNote = Math.max(1, budgetChars / selected.size());
         StringBuilder sb = new StringBuilder("Relevant memory:\n");
-        int added = 0;
-        // Prioritize episodic notes first, then file summaries (newest first).
-        List<String> notes = wm.notes();
-        for (int i = notes.size() - 1; i >= 0 && added < limit; i--, added++) {
-            sb.append("- ").append(notes.get(i)).append('\n');
-        }
-        for (WorkingContextMemory.FileSummary fs : wm.fileSummaries().values()) {
-            if (added >= limit) {
-                break;
-            }
-            sb.append("- ").append(fs.path()).append(": ").append(fs.summary()).append('\n');
-            added++;
+        for (RelevantMemorySelector.ScoredNote scored : selected) {
+            sb.append("- ").append(TextUtil.head(scored.note().text(), perNote)).append('\n');
         }
         return sb.toString();
     }
 
-    private HistoryRender renderHistory(AgentContext context) {
+    private String renderCurrentRequest(AgentContext context) {
         ConversationHistory history = context.getConversationHistory();
         if (history == null || history.isEmpty()) {
-            return new HistoryRender("", 0, 0);
+            return prefixTitle("Current user request:", context.getQuestion());
         }
-        ContextProperties cfg = contextProperties(context);
-        int recentItems = positive(cfg.getRecentHistoryItems(), 6);
-
-        List<ConversationHistoryEntry> entries = history.entries();
-        // The current request (last USER_TASK/USER_INPUT) is sent separately as
-        // the final user message — exclude only that entry from the history
-        // projection to avoid duplication.
-        int currentRequestIndex = currentRequestEntryIndex(entries);
-        List<ConversationHistoryEntry> historyEntries;
-        if (currentRequestIndex < 0) {
-            historyEntries = new ArrayList<>(entries);
-        } else if (currentRequestIndex == entries.size() - 1) {
-            historyEntries = new ArrayList<>(entries.subList(0, entries.size() - 1));
-        } else {
-            historyEntries = new ArrayList<>();
-            historyEntries.addAll(entries.subList(0, currentRequestIndex));
-            historyEntries.addAll(entries.subList(currentRequestIndex + 1, entries.size()));
+        int idx = currentRequestEntryIndex(context);
+        if (idx >= 0) {
+            return prefixTitle("Current user request:", history.entries().get(idx).content());
         }
-
-        List<LogicalItem> logical = toLogicalItems(historyEntries);
-
-        // Select the last `recentItems` logical items as recent window.
-        List<LogicalItem> recent = logical.size() > recentItems
-                ? new ArrayList<>(logical.subList(logical.size() - recentItems, logical.size()))
-                : new ArrayList<>(logical);
-
-        int merged = logical.size() - recent.size();
-        StringBuilder sb = new StringBuilder("History:\n");
-        int summarized = 0;
-        for (LogicalItem item : recent) {
-            sb.append(renderLogicalItem(item));
-            if (item.summarized()) {
-                summarized++;
-            }
-            sb.append('\n');
-        }
-        return new HistoryRender(sb.toString(), merged, summarized);
+        return prefixTitle("Current user request:", context.getQuestion());
     }
 
-    private int currentRequestEntryIndex(List<ConversationHistoryEntry> entries) {
+    private String prefixTitle(String title, String body) {
+        return title + "\n" + (body == null ? "" : body);
+    }
+
+    private int currentRequestEntryIndex(AgentContext context) {
+        ConversationHistory history = context.getConversationHistory();
+        if (history == null || history.isEmpty()) {
+            return -1;
+        }
+        List<ConversationHistoryEntry> entries = history.entries();
         for (int i = entries.size() - 1; i >= 0; i--) {
             ConversationHistoryEntry entry = entries.get(i);
             if (entry.stableType() == ConversationEntryType.USER_TASK
@@ -222,235 +207,127 @@ public final class ContextManager {
         return -1;
     }
 
-    /** Merge assistant tool-call + tool-result pairs into one logical item. */
-    private List<LogicalItem> toLogicalItems(List<ConversationHistoryEntry> entries) {
-        List<LogicalItem> items = new ArrayList<>();
-        for (int i = 0; i < entries.size(); i++) {
-            ConversationHistoryEntry entry = entries.get(i);
-            if (entry.stableType() == ConversationEntryType.ASSISTANT_ACTION
-                    && i + 1 < entries.size()
-                    && entries.get(i + 1).stableType() == ConversationEntryType.TOOL_RESULT
-                    && sameCorrelation(entry, entries.get(i + 1))) {
-                items.add(LogicalItem.toolPair(entry, entries.get(i + 1)));
-                i++;
-            } else if (entry.stableType() == ConversationEntryType.TOOL_RESULT) {
-                items.add(LogicalItem.single(entry));
-            } else {
-                items.add(LogicalItem.single(entry));
-            }
-        }
-        return items;
-    }
-
-    private boolean sameCorrelation(ConversationHistoryEntry a, ConversationHistoryEntry b) {
-        String ca = correlation(a.eventKey());
-        String cb = correlation(b.eventKey());
-        return !ca.isBlank() && ca.equals(cb);
-    }
-
-    private String correlation(String eventKey) {
-        if (eventKey == null) {
-            return "";
-        }
-        int lastSeparator = eventKey.lastIndexOf(':');
-        return lastSeparator < 0 ? "" : eventKey.substring(0, lastSeparator);
-    }
-
-    private String renderLogicalItem(LogicalItem item) {
-        if (item.type() == LogicalItem.Type.TOOL_PAIR) {
-            ConversationHistoryEntry assistant = item.first();
-            ConversationHistoryEntry result = item.second();
-            String toolName = assistant.toolName() != null ? assistant.toolName()
-                    : (result.toolName() != null ? result.toolName() : "tool");
-            String content = unwrapToolBoundary(result.content());
-            return "[tool:" + toolName + "] args + result:\n"
-                    + "Result: " + firstLines(UntrustedContentSanitizer.escapeXml(content), 3);
-        }
-        if (item.type() == LogicalItem.Type.TOOL_RESULT) {
-            String toolName = item.first().toolName() != null ? item.first().toolName() : "tool";
-            return "[tool:" + toolName + "] result:\n"
-                    + "Result: " + firstLines(UntrustedContentSanitizer.escapeXml(unwrapToolBoundary(item.first().content())), 3);
-        }
-        // user/assistant message or other
-        String role = item.first().role();
-        if ("assistant".equals(role)) {
-            return "Assistant: " + singleLine(item.first().content());
-        }
-        return "User: " + singleLine(item.first().content());
-    }
-
-    private String unwrapToolBoundary(String content) {
-        String open = "<untrusted_tool_output>\n";
-        String close = "\n</untrusted_tool_output>";
-        if (content != null && content.startsWith(open) && content.endsWith(close)) {
-            return content.substring(open.length(), content.length() - close.length());
-        }
-        return content == null ? "" : content;
-    }
-
-    private String firstLines(String value, int maxLines) {
-        if (value == null) {
-            return "";
-        }
-        String[] lines = value.split("\n", -1);
-        int count = Math.min(lines.length, maxLines);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < count; i++) {
-            if (sb.length() > 0) {
-                sb.append('\n');
-            }
-            sb.append(abbreviate(lines[i], 300));
-        }
-        if (lines.length > count) {
-            sb.append("\n[... ").append(lines.length - count).append(" more lines ...]");
-        }
-        return sb.toString();
-    }
-
-    private String singleLine(String value) {
-        return value == null ? "" : abbreviate(value.replace('\n', ' '), 900);
-    }
-
-    private String renderCurrentRequest(AgentContext context) {
-        ConversationHistory history = context.getConversationHistory();
-        if (history == null || history.isEmpty()) {
-            return context.getQuestion() == null ? "" : context.getQuestion();
-        }
-        List<ConversationHistoryEntry> entries = history.entries();
-        for (int i = entries.size() - 1; i >= 0; i--) {
-            ConversationHistoryEntry entry = entries.get(i);
-            if (entry.stableType() == ConversationEntryType.USER_TASK
-                    || entry.stableType() == ConversationEntryType.USER_INPUT) {
-                return entry.content();
-            }
-        }
-        return context.getQuestion() == null ? "" : context.getQuestion();
-    }
-
     // ================================================================
     // Assembly
     // ================================================================
 
-    private ContextBuildResult assembleRaw(String prefix, String memory, String relevantMemory,
-                                           String historyText, String currentRequest,
-                                           AgentContext context) {
+    private List<ChatMessage> messages(String memory, String relevant, String history, String currentRequest) {
         List<ChatMessage> messages = new ArrayList<>();
-        if (memory.length() > 0) {
-            messages.add(ChatMessage.builder().role("user")
-                    .content(memory).build());
-        }
-        if (relevantMemory.length() > 0) {
-            messages.add(ChatMessage.builder().role("user")
-                    .content(relevantMemory).build());
-        }
-        if (historyText.length() > 0) {
-            messages.add(ChatMessage.builder().role("user")
-                    .content(historyText).build());
-        }
-        messages.add(ChatMessage.builder().role("user")
-                .content(currentRequest).build());
+        messages.add(ChatMessage.builder().role("user").content(memory).build());
+        messages.add(ChatMessage.builder().role("user").content(relevant).build());
+        messages.add(ChatMessage.builder().role("user").content(history).build());
+        messages.add(ChatMessage.builder().role("user").content(currentRequest).build());
+        return messages;
+    }
+
+    private ContextBuildResult assembleRaw(Sections raw, AgentContext context) {
+        List<ChatMessage> messages = messages(raw.memory, raw.relevantMemory, raw.historyText, raw.currentRequest);
+        int total = TextUtil.length(raw.prefix) + TextUtil.length(raw.memory)
+                + TextUtil.length(raw.relevantMemory) + TextUtil.length(raw.historyText)
+                + TextUtil.length(raw.currentRequest);
 
         ContextBuildResult.ContextRenderMetadata metadata =
                 new ContextBuildResult.ContextRenderMetadata(
-                        prefix.length() + memory.length() + relevantMemory.length()
-                                + historyText.length() + currentRequest.length(),
-                        0,
-                        Map.of("prefix", prefix.length(), "memory", memory.length(),
-                                "relevant_memory", relevantMemory.length(),
-                                "history", historyText.length(),
-                                "current_request", currentRequest.length()),
-                        Map.of(),
-                        List.of(), false, 0, 0, 0, currentRequest, true, currentRequest.length());
-        return new ContextBuildResult(prefix, messages, metadata, false, null);
+                        total, 0, false,
+                        sectionRawChars(raw), Map.of(), sectionRawChars(raw), SECTION_ORDER,
+                        List.of(), false,
+                        raw.historyResult.merged(), raw.historyResult.summarized(),
+                        raw.historyResult.deduped(), raw.historyResult.summaryReuse(),
+                        raw.relevantSelected,
+                        raw.currentRequest, true, TextUtil.length(raw.currentRequest));
+        return new ContextBuildResult(raw.prefix, messages, metadata, false, null);
     }
 
-    private ContextBuildResult assembleBudgeted(String prefix, String memory, String relevantMemory,
-                                                HistoryRender history, String currentRequest,
-                                                AgentContext context, ContextProperties cfg) {
+    private ContextBuildResult assembleBudgeted(Sections raw, AgentContext context, ContextProperties cfg) {
         int totalBudget = positive(cfg.getTotalBudgetChars(), 12000);
         int prefixBudget = positive(cfg.getPrefixBudgetChars(), 3600);
-        int prefixFloor = positive(cfg.getPrefixFloorChars(), 1200);
+        int prefixFloor = positive(cfg.getPrefixFloorChars(), 900);
         int memoryBudget = positive(cfg.getMemoryBudgetChars(), 1600);
         int memoryFloor = positive(cfg.getMemoryFloorChars(), 400);
         int relevantBudget = positive(cfg.getRelevantMemoryBudgetChars(), 1200);
         int relevantFloor = positive(cfg.getRelevantMemoryFloorChars(), 300);
         int historyBudget = positive(cfg.getHistoryBudgetChars(), 5200);
-        int historyFloor = positive(cfg.getHistoryFloorChars(), 1500);
+        int historyFloor = positive(cfg.getHistoryFloorChars(), 1300);
 
-        // Current request always preserved and never trimmed.
-        int currentRequestChars = currentRequest.length();
+        // Current request is always preserved and never trimmed.
+        int currentRequestChars = TextUtil.length(raw.currentRequest);
 
-        String trimmedPrefix = trim(prefix, prefixBudget, prefixFloor, "prefix");
-        String trimmedMemory = trim(memory, memoryBudget, memoryFloor, "memory");
-        String trimmedRelevant = trim(relevantMemory, relevantBudget, relevantFloor, "relevant_memory");
-        String trimmedHistory = trim(history.text(), historyBudget, historyFloor, "history");
+        String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixBudget);
+        String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryBudget);
+        String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantBudget);
+        String trimmedHistory = TextUtil.clipHeadTail(raw.historyText, historyBudget);
 
-        int total = trimmedPrefix.length() + trimmedMemory.length() + trimmedRelevant.length()
-                + trimmedHistory.length() + currentRequestChars;
+        int total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
 
         List<String> reductions = new ArrayList<>();
-        // If still over budget, reduce in fixed order: relevant_memory → history → memory → prefix.
-        // Each section is pressed directly to its floor to avoid O(n²) single-char trims.
-        if (total > totalBudget && trimmedRelevant.length() > relevantFloor) {
-            trimmedRelevant = trim(trimmedRelevant, relevantFloor, relevantFloor, "relevant_memory");
-            reductions.add("relevant_memory");
-            total = recompute(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        // If still over budget, reduce in fixed order: relevant_memory → history → memory → prefix,
+        // each pressed to its floor, re-rendering after each change.
+        if (total > totalBudget && TextUtil.length(trimmedRelevant) > relevantFloor) {
+            trimmedRelevant = TextUtil.clipHeadTail(trimmedRelevant, relevantFloor);
+            reductions.add("relevant_memory->floor");
+            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
-        if (total > totalBudget && trimmedHistory.length() > historyFloor) {
-            trimmedHistory = trim(trimmedHistory, historyFloor, historyFloor, "history");
-            reductions.add("history");
-            total = recompute(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        if (total > totalBudget && TextUtil.length(trimmedHistory) > historyFloor) {
+            trimmedHistory = TextUtil.clipHeadTail(trimmedHistory, historyFloor);
+            reductions.add("history->floor");
+            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
-        if (total > totalBudget && trimmedMemory.length() > memoryFloor) {
-            trimmedMemory = trim(trimmedMemory, memoryFloor, memoryFloor, "memory");
-            reductions.add("memory");
-            total = recompute(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        if (total > totalBudget && TextUtil.length(trimmedMemory) > memoryFloor) {
+            trimmedMemory = TextUtil.clipHeadTail(trimmedMemory, memoryFloor);
+            reductions.add("memory->floor");
+            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
-        if (total > totalBudget && trimmedPrefix.length() > prefixFloor) {
-            trimmedPrefix = trim(trimmedPrefix, prefixFloor, prefixFloor, "prefix");
-            reductions.add("prefix");
-            total = recompute(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        if (total > totalBudget && TextUtil.length(trimmedPrefix) > prefixFloor) {
+            trimmedPrefix = TextUtil.clipHeadTail(trimmedPrefix, prefixFloor);
+            reductions.add("prefix->floor");
+            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
 
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.builder().role("user").content(trimmedMemory).build());
-        messages.add(ChatMessage.builder().role("user").content(trimmedRelevant).build());
-        messages.add(ChatMessage.builder().role("user").content(trimmedHistory).build());
-        messages.add(ChatMessage.builder().role("user").content(currentRequest).build());
+        List<ChatMessage> messages = messages(
+                trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
+
+        Map<String, Integer> budget = sectionBudgetChars(cfg);
+        Map<String, Integer> rendered = new LinkedHashMap<>();
+        rendered.put("prefix", TextUtil.length(trimmedPrefix));
+        rendered.put("memory", TextUtil.length(trimmedMemory));
+        rendered.put("relevant_memory", TextUtil.length(trimmedRelevant));
+        rendered.put("history", TextUtil.length(trimmedHistory));
+        rendered.put("current_request", currentRequestChars);
 
         ContextBuildResult.ContextRenderMetadata metadata =
                 new ContextBuildResult.ContextRenderMetadata(
-                        total, totalBudget,
-                        Map.of("prefix", prefix.length(), "memory", memory.length(),
-                                "relevant_memory", relevantMemory.length(),
-                                "history", history.text().length(),
-                                "current_request", currentRequestChars),
-                        Map.of("prefix", trimmedPrefix.length(), "memory", trimmedMemory.length(),
-                                "relevant_memory", trimmedRelevant.length(),
-                                "history", trimmedHistory.length(),
-                                "current_request", currentRequestChars),
-                        reductions, true, history.merged(), history.summarized(), 0,
-                        currentRequest, true, currentRequestChars);
+                        total, totalBudget, total > totalBudget,
+                        sectionRawChars(raw), budget, rendered, SECTION_ORDER, reductions, true,
+                        raw.historyResult.merged(), raw.historyResult.summarized(),
+                        raw.historyResult.deduped(), raw.historyResult.summaryReuse(),
+                        raw.relevantSelected,
+                        raw.currentRequest, true, currentRequestChars);
         return new ContextBuildResult(trimmedPrefix, messages, metadata, false, null);
     }
 
-    private String trim(String value, int budget, int floor, String section) {
-        if (value == null || value.length() <= budget) {
-            return value == null ? "" : value;
-        }
-        // Keep the head; never cut below the floor.
-        int target = Math.max(floor, budget);
-        if (value.length() <= target) {
-            return value;
-        }
-        // Preserve a meaningful tail for history/prefix continuity.
-        int head = (int) (target * 0.75);
-        int tail = target - head;
-        return value.substring(0, head) + "\n[...] " + value.substring(value.length() - tail);
+    private Map<String, Integer> sectionRawChars(Sections raw) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        map.put("prefix", TextUtil.length(raw.prefix));
+        map.put("memory", TextUtil.length(raw.memory));
+        map.put("relevant_memory", TextUtil.length(raw.relevantMemory));
+        map.put("history", TextUtil.length(raw.historyText));
+        map.put("current_request", TextUtil.length(raw.currentRequest));
+        return map;
     }
 
-    private int recompute(String prefix, String memory, String relevant, String history, int currentRequestChars) {
-        return prefix.length() + memory.length() + relevant.length() + history.length() + currentRequestChars;
+    private Map<String, Integer> sectionBudgetChars(ContextProperties cfg) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        map.put("prefix", positive(cfg.getPrefixBudgetChars(), 3600));
+        map.put("memory", positive(cfg.getMemoryBudgetChars(), 1600));
+        map.put("relevant_memory", positive(cfg.getRelevantMemoryBudgetChars(), 1200));
+        map.put("history", positive(cfg.getHistoryBudgetChars(), 5200));
+        map.put("current_request", 0);
+        return map;
+    }
+
+    private int totalLength(String prefix, String memory, String relevant, String history, int request) {
+        return TextUtil.length(prefix) + TextUtil.length(memory)
+                + TextUtil.length(relevant) + TextUtil.length(history) + request;
     }
 
     private ContextProperties contextProperties(AgentContext context) {
@@ -465,36 +342,9 @@ public final class ContextManager {
         return value == null || value <= 0 ? fallback : value;
     }
 
-    private static String abbreviate(String value, int max) {
-        if (value == null) {
-            return "";
-        }
-        if (value.length() <= max) {
-            return value;
-        }
-        return value.substring(0, max);
-    }
-
-    /** Internal render state for the history section. */
-    record HistoryRender(String text, int merged, int summarized) {
-    }
-
-    /** A logical history item, either a message, a tool result, or a merged pair. */
-    record LogicalItem(Type type, ConversationHistoryEntry first, ConversationHistoryEntry second) {
-
-        enum Type { MESSAGE, TOOL_RESULT, TOOL_PAIR }
-
-        static LogicalItem single(ConversationHistoryEntry entry) {
-            Type t = entry.stableType() == ConversationEntryType.TOOL_RESULT ? Type.TOOL_RESULT : Type.MESSAGE;
-            return new LogicalItem(t, entry, null);
-        }
-
-        static LogicalItem toolPair(ConversationHistoryEntry assistant, ConversationHistoryEntry result) {
-            return new LogicalItem(Type.TOOL_PAIR, assistant, result);
-        }
-
-        boolean summarized() {
-            return type == Type.TOOL_PAIR;
-        }
+    /** Raw, pre-budget section texts plus render diagnostics. */
+    private record Sections(String prefix, String memory, String relevantMemory,
+                            String historyText, String currentRequest,
+                            HistoryRenderer.HistoryResult historyResult, int relevantSelected) {
     }
 }

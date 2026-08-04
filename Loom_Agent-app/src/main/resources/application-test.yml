@@ -124,22 +124,16 @@ loom:
     sub-agent-timeout-ms: ${AGENT_SUB_AGENT_TIMEOUT_MS:60000}
     sub-agent-summary-max-chars: ${AGENT_SUB_AGENT_SUMMARY_MAX_CHARS:12000}
     context:
-      enabled: ${AGENT_CONTEXT_ENABLED:true}
-      storage-root: ${AGENT_CONTEXT_STORAGE_ROOT:${LOOM_DATA_DIR:${java.io.tmpdir}/loom-agent-test}/context-artifacts}
-      persist-tool-result-chars: ${AGENT_CONTEXT_PERSIST_TOOL_RESULT_CHARS:12000}
-      tool-preview-chars: ${AGENT_CONTEXT_TOOL_PREVIEW_CHARS:2000}
-      keep-recent-tool-results: ${AGENT_CONTEXT_KEEP_RECENT_TOOL_RESULTS:4}
-      max-dynamic-entries: ${AGENT_CONTEXT_MAX_DYNAMIC_ENTRIES:60}
       context-reduction-enabled: ${AGENT_CONTEXT_REDUCTION_ENABLED:true}
       total-budget-chars: ${AGENT_CONTEXT_TOTAL_BUDGET_CHARS:12000}
       prefix-budget-chars: ${AGENT_CONTEXT_PREFIX_BUDGET_CHARS:3600}
-      prefix-floor-chars: ${AGENT_CONTEXT_PREFIX_FLOOR_CHARS:1200}
+      prefix-floor-chars: ${AGENT_CONTEXT_PREFIX_FLOOR_CHARS:900}
       memory-budget-chars: ${AGENT_CONTEXT_MEMORY_BUDGET_CHARS:1600}
       memory-floor-chars: ${AGENT_CONTEXT_MEMORY_FLOOR_CHARS:400}
       relevant-memory-budget-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_BUDGET_CHARS:1200}
       relevant-memory-floor-chars: ${AGENT_CONTEXT_RELEVANT_MEMORY_FLOOR_CHARS:300}
       history-budget-chars: ${AGENT_CONTEXT_HISTORY_BUDGET_CHARS:5200}
-      history-floor-chars: ${AGENT_CONTEXT_HISTORY_FLOOR_CHARS:1500}
+      history-floor-chars: ${AGENT_CONTEXT_HISTORY_FLOOR_CHARS:1300}
       recent-history-items: ${AGENT_CONTEXT_RECENT_HISTORY_ITEMS:6}
       relevant-memory-limit: ${AGENT_CONTEXT_RELEVANT_MEMORY_LIMIT:3}
     persistence:

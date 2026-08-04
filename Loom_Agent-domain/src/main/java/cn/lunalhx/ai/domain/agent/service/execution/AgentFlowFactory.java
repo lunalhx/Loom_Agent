@@ -82,7 +82,7 @@ public class AgentFlowFactory {
         DynamicContextMiddleware dynamicContextMiddleware =
                 new DynamicContextMiddleware(ledgerAppendService);
         BudgetMiddleware budgetMiddleware =
-                new BudgetMiddleware(budgetGuard, properties, contextManager::budgetInput);
+                new BudgetMiddleware(budgetGuard, properties);
         ErrorRecoveryMiddleware errorRecoveryMiddleware =
                 new ErrorRecoveryMiddleware(
                         RecoveryChainFactory.createRecoveryChain(

@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.service.context;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
+import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory.MemoryNote;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolOperation;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Updates {@link WorkingContextMemory} after tool completion.
@@ -29,6 +31,7 @@ public final class WorkingContextMemoryService {
 
     private static final int FILE_SUMMARY_CHARS = 180;
     private static final int MAX_SUMMARY_LINES = 3;
+    private static final AtomicLong SEQUENCE = new AtomicLong(0);
 
     public void onToolResult(AgentContext context, String toolName, ToolResult result) {
         if (context == null || toolName == null) {
@@ -58,7 +61,11 @@ public final class WorkingContextMemoryService {
             wm.putFileSummary(new WorkingContextMemory.FileSummary(path, summary, Instant.now(), sha));
         }
         if (result != null && !result.isSuccess()) {
-            wm.addNote("read_file 失败: " + errorText(result));
+            wm.addNote(note("read_file 失败: " + errorText(result),
+                    List.of("read_file", "error"), pathSource(paths)));
+        } else if (!paths.isEmpty()) {
+            wm.addNote(note("read_file: " + StringUtils.abbreviate(paths.get(0), 120),
+                    List.of("read_file"), pathSource(paths)));
         }
     }
 
@@ -68,7 +75,11 @@ public final class WorkingContextMemoryService {
             wm.invalidateFileSummary(path);
         }
         if (paths.isEmpty() && result != null && !result.isSuccess()) {
-            wm.addNote(toolName + " 失败: " + errorText(result));
+            wm.addNote(note(toolName + " 失败: " + errorText(result),
+                    List.of(toolName, "error"), pathSource(paths)));
+        } else if (!paths.isEmpty()) {
+            wm.addNote(note(toolName + ": " + StringUtils.abbreviate(String.join(",", paths), 120),
+                    List.of(toolName), pathSource(paths)));
         }
     }
 
@@ -77,16 +88,35 @@ public final class WorkingContextMemoryService {
             return;
         }
         if (success) {
-            wm.addNote("run_shell: " + StringUtils.abbreviate(firstNonEmptyLines(result.getObservation(), 1), 120));
+            wm.addNote(note("run_shell: " + StringUtils.abbreviate(
+                    firstNonEmptyLines(result.getObservation(), 1), 120),
+                    List.of("run_shell"), null));
         } else {
-            wm.addNote("run_shell 失败: " + errorText(result));
+            wm.addNote(note("run_shell 失败: " + errorText(result),
+                    List.of("run_shell", "error"), null));
         }
     }
 
     private void handleGeneric(WorkingContextMemory wm, String toolName, boolean success, ToolResult result) {
         if (!success && result != null) {
-            wm.addNote(toolName + " 未成功: " + errorText(result));
+            wm.addNote(note(toolName + " 未成功: " + errorText(result),
+                    List.of(toolName, "error"), null));
         }
+    }
+
+    private MemoryNote note(String text, List<String> tags, String source) {
+        return MemoryNote.builder()
+                .text(text)
+                .tags(tags)
+                .source(source)
+                .createdAt(Instant.now())
+                .sequence(SEQUENCE.incrementAndGet())
+                .kind("process")
+                .build();
+    }
+
+    private String pathSource(List<String> paths) {
+        return paths == null || paths.isEmpty() ? null : paths.get(0);
     }
 
     private String summarizeReadOutput(AgentContext context, String path, ToolResult result) {

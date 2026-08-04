@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service.workspace;
 
+import org.apache.commons.codec.digest.DigestUtils;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -8,20 +10,39 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Builds loom-code "Workspace Facts": cwd, repo root, current/default branch,
- * git status, last 5 commits, plus a navigation snippet of AGENTS.md, README.md,
- * pyproject.toml and package.json (max 1200 chars each).
+ * git status, last 5 commits, plus a navigation snippet of whitelisted project
+ * docs (max 1200 chars each).
+ *
+ * <p>Structural identity (cwd, repo root, branch, default branch) is captured
+ * separately as a {@code workspaceFingerprint} so that ordinary git status or
+ * doc-content churn does not invalidate a {@code StablePrefix}; only a change
+ * in the structural identity does.
+ *
+ * <p>Git commands are bounded to a 5-second timeout; non-git directories fall
+ * back to stable values.
  */
 public final class WorkspaceFacts {
 
-    private static final String[] DOC_NAMES = {"AGENTS.md", "README.md", "pyproject.toml", "package.json"};
+    private static final String[] DOC_NAMES = {
+            "AGENTS.md", "README.md", "pom.xml",
+            "settings.gradle", "settings.gradle.kts",
+            "build.gradle", "build.gradle.kts", "gradle.properties",
+            "pyproject.toml", "package.json"};
     private static final int DOC_CHARS = 1200;
     private static final int STATUS_CHARS = 1500;
+    private static final long GIT_TIMEOUT_SECONDS = 5;
 
     public record Facts(String cwd, String repoRoot, String branch, String defaultBranch,
                         String status, List<String> recentCommits, Map<String, String> projectDocs) {
+
+        /** Deterministic fingerprint of the workspace structural identity. */
+        public String workspaceFingerprint() {
+            return DigestUtils.sha256Hex(cwd + "\n" + repoRoot + "\n" + branch + "\n" + defaultBranch);
+        }
 
         public String text() {
             StringBuilder sb = new StringBuilder("Workspace:\n");
@@ -106,9 +127,14 @@ public final class WorkspaceFacts {
             cmd.addAll(java.util.Arrays.asList(args.split("\\s+")));
             Process process = new ProcessBuilder(cmd)
                     .directory(cwd.toFile())
+                    .redirectErrorStream(true)
                     .start();
+            boolean finished = process.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return fallback;
+            }
             String out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-            process.waitFor();
             return out.isEmpty() ? fallback : out;
         } catch (IOException | InterruptedException e) {
             return fallback;

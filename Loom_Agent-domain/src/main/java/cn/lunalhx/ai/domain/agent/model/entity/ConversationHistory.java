@@ -47,12 +47,20 @@ public final class ConversationHistory {
     public ConversationHistory appendWithEventKey(String role, String content,
                                                   ConversationEntryType stableType, String eventKey) {
         return appendWithEventKey(role, content, stableType, eventKey,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     public ConversationHistory appendWithEventKey(String role, String content,
                                                   ConversationEntryType stableType, String eventKey,
                                                   String toolName, String artifactId,
+                                                  Integer originalChars, Integer renderChars) {
+        return appendWithEventKey(role, content, stableType, eventKey,
+                toolName, null, artifactId, originalChars, renderChars);
+    }
+
+    public ConversationHistory appendWithEventKey(String role, String content,
+                                                  ConversationEntryType stableType, String eventKey,
+                                                  String toolName, String toolInputJson, String artifactId,
                                                   Integer originalChars, Integer renderChars) {
         Objects.requireNonNull(role, "role must not be null");
         Objects.requireNonNull(content, "content must not be null");
@@ -73,6 +81,7 @@ public final class ConversationHistory {
                 .stableType(stableType)
                 .eventKey(eventKey)
                 .toolName(toolName)
+                .toolInputJson(toolInputJson)
                 .artifactId(artifactId)
                 .originalChars(originalChars)
                 .renderChars(renderChars)

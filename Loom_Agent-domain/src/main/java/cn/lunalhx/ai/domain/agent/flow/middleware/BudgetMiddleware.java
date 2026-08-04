@@ -8,33 +8,32 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 
 import java.util.Objects;
-import java.util.function.Function;
 
 public class BudgetMiddleware implements ModelCallMiddleware {
 
     private final BudgetGuard budgetGuard;
     private final AgentRuntimeProperties properties;
-    private final Function<AgentContext, String> budgetInput;
 
     public BudgetMiddleware(BudgetGuard budgetGuard, AgentRuntimeProperties properties) {
-        this(budgetGuard, properties, context -> context.getQuestion() == null ? "" : context.getQuestion());
-    }
-
-    public BudgetMiddleware(BudgetGuard budgetGuard, AgentRuntimeProperties properties,
-                            Function<AgentContext, String> budgetInput) {
         this.budgetGuard = Objects.requireNonNull(budgetGuard, "budgetGuard must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
-        this.budgetInput = Objects.requireNonNull(budgetInput, "budgetInput must not be null");
     }
 
     @Override
     public ModelCallOutcome apply(ModelCallContext ctx, ModelCallNext next) {
         AgentContext context = ctx.getAgentContext();
 
+        // Consume the same PreparedContextView built by ContextReductionMiddleware so
+        // that budget estimation exactly matches the actual request. BudgetGuard only
+        // performs the global token/cost quota check; it never changes section budgets.
+        String budgetText = ctx.getPreparedView() != null
+                ? ctx.getPreparedView().budgetText()
+                : (context.getQuestion() == null ? "" : context.getQuestion());
+
         BudgetCheckResult check = budgetGuard.checkBeforeModelCall(context,
                 AgentNodeNames.MODEL_CALL, ctx.getRequestModel(),
                 ModelCallPurpose.CONTROL_JSON,
-                budgetInput.apply(context), ctx.getMaxTokens() == null ? 0 : ctx.getMaxTokens());
+                budgetText, ctx.getMaxTokens() == null ? 0 : ctx.getMaxTokens());
         if (!check.isAllowed()) {
             String reason = "budget_exceeded: usedTokens=" + check.getUsedTokens()
                     + ", estimatedInputTokens=" + check.getEstimatedInputTokens()

@@ -66,6 +66,16 @@ public class AiRuntimeConfigValidationTest {
         assertRemovedLedgerPropertyRejected("loom.agent.conversation-ledger.shadow-enabled");
     }
 
+    @Test
+    public void removedContextStorageRootPropertyMustFailStartup() {
+        assertRemovedLedgerPropertyRejected("loom.agent.context.storage-root");
+    }
+
+    @Test
+    public void removedContextToolPreviewPropertyMustFailStartup() {
+        assertRemovedLedgerPropertyRejected("loom.agent.context.tool-preview-chars");
+    }
+
     private void assertRemovedLedgerPropertyRejected(String property) {
         ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
         AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
@@ -78,38 +88,6 @@ public class AiRuntimeConfigValidationTest {
             IllegalStateException error = assertThrows(
                     IllegalStateException.class, validator::afterPropertiesSet);
             assertTrue(error.getMessage().contains("配置已删除"));
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    @Test
-    public void toolPreviewCharsAbove2000MustFailStartup() {
-        ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
-        AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
-        agentProperties.getContext().setToolPreviewChars(2001);
-        ThreadPoolExecutor executor = executor();
-        InitializingBean validator = new AgentLoopAutoConfig()
-                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
-
-        try {
-            assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    @Test
-    public void toolPreviewCharsZeroMustFailStartup() {
-        ModelRuntimeProperties modelProperties = new ModelRuntimeProperties();
-        AgentRuntimeProperties agentProperties = new AgentRuntimeProperties();
-        agentProperties.getContext().setToolPreviewChars(0);
-        ThreadPoolExecutor executor = executor();
-        InitializingBean validator = new AgentLoopAutoConfig()
-                .aiConfigValidator(modelProperties, agentProperties, streamLimitProps(), environment(), executor);
-
-        try {
-            assertThrows(IllegalStateException.class, validator::afterPropertiesSet);
         } finally {
             executor.shutdownNow();
         }
