@@ -30,6 +30,77 @@ public final class AgentEventFactory {
                 .workspace(context.getWorkspaceDisplayName())
                 .parentRunId(context.getParentRunId())
                 .checkpointVersion(context.getCheckpointVersion())
+                .toolSteps(context.getToolSteps())
+                .modelAttempts(context.getModelAttempts())
+                .lastTool(context.getLastTool())
+                .maxToolSteps(context.getMaxSteps())
+                .maxAttempts(context.getMaxAttempts())
+                .build();
+    }
+
+    public AgentEvent meta(AgentContext context) {
+        return AgentEvent.builder()
+                .type(AgentEventType.META)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .toolSteps(context.getToolSteps())
+                .modelAttempts(context.getModelAttempts())
+                .lastTool(context.getLastTool())
+                .maxToolSteps(context.getMaxSteps())
+                .maxAttempts(context.getMaxAttempts())
+                .build();
+    }
+
+    public AgentEvent answer(AgentContext context, String answer) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ANSWER)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .toolSteps(context.getToolSteps())
+                .modelAttempts(context.getModelAttempts())
+                .lastTool(context.getLastTool())
+                .answer(answer)
+                .build();
+    }
+
+    public AgentEvent done(AgentContext context, AgentStopReason stopReason) {
+        return AgentEvent.builder()
+                .type(AgentEventType.DONE)
+                .runId(context.getRunId())
+                .requestId(context.getRequestId())
+                .conversationId(context.getConversationId())
+                .workspace(context.getWorkspaceDisplayName())
+                .parentRunId(context.getParentRunId())
+                .toolSteps(context.getToolSteps())
+                .modelAttempts(context.getModelAttempts())
+                .lastTool(context.getLastTool())
+                .stopReason(stopReason)
+                .answer(context.getFinalAnswer())
+                .checkpointVersion(context.getCheckpointVersion())
+                .build();
+    }
+
+    public AgentEvent error(AgentContext context) {
+        return AgentEvent.builder()
+                .type(AgentEventType.ERROR)
+                .runId(context == null ? null : context.getRunId())
+                .requestId(context == null ? null : context.getRequestId())
+                .conversationId(context == null ? null : context.getConversationId())
+                .workspace(context == null ? null : context.getWorkspaceDisplayName())
+                .parentRunId(context == null ? null : context.getParentRunId())
+                .toolSteps(context == null ? null : context.getToolSteps())
+                .modelAttempts(context == null ? null : context.getModelAttempts())
+                .lastTool(context == null ? null : context.getLastTool())
+                .checkpointVersion(context == null ? null : context.getCheckpointVersion())
+                .recoverable(context != null && context.getCheckpointVersion() != null)
+                .code(context == null ? AgentErrorCode.AGENT_ERROR.code() : context.getErrorCode())
+                .message(context == null ? AgentErrorCode.AGENT_ERROR.defaultMessage() : context.getErrorMessage())
                 .build();
     }
 
@@ -66,7 +137,9 @@ public final class AgentEventFactory {
                 .conversationId(context.getConversationId())
                 .workspace(approval.getWorkspaceDisplayName())
                 .parentRunId(context.getParentRunId())
-                .step(context.getStep() + 1)
+                .toolSteps(context.getToolSteps())
+                .modelAttempts(context.getModelAttempts())
+                .lastTool(context.getLastTool())
                 .tool(approval.getTool())
                 .input(approval.getInput())
                 .approvalId(approval.getApprovalId())
@@ -75,10 +148,6 @@ public final class AgentEventFactory {
                 .metadata(approval.getMetadata())
                 .expiresAt(approval.getExpiresAt())
                 .build();
-    }
-
-    public AgentEvent highRiskApprovalRequired(AgentContext context, PendingApproval approval) {
-        return approvalRequired(context, approval);
     }
 
     public AgentEvent pausedForApproval(AgentContext context) {
@@ -127,15 +196,24 @@ public final class AgentEventFactory {
     }
 
     public AgentEvent agentError(AgentContext context) {
+        String code = context != null && StringUtils.isNotBlank(context.getErrorCode())
+                ? context.getErrorCode() : AgentErrorCode.AGENT_ERROR.code();
+        String message = context != null && StringUtils.isNotBlank(context.getErrorMessage())
+                ? context.getErrorMessage() : AgentErrorCode.AGENT_ERROR.defaultMessage();
         return AgentEvent.builder()
                 .type(AgentEventType.ERROR)
                 .runId(context == null ? null : context.getRunId())
                 .requestId(context == null ? null : context.getRequestId())
                 .conversationId(context == null ? null : context.getConversationId())
+                .workspace(context == null ? null : context.getWorkspaceDisplayName())
+                .parentRunId(context == null ? null : context.getParentRunId())
+                .toolSteps(context == null ? null : context.getToolSteps())
+                .modelAttempts(context == null ? null : context.getModelAttempts())
+                .lastTool(context == null ? null : context.getLastTool())
                 .checkpointVersion(context == null ? null : context.getCheckpointVersion())
                 .recoverable(context != null && context.getCheckpointVersion() != null)
-                .code(AgentErrorCode.AGENT_ERROR.code())
-                .message(AgentErrorCode.AGENT_ERROR.defaultMessage())
+                .code(code)
+                .message(message)
                 .build();
     }
 

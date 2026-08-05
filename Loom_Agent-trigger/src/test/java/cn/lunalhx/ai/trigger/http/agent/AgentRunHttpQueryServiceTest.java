@@ -122,15 +122,15 @@ public class AgentRunHttpQueryServiceTest {
     }
 
     @Test
-    public void cancelledStatusShouldBeTerminalAndNotResumable() {
-        when(agentRunRepository.find("r-cancelled")).thenReturn(Optional.of(
+    public void stoppedStatusShouldBeTerminalAndNotResumable() {
+        when(agentRunRepository.find("r-stopped")).thenReturn(Optional.of(
                 AgentRun.builder()
-                        .runId("r-cancelled")
-                        .status(AgentRunStatus.CANCELLED)
+                        .runId("r-stopped")
+                        .status(AgentRunStatus.STOPPED)
                         .build()));
 
         Response<AgentRunStatusResponse> result =
-                queryService.status("r-cancelled");
+                queryService.status("r-stopped");
 
         assertEquals(Boolean.TRUE, result.getData().getTerminal());
         assertEquals(Boolean.FALSE, result.getData().getResumable());

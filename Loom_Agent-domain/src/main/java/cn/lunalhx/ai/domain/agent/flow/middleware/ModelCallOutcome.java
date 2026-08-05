@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.agent.flow.middleware;
 
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
-import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 
 import java.util.Collections;
 
@@ -25,19 +24,17 @@ public class ModelCallOutcome {
 
     public static ModelCallOutcome budgetBlocked() {
         return new ModelCallOutcome(Type.BUDGET_BLOCKED,
-                NodeResult.builder().nextNode(AgentNodeNames.FAIL).terminal(true)
-                        .events(Collections.emptyList()).build(), null);
+                NodeResult.fail(Collections.emptyList()), null);
     }
 
     public static ModelCallOutcome truncationExhausted() {
         return new ModelCallOutcome(Type.TRUNCATION_EXHAUSTED,
-                NodeResult.next(AgentNodeNames.USER_INPUT_GATE, Collections.emptyList()), null);
+                NodeResult.fail(Collections.emptyList()), null);
     }
 
     public static ModelCallOutcome error(String message) {
         return new ModelCallOutcome(Type.ERROR,
-                NodeResult.builder().nextNode(AgentNodeNames.FAIL).terminal(true)
-                        .events(Collections.emptyList()).build(), message);
+                NodeResult.fail(Collections.emptyList()), message);
     }
 
     public static ModelCallOutcome routed(NodeResult route) {

@@ -5,12 +5,12 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
-import cn.lunalhx.ai.domain.model.valobj.ModelCapability;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
 import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
@@ -19,11 +19,8 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
-import cn.lunalhx.ai.runtime.hook.CheckpointAgentHook;
-import cn.lunalhx.ai.runtime.hook.PendingApprovalConsistencyStopHook;
 import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
@@ -199,17 +196,7 @@ public final class AgentRuntimeTestFixture {
                 testModelRuntimeProperties(props));
         ConversationHistoryAppendService ledgerAppendService = new ConversationHistoryAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
-                standardHookRegistry(props, effectiveApprovalStore(), effectiveRunRepository(), effectiveCheckpointRepository()),
-                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard());
-    }
-
-    private AgentHookRegistry standardHookRegistry(AgentRuntimeProperties props,
-                                                   ApprovalStore approvalStore,
-                                                   AgentRunRepository runRepo,
-                                                   AgentCheckpointRepository checkpointRepo) {
-        return new AgentHookRegistry(List.of(
-                new PendingApprovalConsistencyStopHook(approvalStore),
-                new CheckpointAgentHook(runRepo, checkpointRepo, objectMapper)));
+                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard(), null);
     }
 
     public DefaultAgentLoopService buildAgentLoop() {

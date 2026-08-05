@@ -21,7 +21,8 @@ public class AgentStreamEvent {
     private String workspace;
     private String parentRunId;
     private Long elapsedMs;
-    private Integer step;
+    private Integer toolSteps;
+    private Integer modelAttempts;
     private String node;
     private List<String> nodeInputs;
     private String thought;
@@ -36,7 +37,9 @@ public class AgentStreamEvent {
     private Boolean truncated;
     private String answer;
     private String stopReason;
-    private Integer stepCount;
+    private String lastTool;
+    private Integer maxToolSteps;
+    private Integer maxAttempts;
     private String code;
     private String message;
     private Long checkpointVersion;

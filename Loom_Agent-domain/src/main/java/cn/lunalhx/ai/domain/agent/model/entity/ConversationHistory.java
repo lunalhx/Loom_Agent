@@ -22,7 +22,7 @@ import java.util.Set;
  *       the same event key will not produce a second entry.</li>
  * </ul>
  *
- * <p>This type is independent of {@link DynamicText} — it records conversation
+ * <p>It records conversation
  * structure for idempotency checks, diagnostics, and replay. It is the
  * type-safe, resumable implementation of loom-code {@code session.history}:
  * it only appends raw facts and never performs compaction itself.

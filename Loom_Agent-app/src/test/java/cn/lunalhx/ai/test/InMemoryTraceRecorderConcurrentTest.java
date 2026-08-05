@@ -1,6 +1,6 @@
 package cn.lunalhx.ai.test;
 
-import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
+import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentTraceEvent;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
@@ -45,7 +45,7 @@ public class InMemoryTraceRecorderConcurrentTest {
                         context.setQuestion("test");
                         context.setMaxSteps(3);
 
-                        traceRecorder.recordNodeStart(context, new StartNode(), null);
+                        traceRecorder.recordNodeStart(context, new cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode("prompt_build", java.util.List.of()) { @Override protected cn.lunalhx.ai.domain.agent.flow.NodeResult doApply(cn.lunalhx.ai.domain.agent.model.entity.AgentContext ctx) { return cn.lunalhx.ai.domain.agent.flow.NodeResult.nextRound(java.util.List.of()); } }, null);
                     }
                 } catch (Throwable e) {
                     synchronized (failures) {

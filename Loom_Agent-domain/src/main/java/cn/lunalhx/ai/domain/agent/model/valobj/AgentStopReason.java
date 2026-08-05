@@ -2,15 +2,14 @@ package cn.lunalhx.ai.domain.agent.model.valobj;
 
 public enum AgentStopReason {
 
-    FINAL_ANSWER,
-    MAX_STEPS,
-    PARSE_ERROR,
-    TOOL_ERROR,
-    TIMEOUT,
+    FINAL_ANSWER_RETURNED,
+    STEP_LIMIT_REACHED,
+    RETRY_LIMIT_REACHED,
     MODEL_ERROR,
+    TIMEOUT,
     BUDGET_EXCEEDED,
     CONTEXT_OVERFLOW,
-    NO_PROGRESS,
-    USER_CANCELLED
+    USER_CANCELLED,
+    RUNTIME_SCHEMA_MISMATCH
 
 }

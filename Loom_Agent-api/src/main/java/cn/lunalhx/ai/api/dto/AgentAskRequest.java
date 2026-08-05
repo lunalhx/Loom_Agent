@@ -33,10 +33,6 @@ public class AgentAskRequest {
     @Max(value = 30, message = "maxSteps 不能大于 30")
     private Integer maxSteps;
 
-    @Min(value = 1, message = "maxSegments 不能小于 1")
-    @Max(value = 10, message = "maxSegments 不能大于 10")
-    private Integer maxSegments;
-
     private Boolean includeTrace;
 
     @Pattern(regexp = "^(ask|auto|never)$", message = "approvalPolicy 只能是 ask/auto/never")

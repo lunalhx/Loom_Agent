@@ -3,21 +3,12 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
-import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookAction;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
-import cn.lunalhx.ai.domain.agent.flow.hook.StopHookResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
 
@@ -32,28 +23,17 @@ public final class AgentNodeLifecycle {
 
     private final TraceRecorder traceRecorder;
     private final AgentMetrics agentMetrics;
-    private final AgentHookRegistry hookRegistry;
     private final AgentEventFactory eventFactory;
     private final Map<String, AgentNode> nodes;
 
     public AgentNodeLifecycle(TraceRecorder traceRecorder,
                               AgentMetrics agentMetrics,
-                              AgentHookRegistry hookRegistry,
                               AgentEventFactory eventFactory,
                               Map<String, AgentNode> nodes) {
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
-        this.hookRegistry = hookRegistry;
         this.eventFactory = eventFactory;
         this.nodes = nodes;
-    }
-
-    public void userPromptSubmitted(AgentContext context, Consumer<List<AgentEvent>> emitter) {
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.USER_PROMPT_SUBMIT, AgentHookContext.builder()
-                .agentContext(context)
-                .node(AgentNodeNames.START)
-                .reason("user_prompt_submit")
-                .build()));
     }
 
     public AgentNodeExecution execute(AgentContext context, AgentNode node, Consumer<List<AgentEvent>> emitter) {
@@ -63,32 +43,6 @@ public final class AgentNodeLifecycle {
         context.trace().setCurrentSpanId(spanId);
         long startedAt = System.currentTimeMillis();
         putNodeMdc(context, node.name());
-
-        StopHookResult beforeResult = hookRegistry.triggerInterruptible(AgentHookEvent.BEFORE_NODE,
-                AgentHookContext.builder()
-                        .agentContext(context)
-                        .node(node.name())
-                        .reason("before_node:" + node.name())
-                        .build());
-        emitter.accept(beforeResult.events());
-
-        if (beforeResult.continued()) {
-            AgentHookAction action = beforeResult.action();
-            String targetNode = action.getNextNode();
-            if (!nodes.containsKey(targetNode)) {
-                log.warn("BEFORE_NODE hook redirect target '{}' not found, skipping redirect and executing original node '{}'", targetNode, node.name());
-            } else {
-                if (action.isClearTerminalState()) {
-                    context.runtime().clearOutcomeForContinuation();
-                    context.approval().setPendingApprovalId(null);
-                }
-                traceRecorder.recordStop(context, "continued",
-                        "before_node_hook_continued to " + targetNode);
-                agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
-                MDC.clear();
-                return AgentNodeExecution.stopContinued(targetNode, action);
-            }
-        }
 
         emitter.accept(List.of(eventFactory.nodeStarted(context, node)));
 
@@ -104,79 +58,29 @@ public final class AgentNodeLifecycle {
         }
 
         recordContextCompactedEvents(context, node, startedAt, result.getEvents());
-        String nextNode = result.isTerminal() ? node.name() : result.getNextNode();
+        String nextNode = result.getNextNode() != null ? result.getNextNode() : node.name();
         long durationMs = System.currentTimeMillis() - startedAt;
         String status = nodeStatus(context, result);
         traceRecorder.recordNodeEnd(context, node, spanId, status, durationMs, "nextNode=" + nextNode, null);
         agentMetrics.recordNodeDuration(node.name(), status, durationMs);
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_NODE, AgentHookContext.builder()
-                .agentContext(context)
-                .node(node.name())
-                .nextNode(nextNode)
-                .reason("after_node:" + node.name())
-                .build()));
         MDC.clear();
 
-        if (result.isTerminal()) {
-            return AgentNodeExecution.terminalWithDeferred(result, node.name(), result.getEvents());
+        if (!result.isTerminal()) {
+            emitter.accept(result.getEvents());
         }
-        emitter.accept(result.getEvents());
         return new AgentNodeExecution(result, nextNode);
-    }
-
-    public AgentNodeExecution resolveStop(AgentContext context, AgentNode terminalNode,
-                                          List<AgentEvent> terminalEvents,
-                                          Consumer<List<AgentEvent>> emitter) {
-        StopHookResult stopResult = hookRegistry.triggerStop(AgentHookEvent.STOP, AgentHookContext.builder()
-                .agentContext(context)
-                .node(terminalNode.name())
-                .reason("stop:" + terminalNode.name())
-                .build());
-
-        emitter.accept(stopResult.events());
-
-        if (stopResult.continued()) {
-            AgentHookAction action = stopResult.action();
-            String targetNode = action.getNextNode();
-            if (!nodes.containsKey(targetNode)) {
-                log.warn("STOP hook redirect target '{}' not found, proceeding with original termination", targetNode);
-            } else {
-                if (action.isClearTerminalState()) {
-                    context.runtime().clearOutcomeForContinuation();
-                    context.approval().setPendingApprovalId(null);
-                }
-                traceRecorder.recordStop(context, "continued", "stop_hook_continued to " + targetNode);
-                agentMetrics.recordRun(runKind(context), "continued", context.runtime().errorCode());
-                MDC.clear();
-                return AgentNodeExecution.stopContinued(targetNode, action);
-            }
-        }
-
-        traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
-        agentMetrics.recordRun(runKind(context), stopStatus(context), context.runtime().errorCode());
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
-                .agentContext(context)
-                .node(terminalNode.name())
-                .reason("after_stop:" + terminalNode.name())
-                .build()));
-        emitter.accept(terminalEvents);
-        if (AgentNodeNames.APPROVAL_GATE.equals(terminalNode.name())
-                && StringUtils.isNotBlank(context.getPendingApprovalId())) {
-            emitter.accept(List.of(eventFactory.pausedForApproval(context)));
-        }
-        MDC.clear();
-        return new AgentNodeExecution(NodeResult.terminal(List.of()), terminalNode.name());
     }
 
     public void cancelled(AgentContext context, Consumer<List<AgentEvent>> emitter) {
         context.runtime().cancel();
         traceRecorder.recordStop(context, "cancelled", "user_cancelled");
-        agentMetrics.recordRun(runKind(context), "cancelled", null);
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
-                .agentContext(context)
-                .node(context.runtime().currentNode())
-                .reason("user_cancelled")
-                .build()));
+        agentMetrics.recordRun(runKind(context), "cancelled", context.runtime().errorCode());
+        MDC.clear();
+    }
+
+    public void recordStop(AgentContext context) {
+        traceRecorder.recordStop(context, stopStatus(context), stopSummary(context));
+        agentMetrics.recordRun(runKind(context), stopStatus(context), context.runtime().errorCode());
         MDC.clear();
     }
 
@@ -215,7 +119,7 @@ public final class AgentNodeLifecycle {
         if (StringUtils.isNotBlank(context.runtime().errorCode())) {
             return "failed";
         }
-        if (context.recovery().contextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+        if (context.recovery().contextRecoveryStage() == cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage.WAITING_USER_INPUT) {
             return "waiting_user_input";
         }
         return "completed";
@@ -233,20 +137,6 @@ public final class AgentNodeLifecycle {
 
     public static String runKind(AgentContext context) {
         return StringUtils.isBlank(context.identity().parentRunId()) ? AgentRunKind.ROOT.name() : AgentRunKind.CHILD.name();
-    }
-
-    public void persistFailure(AgentContext context, Consumer<List<AgentEvent>> emitter) {
-        if (context == null) {
-            return;
-        }
-        context.runtime().fail(AgentStopReason.MODEL_ERROR,
-                AgentErrorCode.WORKSPACE_UNDO_BUSY.code(),
-                AgentErrorCode.WORKSPACE_UNDO_BUSY.defaultMessage());
-        emitter.accept(hookRegistry.trigger(AgentHookEvent.AFTER_STOP, AgentHookContext.builder()
-                .agentContext(context)
-                .node(AgentNodeNames.START)
-                .reason("workspace_undo_busy")
-                .build()));
     }
 
     private void putNodeMdc(AgentContext context, String node) {

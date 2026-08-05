@@ -27,7 +27,11 @@ public class AgentRun {
     private String workspace;
     private AgentRunStatus status;
     private String currentNode;
-    private Integer step;
+    private Integer toolSteps;
+    private Integer modelAttempts;
+    private String lastTool;
+    private String stopReason;
+    private String finalAnswer;
     private Long checkpointVersion;
     private String summaryJson;
     private String blockedReason;

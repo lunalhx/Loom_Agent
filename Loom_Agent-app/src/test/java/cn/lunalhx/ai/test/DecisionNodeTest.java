@@ -49,7 +49,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}},\"required\":[\"cmd\"],\"additionalProperties\":false}";
         AgentTool t = tool("test_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -69,7 +69,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\"}},\"required\":[\"count\"],\"additionalProperties\":false}";
         AgentTool t = tool("count_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -87,7 +87,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"additionalProperties\":false}";
         AgentTool t = tool("strict_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -105,7 +105,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -123,7 +123,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"default\":\"hi\"}},\"additionalProperties\":false}";
         AgentTool t = tool("default_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -142,7 +142,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"additionalProperties\":false}";
         AgentTool t = tool("int_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -161,7 +161,7 @@ public class DecisionNodeTest {
     public void unknownToolReturnsUnknownToolError() {
         AgentTool t = tool("known", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -180,7 +180,7 @@ public class DecisionNodeTest {
         AgentTool t1 = tool("exposed", "{\"type\":\"object\",\"additionalProperties\":false}");
         AgentTool t2 = tool("hidden", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t1, t2), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -200,7 +200,7 @@ public class DecisionNodeTest {
     public void reasonFieldParsedCorrectly() {
         AgentTool t = tool("r_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -216,7 +216,7 @@ public class DecisionNodeTest {
     public void oldThoughtFieldFallsBackToReason() {
         AgentTool t = tool("t_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -232,7 +232,7 @@ public class DecisionNodeTest {
     public void reasonTakesPriorityOverThought() {
         AgentTool t = tool("p_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -249,7 +249,7 @@ public class DecisionNodeTest {
     public void reasonTruncatedTo240Chars() {
         AgentTool t = tool("trunc_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         String longReason = "A".repeat(300);
         AgentContext ctx = new AgentContext();
@@ -268,7 +268,6 @@ public class DecisionNodeTest {
     private AgentRuntimeProperties buildProps() {
         AgentRuntimeProperties props = new AgentRuntimeProperties();
         props.setWorkspaceRoot(".");
-        props.setParseErrorMaxAttempts(3);
         return props;
     }
 
@@ -280,7 +279,7 @@ public class DecisionNodeTest {
         String todoSchema = "{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}";
         AgentTool t = tool("todo_write", todoSchema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -303,7 +302,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\"}},\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -314,7 +313,7 @@ public class DecisionNodeTest {
 
         // Should NOT normalize (tool field already exists) — goes to parse error
         // The parser will see type="msg_tool" which is not "action"/"final"
-        assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
+        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
     }
 
     @Test
@@ -323,7 +322,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\"}},\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -333,7 +332,7 @@ public class DecisionNodeTest {
         NodeResult result = node.apply(ctx);
 
         // Should NOT normalize unknown type — goes to parse error
-        assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
+        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
     }
 
     @Test
@@ -342,7 +341,7 @@ public class DecisionNodeTest {
         String todoSchema = "{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}";
         AgentTool t = tool("todo_write", todoSchema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -363,7 +362,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -380,7 +379,7 @@ public class DecisionNodeTest {
         // {"type":"final",...} should not be affected
         AgentTool t = tool("todo_write", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
@@ -389,7 +388,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.FINAL_ANSWER, result.getNextNode());
+        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.COMPLETE, result.getPhase());
     }
 
     @Test
@@ -398,7 +397,7 @@ public class DecisionNodeTest {
                 "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry =
                 new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps());
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
         AgentContext ctx = new AgentContext();
         ctx.setRunId(UUID.randomUUID().toString());
         ctx.setModelOutput(
@@ -407,7 +406,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.RENDER_PROMPT, result.getNextNode());
+        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
         assertTrue(ctx.getToolResult().getMessage().contains("NON_OBJECT_INPUT"));
     }
 }

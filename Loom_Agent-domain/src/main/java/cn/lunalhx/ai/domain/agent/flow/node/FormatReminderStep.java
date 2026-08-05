@@ -31,7 +31,7 @@ final class FormatReminderStep implements ContextRecoveryStep {
         if (ledgerAppendService != null) {
             ledgerAppendService.appendSystemNote(context, FORMAT_REMINDER,
                     ConversationHistoryInitializer.eventKey(context.getRunId(),
-                            String.valueOf(Math.max(1, context.getStep())), "format_reminder"));
+                            String.valueOf(Math.max(1, context.getToolSteps())), "format_reminder"));
         }
         AgentEvent event = AgentEvent.builder()
                 .type(AgentEventType.OBSERVATION)

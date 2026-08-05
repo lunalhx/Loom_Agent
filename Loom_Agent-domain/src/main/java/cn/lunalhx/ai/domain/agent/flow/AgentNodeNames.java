@@ -1,20 +1,19 @@
 package cn.lunalhx.ai.domain.agent.flow;
 
+import java.util.List;
+
 public final class AgentNodeNames {
 
-    public static final String START = "start";
-    public static final String RENDER_PROMPT = "render_prompt";
+    public static final String PROMPT_BUILD = "prompt_build";
     public static final String MODEL_CALL = "model_call";
     public static final String DECISION = "decision";
-    public static final String INSTRUCTION_GATE = "instruction_gate";
     public static final String APPROVAL_GATE = "approval_gate";
     public static final String TOOL_DISPATCH = "tool_dispatch";
     public static final String OBSERVATION = "observation";
-    public static final String FINAL_ANSWER = "final_answer";
-    public static final String USER_INPUT_GATE = "user_input_gate";
-    public static final String FAIL = "fail";
 
     private AgentNodeNames() {
     }
 
+    public static final List<String> ALL = List.of(
+            PROMPT_BUILD, MODEL_CALL, DECISION, APPROVAL_GATE, TOOL_DISPATCH, OBSERVATION);
 }

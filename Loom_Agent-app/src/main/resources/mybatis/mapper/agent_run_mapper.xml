@@ -15,7 +15,11 @@
         <result column="workspace" property="workspace"/>
         <result column="status" property="status"/>
         <result column="current_node" property="currentNode"/>
-        <result column="step" property="step"/>
+        <result column="tool_steps" property="toolSteps"/>
+        <result column="model_attempts" property="modelAttempts"/>
+        <result column="last_tool" property="lastTool"/>
+        <result column="stop_reason" property="stopReason"/>
+        <result column="final_answer" property="finalAnswer"/>
         <result column="checkpoint_version" property="checkpointVersion"/>
         <result column="summary_json" property="summaryJson"/>
         <result column="blocked_reason" property="blockedReason"/>
@@ -28,10 +32,14 @@
     <insert id="upsert" parameterType="cn.lunalhx.ai.infrastructure.dao.po.AgentRunPO">
         INSERT INTO agent_run
         (run_id, parent_run_id, root_run_id, request_id, conversation_id, run_kind, depth,
-         question, workspace, status, current_node, step, checkpoint_version, summary_json, blocked_reason, used_tokens, estimated_cost)
+         question, workspace, status, current_node, tool_steps, model_attempts, last_tool,
+         stop_reason, final_answer, checkpoint_version, summary_json, blocked_reason,
+         used_tokens, estimated_cost)
         VALUES
         (#{runId}, #{parentRunId}, #{rootRunId}, #{requestId}, #{conversationId}, #{runKind}, #{depth},
-         #{question}, #{workspace}, #{status}, #{currentNode}, #{step}, #{checkpointVersion}, #{summaryJson}, #{blockedReason}, #{usedTokens}, #{estimatedCost})
+         #{question}, #{workspace}, #{status}, #{currentNode}, #{toolSteps}, #{modelAttempts}, #{lastTool},
+         #{stopReason}, #{finalAnswer}, #{checkpointVersion}, #{summaryJson}, #{blockedReason},
+         #{usedTokens}, #{estimatedCost})
         ON CONFLICT(run_id) DO UPDATE SET
         parent_run_id = excluded.parent_run_id,
         root_run_id = excluded.root_run_id,
@@ -43,7 +51,11 @@
         workspace = excluded.workspace,
         status = excluded.status,
         current_node = excluded.current_node,
-        step = excluded.step,
+        tool_steps = excluded.tool_steps,
+        model_attempts = excluded.model_attempts,
+        last_tool = excluded.last_tool,
+        stop_reason = excluded.stop_reason,
+        final_answer = excluded.final_answer,
         checkpoint_version = excluded.checkpoint_version,
         summary_json = excluded.summary_json,
         blocked_reason = excluded.blocked_reason,
@@ -57,7 +69,7 @@
     </select>
 
     <select id="selectByParentRunId" resultMap="AgentRunMap">
-        SELECT * FROM agent_run WHERE parent_run_id = #{parentRunId} ORDER BY child_ordinal ASC, create_time ASC
+        SELECT * FROM agent_run WHERE parent_run_id = #{parentRunId} ORDER BY create_time ASC
     </select>
 
     <select id="selectLatestRootByConversationId" resultMap="AgentRunMap">

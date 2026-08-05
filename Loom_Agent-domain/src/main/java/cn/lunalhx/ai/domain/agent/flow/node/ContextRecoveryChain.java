@@ -24,16 +24,16 @@ public class ContextRecoveryChain {
             ContextRecoveryTransition transition = step.apply(request, events);
             switch (transition.action()) {
                 case RENDER_PROMPT:
-                    return NodeResult.next(AgentNodeNames.RENDER_PROMPT, transition.events());
+                    return NodeResult.nextRound(transition.events());
                 case WAIT_USER_INPUT:
-                    return NodeResult.next(AgentNodeNames.USER_INPUT_GATE, transition.events());
+                    return NodeResult.pauseUserInput(transition.events());
                 case FAIL_CONTEXT_OVERFLOW:
-                    return NodeResult.next(AgentNodeNames.FAIL, transition.events());
+                    return NodeResult.fail(transition.events());
                 case CONTINUE:
                     break;
             }
         }
 
-        return NodeResult.next(AgentNodeNames.FAIL, events);
+        return NodeResult.fail(events);
     }
 }

@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.agent.flow.middleware;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
-import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -18,6 +17,12 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Model-level recovery: routes gateway errors via the context-recovery and
+ * model-error-recovery chains. Parse/format retries are no longer tracked
+ * by a local counter; the global {@code modelAttempts} guard in the main
+ * loop terminates exhausted retries as {@code RETRY_LIMIT_REACHED}.
+ */
 public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
 
     private final ContextRecoveryChain recoveryChain;
@@ -47,24 +52,20 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
         try {
             outcome = next.invoke(ctx);
         } catch (Throwable error) {
-            // Classify and handle terminal exception
             return handleError(ctx, context, error, deadlineEpochMs);
         }
 
-        // If success or budget-blocked or truncation-exhausted, just pass through
         if (outcome.type() == ModelCallOutcome.Type.SUCCESS
                 || outcome.type() == ModelCallOutcome.Type.BUDGET_BLOCKED
                 || outcome.type() == ModelCallOutcome.Type.TRUNCATION_EXHAUSTED) {
             return outcome;
         }
 
-        // ERROR outcome — treat as thrown error
         if (outcome.type() == ModelCallOutcome.Type.ERROR) {
             Throwable error = new RuntimeException(outcome.errorMessage());
             return handleError(ctx, context, error, deadlineEpochMs);
         }
 
-        // ROUTED — pass through
         return outcome;
     }
 
@@ -87,11 +88,12 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
                         ModelErrorCode.MODEL_CALL_TIMEOUT.defaultMessage());
                 return ModelCallOutcome.error("模型调用超时");
 
-            case CONTEXT_OVERFLOW:
+            case CONTEXT_OVERFLOW: {
                 NodeResult recoveryRoute = recoveryChain.execute(context,
                         StringUtils.defaultIfBlank(attemptedModel, context.getRecoveryModelOverride()),
                         requestedMaxTokens, deadlineEpochMs);
                 return ModelCallOutcome.routed(recoveryRoute);
+            }
 
             case GATEWAY_ERROR: {
                 ModelGatewayException gatewayException = failureClassifier.modelGatewayException(error);
@@ -103,25 +105,6 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
             }
 
             default: {
-                int retryCount = context.getModelCallRetryCount();
-                AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-                int maxRetries = runProperties.getModelCallRetryMaxAttempts() == null
-                        ? 2 : runProperties.getModelCallRetryMaxAttempts();
-                if (retryCount < maxRetries) {
-                    context.incrementModelCallRetryCount();
-                    AgentEvent retryEvent = AgentEvent.builder()
-                            .type(AgentEventType.OBSERVATION)
-                            .runId(context.getRunId())
-                            .requestId(context.getRequestId())
-                            .conversationId(context.getConversationId())
-                            .workspace(context.getWorkspaceDisplayName())
-                            .parentRunId(context.getParentRunId())
-                            .code("model_error_retry")
-                            .message("模型决策失败，正在重试 (第 " + (retryCount + 1) + "/" + maxRetries + " 次)")
-                            .build();
-                    return ModelCallOutcome.routed(
-                            NodeResult.next(AgentNodeNames.RENDER_PROMPT, List.of(retryEvent)));
-                }
                 if (!context.recovery().modelErrorRecoveryAttempted()) {
                     context.recovery().setModelErrorRecoveryAttempted(true);
                     NodeResult recoveryRouteResult = modelErrorRecoveryChain.execute(context,
@@ -132,7 +115,7 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
                     return ModelCallOutcome.routed(recoveryRouteResult);
                 }
                 context.runtime().fail(AgentStopReason.MODEL_ERROR, "model_error",
-                        "模型决策失败（已重试 " + retryCount + " 次，恢复链已耗尽）");
+                        "模型决策失败，恢复链已耗尽");
                 return ModelCallOutcome.error("model_error");
             }
         }

@@ -24,7 +24,8 @@ public class AgentEvent {
     private String workspace;
     private String parentRunId;
     private Long elapsedMs;
-    private Integer step;
+    private Integer toolSteps;
+    private Integer modelAttempts;
     private String node;
     private List<String> nodeInputs;
     private String thought;
@@ -40,11 +41,13 @@ public class AgentEvent {
     private Boolean truncated;
     private String answer;
     private AgentStopReason stopReason;
-    private Integer stepCount;
+    private String lastTool;
     private String code;
     private String message;
     private Long checkpointVersion;
     private Boolean recoverable;
     private Map<String, Object> metadata;
+    private Integer maxToolSteps;
+    private Integer maxAttempts;
 
 }

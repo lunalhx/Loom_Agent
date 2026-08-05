@@ -3,7 +3,6 @@ package cn.lunalhx.ai.config;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.math.BigDecimal;
@@ -32,7 +31,6 @@ public final class RuntimeConfigValidators implements RuntimeConfigValidator<Run
         validateCore(agent);
         validateBudget(agent.getBudget());
         validateContext(agent.getContext());
-        validateStepBudget(agent.getStepBudget(), agent.getMaxSteps());
         validateModel(model);
         validateCrossGroup(agent, model);
     }
@@ -80,18 +78,6 @@ public final class RuntimeConfigValidators implements RuntimeConfigValidator<Run
         positive(value.getMemoryBudgetChars(), "loom.agent.context.memory-budget-chars");
         positive(value.getRelevantMemoryBudgetChars(), "loom.agent.context.relevant-memory-budget-chars");
         positive(value.getHistoryBudgetChars(), "loom.agent.context.history-budget-chars");
-    }
-
-    static void validateStepBudget(StepBudgetProperties value, Integer maxSteps) {
-        if (value == null) {
-            fail("loom.agent.step-budget", "is required");
-        }
-        positive(value.getMaxSegments(), "loom.agent.step-budget.max-segments");
-        positive(value.getChildMaxSegments(), "loom.agent.step-budget.child-max-segments");
-        positive(value.getMaxTotalSteps(), "loom.agent.step-budget.max-total-steps");
-        if (value.getMaxTotalSteps() < maxSteps) {
-            fail("loom.agent.step-budget.max-total-steps", "cannot be less than loom.agent.max-steps");
-        }
     }
 
     static void validateModel(ModelRuntimeProperties value) {

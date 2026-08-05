@@ -50,7 +50,9 @@ public class AgentResponseMapperTest {
                 .workspace("/tmp")
                 .parentRunId("p-1")
                 .elapsedMs(100L)
-                .step(3)
+                .toolSteps(3)
+                .modelAttempts(5)
+                .lastTool("write_file")
                 .node("model_call")
                 .nodeInputs(List.of("in1"))
                 .thought("thinking")
@@ -63,8 +65,7 @@ public class AgentResponseMapperTest {
                 .observation("obs")
                 .truncated(false)
                 .answer("ans")
-                .stopReason(AgentStopReason.FINAL_ANSWER)
-                .stepCount(5)
+                .stopReason(AgentStopReason.FINAL_ANSWER_RETURNED)
                 .code("0000")
                 .message("ok")
                 .checkpointVersion(1L)
@@ -78,7 +79,9 @@ public class AgentResponseMapperTest {
         assertEquals("/tmp", dto.getWorkspace());
         assertEquals("p-1", dto.getParentRunId());
         assertEquals(Long.valueOf(100L), dto.getElapsedMs());
-        assertEquals(Integer.valueOf(3), dto.getStep());
+        assertEquals(Integer.valueOf(3), dto.getToolSteps());
+        assertEquals(Integer.valueOf(5), dto.getModelAttempts());
+        assertEquals("write_file", dto.getLastTool());
         assertEquals("model_call", dto.getNode());
         assertEquals(List.of("in1"), dto.getNodeInputs());
         assertEquals("thinking", dto.getThought());
@@ -91,8 +94,7 @@ public class AgentResponseMapperTest {
         assertEquals("obs", dto.getObservation());
         assertEquals(false, dto.getTruncated());
         assertEquals("ans", dto.getAnswer());
-        assertEquals("FINAL_ANSWER", dto.getStopReason());
-        assertEquals(Integer.valueOf(5), dto.getStepCount());
+        assertEquals("FINAL_ANSWER_RETURNED", dto.getStopReason());
         assertEquals("0000", dto.getCode());
         assertEquals("ok", dto.getMessage());
         assertEquals(Long.valueOf(1L), dto.getCheckpointVersion());

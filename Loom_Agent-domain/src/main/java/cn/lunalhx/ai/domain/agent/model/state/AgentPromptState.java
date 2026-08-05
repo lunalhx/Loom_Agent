@@ -10,7 +10,6 @@ import java.util.List;
  */
 public final class AgentPromptState {
 
-    private transient String instructionsHash;
     private String modelOutput;
 
     // ---- conversation history (C1) ----
@@ -26,8 +25,8 @@ public final class AgentPromptState {
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
+    private transient cn.lunalhx.ai.domain.agent.service.context.PreparedContextView preparedView;
 
-    public String instructionsHash() { return instructionsHash; }
     public String modelOutput() { return modelOutput; }
 
     // ---- conversation ledger accessors ----
@@ -48,6 +47,9 @@ public final class AgentPromptState {
     /** Pending continuation question set by createContinuation, consumed by bootstrap. */
     public String pendingContinuation() { return pendingContinuation; }
 
+    /** Transient per-round prepared context view, built by PromptBuildNode. */
+    public cn.lunalhx.ai.domain.agent.service.context.PreparedContextView preparedView() { return preparedView; }
+
     /** Whether any ledger state is active (either flag is true). */
     public boolean isLedgerActive() {
         return conversationHistory != null;
@@ -55,7 +57,6 @@ public final class AgentPromptState {
 
     // -- package-private mutators --
 
-    public void setInstructionsHash(String v) { this.instructionsHash = v; }
     public void setModelOutput(String v) { this.modelOutput = v; }
 
     // ---- conversation ledger mutators ----
@@ -67,6 +68,7 @@ public final class AgentPromptState {
     public void setWorkingMemory(WorkingContextMemory v) { this.workingMemory = v; }
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
+    public void setPreparedView(cn.lunalhx.ai.domain.agent.service.context.PreparedContextView v) { this.preparedView = v; }
 
     /** Ensures ledger state is initialized. Safe to call repeatedly. */
     public void ensureLedgerActive() {

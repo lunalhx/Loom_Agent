@@ -1,7 +1,7 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
-import cn.lunalhx.ai.domain.agent.flow.node.StartNode;
+import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentReplayTimeline;
@@ -22,7 +22,7 @@ public class DefaultReplayServiceTest {
     public void shouldReplaySingleRunWithoutGeneratingCostOrMutatingTrace() {
         InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
         AgentContext root = context("root-run", null, "root-run", "trace-root");
-        traceRecorder.recordNodeStart(root, new StartNode(), null);
+        traceRecorder.recordNodeStart(root, new cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode("prompt_build", java.util.List.of()) { @Override protected cn.lunalhx.ai.domain.agent.flow.NodeResult doApply(cn.lunalhx.ai.domain.agent.model.entity.AgentContext ctx) { return cn.lunalhx.ai.domain.agent.flow.NodeResult.nextRound(java.util.List.of()); } }, null);
         traceRecorder.recordStop(root, "completed", "done");
         int eventCount = traceRecorder.timeline("root-run").size();
 
@@ -44,8 +44,8 @@ public class DefaultReplayServiceTest {
         InMemoryTraceRecorder traceRecorder = new InMemoryTraceRecorder();
         AgentContext root = context("root-run", null, "root-run", "trace-root");
         AgentContext child = context("child-run", "root-run", "root-run", "trace-root");
-        traceRecorder.recordNodeStart(root, new StartNode(), null);
-        traceRecorder.recordNodeStart(child, new StartNode(), null);
+        traceRecorder.recordNodeStart(root, new cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode("prompt_build", java.util.List.of()) { @Override protected cn.lunalhx.ai.domain.agent.flow.NodeResult doApply(cn.lunalhx.ai.domain.agent.model.entity.AgentContext ctx) { return cn.lunalhx.ai.domain.agent.flow.NodeResult.nextRound(java.util.List.of()); } }, null);
+        traceRecorder.recordNodeStart(child, new cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode("prompt_build", java.util.List.of()) { @Override protected cn.lunalhx.ai.domain.agent.flow.NodeResult doApply(cn.lunalhx.ai.domain.agent.model.entity.AgentContext ctx) { return cn.lunalhx.ai.domain.agent.flow.NodeResult.nextRound(java.util.List.of()); } }, null);
 
         AgentReplayTimeline withChildren = new DefaultReplayService(traceRecorder)
                 .replayRun("root-run", true);
@@ -69,7 +69,7 @@ public class DefaultReplayServiceTest {
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
 
-        assertEquals(8, snapshot.getSchemaVersion());
+        assertEquals(9, snapshot.getSchemaVersion());
         // Snapshots exclude transient prompt/model output; restore re-injects toolSpecs etc.
         AgentContext restored = snapshot.restore();
         assertNull(restored.getModelOutput());

@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.service.context.PreparedContextView;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
@@ -22,6 +23,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Budget check, model call, and model-level recovery. Consumes the prepared
+ * view built by {@link PromptBuildNode} so budget estimation matches the
+ * actual request.
+ */
 public class ModelCallNode extends AbstractAgentNode {
 
     private final ModelCallMiddlewareChain chain;
@@ -55,6 +61,10 @@ public class ModelCallNode extends AbstractAgentNode {
 
         ModelCallContext ctx = ModelCallContext.of(context, requestedModel, 0, deadlineEpochMs);
         ctx.setEscalatedMaxTokens(escalatedMaxTokens);
+        PreparedContextView prepared = context.getPreparedView();
+        if (prepared != null) {
+            ctx.setPreparedView(prepared);
+        }
 
         ModelCallOutcome outcome = chain.execute(ctx);
         List<AgentEvent> events = ctx.getEvents();
@@ -62,16 +72,14 @@ public class ModelCallNode extends AbstractAgentNode {
         switch (outcome.type()) {
             case SUCCESS:
                 resetContextRecovery(context);
-                context.resetModelCallRetryCount();
-                context.recovery().setModelErrorRecoveryAttempted(false);
                 String eventKey = ConversationHistoryInitializer.eventKey(
-                        context.getRunId(), String.valueOf(context.getStep() + 1), "assistant");
+                        context.getRunId(), String.valueOf(context.getModelAttempts()), "assistant");
                 ledgerAppendService.appendAssistant(
                         context, context.getModelOutput(), eventKey);
-                return NodeResult.next(AgentNodeNames.DECISION, events);
+                return NodeResult.nextNode(AgentNodeNames.DECISION, events);
 
             case BUDGET_BLOCKED:
-                return NodeResult.next(AgentNodeNames.FAIL, events);
+                return NodeResult.fail(events);
 
             case TRUNCATION_EXHAUSTED:
                 fail(context, AgentStopReason.MODEL_ERROR,
@@ -83,14 +91,14 @@ public class ModelCallNode extends AbstractAgentNode {
                             Map.of("purpose", ModelCallPurpose.CONTROL_JSON.name(),
                                     "finishReason", StringUtils.defaultString("length")));
                 }
-                return NodeResult.next(AgentNodeNames.FAIL, events);
+                return NodeResult.fail(events);
 
             case ROUTED:
                 return outcome.route();
 
             case ERROR:
             default:
-                return NodeResult.next(AgentNodeNames.FAIL, events);
+                return NodeResult.fail(events);
         }
     }
 

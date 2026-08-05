@@ -23,7 +23,6 @@ public class AgentQuestion {
     private String pathScope;
     private String workspace;
     private Integer maxSteps;
-    private Integer maxSegments;
     private Boolean includeTrace;
     private String traceId;
     private String model;

@@ -25,15 +25,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v7 — only durable state needed for recovery.
+ * Checkpoint snapshot v9 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v7 removes all legacy compression state (compaction depth/generation, durable summary,
- * Transcript artifacts) and adds working context memory. Only v7 snapshots are recoverable;
- * v6 and earlier are rejected at restore time.
+ * <p>v9 adopts loom-code loop semantics: {@code toolSteps}/{@code modelAttempts} counters
+ * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
+ * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
+ * Only v9 snapshots are recoverable; v8 and earlier are rejected at restore time.
  */
 @Data
 @Builder
@@ -41,7 +42,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 7;
+    private int schemaVersion = 9;
 
     // -- identity (durable) --
     private String runId;
@@ -55,14 +56,15 @@ public class AgentContextSnapshot {
     private String question;
     private String pathScope;
     private Integer maxSteps;
-    private Integer maxSegments;
-    private Integer maxTotalSteps;
+    private Integer maxAttempts;
 
     // -- environment (only workspace ref; resolved path re-injected) --
     private WorkspaceRef workspace;
 
     // -- runtime (durable) --
-    private Integer step;
+    private Integer toolSteps;
+    private Integer modelAttempts;
+    private String lastTool;
     private Integer parseErrors;
     private Instant startedAt;
     private List<AgentStep> history;
@@ -74,18 +76,6 @@ public class AgentContextSnapshot {
     private AgentStopReason stopReason;
     private String errorCode;
     private String errorMessage;
-    private Integer segmentIndex;
-    private Integer segmentStartStep;
-    private Integer stopHookContinuationCount;
-    private Boolean codeReadObserved;
-    private Integer lastWriteStep;
-    private Integer lastTestStep;
-    private Boolean lastTestPassed;
-    private Boolean changedSincePassingTest;
-    private Integer verificationContinuationCount;
-    private List<String> touchedFiles;
-    private List<String> readFiles;
-    private Integer lastTestExitCode;
 
     // -- action (durable) --
     private AgentDecision decision;
@@ -155,7 +145,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(8)
+                .schemaVersion(9)
                 // identity
                 .runId(id.runId())
                 .parentRunId(id.parentRunId())
@@ -167,12 +157,13 @@ public class AgentContextSnapshot {
                 .question(def.question())
                 .pathScope(def.pathScope())
                 .maxSteps(def.maxSteps())
-                .maxSegments(def.maxSegments())
-                .maxTotalSteps(def.maxTotalSteps())
+                .maxAttempts(def.maxAttempts())
                 // environment
                 .workspace(context.environment().workspace())
                 // runtime
-                .step(runtime.step())
+                .toolSteps(runtime.toolSteps())
+                .modelAttempts(runtime.modelAttempts())
+                .lastTool(runtime.lastTool())
                 .parseErrors(runtime.parseErrors())
                 .startedAt(runtime.startedAt())
                 .history(runtime.history() == null ? null : new ArrayList<>(runtime.history()))
@@ -182,18 +173,6 @@ public class AgentContextSnapshot {
                 .stopReason(runtime.stopReason())
                 .errorCode(runtime.errorCode())
                 .errorMessage(runtime.errorMessage())
-                .segmentIndex(runtime.segmentIndex())
-                .segmentStartStep(runtime.segmentStartStep())
-                .stopHookContinuationCount(runtime.stopHookContinuationCount())
-                .codeReadObserved(runtime.codeReadObserved())
-                .lastWriteStep(runtime.lastWriteStep())
-                .lastTestStep(runtime.lastTestStep())
-                .lastTestPassed(runtime.lastTestPassed())
-                .changedSincePassingTest(runtime.changedSincePassingTest())
-                .verificationContinuationCount(runtime.verificationContinuationCount())
-                .touchedFiles(new ArrayList<>(runtime.touchedFiles()))
-                .readFiles(new ArrayList<>(runtime.readFiles()))
-                .lastTestExitCode(runtime.lastTestExitCode())
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
@@ -249,14 +228,15 @@ public class AgentContextSnapshot {
         context.setQuestion(question);
         context.setPathScope(pathScope);
         context.setMaxSteps(maxSteps == null ? 0 : maxSteps);
-        context.setMaxSegments(maxSegments == null ? 1 : maxSegments);
-        context.setMaxTotalSteps(maxTotalSteps == null ? context.getMaxSteps() : maxTotalSteps);
+        context.setMaxAttempts(maxAttempts == null ? 0 : maxAttempts);
 
         // environment — workspace ref only; resolved path and toolSpecs re-injected by factory
         context.setWorkspace(workspace);
 
         // runtime
-        context.setStep(step == null ? 0 : step);
+        context.setToolSteps(toolSteps == null ? 0 : toolSteps);
+        context.setModelAttempts(modelAttempts == null ? 0 : modelAttempts);
+        context.setLastTool(lastTool);
         context.setParseErrors(parseErrors == null ? 0 : parseErrors);
         context.setStartedAt(startedAt);
         context.setHistory(history == null ? new ArrayList<>() : new ArrayList<>(history));
@@ -266,22 +246,6 @@ public class AgentContextSnapshot {
         context.setStopReason(stopReason);
         context.setErrorCode(errorCode);
         context.setErrorMessage(errorMessage);
-        context.setSegmentIndex(segmentIndex == null ? 0 : segmentIndex);
-        context.setSegmentStartStep(segmentStartStep == null ? 0 : segmentStartStep);
-        context.setStopHookContinuationCount(stopHookContinuationCount == null ? 0 : stopHookContinuationCount);
-        context.setCodeReadObserved(Boolean.TRUE.equals(codeReadObserved));
-        context.setLastWriteStep(lastWriteStep == null ? 0 : lastWriteStep);
-        context.setLastTestStep(lastTestStep == null ? 0 : lastTestStep);
-        context.setLastTestPassed(lastTestPassed);
-        context.setChangedSincePassingTest(
-                Boolean.TRUE.equals(changedSincePassingTest));
-        context.setVerificationContinuationCount(
-                verificationContinuationCount == null ? 0 : verificationContinuationCount);
-        context.setTouchedFiles(touchedFiles == null
-                ? new LinkedHashSet<>() : new LinkedHashSet<>(touchedFiles));
-        context.setReadFiles(readFiles == null
-                ? new LinkedHashSet<>() : new LinkedHashSet<>(readFiles));
-        context.setLastTestExitCode(lastTestExitCode);
 
         // action
         context.setDecision(decision);

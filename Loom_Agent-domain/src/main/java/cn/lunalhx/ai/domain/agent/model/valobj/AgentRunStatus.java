@@ -6,15 +6,13 @@ public enum AgentRunStatus {
     WAITING_APPROVAL,
     WAITING_USER_INPUT,
     COMPLETED,
-    FAILED,
-    BUDGET_EXCEEDED,
-    CANCELLED;
+    STOPPED,
+    FAILED;
 
     public boolean terminal() {
         return this == COMPLETED
-                || this == FAILED
-                || this == BUDGET_EXCEEDED
-                || this == CANCELLED;
+                || this == STOPPED
+                || this == FAILED;
     }
 
     public boolean resumable() {

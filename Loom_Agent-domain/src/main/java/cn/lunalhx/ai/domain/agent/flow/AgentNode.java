@@ -9,19 +9,10 @@ public interface AgentNode {
     String name();
 
     /**
-     * Declares which state partitions this node reads and writes.
-     * Defaults to {@link NodeAccess#NONE}.
+     * Declares the state partitions this node reads. Used for trace and
+     * display; overrides may restrict further.
      */
-    default NodeAccess access() {
-        return NodeAccess.NONE;
-    }
-
-    /**
-     * Derives input keys from {@link #access()}. Override to restrict further.
-     */
-    default List<String> inputKeys() {
-        return access().inputKeys();
-    }
+    List<String> inputKeys();
 
     NodeResult apply(AgentContext context);
 }

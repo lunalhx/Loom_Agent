@@ -71,7 +71,11 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
         po.setWorkspace(run.getWorkspace());
         po.setStatus(run.getStatus() == null ? null : run.getStatus().name());
         po.setCurrentNode(run.getCurrentNode());
-        po.setStep(run.getStep());
+        po.setToolSteps(run.getToolSteps());
+        po.setModelAttempts(run.getModelAttempts());
+        po.setLastTool(run.getLastTool());
+        po.setStopReason(run.getStopReason());
+        po.setFinalAnswer(run.getFinalAnswer());
         po.setCheckpointVersion(run.getCheckpointVersion());
         po.setSummaryJson(run.getSummaryJson());
         po.setBlockedReason(run.getBlockedReason());
@@ -93,7 +97,11 @@ public class MybatisAgentRunRepository implements AgentRunRepository {
                 .workspace(po.getWorkspace())
                 .status(po.getStatus() == null ? null : AgentRunStatus.valueOf(po.getStatus()))
                 .currentNode(po.getCurrentNode())
-                .step(po.getStep())
+                .toolSteps(po.getToolSteps())
+                .modelAttempts(po.getModelAttempts())
+                .lastTool(po.getLastTool())
+                .stopReason(po.getStopReason())
+                .finalAnswer(po.getFinalAnswer())
                 .checkpointVersion(po.getCheckpointVersion())
                 .summaryJson(po.getSummaryJson())
                 .blockedReason(po.getBlockedReason())

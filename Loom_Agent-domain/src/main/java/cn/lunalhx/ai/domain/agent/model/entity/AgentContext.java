@@ -53,7 +53,7 @@ public class AgentContext {
 
     public AgentContext() {
         this.identity = new AgentIdentity(null, null, null, null, null, 0);
-        this.runDefinition = new AgentRunDefinition(null, null, 0, 1, 0);
+        this.runDefinition = new AgentRunDefinition(null, null, 0, 0);
         this.environment = new AgentEnvironmentState();
         this.runtime = new AgentRuntimeState();
         this.prompt = new AgentPromptState();
@@ -100,10 +100,8 @@ public class AgentContext {
     public void setPathScope(String v) { runDefinition = runDefinition.withPathScope(v); }
     public int getMaxSteps() { return runDefinition.maxSteps(); }
     public void setMaxSteps(int v) { runDefinition = runDefinition.withMaxSteps(v); }
-    public int getMaxSegments() { return runDefinition.maxSegments(); }
-    public void setMaxSegments(int v) { runDefinition = runDefinition.withMaxSegments(v); }
-    public int getMaxTotalSteps() { return runDefinition.maxTotalSteps(); }
-    public void setMaxTotalSteps(int v) { runDefinition = runDefinition.withMaxTotalSteps(v); }
+    public int getMaxAttempts() { return runDefinition.maxAttempts(); }
+    public void setMaxAttempts(int v) { runDefinition = runDefinition.withMaxAttempts(v); }
 
     // ==================== environment delegates ====================
 
@@ -130,14 +128,16 @@ public class AgentContext {
 
     // ==================== runtime delegates ====================
 
-    public int getStep() { return runtime.step(); }
-    public void setStep(int v) { runtime.setStep(v); }
+    public int getToolSteps() { return runtime.toolSteps(); }
+    public void setToolSteps(int v) { runtime.setToolSteps(v); }
+    public int getModelAttempts() { return runtime.modelAttempts(); }
+    public void setModelAttempts(int v) { runtime.setModelAttempts(v); }
+    public void advanceModelAttempt() { runtime.advanceModelAttempt(); }
+    public void advanceToolStep(String tool) { runtime.advanceToolStep(tool); }
+    public String getLastTool() { return runtime.lastTool(); }
+    public void setLastTool(String v) { runtime.setLastTool(v); }
     public int getParseErrors() { return runtime.parseErrors(); }
     public void setParseErrors(int v) { runtime.setParseErrors(v); }
-    public int getModelCallRetryCount() { return runtime.modelCallRetryCount(); }
-    public void setModelCallRetryCount(int v) { runtime.setModelCallRetryCount(v); }
-    public void incrementModelCallRetryCount() { runtime.setModelCallRetryCount(runtime.modelCallRetryCount() + 1); }
-    public void resetModelCallRetryCount() { runtime.setModelCallRetryCount(0); }
     public Instant getStartedAt() { return runtime.startedAt(); }
     public void setStartedAt(Instant v) { runtime.setStartedAt(v); }
     public List<AgentStep> getHistory() { return runtime.history(); }
@@ -154,36 +154,14 @@ public class AgentContext {
     public void setErrorCode(String v) { runtime.setErrorCode(v); }
     public String getErrorMessage() { return runtime.errorMessage(); }
     public void setErrorMessage(String v) { runtime.setErrorMessage(v); }
-    public int getSegmentIndex() { return runtime.segmentIndex(); }
-    public void setSegmentIndex(int v) { runtime.setSegmentIndex(v); }
-    public int getSegmentStartStep() { return runtime.segmentStartStep(); }
-    public void setSegmentStartStep(int v) { runtime.setSegmentStartStep(v); }
-    public int getStopHookContinuationCount() { return runtime.stopHookContinuationCount(); }
-    public void setStopHookContinuationCount(int v) { runtime.setStopHookContinuationCount(v); }
-    public boolean isCodeReadObserved() { return runtime.codeReadObserved(); }
-    public void setCodeReadObserved(boolean v) { runtime.setCodeReadObserved(v); }
-    public int getLastWriteStep() { return runtime.lastWriteStep(); }
-    public void setLastWriteStep(int v) { runtime.setLastWriteStep(v); }
-    public int getLastTestStep() { return runtime.lastTestStep(); }
-    public void setLastTestStep(int v) { runtime.setLastTestStep(v); }
-    public Boolean getLastTestPassed() { return runtime.lastTestPassed(); }
-    public void setLastTestPassed(Boolean v) { runtime.setLastTestPassed(v); }
-    public boolean isChangedSincePassingTest() { return runtime.changedSincePassingTest(); }
-    public void setChangedSincePassingTest(boolean v) { runtime.setChangedSincePassingTest(v); }
-    public int getVerificationContinuationCount() { return runtime.verificationContinuationCount(); }
-    public void setVerificationContinuationCount(int v) { runtime.setVerificationContinuationCount(v); }
-    public Set<String> getTouchedFiles() { return runtime.touchedFiles(); }
-    public void setTouchedFiles(Set<String> v) { runtime.setTouchedFiles(v); }
-    public Set<String> getReadFiles() { return runtime.readFiles(); }
-    public void setReadFiles(Set<String> v) { runtime.setReadFiles(v); }
-    public Integer getLastTestExitCode() { return runtime.lastTestExitCode(); }
-    public void setLastTestExitCode(Integer v) { runtime.setLastTestExitCode(v); }
+    public void stopRun(AgentStopReason reason) { runtime.stop(reason); }
+    public void clearOutcomeForContinuation() { runtime.clearOutcomeForContinuation(); }
     // ==================== prompt delegates ====================
 
-    public String getInstructionsHash() { return prompt.instructionsHash(); }
-    public void setInstructionsHash(String v) { prompt.setInstructionsHash(v); }
     public String getModelOutput() { return prompt.modelOutput(); }
     public void setModelOutput(String v) { prompt.setModelOutput(v); }
+    public cn.lunalhx.ai.domain.agent.service.context.PreparedContextView getPreparedView() { return prompt.preparedView(); }
+    public void setPreparedView(cn.lunalhx.ai.domain.agent.service.context.PreparedContextView v) { prompt.setPreparedView(v); }
 
     // ---- conversation ledger delegates (C1) ----
     public ConversationHistory getConversationHistory() { return prompt.conversationHistory(); }

@@ -3,16 +3,11 @@ package cn.lunalhx.ai.domain.agent.flow.node;
 import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookContext;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookEvent;
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -22,22 +17,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Executes one tool and generates a deterministic {@code toolCallId}.
+ * Does not count tool steps (the {@link DecisionNode} already did) and
+ * carries no checkpoint hook.
+ */
 public class ToolDispatchNode extends AbstractAgentNode {
 
     private final ToolRegistry toolRegistry;
     private final AgentRuntimeProperties properties;
-    private final AgentHookRegistry hookRegistry;
-    private final ConversationHistoryAppendService ledgerAppendService;
 
     public ToolDispatchNode(ToolRegistry toolRegistry,
-                            AgentRuntimeProperties properties,
-                            AgentHookRegistry hookRegistry,
-                            ConversationHistoryAppendService ledgerAppendService) {
-        super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input", "step"));
+                            AgentRuntimeProperties properties) {
+        super(AgentNodeNames.TOOL_DISPATCH, List.of("decision.tool", "decision.input"));
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
-        this.hookRegistry = Objects.requireNonNull(hookRegistry, "hookRegistry must not be null");
-        this.ledgerAppendService = ledgerAppendService;
     }
 
     @Override
@@ -55,47 +49,28 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .runtimeProperties(context.runtimeProperties(properties))
                 .build();
 
-        context.setStep(context.getStep() + 1);
-
-        List<AgentEvent> events = new ArrayList<>();
-        events.addAll(hookRegistry.trigger(AgentHookEvent.BEFORE_TOOL, AgentHookContext.builder()
-                .agentContext(context)
-                .node(name())
-                .toolCall(toolCall)
-                .reason("before_tool:" + decision.getTool())
-                .build()));
-
         ToolResult result = toolRegistry.call(toolCall);
         context.setToolResult(result);
 
+        List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)
-                .step(context.getStep())
-                .thought(decision.getThought())
+                .thought(decision.getReason())
                 .build());
         events.add(event(context, AgentEventType.TOOL_CALL)
-                .step(context.getStep())
-                .thought(decision.getThought())
+                .thought(decision.getReason())
                 .tool(decision.getTool())
                 .toolCallId(toolCall.getToolCallId())
                 .input(decision.getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
-        events.addAll(hookRegistry.trigger(AgentHookEvent.AFTER_TOOL, AgentHookContext.builder()
-                .agentContext(context)
-                .node(name())
-                .toolCall(toolCall)
-                .toolResult(result)
-                .reason("after_tool:" + decision.getTool())
-                .build()));
-        return NodeResult.next(AgentNodeNames.OBSERVATION, events);
+        return NodeResult.nextNode(AgentNodeNames.OBSERVATION, events);
     }
 
     private String toolCallId(AgentContext context, AgentDecision decision) {
         String input = decision.getInput() == null ? "" : decision.getInput().toString();
         return DigestUtils.sha256Hex(
-                context.getRunId() + "|" + (context.getStep() + 1)
+                context.getRunId() + "|" + context.getToolSteps()
                         + "|" + decision.getTool() + "|" + input)
                 .substring(0, 24);
     }
-
 }

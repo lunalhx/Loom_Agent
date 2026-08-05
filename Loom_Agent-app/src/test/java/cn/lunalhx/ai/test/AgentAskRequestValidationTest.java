@@ -26,16 +26,4 @@ public class AgentAskRequestValidationTest {
 
         assertFalse(violations.isEmpty());
     }
-
-    @Test
-    public void testMaxSegmentsRejectsEleven() {
-        AgentAskRequest request = AgentAskRequest.builder()
-                .question("complex task")
-                .maxSegments(11)
-                .build();
-
-        Set<ConstraintViolation<AgentAskRequest>> violations = validator.validate(request);
-
-        assertFalse(violations.isEmpty());
-    }
 }

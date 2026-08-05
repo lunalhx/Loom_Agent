@@ -146,25 +146,22 @@ public class ModelCallMiddlewareChainTest {
         assertEquals(ModelCallOutcome.Type.BUDGET_BLOCKED, budgetBlocked.type());
         assertNotNull(budgetBlocked.route());
         assertTrue(budgetBlocked.route().isTerminal());
-        assertEquals(AgentNodeNames.FAIL, budgetBlocked.route().getNextNode());
 
-        // TRUNCATION_EXHAUSTED -> USER_INPUT_GATE (not terminal)
+        // TRUNCATION_EXHAUSTED -> FAIL (terminal)
         ModelCallOutcome truncationExhausted = ModelCallOutcome.truncationExhausted();
         assertEquals(ModelCallOutcome.Type.TRUNCATION_EXHAUSTED, truncationExhausted.type());
         assertNotNull(truncationExhausted.route());
-        assertFalse(truncationExhausted.route().isTerminal());
-        assertEquals(AgentNodeNames.USER_INPUT_GATE, truncationExhausted.route().getNextNode());
+        assertTrue(truncationExhausted.route().isTerminal());
 
         // ERROR -> FAIL (terminal)
         ModelCallOutcome error = ModelCallOutcome.error("something went wrong");
         assertEquals(ModelCallOutcome.Type.ERROR, error.type());
         assertNotNull(error.route());
         assertTrue(error.route().isTerminal());
-        assertEquals(AgentNodeNames.FAIL, error.route().getNextNode());
         assertEquals("something went wrong", error.errorMessage());
 
         // ROUTED
-        NodeResult customRoute = NodeResult.next("custom_node", List.of());
+        NodeResult customRoute = NodeResult.nextNode("custom_node", List.of());
         ModelCallOutcome routed = ModelCallOutcome.routed(customRoute);
         assertEquals(ModelCallOutcome.Type.ROUTED, routed.type());
         assertSame(customRoute, routed.route());

@@ -6,7 +6,6 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
@@ -21,6 +20,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Parses final/action/retry. Unknown tools, invalid parameters, and parse
+ * errors only produce a structured {@link ToolResult} and route to
+ * {@link AgentNodeNames#OBSERVATION}; they never write history or Observation
+ * directly — that is the sole responsibility of {@link ObservationNode}.
+ */
 public class DecisionNode extends AbstractAgentNode {
 
     private final ObjectMapper objectMapper;
@@ -28,10 +33,6 @@ public class DecisionNode extends AbstractAgentNode {
     private final AgentRuntimeProperties properties;
     private final ConversationHistoryAppendService ledgerAppendService;
     private final DecisionParser decisionParser;
-
-    public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry, AgentRuntimeProperties properties) {
-        this(objectMapper, toolRegistry, properties, null);
-    }
 
     public DecisionNode(ObjectMapper objectMapper, ToolRegistry toolRegistry,
                         AgentRuntimeProperties properties,
@@ -58,8 +59,9 @@ public class DecisionNode extends AbstractAgentNode {
             context.setDecision(decision);
             context.setParseErrors(0);
             if ("final".equals(decision.getType())) {
-                return NodeResult.next(AgentNodeNames.FINAL_ANSWER, List.of());
+                return NodeResult.complete(List.of());
             }
+            context.runtime().advanceToolStep(decision.getTool());
             if (!isToolVisible(context, decision.getTool())) {
                 return unknownTool(context, decision);
             }
@@ -67,7 +69,7 @@ public class DecisionNode extends AbstractAgentNode {
             if (!validation.valid()) {
                 return invalidInput(context, decision, validation);
             }
-            return NodeResult.next(AgentNodeNames.APPROVAL_GATE, List.of());
+            return NodeResult.nextNode(AgentNodeNames.APPROVAL_GATE, List.of());
         } catch (DecisionParseException e) {
             return handleParseError(context, e);
         } catch (Exception e) {
@@ -79,23 +81,7 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
-        AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         context.setParseErrors(context.getParseErrors() + 1);
-        int maxAttempts = runProperties.getParseErrorMaxAttempts();
-        if (context.getParseErrors() > maxAttempts) {
-            fail(context, AgentStopReason.PARSE_ERROR, "parse_error",
-                    "模型连续返回非法 JSON (" + context.getParseErrors() + " 次)，已停止。最后错误: " + e.getMessage());
-            return NodeResult.next(AgentNodeNames.FAIL, List.of());
-        }
-        int fallbackThreshold = runProperties.getParseErrorFallbackModelThreshold() == null
-                ? 1 : runProperties.getParseErrorFallbackModelThreshold();
-        if (context.getParseErrors() > fallbackThreshold && context.getRecoveryModelOverride() == null) {
-            String fallbackModel = runProperties.getModelRecovery() != null
-                    && runProperties.getModelRecovery().getContextFallbackModel() != null
-                    ? runProperties.getModelRecovery().getContextFallbackModel()
-                    : "deepseek-v4-pro";
-            context.setRecoveryModelOverride(fallbackModel);
-        }
         String repairMsg = e.toModelMessage();
         String guidance;
         if (context.getParseErrors() == 1) {
@@ -108,18 +94,16 @@ public class DecisionNode extends AbstractAgentNode {
         }
         context.setToolResult(ToolResult.failure("parse_error",
                 repairMsg + "\n" + guidance, 0L));
-        appendStep(context, false);
         if (ledgerAppendService != null) {
-            ledgerAppendService.appendSystemNote(context,
-                    "Attempt " + context.getParseErrors() + "/" + (maxAttempts + 1) + "\n"
-                            + "Error: " + e.getMessage() + "\n"
-                            + "RawOutput:\n" + truncateModelOutput(context),
-                    ConversationHistoryInitializer.eventKey(context.getRunId(),
-                            String.valueOf(Math.max(1, context.getStep())),
-                            "parse_error_note:" + context.getParseErrors()));
+            String note = ControlUpdateTexts.renderParseErrorNote(
+                    truncateModelOutput(context),
+                    context.getParseErrors(),
+                    context.getMaxAttempts());
+            String eventKey = ConversationHistoryInitializer.eventKey(context.getRunId(),
+                    String.valueOf(context.getModelAttempts()), "parse_error:" + context.getParseErrors());
+            ledgerAppendService.appendSystemNote(context, note, eventKey);
         }
-        appendParseErrorToLedger(context);
-        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
+        return NodeResult.nextRound(List.of());
     }
 
     private String truncateModelOutput(AgentContext context) {
@@ -150,48 +134,16 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private NodeResult unknownTool(AgentContext context, AgentDecision decision) {
-        context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure("unknown_tool", "未知工具：" + decision.getTool(), 0L));
-        appendStep(context, false);
-        if (ledgerAppendService != null) {
-            ledgerAppendService.appendToolResult(context,
-                    "Success: false\nObservation:\n未知工具：" + decision.getTool(),
-                    ConversationHistoryInitializer.eventKey(context.getRunId(),
-                            String.valueOf(context.getStep()), "unknown_tool"));
-        }
-        return NodeResult.next(AgentNodeNames.OBSERVATION, observationEvents(context));
+        return NodeResult.nextNode(AgentNodeNames.OBSERVATION, List.of());
     }
 
     private NodeResult invalidInput(AgentContext context, AgentDecision decision, ToolInputValidationResult validation) {
         String errorDetail = validation.errors().stream()
                 .map(e -> e.pointer() + ": " + e.message())
                 .collect(Collectors.joining("; "));
-        context.setStep(context.getStep() + 1);
         context.setToolResult(ToolResult.failure("invalid_tool_input",
                 "工具 " + decision.getTool() + " 参数校验失败: " + errorDetail, 0L));
-        appendStep(context, false);
-        if (ledgerAppendService != null) {
-            ledgerAppendService.appendToolResult(context,
-                    "Success: false\nErrorCode: invalid_tool_input\nObservation:\n" + errorDetail,
-                    ConversationHistoryInitializer.eventKey(context.getRunId(),
-                            String.valueOf(context.getStep()), "invalid_input"));
-        }
-        return NodeResult.next(AgentNodeNames.OBSERVATION, observationEvents(context));
+        return NodeResult.nextNode(AgentNodeNames.OBSERVATION, List.of());
     }
-
-    private void appendParseErrorToLedger(AgentContext context) {
-        if (ledgerAppendService == null) {
-            return;
-        }
-        String text = ControlUpdateTexts.renderParseErrorNote(
-                context.getModelOutput(),
-                context.getParseErrors(),
-                context.runtimeProperties(properties).getParseErrorMaxAttempts());
-        String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(),
-                String.valueOf(Math.max(1, context.getStep())),
-                "parse_error:" + context.getParseErrors());
-        ledgerAppendService.appendControlUpdate(context, text, eventKey);
-    }
-
 }

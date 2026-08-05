@@ -46,6 +46,7 @@ final class ModelCallExecutor {
             ChatPrompt prompt = promptFactory.build(context, requestedModel, currentMaxTokens, deadlineEpochMs, view);
             ModelChatResult result;
             try (ModelCallTraceContext.Scope ignored = ModelCallTraceContext.open(context)) {
+                context.advanceModelAttempt();
                 long remainingMs = Math.max(1L, deadlineEpochMs - System.currentTimeMillis());
                 result = modelGateway.complete(prompt)
                         .timeout(Duration.ofMillis(remainingMs))

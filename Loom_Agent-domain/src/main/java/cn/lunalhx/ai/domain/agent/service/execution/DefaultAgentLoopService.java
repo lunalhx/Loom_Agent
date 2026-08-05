@@ -1,23 +1,24 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
+import cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
-import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -41,17 +42,19 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final AgentRuntimeProperties properties;
     private final Map<String, AgentNode> nodes;
     private final AgentLoopComponents components;
+    private final AgentRunLifecycle lifecycle;
     private final Executor executor;
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
 
-    // ==================== 生产构造器 ====================
-
-    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor, ConversationExecutionGuard executionGuard) {
+    DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
+                            AgentRunLifecycle lifecycle,
+                            ConversationExecutionGuard executionGuard) {
         this.properties = assembly.properties();
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
+        this.lifecycle = lifecycle;
         this.executor = executor;
         this.executionGuard = executionGuard;
     }
@@ -80,12 +83,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
             }
             try {
                 emit(sink, List.of(components.eventFactory().runStarted(context)));
-                try {
-                    components.nodeLifecycle().userPromptSubmitted(context, events -> emit(sink, events));
-                    runLoop(context, AgentNodeNames.START, sink);
-                } catch (Exception e) {
-                    throw e;
-                }
+                emit(sink, lifecycle.initializeRun(context));
+                emit(sink, List.of(components.eventFactory().meta(context)));
+                runLoop(context, sink);
             } finally {
                 if (token != null) {
                     executionGuard.release(lockKey, token);
@@ -105,8 +105,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
             return components.contextFactory().create(question);
         }
 
-        AgentCheckpoint checkpoint = components.checkpointRepository().latest(previousRun.getRunId()).orElse(null);
-        AgentContextSnapshot previous = checkpoint != null ? checkpoint.getContextSnapshot() : null;
+        var checkpoint = components.checkpointRepository().latest(previousRun.getRunId()).orElse(null);
+        var previous = checkpoint != null ? checkpoint.getContextSnapshot() : null;
         return components.contextFactory().createContinuation(question, previous);
     }
 
@@ -284,15 +284,14 @@ public class DefaultAgentLoopService implements AgentLoopService {
             sink.complete();
             return;
         }
-
-        try {
-            runLoop(plan.context(), plan.startNode(), sink);
-        } catch (Exception e) {
-            throw e;
-        }
+        runLoop(plan.context(), plan.startNode(), sink);
     }
 
-    private void runLoop(AgentContext context, String currentNode, FluxSink<AgentEvent> sink) {
+    private void runLoop(AgentContext context, FluxSink<AgentEvent> sink) {
+        runLoop(context, AgentNodeNames.PROMPT_BUILD, sink);
+    }
+
+    private void runLoop(AgentContext context, String startNode, FluxSink<AgentEvent> sink) {
         AtomicBoolean cancellation = new AtomicBoolean(false);
         AtomicBoolean existing = cancellationRequests.putIfAbsent(context.identity().runId(), cancellation);
         AtomicBoolean activeCancellation = existing == null ? cancellation : existing;
@@ -301,45 +300,72 @@ public class DefaultAgentLoopService implements AgentLoopService {
             conversationRuns.computeIfAbsent(convId, k -> ConcurrentHashMap.newKeySet()).add(context.identity().runId());
         }
         try {
+            String currentNode = startNode;
+            boolean firstRound = true;
             while (!sink.isCancelled() && !activeCancellation.get()) {
-                if (isTotalTimeout(context)) {
-                    context.runtime().fail(AgentStopReason.TIMEOUT, AgentErrorCode.AGENT_TIMEOUT.code(), "Agent 执行超时");
-                    currentNode = AgentNodeNames.FAIL;
+                if (!firstRound) {
+                    if (isTotalTimeout(context)) {
+                        finishTimeout(context, sink);
+                        return;
+                    }
+                    if (context.getToolSteps() >= context.getMaxSteps()) {
+                        finishStepLimit(context, sink);
+                        return;
+                    }
+                    if (context.getModelAttempts() >= context.getMaxAttempts()) {
+                        finishRetryLimit(context, sink);
+                        return;
+                    }
                 }
+                firstRound = false;
 
                 AgentNode node = nodes.get(currentNode);
                 context.runtime().enterNode(currentNode);
                 if (node == null) {
                     context.runtime().fail(AgentStopReason.MODEL_ERROR, "node_not_found", "未知节点：" + currentNode);
-                    node = nodes.get(AgentNodeNames.FAIL);
-                    if (node == null) {
-                        log.error("FAIL 节点缺失，无法继续执行。currentNode={}", currentNode);
-                        sink.complete();
-                        return;
-                    }
+                    finishFail(context, List.of(), sink);
+                    return;
                 }
 
                 AgentNodeExecution execution =
                         components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
 
-                if (execution.terminal() && execution.hasDeferredTerminalEvents()) {
-                    execution = components.nodeLifecycle().resolveStop(
-                            context, node, execution.terminalEvents(), events -> emit(sink, events));
+                if (AgentNodeNames.MODEL_CALL.equals(currentNode)) {
+                    lifecycle.recordModelAttempt(context);
+                }
+                if (AgentNodeNames.TOOL_DISPATCH.equals(currentNode)) {
+                    emit(sink, lifecycle.checkpointAfterTool(context));
                 }
 
-                if (execution.isStopContinued()) {
-                    currentNode = execution.nextNode();
-                    continue;
+                NodeResult result = execution.result();
+                switch (result.getPhase()) {
+                    case NEXT_NODE:
+                        currentNode = execution.nextNode();
+                        break;
+                    case NEXT_ROUND:
+                        currentNode = AgentNodeNames.PROMPT_BUILD;
+                        break;
+                    case COMPLETE:
+                        finishComplete(context, result.getEvents(), sink);
+                        return;
+                    case PAUSE_APPROVAL:
+                        emit(sink, result.getEvents());
+                        emit(sink, lifecycle.pauseForApproval(context));
+                        emit(sink, List.of(components.eventFactory().pausedForApproval(context)));
+                        sink.complete();
+                        return;
+                    case PAUSE_USER_INPUT:
+                        emit(sink, result.getEvents());
+                        emit(sink, lifecycle.pauseForUserInput(context));
+                        sink.complete();
+                        return;
+                    case FAIL:
+                        finishFail(context, result.getEvents(), sink);
+                        return;
                 }
-
-                if (execution.terminal()) {
-                    sink.complete();
-                    return;
-                }
-
-                currentNode = execution.nextNode();
             }
             components.nodeLifecycle().cancelled(context, events -> emit(sink, events));
+            lifecycle.cancelled(context);
             sink.complete();
         } finally {
             if (existing == null) {
@@ -355,6 +381,72 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
             }
         }
+    }
+
+    // ==================== 终止处理 ====================
+
+    private void finishComplete(AgentContext context, List<AgentEvent> nodeEvents, FluxSink<AgentEvent> sink) {
+        emit(sink, nodeEvents);
+        String answer = StringUtils.defaultIfBlank(
+                context.getDecision() == null ? null : context.getDecision().getAnswer(),
+                StringUtils.defaultIfBlank(context.getFinalAnswer(), "未能生成最终回答"));
+        context.runtime().complete(answer);
+        context.setStopReason(AgentStopReason.FINAL_ANSWER_RETURNED);
+        if (components.ledgerAppendService() != null) {
+            components.ledgerAppendService().appendSystemNote(context, answer,
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getToolSteps()), "final_answer"));
+        }
+        emit(sink, List.of(components.eventFactory().answer(context, answer)));
+        emit(sink, List.of(components.eventFactory().done(context, AgentStopReason.FINAL_ANSWER_RETURNED)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.complete(context);
+        sink.complete();
+    }
+
+    private void finishStepLimit(AgentContext context, FluxSink<AgentEvent> sink) {
+        String message = "已达到工具执行上限 (" + context.getMaxSteps() + " 步)，任务停止";
+        context.runtime().stop(AgentStopReason.STEP_LIMIT_REACHED);
+        context.setFinalAnswer(message);
+        if (components.ledgerAppendService() != null) {
+            components.ledgerAppendService().appendSystemNote(context, message,
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getToolSteps()), "step_limit"));
+        }
+        emit(sink, List.of(components.eventFactory().answer(context, message)));
+        emit(sink, List.of(components.eventFactory().done(context, AgentStopReason.STEP_LIMIT_REACHED)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.stopped(context);
+        sink.complete();
+    }
+
+    private void finishRetryLimit(AgentContext context, FluxSink<AgentEvent> sink) {
+        String message = "模型连续重试达到上限 (" + context.getMaxAttempts() + " 次)，已停止";
+        context.runtime().stop(AgentStopReason.RETRY_LIMIT_REACHED);
+        context.setFinalAnswer(message);
+        if (components.ledgerAppendService() != null) {
+            components.ledgerAppendService().appendSystemNote(context, message,
+                    ConversationHistoryInitializer.eventKey(context.getRunId(),
+                            String.valueOf(context.getModelAttempts()), "retry_limit"));
+        }
+        emit(sink, List.of(components.eventFactory().answer(context, message)));
+        emit(sink, List.of(components.eventFactory().done(context, AgentStopReason.RETRY_LIMIT_REACHED)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.stopped(context);
+        sink.complete();
+    }
+
+    private void finishTimeout(AgentContext context, FluxSink<AgentEvent> sink) {
+        context.runtime().fail(AgentStopReason.TIMEOUT, AgentErrorCode.AGENT_TIMEOUT.code(), "Agent 执行超时");
+        finishFail(context, List.of(), sink);
+    }
+
+    private void finishFail(AgentContext context, List<AgentEvent> nodeEvents, FluxSink<AgentEvent> sink) {
+        emit(sink, nodeEvents);
+        emit(sink, List.of(components.eventFactory().agentError(context)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.failed(context);
+        sink.complete();
     }
 
     // ==================== 私有辅助 ====================

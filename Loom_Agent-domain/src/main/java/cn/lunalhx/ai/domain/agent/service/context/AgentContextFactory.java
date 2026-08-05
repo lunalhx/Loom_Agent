@@ -89,16 +89,17 @@ public final class AgentContextFactory {
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
         AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-        context.setMaxSteps(question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps());
+        int maxSteps = question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps();
+        context.setMaxSteps(maxSteps);
+        context.setMaxAttempts(Math.max(maxSteps * 3, maxSteps + 4));
         context.setStartedAt(Instant.now());
-        context.setStep(0);
+        context.setToolSteps(0);
+        context.setModelAttempts(0);
         context.setParseErrors(0);
         context.setToolSpecs(toolSpecs);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
-
-        initStepBudget(context, question);
 
         if (previous != null) {
             if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
@@ -134,12 +135,16 @@ public final class AgentContextFactory {
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
         AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
-        context.setMaxSteps(question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps());
+        int maxSteps = question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps();
+        context.setMaxSteps(maxSteps);
+        context.setMaxAttempts(Math.max(maxSteps * 3, maxSteps + 4));
         context.setStartedAt(Instant.now());
+        context.setToolSteps(0);
+        context.setModelAttempts(0);
+        context.setParseErrors(0);
         context.setToolSpecs(toolSpecs);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
-        initStepBudget(context, question);
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }
@@ -171,37 +176,15 @@ public final class AgentContextFactory {
         return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
     }
 
-    private void initStepBudget(AgentContext context, AgentQuestion question) {
-        cn.lunalhx.ai.domain.agent.model.valobj.StepBudgetProperties stepBudget =
-                context.runtimeProperties(properties).getStepBudget();
-        if (stepBudget == null || !Boolean.TRUE.equals(stepBudget.getContinuationEnabled())) {
-            context.setMaxSegments(1);
-            context.setMaxTotalSteps(context.getMaxSteps());
-            context.setSegmentIndex(0);
-            context.setSegmentStartStep(0);
-            return;
-        }
-        boolean isRoot = StringUtils.isBlank(question.getParentRunId());
-        if (isRoot) {
-            context.setMaxSegments(question.getMaxSegments() != null
-                    ? question.getMaxSegments() : stepBudget.getMaxSegments());
-        } else {
-            int configMax = stepBudget.getMaxSegments() != null ? stepBudget.getMaxSegments() : 5;
-            int childMax = stepBudget.getChildMaxSegments() != null ? stepBudget.getChildMaxSegments() : 2;
-            context.setMaxSegments(Math.min(configMax, childMax));
-        }
-        context.setMaxTotalSteps(stepBudget.getMaxTotalSteps() != null
-                ? stepBudget.getMaxTotalSteps() : 150);
-        context.setSegmentIndex(0);
-        context.setSegmentStartStep(0);
-    }
-
     public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {
         context.setRunConfig(runtimeConfigSource.captureRunConfig());
         restoreWorkspace(context, workspace);
         context.setStartedAt(Instant.now());
         context.setCheckpointVersion(checkpointVersion);
         context.setToolSpecs(toolSpecs);
+        if (context.getMaxAttempts() <= 0 && context.getMaxSteps() > 0) {
+            context.setMaxAttempts(Math.max(context.getMaxSteps() * 3, context.getMaxSteps() + 4));
+        }
         return context;
     }
 

@@ -1,7 +1,7 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
-import cn.lunalhx.ai.domain.agent.flow.node.RenderPromptNode;
+import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
 import cn.lunalhx.ai.domain.agent.service.execution.DefaultAgentLoopService;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -39,7 +39,7 @@ public class ArchitectureRegressionTest {
             classes().that().haveFullyQualifiedName(DefaultAgentLoopService.class.getName())
                     .or().haveFullyQualifiedName(ModelCallNode.class.getName())
                     .or().haveFullyQualifiedName(ToolDispatchNode.class.getName())
-                    .or().haveFullyQualifiedName(RenderPromptNode.class.getName())
+                    .or().haveFullyQualifiedName(PromptBuildNode.class.getName())
                     .should(haveAtMostOnePublicConstructor());
 
     @ArchTest
@@ -47,7 +47,7 @@ public class ArchitectureRegressionTest {
             classes().that().haveFullyQualifiedName(DefaultAgentLoopService.class.getName())
                     .or().haveFullyQualifiedName(ModelCallNode.class.getName())
                     .or().haveFullyQualifiedName(ToolDispatchNode.class.getName())
-                    .or().haveFullyQualifiedName(RenderPromptNode.class.getName())
+                    .or().haveFullyQualifiedName(PromptBuildNode.class.getName())
                     .should(haveConstructorsWithAtMost5Params());
 
     @ArchTest
@@ -86,23 +86,7 @@ public class ArchitectureRegressionTest {
                     .should().dependOnClassesThat()
                     .resideInAnyPackage("org.springframework..")
                     .orShould().dependOnClassesThat()
-                    .resideInAnyPackage("cn.lunalhx.ai.config..")
-                    .orShould().dependOnClassesThat()
-                    .resideInAnyPackage("cn.lunalhx.ai.runtime.hook..");
-
-    @ArchTest
-    public static final ArchRule all_agent_hook_impls_must_reside_in_runtime_hook_package =
-            classes().that().areAssignableTo(cn.lunalhx.ai.domain.agent.flow.hook.AgentHook.class)
-                    .should().resideInAnyPackage(
-                            "cn.lunalhx.ai.runtime.hook..",
-                            "cn.lunalhx.ai.domain.agent.flow.hook");
-
-    @ArchTest
-    public static final ArchRule agent_flow_factory_must_not_depend_on_concrete_hooks =
-            noClasses().that().haveFullyQualifiedName(
-                            cn.lunalhx.ai.domain.agent.service.execution.AgentFlowFactory.class.getName())
-                    .should().dependOnClassesThat()
-                    .resideInAnyPackage("cn.lunalhx.ai.runtime.hook..");
+                    .resideInAnyPackage("cn.lunalhx.ai.config..");
 
     @ArchTest
     public static final ArchRule no_classes_in_root_service_package =
@@ -126,12 +110,6 @@ public class ArchitectureRegressionTest {
     public static final ArchRule state_classes_must_not_use_lombok_data =
             noClasses().that().resideInAnyPackage("cn.lunalhx.ai.domain.agent.model.state..")
                     .should().beAnnotatedWith("lombok.Data");
-
-    @ArchTest
-    public static final ArchRule node_implementations_must_declare_node_access =
-            classes().that().areAssignableTo(cn.lunalhx.ai.domain.agent.flow.AgentNode.class)
-                    .and().resideOutsideOfPackage("cn.lunalhx.ai.domain.agent.flow")
-                    .should(declareNonDefaultNodeAccess());
 
     private static ArchCondition<JavaClass> onlyHaveNonPublicConstructors() {
         return new ArchCondition<>("have only non-public constructors") {
@@ -193,17 +171,4 @@ public class ArchitectureRegressionTest {
         };
     }
 
-    private static ArchCondition<JavaClass> declareNonDefaultNodeAccess() {
-        return new ArchCondition<>("declare non-default NodeAccess") {
-            @Override
-            public void check(JavaClass javaClass, ConditionEvents events) {
-                boolean hasAccessMethod = javaClass.getMethods().stream()
-                        .anyMatch(m -> m.getName().equals("access")
-                                && m.getRawParameterTypes().isEmpty());
-                if (!hasAccessMethod) {
-                    return;
-                }
-            }
-        };
-    }
 }

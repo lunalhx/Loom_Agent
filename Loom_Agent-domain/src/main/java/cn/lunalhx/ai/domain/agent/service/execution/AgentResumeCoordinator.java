@@ -30,7 +30,7 @@ import java.util.Map;
 
 public final class AgentResumeCoordinator {
 
-    private static final int MIN_SUPPORTED_SNAPSHOT_VERSION = 8;
+    private static final int MIN_SUPPORTED_SNAPSHOT_VERSION = 9;
 
     private final ApprovalStore approvalStore;
     private final AgentCheckpointRepository checkpointRepository;
@@ -38,14 +38,6 @@ public final class AgentResumeCoordinator {
     private final AgentContextFactory contextFactory;
     private final AgentEventFactory eventFactory;
     private final ConversationHistoryAppendService ledgerAppendService;
-
-    public AgentResumeCoordinator(ApprovalStore approvalStore,
-                                  AgentCheckpointRepository checkpointRepository,
-                                  AgentRunRepository runRepository,
-                                  AgentContextFactory contextFactory,
-                                  AgentEventFactory eventFactory) {
-        this(approvalStore, checkpointRepository, runRepository, contextFactory, eventFactory, null);
-    }
 
     public AgentResumeCoordinator(ApprovalStore approvalStore,
                                   AgentCheckpointRepository checkpointRepository,
@@ -61,18 +53,10 @@ public final class AgentResumeCoordinator {
         this.ledgerAppendService = ledgerAppendService;
     }
 
-    public AgentResumePlan prepareApprovalResume(String approvalId, ApprovalDecision decision, String reason) {
-        return prepareApprovalResume(approvalId, decision, reason, null, List.of());
-    }
-
     public AgentResumePlan prepareApprovalResume(
-            String approvalId,
-            ApprovalDecision decision,
-            String reason,
-            String reasonCode,
-            List<String> allowedAlternatives) {
-        ApprovalDecisionResult claim = approvalStore.decide(
-                approvalId, decision, reason);
+            String approvalId, ApprovalDecision decision, String reason,
+            String reasonCode, List<String> allowedAlternatives) {
+        ApprovalDecisionResult claim = approvalStore.decide(approvalId, decision, reason);
         if (claim.outcome() == ApprovalDecisionResult.Outcome.NOT_FOUND) {
             return AgentResumePlan.complete(List.of(eventFactory.approvalNotFound(approvalId)));
         }
@@ -120,7 +104,6 @@ public final class AgentResumeCoordinator {
         appendApprovalToLedger(context, "rejected",
                 approval.getTool(), effectiveReason);
 
-        context.runtime().advanceStep();
         ToolResult rejection = ToolResult.failure(
                 "approval_rejected",
                 StringUtils.defaultIfBlank(effectiveReason, "用户拒绝执行该写操作"),
@@ -185,7 +168,6 @@ public final class AgentResumeCoordinator {
             }
             String expiredId = context.approval().pendingApprovalId();
             context.approval().expire(expiredId);
-            context.runtime().advanceStep();
             context.setToolResult(ToolResult.failure(
                     "policy_denied",
                     "审批已过期或不可用，写操作未执行",
@@ -194,13 +176,12 @@ public final class AgentResumeCoordinator {
             return AgentResumePlan.continueAt(context, AgentNodeNames.OBSERVATION, events);
         }
 
-        if (AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                || context.recovery().contextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
+        if (context.recovery().contextRecoveryStage() == ContextRecoveryStage.WAITING_USER_INPUT) {
             events.add(eventFactory.userInputRequired(context));
             return AgentResumePlan.complete(events);
         }
 
-        String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.RENDER_PROMPT);
+        String currentNode = StringUtils.defaultIfBlank(checkpoint.getCurrentNode(), AgentNodeNames.PROMPT_BUILD);
         return AgentResumePlan.continueAt(context, currentNode, events);
     }
 
@@ -216,8 +197,7 @@ public final class AgentResumeCoordinator {
         }
 
         AgentContext context = snapshot.restore();
-        if (!AgentNodeNames.USER_INPUT_GATE.equals(checkpoint.getCurrentNode())
-                && context.recovery().contextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
+        if (context.recovery().contextRecoveryStage() != ContextRecoveryStage.WAITING_USER_INPUT) {
             return AgentResumePlan.complete(List.of(eventFactory.runNotWaitingUserInput(runId)));
         }
 
@@ -236,13 +216,14 @@ public final class AgentResumeCoordinator {
             context.recovery().reset();
             context.runtime().fail(AgentStopReason.CONTEXT_OVERFLOW, ModelErrorCode.CONTEXT_OVERFLOW.code(),
                     "用户在上下文恢复等待阶段终止了本次运行");
-            return AgentResumePlan.continueAt(context, AgentNodeNames.FAIL, events);
+            events.add(eventFactory.agentError(context));
+            return AgentResumePlan.complete(events);
         }
 
         appendUserInputToLedger(context, StringUtils.trim(message));
         context.recovery().reset();
         context.runtime().clearOutcomeForContinuation();
-        return AgentResumePlan.continueAt(context, AgentNodeNames.RENDER_PROMPT, events);
+        return AgentResumePlan.continueAt(context, AgentNodeNames.PROMPT_BUILD, events);
     }
 
     private void appendUserInputToLedger(AgentContext context, String message) {
@@ -251,18 +232,18 @@ public final class AgentResumeCoordinator {
         }
         String text = ControlUpdateTexts.renderUserInput(message);
         String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())), "user_input");
+                context.getRunId(), String.valueOf(Math.max(1, context.getToolSteps())), "user_input");
         ledgerAppendService.appendUserInput(context, text, eventKey);
     }
 
     private void appendApprovalToLedger(AgentContext context, String decision,
-                                        String toolName, String reason) {
+                                         String toolName, String reason) {
         if (ledgerAppendService == null) {
             return;
         }
         String text = ControlUpdateTexts.renderApprovalDecision(decision, toolName, reason);
         String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())),
+                context.getRunId(), String.valueOf(Math.max(1, context.getToolSteps())),
                 "approval_" + decision);
         ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }
@@ -273,7 +254,7 @@ public final class AgentResumeCoordinator {
         }
         String text = ControlUpdateTexts.renderApprovalExpired(approvalId);
         String eventKey = ConversationHistoryInitializer.eventKey(
-                context.getRunId(), String.valueOf(Math.max(1, context.runtime().step())),
+                context.getRunId(), String.valueOf(Math.max(1, context.getToolSteps())),
                 "approval_expired");
         ledgerAppendService.appendControlUpdate(context, text, eventKey);
     }

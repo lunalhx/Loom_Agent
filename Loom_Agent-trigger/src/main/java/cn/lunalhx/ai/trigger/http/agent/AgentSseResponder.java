@@ -44,12 +44,10 @@ public class AgentSseResponder {
             AgentEventType.CONTEXT_COMPACTED,
             AgentEventType.RESUME_STARTED,
             AgentEventType.APPROVAL_REQUIRED,
-            AgentEventType.HIGH_RISK_APPROVAL_REQUIRED,
             AgentEventType.PAUSED_FOR_APPROVAL,
             AgentEventType.USER_INPUT_REQUIRED,
             AgentEventType.POLICY_DENIED,
             AgentEventType.ANSWER,
-            AgentEventType.STOP_HOOK_RESULT,
             AgentEventType.DONE,
             AgentEventType.ERROR
     );

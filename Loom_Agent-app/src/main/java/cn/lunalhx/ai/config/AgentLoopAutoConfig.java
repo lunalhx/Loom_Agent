@@ -1,6 +1,6 @@
 package cn.lunalhx.ai.config;
 
-import cn.lunalhx.ai.domain.agent.flow.hook.AgentHookRegistry;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
@@ -16,6 +16,7 @@ import cn.lunalhx.ai.infrastructure.gateway.ChatModelFactoryRegistry;
 import cn.lunalhx.ai.infrastructure.gateway.DeepSeekChatModelFactory;
 import cn.lunalhx.ai.infrastructure.gateway.OpenCodeGoChatModelFactory;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -30,12 +31,12 @@ public class AgentLoopAutoConfig {
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
-                                             AgentHookRegistry hookRegistry,
                                              ConversationHistoryAppendService ledgerAppendService,
                                              ContextManager contextManager,
-                                             ConversationExecutionGuard executionGuard) {
-        return new AgentLoopFactory(modelGateway, state, runtime, hookRegistry,
-                ledgerAppendService, contextManager, executionGuard);
+                                             ConversationExecutionGuard executionGuard,
+                                             ObjectProvider<ConversationDeletionRepository> deletionRepository) {
+        return new AgentLoopFactory(modelGateway, state, runtime, ledgerAppendService,
+                contextManager, executionGuard, deletionRepository.getIfAvailable());
     }
 
     @Bean

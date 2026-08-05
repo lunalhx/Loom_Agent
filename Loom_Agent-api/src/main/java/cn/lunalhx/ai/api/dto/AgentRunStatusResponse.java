@@ -16,6 +16,11 @@ public class AgentRunStatusResponse {
     private String runId;
     private String status;
     private String currentNode;
+    private Integer toolSteps;
+    private Integer modelAttempts;
+    private String lastTool;
+    private String stopReason;
+    private String finalAnswer;
     private Long checkpointVersion;
     private Boolean terminal;
     private Boolean resumable;

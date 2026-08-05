@@ -18,28 +18,27 @@ public final class ControlUpdateTexts {
     }
 
     // ================================================================
-    // Step-budget snapshot
+    // Round budget snapshot
     // ================================================================
 
     /**
-     * Render a deterministic step-budget snapshot.
+     * Render a deterministic round-budget snapshot appended before each round.
      *
-     * <p>Only meaningful when {@code maxSegments > 1}. Format:
+     * <p>Format:
      * <pre>{@code
-     * [Step Budget] Segment {seg}/{maxSeg}, Step {step}/{maxTotal}, segment limit {limit} steps
+     * [Round Budget] Tool {toolSteps}/{maxToolSteps}, Attempt {modelAttempts}/{maxAttempts}
      * }</pre>
      *
-     * @return the budget text, or empty string when step-budget is not applicable
+     * @return the budget text, or empty string when not applicable
      */
-    public static String renderBudgetSnapshot(AgentContext context) {
-        if (context == null || context.getMaxSegments() <= 1) {
+    public static String renderRoundBudget(AgentContext context) {
+        if (context == null) {
             return "";
         }
-        return "[Step Budget] Segment " + (context.getSegmentIndex() + 1)
-                + "/" + context.getMaxSegments()
-                + ", Step " + (context.getStep() + 1)
-                + "/" + context.getMaxTotalSteps()
-                + ", segment limit " + context.getMaxSteps() + " steps";
+        return "[Round Budget] Tool " + context.getToolSteps()
+                + "/" + context.getMaxSteps()
+                + ", Attempt " + context.getModelAttempts()
+                + "/" + context.getMaxAttempts();
     }
 
     // ================================================================

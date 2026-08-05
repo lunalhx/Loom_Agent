@@ -18,6 +18,12 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Single recording entry for tool results, validation errors, and approval
+ * denials. Unifies cleaning, working memory, ledger, history, and the
+ * Observation event. Ledger event keys stay idempotent so checkpoint resume
+ * never re-executes tools and never duplicates records.
+ */
 public class ObservationNode extends AbstractAgentNode {
 
     private static final Logger log = LoggerFactory.getLogger(ObservationNode.class);
@@ -32,7 +38,7 @@ public class ObservationNode extends AbstractAgentNode {
                            TraceRecorder traceRecorder,
                            AgentMetrics agentMetrics,
                            ConversationHistoryAppendService ledgerAppendService) {
-        super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "step"));
+        super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "toolSteps"));
         this.sanitizer = sanitizer;
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
@@ -58,18 +64,18 @@ public class ObservationNode extends AbstractAgentNode {
 
         if (ledgerAppendService != null) {
             String eventKey = ConversationHistoryInitializer.eventKey(
-                    context.getRunId(), String.valueOf(Math.max(1, context.getStep())), "tool_result");
+                    context.getRunId(), String.valueOf(Math.max(1, context.getToolSteps())), "tool_result");
             String toolInputJson = context.getDecision() != null && context.getDecision().getInput() != null
                     ? context.getDecision().getInput().toString() : null;
             ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result,
                     toolName, toolInputJson, eventKey);
         }
 
-        return NodeResult.next(AgentNodeNames.RENDER_PROMPT, observationEvents(context));
+        return NodeResult.nextRound(observationEvents(context));
     }
 
     private ToolOutputSanitization sanitizeObservation(AgentContext context, String toolName,
-                                                        String rawObservation) {
+                                                       String rawObservation) {
         ToolOutputSanitization sanitization;
         try {
             sanitization = sanitizer.sanitize(toolName, rawObservation);
@@ -101,40 +107,4 @@ public class ObservationNode extends AbstractAgentNode {
 
         return sanitization;
     }
-
-    private String toDynamicObservation(AgentContext context, ToolResult result,
-                                        String toolName, ToolOutputSanitization sanitization) {
-
-        String escapedToolName = escapeXmlAttr(toolName);
-
-        StringBuilder text = new StringBuilder();
-        text.append("Success: ").append(result != null && result.isSuccess()).append('\n');
-        if (sanitization.isInjectionDetected()) {
-            text.append("[security_note] 检测到疑似注入指令，已标记为不可信数据\n");
-        }
-        text.append("<untrusted_tool_output tool=\"").append(escapedToolName).append("\">\n");
-        text.append(sanitization.getOutput()).append('\n');
-        text.append("</untrusted_tool_output>");
-        return text.toString();
-    }
-
-    private static String escapeXmlAttr(String value) {
-        if (value == null || value.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(value.length() + 16);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '&' -> sb.append("&amp;");
-                case '"' -> sb.append("&quot;");
-                case '<' -> sb.append("&lt;");
-                case '>' -> sb.append("&gt;");
-                case '\'' -> sb.append("&apos;");
-                default -> sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
 }

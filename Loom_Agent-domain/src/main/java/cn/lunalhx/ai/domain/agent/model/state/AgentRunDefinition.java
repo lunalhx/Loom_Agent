@@ -8,27 +8,23 @@ public final class AgentRunDefinition {
     private final String question;
     private final String pathScope;
     private final int maxSteps;
-    private final int maxSegments;
-    private final int maxTotalSteps;
+    private final int maxAttempts;
 
     public AgentRunDefinition(String question, String pathScope,
-                              int maxSteps, int maxSegments, int maxTotalSteps) {
+                              int maxSteps, int maxAttempts) {
         this.question = question;
         this.pathScope = pathScope;
         this.maxSteps = maxSteps;
-        this.maxSegments = maxSegments;
-        this.maxTotalSteps = maxTotalSteps;
+        this.maxAttempts = maxAttempts;
     }
 
     public String question() { return question; }
     public String pathScope() { return pathScope; }
     public int maxSteps() { return maxSteps; }
-    public int maxSegments() { return maxSegments; }
-    public int maxTotalSteps() { return maxTotalSteps; }
+    public int maxAttempts() { return maxAttempts; }
 
-    public AgentRunDefinition withQuestion(String v) { return new AgentRunDefinition(v, pathScope, maxSteps, maxSegments, maxTotalSteps); }
-    public AgentRunDefinition withPathScope(String v) { return new AgentRunDefinition(question, v, maxSteps, maxSegments, maxTotalSteps); }
-    public AgentRunDefinition withMaxSteps(int v) { return new AgentRunDefinition(question, pathScope, v, maxSegments, maxTotalSteps); }
-    public AgentRunDefinition withMaxSegments(int v) { return new AgentRunDefinition(question, pathScope, maxSteps, v, maxTotalSteps); }
-    public AgentRunDefinition withMaxTotalSteps(int v) { return new AgentRunDefinition(question, pathScope, maxSteps, maxSegments, v); }
+    public AgentRunDefinition withQuestion(String v) { return new AgentRunDefinition(v, pathScope, maxSteps, maxAttempts); }
+    public AgentRunDefinition withPathScope(String v) { return new AgentRunDefinition(question, v, maxSteps, maxAttempts); }
+    public AgentRunDefinition withMaxSteps(int v) { return new AgentRunDefinition(question, pathScope, v, maxAttempts); }
+    public AgentRunDefinition withMaxAttempts(int v) { return new AgentRunDefinition(question, pathScope, maxSteps, v); }
 }

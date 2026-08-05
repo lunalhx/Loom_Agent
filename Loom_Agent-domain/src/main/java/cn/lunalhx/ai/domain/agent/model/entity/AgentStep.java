@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AgentStep {
 
-    private int step;
+    private int toolStep;
     private String thought;
     private String tool;
     private String input;

@@ -42,13 +42,17 @@ public abstract class AbstractAgentNode implements AgentNode {
 
     protected AgentEvent.AgentEventBuilder event(AgentContext context, AgentEventType type) {
         AgentIdentity id = context.identity();
+        AgentRuntimeState runtime = context.runtime();
         return AgentEvent.builder()
                 .type(type)
                 .runId(id.runId())
                 .requestId(id.requestId())
                 .conversationId(id.conversationId())
                 .workspace(context.environment().workspaceDisplayName())
-                .parentRunId(id.parentRunId());
+                .parentRunId(id.parentRunId())
+                .toolSteps(runtime.toolSteps())
+                .modelAttempts(runtime.modelAttempts())
+                .lastTool(runtime.lastTool());
     }
 
     protected void fail(AgentContext context, AgentStopReason reason, String code, String message) {
@@ -61,7 +65,7 @@ public abstract class AbstractAgentNode implements AgentNode {
         AgentDecision decision = action.decision();
         ToolResult result = action.toolResult();
         runtime.history().add(AgentStep.builder()
-                .step(Math.max(1, runtime.step()))
+                .toolStep(Math.max(1, runtime.toolSteps()))
                 .thought(decision == null ? null : decision.getReason())
                 .tool(decision == null ? "model_parse" : decision.getTool())
                 .input(decision == null ? context.prompt().modelOutput() : String.valueOf(decision.getInputView()))
@@ -75,7 +79,6 @@ public abstract class AbstractAgentNode implements AgentNode {
         AgentActionState action = context.action();
         ToolResult result = action.toolResult();
         return List.of(event(context, AgentEventType.OBSERVATION)
-                .step(runtime.step())
                 .tool(action.decision() == null ? null : action.decision().getTool())
                 .observation(result == null ? null : result.getObservation())
                 .truncated(result != null && result.isTruncated())

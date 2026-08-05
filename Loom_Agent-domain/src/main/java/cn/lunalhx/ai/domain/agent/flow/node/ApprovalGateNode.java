@@ -22,7 +22,8 @@ import java.util.UUID;
 
 /**
  * Approval gate for risky tools driven by {@code approvalPolicy} ("ask"|"auto"|"never").
- * Risky tools are uniformly shown as RISKY; content diff and stale-approval fingerprints removed.
+ * Only handles risk policy and the approval record; recording the denial
+ * observation is left to {@link ObservationNode}.
  */
 public class ApprovalGateNode extends AbstractAgentNode {
 
@@ -45,15 +46,14 @@ public class ApprovalGateNode extends AbstractAgentNode {
         boolean risky = toolRegistry.isRisky(tool);
 
         if (!risky) {
-            return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+            return NodeResult.nextNode(AgentNodeNames.TOOL_DISPATCH, List.of());
         }
 
         String policy = StringUtils.defaultString(context.getApprovalPolicy(), "ask").toLowerCase();
         if ("auto".equals(policy)) {
-            return NodeResult.next(AgentNodeNames.TOOL_DISPATCH, List.of());
+            return NodeResult.nextNode(AgentNodeNames.TOOL_DISPATCH, List.of());
         }
         if ("never".equals(policy)) {
-            context.runtime().advanceStep();
             ToolResult result = ToolResult.failure("approval_denied",
                     "error: approval denied for " + tool, 0L);
             result.setToolStatus("rejected");
@@ -64,19 +64,14 @@ public class ApprovalGateNode extends AbstractAgentNode {
             result.setWorkspaceChanged(false);
             result.setDiffSummary(List.of());
             context.setToolResult(result);
-            List<AgentEvent> events = List.of(
-                    event(context, AgentEventType.OBSERVATION)
-                            .step(context.getStep())
-                            .tool(tool)
-                            .observation(result.getObservation())
-                            .build());
-            return NodeResult.next(AgentNodeNames.OBSERVATION, events);
+            return NodeResult.nextNode(AgentNodeNames.OBSERVATION, List.of());
         }
 
-        return requireApproval(context, tool);
+        return requireApproval(context, tool, runProperties);
     }
 
-    private NodeResult requireApproval(AgentContext context, String tool) {
+    private NodeResult requireApproval(AgentContext context, String tool,
+                                       AgentRuntimeProperties runProperties) {
         Instant now = Instant.now();
         String approvalId = UUID.randomUUID().toString();
         context.setPendingApprovalId(approvalId);
@@ -95,13 +90,12 @@ public class ApprovalGateNode extends AbstractAgentNode {
                 .operationPreview(String.valueOf(context.getDecision().getInputView()))
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(Math.max(1L,
-                        context.runtimeProperties(properties).getApprovalTtlSeconds())))
+                        runProperties.getApprovalTtlSeconds())))
                 .context(context)
                 .state(ApprovalRecordState.PENDING)
                 .build();
         approvalStore.save(approval);
-        return NodeResult.terminal(List.of(event(context, AgentEventType.APPROVAL_REQUIRED)
-                .step(context.getStep() + 1)
+        return NodeResult.pauseApproval(List.of(event(context, AgentEventType.APPROVAL_REQUIRED)
                 .tool(tool)
                 .input(inputSummary)
                 .approvalId(approvalId)
@@ -130,5 +124,4 @@ public class ApprovalGateNode extends AbstractAgentNode {
         }
         return value;
     }
-
 }

@@ -139,14 +139,14 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         context.setWorkspaceDisplayName(".");
         context.setMaxSteps(6);
         context.setStartedAt(Instant.now());
-        context.setCurrentNode(AgentNodeNames.USER_INPUT_GATE);
+        context.setCurrentNode(AgentNodeNames.PROMPT_BUILD);
         context.setContextRecoveryStage(cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage.WAITING_USER_INPUT);
         context.setToolSpecs(List.of());
         checkpointRepository.save(AgentCheckpoint.builder()
                 .runId("waiting-run")
-                .currentNode(AgentNodeNames.USER_INPUT_GATE)
+                .currentNode(AgentNodeNames.PROMPT_BUILD)
                 .contextSnapshot(AgentContextSnapshot.from(context))
-                .reason("after_node:user_input_gate")
+                .reason("pause_user_input")
                 .build());
 
         DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
@@ -177,15 +177,15 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         context.setWorkspaceDisplayName(".");
         context.setMaxSteps(6);
         context.setStartedAt(Instant.now());
-        context.setCurrentNode(AgentNodeNames.USER_INPUT_GATE);
+        context.setCurrentNode(AgentNodeNames.PROMPT_BUILD);
         context.setContextRecoveryStage(cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage.WAITING_USER_INPUT);
-        context.setStep(1);
+        context.setToolSteps(1);
         context.setToolSpecs(List.of());
         checkpointRepository.save(AgentCheckpoint.builder()
                 .runId("continue-run")
-                .currentNode(AgentNodeNames.USER_INPUT_GATE)
+                .currentNode(AgentNodeNames.PROMPT_BUILD)
                 .contextSnapshot(AgentContextSnapshot.from(context))
-                .reason("after_node:user_input_gate")
+                .reason("pause_user_input")
                 .build());
 
         DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
@@ -226,13 +226,13 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         context.setWorkspaceDisplayName(".");
         context.setMaxSteps(6);
         context.setStartedAt(Instant.now());
-        context.setStep(3);
+        context.setToolSteps(3);
         context.setToolSpecs(List.of());
         checkpointRepository.save(AgentCheckpoint.builder()
                 .runId("completed-run")
-                .currentNode(AgentNodeNames.FINAL_ANSWER)
+                .currentNode(AgentNodeNames.PROMPT_BUILD)
                 .contextSnapshot(AgentContextSnapshot.from(context))
-                .reason("after_node:final_answer")
+                .reason("run_complete")
                 .build());
 
         DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
@@ -273,13 +273,13 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         context.setWorkspaceDisplayName(".");
         context.setMaxSteps(6);
         context.setStartedAt(Instant.now());
-        context.setStep(1);
+        context.setToolSteps(1);
         context.setToolSpecs(List.of());
         checkpointRepository.save(AgentCheckpoint.builder()
                 .runId("failed-run")
-                .currentNode(AgentNodeNames.FAIL)
+                .currentNode(AgentNodeNames.PROMPT_BUILD)
                 .contextSnapshot(AgentContextSnapshot.from(context))
-                .reason("after_node:fail")
+                .reason("run_failed")
                 .build());
 
         DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
@@ -306,7 +306,7 @@ public class DefaultAgentLoopServiceOrchestrationTest {
                 .requestId("req-3")
                 .conversationId("conv-3")
                 .workspace(".")
-                .status(AgentRunStatus.BUDGET_EXCEEDED)
+                .status(AgentRunStatus.FAILED)
                 .build());
 
         AgentContext context = new AgentContext();
@@ -317,13 +317,13 @@ public class DefaultAgentLoopServiceOrchestrationTest {
         context.setWorkspaceDisplayName(".");
         context.setMaxSteps(6);
         context.setStartedAt(Instant.now());
-        context.setStep(2);
+        context.setToolSteps(2);
         context.setToolSpecs(List.of());
         checkpointRepository.save(AgentCheckpoint.builder()
                 .runId("budget-run")
-                .currentNode(AgentNodeNames.RENDER_PROMPT)
+                .currentNode(AgentNodeNames.PROMPT_BUILD)
                 .contextSnapshot(AgentContextSnapshot.from(context))
-                .reason("after_node:render_prompt")
+                .reason("run_init")
                 .build());
 
         DefaultAgentLoopService service = AgentRuntimeTestFixture.fixture()
