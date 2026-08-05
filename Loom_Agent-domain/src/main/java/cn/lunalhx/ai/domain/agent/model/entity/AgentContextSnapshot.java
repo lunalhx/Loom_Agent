@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentApprovalState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
@@ -9,7 +8,6 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
@@ -81,15 +79,6 @@ public class AgentContextSnapshot {
     private AgentDecision decision;
     private ToolResult toolResult;
 
-    // -- approval (durable) --
-    private Boolean unsafeResumeRequired;
-    private String pendingApprovalId;
-    private String approvedTool;
-    private String approvedPolicyFingerprint;
-    private Boolean approvalExpired;
-    private String expiredApprovalId;
-    private List<ApprovalGrant> approvalGrants;
-
     // -- budget (durable usage snapshot) --
     private Long usedPromptTokens;
     private Long usedCompletionTokens;
@@ -139,7 +128,6 @@ public class AgentContextSnapshot {
         AgentRunDefinition def = context.runDefinition();
         AgentRuntimeState runtime = context.runtime();
         AgentActionState action = context.action();
-        AgentApprovalState approval = context.approval();
         AgentBudgetState budget = context.budget();
         AgentRecoveryState recovery = context.recovery();
         AgentTraceState trace = context.trace();
@@ -176,14 +164,6 @@ public class AgentContextSnapshot {
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
-                // approval
-                .unsafeResumeRequired(approval.unsafeResumeRequired())
-                .pendingApprovalId(approval.pendingApprovalId())
-                .approvedTool(approval.approvedTool())
-                .approvedPolicyFingerprint(approval.approvedPolicyFingerprint())
-                .approvalExpired(approval.approvalExpired())
-                .expiredApprovalId(approval.expiredApprovalId())
-                .approvalGrants(approval.approvalGrants() == null ? null : new ArrayList<>(approval.approvalGrants()))
                 // budget
                 .usedPromptTokens(budget.usedPromptTokens())
                 .usedCompletionTokens(budget.usedCompletionTokens())
@@ -250,15 +230,6 @@ public class AgentContextSnapshot {
         // action
         context.setDecision(decision);
         context.setToolResult(toolResult);
-
-        // approval
-        context.setUnsafeResumeRequired(Boolean.TRUE.equals(unsafeResumeRequired));
-        context.setPendingApprovalId(pendingApprovalId);
-        context.setApprovedTool(approvedTool);
-        context.setApprovedPolicyFingerprint(approvedPolicyFingerprint);
-        context.setApprovalExpired(Boolean.TRUE.equals(approvalExpired));
-        context.setExpiredApprovalId(expiredApprovalId);
-        context.setApprovalGrants(approvalGrants == null ? null : new ArrayList<>(approvalGrants));
 
         // budget
         context.setUsedPromptTokens(usedPromptTokens == null ? 0L : usedPromptTokens);

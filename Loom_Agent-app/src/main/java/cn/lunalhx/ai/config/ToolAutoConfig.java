@@ -4,7 +4,6 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
-import cn.lunalhx.ai.domain.tool.service.ToolAssembler;
 import cn.lunalhx.ai.infrastructure.loom.DelegateTool;
 import cn.lunalhx.ai.infrastructure.loom.ListFilesTool;
 import cn.lunalhx.ai.infrastructure.loom.PatchFileTool;
@@ -12,7 +11,7 @@ import cn.lunalhx.ai.infrastructure.loom.ReadFileTool;
 import cn.lunalhx.ai.infrastructure.loom.RunShellTool;
 import cn.lunalhx.ai.infrastructure.loom.SearchTool;
 import cn.lunalhx.ai.infrastructure.loom.WriteFileTool;
-import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
+import cn.lunalhx.ai.infrastructure.tool.NoopToolOutputSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,7 +32,7 @@ public class ToolAutoConfig {
 
     @Bean
     public ToolOutputSanitizer toolOutputSanitizer() {
-        return new RegexToolOutputSanitizer();
+        return new NoopToolOutputSanitizer();
     }
 
     @Bean

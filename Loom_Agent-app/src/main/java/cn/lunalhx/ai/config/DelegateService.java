@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -23,11 +24,11 @@ public class DelegateService implements DelegateRunner {
     private static final int MAX_PARENT_HISTORY_CHARS = 300;
 
     private final AgentLoopFactory loopFactory;
-    private final ToolRegistry toolRegistry;
+    private final ObjectProvider<ToolRegistry> toolRegistryProvider;
 
-    public DelegateService(AgentLoopFactory loopFactory, ToolRegistry toolRegistry) {
+    public DelegateService(AgentLoopFactory loopFactory, ObjectProvider<ToolRegistry> toolRegistryProvider) {
         this.loopFactory = loopFactory;
-        this.toolRegistry = toolRegistry;
+        this.toolRegistryProvider = toolRegistryProvider;
     }
 
     @Override
@@ -50,7 +51,6 @@ public class DelegateService implements DelegateRunner {
         } catch (Exception e) {
             return "delegate_result:\n" + "error: " + e.getMessage();
         }
-        events.blockLast();
         events.doOnNext(event -> {
             if (event.getType() == AgentEventType.ANSWER && event.getAnswer() != null) {
                 answer.set(event.getAnswer());
@@ -58,7 +58,7 @@ public class DelegateService implements DelegateRunner {
             if (event.getType() == AgentEventType.ERROR) {
                 error.set(String.valueOf(event.getMessage()));
             }
-        }).subscribe();
+        }).blockLast();
         String result = answer.get();
         if (result == null || result.isBlank()) {
             result = error.get() == null || error.get().isBlank() ? "(empty)" : "error: " + error.get();
@@ -67,6 +67,7 @@ public class DelegateService implements DelegateRunner {
     }
 
     private ToolRegistry baseToolRegistry() {
+        ToolRegistry toolRegistry = toolRegistryProvider.getObject();
         return new ToolRegistry(toolRegistry.tools().stream()
                 .filter(t -> !ToolRegistry.DELEGATE_TOOL_NAME.equals(t.spec().getName()))
                 .toList(), new cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator(

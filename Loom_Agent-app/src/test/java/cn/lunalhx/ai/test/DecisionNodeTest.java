@@ -1,10 +1,10 @@
 package cn.lunalhx.ai.test;
 
+import cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -13,7 +13,6 @@ import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.Test;
 
 import java.util.List;
@@ -24,6 +23,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * DecisionNode tests for the Loom XML protocol: JSON tool form, XML attribute
+ * / child-tag form, final answers, bare-text final, and format retries.
+ */
 public class DecisionNodeTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -42,7 +45,251 @@ public class DecisionNodeTest {
         };
     }
 
-    // ---- Schema validation ----
+    // ---- JSON <tool> form ----
+
+    @Test
+    public void jsonToolFormProceedsToToolDispatch() {
+        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
+        AgentTool t = tool("msg_tool", schema);
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":{\"msg\":\"hello\"}}</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertNull(ctx.getToolResult());
+        assertEquals("action", ctx.getDecision().getType());
+        assertEquals("msg_tool", ctx.getDecision().getTool());
+    }
+
+    @Test
+    public void jsonToolMissingArgsDefaultsToEmptyObject() {
+        AgentTool t = tool("empty_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"empty_tool\"}</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+    }
+
+    @Test
+    public void malformedToolJsonReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals(0, ctx.getToolSteps());
+    }
+
+    @Test
+    public void missingToolNameReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"args\":{}}</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals(0, ctx.getToolSteps());
+    }
+
+    @Test
+    public void nonObjectArgsReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":[]}</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals(0, ctx.getToolSteps());
+    }
+
+    // ---- XML attribute / child-tag form ----
+
+    @Test
+    public void xmlWriteFileWithContentTag() {
+        AgentTool t = tool("write_file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool name=\"write_file\" path=\"a.txt\"><content>hello\nworld</content></tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals("a.txt", ctx.getDecision().getInput().path("path").asText());
+        assertEquals("hello\nworld", ctx.getDecision().getInput().path("content").asText());
+    }
+
+    @Test
+    public void xmlWriteFileBodyFallback() {
+        AgentTool t = tool("write_file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool name=\"write_file\" path=\"a.txt\">\ndef f():\n    return 1\n</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertTrue(ctx.getDecision().getInput().path("content").asText().contains("def f()"));
+    }
+
+    @Test
+    public void xmlPatchFileWithOldNewTags() {
+        AgentTool t = tool("patch_file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_text\":{\"type\":\"string\"},\"new_text\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_text\",\"new_text\"],\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool name=\"patch_file\" path=\"a.py\"><old_text>return -1</old_text><new_text>return mid</new_text></tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals("return -1", ctx.getDecision().getInput().path("old_text").asText());
+        assertEquals("return mid", ctx.getDecision().getInput().path("new_text").asText());
+    }
+
+    @Test
+    public void xmlToolSingleQuotedAttrs() {
+        AgentTool t = tool("read_file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool name='read_file' path='README.md'></tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals("README.md", ctx.getDecision().getInput().path("path").asText());
+    }
+
+    @Test
+    public void xmlToolWithoutNameReturnsFormatRetry() {
+        AgentTool t = tool("read_file", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool path=\"README.md\"></tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+    }
+
+    // ---- final / bare text ----
+
+    @Test
+    public void finalTagCompletes() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<final>Done.</final>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("Done.", ctx.getDecision().getAnswer());
+    }
+
+    @Test
+    public void emptyFinalReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<final>   </final>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+    }
+
+    @Test
+    public void bareTextCompletesAsFinal() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("just an answer", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("just an answer", ctx.getDecision().getAnswer());
+    }
+
+    @Test
+    public void emptyOutputReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals(0, ctx.getToolSteps());
+    }
+
+    // ---- Tool visibility / validation ----
+
+    @Test
+    public void unknownToolReturnsUnknownToolError() {
+        AgentTool t = tool("known", "{\"type\":\"object\",\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"unknown\",\"args\":{}}</tool>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
+        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
+        assertTrue(ctx.getToolResult().getObservation().contains("unknown"));
+    }
+
+    @Test
+    public void hiddenToolInRegistryIsRejected() {
+        AgentTool t1 = tool("exposed", "{\"type\":\"object\",\"additionalProperties\":false}");
+        AgentTool t2 = tool("hidden", "{\"type\":\"object\",\"additionalProperties\":false}");
+        ToolRegistry registry = new ToolRegistry(List.of(t1, t2), new ToolSchemaValidator(mapper));
+        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+
+        AgentContext ctx = context("<tool>{\"name\":\"hidden\",\"args\":{}}</tool>", List.of(t1.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
+        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
+    }
 
     @Test
     public void missingRequiredFieldReturnsInvalidToolInput() {
@@ -51,10 +298,7 @@ public class DecisionNodeTest {
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
         DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"test_tool\",\"input\":{}}");
-        ctx.setToolSpecs(List.of(t.spec()));
+        AgentContext ctx = context("<tool>{\"name\":\"test_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
@@ -71,70 +315,14 @@ public class DecisionNodeTest {
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
         DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"count_tool\",\"input\":{\"count\":\"not_a_number\"}}");
-        ctx.setToolSpecs(List.of(t.spec()));
+        AgentContext ctx = context(
+                "<tool>{\"name\":\"count_tool\",\"args\":{\"count\":\"not_a_number\"}}</tool>",
+                List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
         assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
         assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
-    }
-
-    @Test
-    public void unknownPropertyRejectedWhenAdditionalPropertiesFalse() {
-        String schema = "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"additionalProperties\":false}";
-        AgentTool t = tool("strict_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"strict_tool\",\"input\":{\"name\":\"test\",\"extra\":123}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
-    }
-
-    @Test
-    public void validInputProceedsToApprovalGate() {
-        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
-        AgentTool t = tool("msg_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"msg_tool\",\"input\":{\"msg\":\"hello\"}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.APPROVAL_GATE, result.getNextNode());
-        assertNull(ctx.getToolResult());
-    }
-
-    @Test
-    public void validInputWithDefaultFillsNoValue() {
-        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"default\":\"hi\"}},\"additionalProperties\":false}";
-        AgentTool t = tool("default_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"default_tool\",\"input\":{}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.APPROVAL_GATE, result.getNextNode());
-        // default value is NOT injected by validator
-        assertTrue(ctx.getDecision().getInput().path("msg").isMissingNode());
     }
 
     @Test
@@ -144,269 +332,41 @@ public class DecisionNodeTest {
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
         DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setParseErrors(0);
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"int_tool\",\"input\":{}}");
-        ctx.setToolSpecs(List.of(t.spec()));
+        AgentContext ctx = context("<tool>{\"name\":\"int_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
         node.apply(ctx);
 
         assertEquals(0, ctx.getParseErrors());
     }
 
-    // ---- Unknown tool ----
-
     @Test
-    public void unknownToolReturnsUnknownToolError() {
-        AgentTool t = tool("known", "{\"type\":\"object\",\"additionalProperties\":false}");
+    public void integerStringAttributeAcceptedBySchema() {
+        // XML attributes are strings; the semantic validator accepts integer strings
+        String schema = "{\"type\":\"object\",\"properties\":{\"start\":{\"type\":\"integer\"},\"end\":{\"type\":\"integer\"}},\"required\":[\"start\"],\"additionalProperties\":false}";
+        AgentTool t = tool("range_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
         DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
 
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"unknown\",\"input\":{}}");
-        ctx.setToolSpecs(List.of(t.spec()));
+        AgentContext ctx = context("<tool name=\"range_tool\" start=\"1\" end=\"80\"></tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
-        assertTrue(ctx.getToolResult().getObservation().contains("unknown"));
-    }
-
-    @Test
-    public void toolInRegistryButNotInCurrentSpecsIsUnknown() {
-        AgentTool t1 = tool("exposed", "{\"type\":\"object\",\"additionalProperties\":false}");
-        AgentTool t2 = tool("hidden", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t1, t2), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"hidden\",\"input\":{}}");
-        // only expose t1, not t2
-        ctx.setToolSpecs(List.of(t1.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
-    }
-
-    // ---- Reason field ----
-
-    @Test
-    public void reasonFieldParsedCorrectly() {
-        AgentTool t = tool("r_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"r_tool\",\"input\":{},\"reason\":\"short reason\"}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        node.apply(ctx);
-
-        assertEquals("short reason", ctx.getDecision().getReason());
-    }
-
-    @Test
-    public void oldThoughtFieldFallsBackToReason() {
-        AgentTool t = tool("t_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"t_tool\",\"input\":{},\"thought\":\"old thought\"}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        node.apply(ctx);
-
-        assertEquals("old thought", ctx.getDecision().getReason());
-    }
-
-    @Test
-    public void reasonTakesPriorityOverThought() {
-        AgentTool t = tool("p_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput(
-                "{\"type\":\"action\",\"tool\":\"p_tool\",\"input\":{},\"reason\":\"new reason\",\"thought\":\"old thought\"}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        node.apply(ctx);
-
-        assertEquals("new reason", ctx.getDecision().getReason());
-    }
-
-    @Test
-    public void reasonTruncatedTo240Chars() {
-        AgentTool t = tool("trunc_tool", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        String longReason = "A".repeat(300);
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput(
-                "{\"type\":\"action\",\"tool\":\"trunc_tool\",\"input\":{},\"reason\":\"" + longReason + "\"}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        node.apply(ctx);
-
-        assertEquals(240, ctx.getDecision().getReason().length());
+        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
     }
 
     // ---- Helper ----
+
+    private AgentContext context(String modelOutput, List<ToolSpec> specs) {
+        AgentContext ctx = new AgentContext();
+        ctx.setRunId(UUID.randomUUID().toString());
+        ctx.setModelOutput(modelOutput);
+        ctx.setToolSpecs(specs);
+        return ctx;
+    }
 
     private AgentRuntimeProperties buildProps() {
         AgentRuntimeProperties props = new AgentRuntimeProperties();
         props.setWorkspaceRoot(".");
         return props;
-    }
-
-    // ---- Protocol normalization: tool-name-as-type ----
-
-    @Test
-    public void toolNameAsTypeNormalizedToAction() {
-        // Model emits {"type":"todo_write","input":{...}} instead of canonical form
-        String todoSchema = "{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}";
-        AgentTool t = tool("todo_write", todoSchema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"todo_write\",\"input\":{\"todos\":[{\"id\":\"verify\",\"content\":\"tests passed\",\"status\":\"completed\"}]}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        // Should be normalized and proceed to APPROVAL_GATE (not REPLAN_GUARD)
-        assertEquals(AgentNodeNames.APPROVAL_GATE, result.getNextNode());
-        assertNull(ctx.getToolResult());
-        assertNotNull(ctx.getDecision());
-        assertEquals("action", ctx.getDecision().getType());
-        assertEquals("todo_write", ctx.getDecision().getTool());
-    }
-
-    @Test
-    public void toolNameAsTypeWithoutToolFieldNormalized() {
-        // Only normalize when tool field is missing (not when both type and tool exist)
-        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\"}},\"additionalProperties\":false}";
-        AgentTool t = tool("msg_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"msg_tool\",\"tool\":\"other_tool\",\"input\":{\"msg\":\"hello\"}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        // Should NOT normalize (tool field already exists) — goes to parse error
-        // The parser will see type="msg_tool" which is not "action"/"final"
-        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
-    }
-
-    @Test
-    public void unknownTypeNotNormalized() {
-        // Unknown type should NOT be guessed — parser rejects it
-        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\"}},\"additionalProperties\":false}";
-        AgentTool t = tool("msg_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"unknown_tool\",\"input\":{\"msg\":\"hello\"}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        // Should NOT normalize unknown type — goes to parse error
-        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
-    }
-
-    @Test
-    public void normalizedTodoWriteStillSchemaValidated() {
-        // After normalization, invalid input should still fail schema validation
-        String todoSchema = "{\"type\":\"object\",\"properties\":{\"todos\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"pending\",\"in_progress\",\"completed\",\"blocked\",\"skipped\"]}},\"required\":[\"status\"],\"additionalProperties\":false}}},\"required\":[\"todos\"],\"additionalProperties\":false}";
-        AgentTool t = tool("todo_write", todoSchema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        // Missing required "todos" field in input
-        ctx.setModelOutput("{\"type\":\"todo_write\",\"input\":{}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        // Normalization succeeded but schema validation should fail
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
-    }
-
-    @Test
-    public void standardActionTypeNotNormalized() {
-        // Standard {"type":"action",...} should not be affected
-        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
-        AgentTool t = tool("msg_tool", schema);
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"action\",\"tool\":\"msg_tool\",\"input\":{\"msg\":\"hello\"}}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(AgentNodeNames.APPROVAL_GATE, result.getNextNode());
-    }
-
-    @Test
-    public void finalTypeNotNormalized() {
-        // {"type":"final",...} should not be affected
-        AgentTool t = tool("todo_write", "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput("{\"type\":\"final\",\"answer\":\"done\",\"evidence\":[]}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.COMPLETE, result.getPhase());
-    }
-
-    @Test
-    public void nonObjectInputShouldReturnStructuredParseError() {
-        AgentTool t = tool("msg_tool",
-                "{\"type\":\"object\",\"additionalProperties\":false}");
-        ToolRegistry registry =
-                new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
-        AgentContext ctx = new AgentContext();
-        ctx.setRunId(UUID.randomUUID().toString());
-        ctx.setModelOutput(
-                "{\"type\":\"action\",\"tool\":\"msg_tool\",\"input\":[]}");
-        ctx.setToolSpecs(List.of(t.spec()));
-
-        NodeResult result = node.apply(ctx);
-
-        assertEquals(cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase.NEXT_ROUND, result.getPhase());
-        assertTrue(ctx.getToolResult().getMessage().contains("NON_OBJECT_INPUT"));
     }
 }

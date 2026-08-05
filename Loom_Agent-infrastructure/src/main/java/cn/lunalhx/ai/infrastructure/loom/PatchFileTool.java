@@ -66,7 +66,7 @@ public class PatchFileTool implements AgentTool {
                 return failure("path is not a file", startedAt);
             }
             String content = Files.readString(file, StandardCharsets.UTF_8);
-            int count = content.split(oldText, -1).length - 1;
+            int count = countOccurrences(content, oldText);
             if (count != 1) {
                 return failure("old_text must occur exactly once, found " + count, startedAt);
             }
@@ -77,6 +77,17 @@ public class PatchFileTool implements AgentTool {
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);
         }
+    }
+
+    /** Literal substring counting — never regex split. */
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = haystack.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 
     private String text(ToolCall call, String key, String def) {

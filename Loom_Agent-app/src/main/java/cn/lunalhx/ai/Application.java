@@ -1,18 +1,14 @@
 package cn.lunalhx.ai;
 
-import org.springframework.beans.factory.annotation.Configurable;
-import org.springframework.boot.SpringApplication;
+import cn.lunalhx.ai.cli.CliMain;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
-@Configurable
-@EnableScheduling
+@SpringBootApplication
 public class Application {
 
-    public static void main(String[] args){
-        SpringApplication.run(Application.class);
+    public static void main(String[] args) {
+        int exitCode = CliMain.run(args);
+        System.exit(exitCode);
     }
 
 }

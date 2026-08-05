@@ -11,8 +11,6 @@ public enum AgentLoopPhase {
     NEXT_ROUND,
     /** Run completed with a final answer. */
     COMPLETE,
-    /** Run paused waiting for an approval decision. */
-    PAUSE_APPROVAL,
     /** Run paused waiting for user input. */
     PAUSE_USER_INPUT,
     /** Run terminated with an error. */

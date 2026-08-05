@@ -7,8 +7,7 @@ import org.springframework.context.annotation.Import;
 @Import({
         AgentLoopAutoConfig.class,
         ToolAutoConfig.class,
-        PersistenceAutoConfig.class,
-        MetricsAutoConfig.class
+        CliPersistenceAutoConfig.class
 })
 public class AiRuntimeConfig {
 }

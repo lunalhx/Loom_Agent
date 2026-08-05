@@ -36,8 +36,6 @@ import java.util.Map;
 final class HistoryRenderer {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String BOUNDARY_OPEN = "<untrusted_tool_output>\n";
-    private static final String BOUNDARY_CLOSE = "\n</untrusted_tool_output>";
 
     record HistoryResult(String text, int merged, int summarized, int deduped, int summaryReuse) {
     }
@@ -261,9 +259,6 @@ final class HistoryRenderer {
     }
 
     private String unwrapToolBoundary(String content) {
-        if (content != null && content.startsWith(BOUNDARY_OPEN) && content.endsWith(BOUNDARY_CLOSE)) {
-            return content.substring(BOUNDARY_OPEN.length(), content.length() - BOUNDARY_CLOSE.length());
-        }
         return content == null ? "" : content;
     }
 

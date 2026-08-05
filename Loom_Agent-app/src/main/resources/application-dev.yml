@@ -3,9 +3,3 @@ spring.config.import: classpath:application-common.yml
 loom:
   agent:
     allowed-workspace-roots: ${AGENT_ALLOWED_WORKSPACE_ROOTS:${AGENT_ALLOWED_WORKSPACE_ROOT:${user.home}/Desktop}}
-    long-term-memory:
-      pinned-limit: ${AGENT_MEMORY_PINNED_LIMIT:4}
-      min-relevance-score: ${AGENT_MEMORY_MIN_RELEVANCE_SCORE:0.5}
-      archive-after-unused-days: ${AGENT_MEMORY_ARCHIVE_AFTER_UNUSED_DAYS:90}
-      archive-min-importance: ${AGENT_MEMORY_ARCHIVE_MIN_IMPORTANCE:80}
-      cleanup-interval-hours: ${AGENT_MEMORY_CLEANUP_INTERVAL_HOURS:24}

@@ -2,8 +2,6 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
-import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -28,22 +26,19 @@ public class AgentLoopFactory {
     private final ConversationHistoryAppendService ledgerAppendService;
     private final ContextManager contextManager;
     private final ConversationExecutionGuard executionGuard;
-    private final ConversationDeletionRepository deletionRepository;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                             AgentLoopStateDependencies state,
                             AgentLoopRuntimeDependencies runtime,
                             ConversationHistoryAppendService ledgerAppendService,
                             ContextManager contextManager,
-                            ConversationExecutionGuard executionGuard,
-                            ConversationDeletionRepository deletionRepository) {
+                            ConversationExecutionGuard executionGuard) {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.ledgerAppendService = Objects.requireNonNull(
                 ledgerAppendService, "ledgerAppendService must not be null");
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
         this.executionGuard = Objects.requireNonNull(executionGuard, "executionGuard must not be null");
-        this.deletionRepository = deletionRepository;
         LedgerBootstrapService bs = new LedgerBootstrapService(
                 ledgerAppendService, new ConversationHistoryInitializer());
 
@@ -56,7 +51,7 @@ public class AgentLoopFactory {
         Objects.requireNonNull(executor, "executor must not be null");
         AgentLoopAssembly assembly = assemble(toolRegistry);
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
-                state.runRepository(), state.checkpointRepository(), deletionRepository);
+                state.runRepository(), state.checkpointRepository());
         return new DefaultAgentLoopService(assembly, executor, lifecycle, executionGuard);
     }
 
@@ -71,15 +66,12 @@ public class AgentLoopFactory {
         AgentContextFactory contextFactory = new AgentContextFactory(
                 runtime.properties(), state.workspaceResolver(), flow.toolSpecs(),
                 ledgerAppendService, runtime.runtimeConfigSource());
-        AgentResumeCoordinator resumeCoordinator = new AgentResumeCoordinator(
-                state.approvalStore(), state.checkpointRepository(), state.runRepository(),
-                contextFactory, eventFactory, ledgerAppendService);
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), eventFactory, flow.nodes());
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
-                state.runRepository(), state.checkpointRepository(), deletionRepository);
-        return new AgentLoopComponents(contextFactory, resumeCoordinator, nodeLifecycle, eventFactory,
-                state.runRepository(), state.checkpointRepository(), state.approvalStore(),
+                state.runRepository(), state.checkpointRepository());
+        return new AgentLoopComponents(contextFactory, nodeLifecycle, eventFactory,
+                state.runRepository(), state.checkpointRepository(),
                 lifecycle, ledgerAppendService);
     }
 }

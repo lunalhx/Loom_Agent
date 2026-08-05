@@ -51,14 +51,6 @@ public class ArchitectureRegressionTest {
                     .should(haveConstructorsWithAtMost5Params());
 
     @ArchTest
-    public static final ArchRule controllers_must_not_depend_on_infrastructure =
-            noClasses().that().resideInAnyPackage("cn.lunalhx.ai.trigger.http..")
-                    .should().dependOnClassesThat()
-                    .resideInAnyPackage("cn.lunalhx.ai.infrastructure..")
-                    .orShould().dependOnClassesThat()
-                    .haveFullyQualifiedName("cn.lunalhx.ai.domain.model.adapter.port.ModelGateway");
-
-    @ArchTest
     public static final ArchRule strategy_and_helper_classes_are_package_private =
             classes().that().resideInAnyPackage(
                             "cn.lunalhx.ai.domain.agent.service..",
@@ -79,6 +71,24 @@ public class ArchitectureRegressionTest {
     public static final ArchRule ai_runtime_config_must_not_declare_bean_methods =
             classes().that().haveFullyQualifiedName("cn.lunalhx.ai.config.AiRuntimeConfig")
                     .should(notHaveBeanAnnotatedMethods());
+
+    @ArchTest
+    public static final ArchRule no_http_or_legacy_http_concerns_in_codebase =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai..")
+                    .should().dependOnClassesThat().resideInAnyPackage(
+                            "org.springframework.web..",
+                            "org.springframework.boot.web..",
+                            "org.springframework.ai..",
+                            "org.mybatis..",
+                            "org.flywaydb..",
+                            "org.sqlite..");
+
+    @ArchTest
+    public static final ArchRule no_http_controllers_remain =
+            noClasses().that().resideInAnyPackage("cn.lunalhx.ai..")
+                    .should().beAnnotatedWith("org.springframework.web.bind.annotation.RestController")
+                    .orShould().beAnnotatedWith("org.springframework.web.bind.annotation.Controller")
+                    .orShould().beAnnotatedWith("org.springframework.web.bind.annotation.RequestMapping");
 
     @ArchTest
     public static final ArchRule domain_must_not_depend_on_spring_or_app_concerns =

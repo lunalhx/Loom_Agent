@@ -21,10 +21,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Parses final/action/retry. Unknown tools, invalid parameters, and parse
- * errors only produce a structured {@link ToolResult} and route to
- * {@link AgentNodeNames#OBSERVATION}; they never write history or Observation
- * directly — that is the sole responsibility of {@link ObservationNode}.
+ * Parses Loom XML tool/final/retry decisions. Unknown tools, invalid
+ * parameters, and parse errors only produce a structured {@link ToolResult}
+ * and route to {@link AgentNodeNames#OBSERVATION}; they never write history or
+ * Observation directly — that is the sole responsibility of
+ * {@link ObservationNode}. Format retries (kind=retry) count as model attempts
+ * only, never as tool steps.
  */
 public class DecisionNode extends AbstractAgentNode {
 
@@ -49,17 +51,21 @@ public class DecisionNode extends AbstractAgentNode {
     protected NodeResult doApply(AgentContext context) {
         try {
             context.setDecision(null);
-            Set<String> visibleTools = context.getToolSpecs() == null
-                    ? Set.of()
+            List<String> visibleTools = context.getToolSpecs() == null
+                    ? List.of()
                     : context.getToolSpecs().stream()
                             .map(ToolSpec::getName)
-                            .collect(Collectors.toSet());
+                            .toList();
             AgentDecision decision =
                     decisionParser.parse(context.getModelOutput(), visibleTools);
             context.setDecision(decision);
             context.setParseErrors(0);
-            if ("final".equals(decision.getType())) {
+            String type = decision.getType();
+            if ("final".equals(type)) {
                 return NodeResult.complete(List.of());
+            }
+            if ("retry".equals(type)) {
+                return formatRetry(context, decision);
             }
             context.runtime().advanceToolStep(decision.getTool());
             if (!isToolVisible(context, decision.getTool())) {
@@ -69,7 +75,7 @@ public class DecisionNode extends AbstractAgentNode {
             if (!validation.valid()) {
                 return invalidInput(context, decision, validation);
             }
-            return NodeResult.nextNode(AgentNodeNames.APPROVAL_GATE, List.of());
+            return NodeResult.nextNode(AgentNodeNames.TOOL_DISPATCH, List.of());
         } catch (DecisionParseException e) {
             return handleParseError(context, e);
         } catch (Exception e) {
@@ -80,18 +86,18 @@ public class DecisionNode extends AbstractAgentNode {
         }
     }
 
+    private NodeResult formatRetry(AgentContext context, AgentDecision decision) {
+        context.setToolResult(ToolResult.failure("parse_error",
+                decision.getAnswer() == null ? "Runtime notice: model returned malformed tool output" : decision.getAnswer(),
+                0L));
+        return NodeResult.nextRound(List.of());
+    }
+
     private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
         context.setParseErrors(context.getParseErrors() + 1);
         String repairMsg = e.toModelMessage();
-        String guidance;
-        if (context.getParseErrors() == 1) {
-            guidance = "请只输出一个合法的 action 或 final JSON 对象。";
-        } else {
-            guidance = "你已经连续 " + context.getParseErrors() + " 次输出非法 JSON。"
-                    + "请检查并修复以下问题后重试：确保输出是纯 JSON（不含 markdown 代码块或额外文字），"
-                    + "type 必须是 \"action\" 或 \"final\"，所有字符串必须用双引号。"
-                    + "示例: {\"type\":\"action\",\"tool\":\"read_file\",\"input\":{\"path\":\"src/App.java\"}}";
-        }
+        String guidance = "Reply with a valid <tool> call or a non-empty <final> answer. "
+                + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
         context.setToolResult(ToolResult.failure("parse_error",
                 repairMsg + "\n" + guidance, 0L));
         if (ledgerAppendService != null) {
@@ -134,7 +140,7 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private NodeResult unknownTool(AgentContext context, AgentDecision decision) {
-        context.setToolResult(ToolResult.failure("unknown_tool", "未知工具：" + decision.getTool(), 0L));
+        context.setToolResult(ToolResult.failure("unknown_tool", "error: unknown tool '" + decision.getTool() + "'", 0L));
         return NodeResult.nextNode(AgentNodeNames.OBSERVATION, List.of());
     }
 

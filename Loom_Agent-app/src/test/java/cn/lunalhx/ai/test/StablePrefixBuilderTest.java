@@ -64,7 +64,7 @@ public class StablePrefixBuilderTest {
         StablePrefix main = builder.build(false, true, null, specs, "");
         StablePrefix delegate = builder.build(true, false, null, specs, "");
         assertNotEquals(main.frozenContent(), delegate.frozenContent());
-        assertTrue(delegate.frozenContent().contains("只读"));
+        assertTrue(delegate.frozenContent().contains("read-only"));
     }
 
     @Test
@@ -79,7 +79,7 @@ public class StablePrefixBuilderTest {
     @Test
     public void buildRoleProtocolTextContainsProtocolRules() {
         String text = StablePrefixBuilder.buildRoleProtocolText(false, true, null);
-        assertTrue(text.contains("每轮只能输出一个 JSON 对象"));
+        assertTrue(text.contains("Return exactly one <tool>...</tool> or one <final>...</final>."));
     }
 
     @Test

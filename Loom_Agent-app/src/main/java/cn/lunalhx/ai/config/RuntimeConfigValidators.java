@@ -12,8 +12,6 @@ import java.util.Set;
 
 public final class RuntimeConfigValidators implements RuntimeConfigValidator<RuntimeConfigValidators.ConfigGroups> {
 
-    private static final Set<String> PERMISSION_MODES = Set.of("SANDBOX", "ACCEPT_EDITS", "BYPASS");
-    private static final Set<String> HIGH_RISK_POLICIES = Set.of("DENY", "CONFIRM", "ALLOW");
     private static final Set<String> APPROVAL_POLICIES = Set.of("ask", "auto", "never");
     private static final RuntimeConfigValidators AGGREGATE = new RuntimeConfigValidators();
 
@@ -43,13 +41,6 @@ public final class RuntimeConfigValidators implements RuntimeConfigValidator<Run
         positive(value.getTotalTimeoutMs(), "loom.agent.total-timeout-ms");
         positive(value.getStepTimeoutMs(), "loom.agent.step-timeout-ms");
         positive(value.getToolTimeoutMs(), "loom.agent.tool-timeout-ms");
-        positive(value.getApprovalTtlSeconds(), "loom.agent.approval-ttl-seconds");
-        if (!PERMISSION_MODES.contains(upper(value.getPermissionMode()))) {
-            fail("loom.agent.permission-mode", "must be SANDBOX, ACCEPT_EDITS, or BYPASS");
-        }
-        if (!HIGH_RISK_POLICIES.contains(upper(value.getHighRiskPolicy()))) {
-            fail("loom.agent.high-risk-policy", "must be DENY, CONFIRM, or ALLOW");
-        }
         if (value.getApprovalPolicy() != null
                 && !APPROVAL_POLICIES.contains(value.getApprovalPolicy().toLowerCase())) {
             fail("loom.agent.approval-policy", "must be ask, auto, or never");

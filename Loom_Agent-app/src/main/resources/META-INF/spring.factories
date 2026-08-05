@@ -1,1 +1,0 @@
-org.springframework.boot.env.EnvironmentPostProcessor=cn.lunalhx.ai.config.LegacyConfigurationEnvironmentPostProcessor

@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentApprovalState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentEnvironmentState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
@@ -13,7 +12,6 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalGrant;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -46,7 +44,6 @@ public class AgentContext {
     private AgentRuntimeState runtime;
     private AgentPromptState prompt;
     private AgentActionState action;
-    private AgentApprovalState approval;
     private AgentBudgetState budget;
     private AgentRecoveryState recovery;
     private AgentTraceState trace;
@@ -58,7 +55,6 @@ public class AgentContext {
         this.runtime = new AgentRuntimeState();
         this.prompt = new AgentPromptState();
         this.action = new AgentActionState();
-        this.approval = new AgentApprovalState();
         this.budget = new AgentBudgetState();
         this.recovery = new AgentRecoveryState();
         this.trace = new AgentTraceState();
@@ -72,7 +68,6 @@ public class AgentContext {
     public AgentRuntimeState runtime() { return runtime; }
     public AgentPromptState prompt() { return prompt; }
     public AgentActionState action() { return action; }
-    public AgentApprovalState approval() { return approval; }
     public AgentBudgetState budget() { return budget; }
     public AgentRecoveryState recovery() { return recovery; }
     public AgentTraceState trace() { return trace; }
@@ -200,26 +195,6 @@ public class AgentContext {
     public void setDecision(AgentDecision v) { action.setDecision(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
-
-    // ==================== approval delegates ====================
-
-    public boolean isUnsafeResumeRequired() { return approval.unsafeResumeRequired(); }
-    public void setUnsafeResumeRequired(boolean v) { approval.setUnsafeResumeRequired(v); }
-    public String getPendingApprovalId() { return approval.pendingApprovalId(); }
-    public void setPendingApprovalId(String v) { approval.setPendingApprovalId(v); }
-    public String getApprovedTool() { return approval.approvedTool(); }
-    public void setApprovedTool(String v) { approval.setApprovedTool(v); }
-    public String getApprovedPolicyFingerprint() { return approval.approvedPolicyFingerprint(); }
-    public void setApprovedPolicyFingerprint(String v) { approval.setApprovedPolicyFingerprint(v); }
-    public boolean isApprovalExpired() { return approval.approvalExpired(); }
-    public void setApprovalExpired(boolean v) { approval.setApprovalExpired(v); }
-    public String getExpiredApprovalId() { return approval.expiredApprovalId(); }
-    public void setExpiredApprovalId(String v) { approval.setExpiredApprovalId(v); }
-    public List<ApprovalGrant> getApprovalGrants() { return approval.approvalGrants(); }
-    public void setApprovalGrants(List<ApprovalGrant> v) { approval.setApprovalGrants(v); }
-    public void addApprovalGrant(ApprovalGrant v) { approval.addGrant(v); }
-    public ApprovalGrant findMatchingGrant(String command) { return approval.findMatchingGrant(command); }
-    public void clearApprovalGrants() { approval.clearGrants(); }
 
     // ==================== budget delegates ====================
 

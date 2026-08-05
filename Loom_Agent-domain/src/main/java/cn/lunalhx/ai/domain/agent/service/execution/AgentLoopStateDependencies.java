@@ -2,7 +2,6 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 
@@ -17,14 +16,12 @@ import java.util.Objects;
  * @see AgentLoopRuntimeDependencies
  */
 public record AgentLoopStateDependencies(
-        ApprovalStore approvalStore,
         AgentWorkspaceResolver workspaceResolver,
         AgentRunRepository runRepository,
         AgentCheckpointRepository checkpointRepository,
         ObjectMapper objectMapper
 ) {
     public AgentLoopStateDependencies {
-        Objects.requireNonNull(approvalStore, "approvalStore must not be null");
         Objects.requireNonNull(workspaceResolver, "workspaceResolver must not be null");
         Objects.requireNonNull(runRepository, "runRepository must not be null");
         Objects.requireNonNull(checkpointRepository, "checkpointRepository must not be null");

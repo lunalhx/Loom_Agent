@@ -38,10 +38,6 @@ public final class NodeResult {
         return new NodeResult(AgentLoopPhase.COMPLETE, null, events);
     }
 
-    public static NodeResult pauseApproval(List<AgentEvent> events) {
-        return new NodeResult(AgentLoopPhase.PAUSE_APPROVAL, null, events);
-    }
-
     public static NodeResult pauseUserInput(List<AgentEvent> events) {
         return new NodeResult(AgentLoopPhase.PAUSE_USER_INPUT, null, events);
     }

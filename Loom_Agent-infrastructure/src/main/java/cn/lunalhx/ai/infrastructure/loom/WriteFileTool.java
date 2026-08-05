@@ -64,7 +64,8 @@ public class WriteFileTool implements AgentTool {
                 Files.createDirectories(parent);
             }
             Files.writeString(target, content, StandardCharsets.UTF_8);
-            String message = "wrote " + LoomToolSupport.relative(root, target) + " (" + content.length() + " chars)";
+            String message = "wrote " + LoomToolSupport.relative(root, target)
+                    + " (" + content.codePointCount(0, content.length()) + " chars)";
             return ToolResult.success(LoomToolSupport.clip(message), false, elapsed(startedAt));
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);

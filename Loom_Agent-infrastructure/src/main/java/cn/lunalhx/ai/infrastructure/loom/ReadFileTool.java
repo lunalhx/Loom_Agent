@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,11 @@ import java.util.List;
  */
 @Component
 public class ReadFileTool implements AgentTool {
+
+    private static final java.nio.charset.CharsetDecoder UTF8_DECODER = StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE);
 
     private final WorkspacePort workspacePort;
 
@@ -64,7 +70,11 @@ public class ReadFileTool implements AgentTool {
             if (!Files.isRegularFile(file)) {
                 return failure("path is not a file", startedAt);
             }
-            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            String content = UTF8_DECODER.decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file))).toString();
+            List<String> lines = java.util.Arrays.asList(content.split("\n", -1));
+            if (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
+                lines = lines.subList(0, lines.size() - 1);
+            }
             StringBuilder out = new StringBuilder("# ").append(LoomToolSupport.relative(root, file)).append('\n');
             int last = Math.min(end, lines.size());
             for (int i = start; i <= last; i++) {

@@ -2,7 +2,6 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
@@ -32,14 +31,11 @@ public final class AgentRunLifecycle {
 
     private final AgentRunRepository runRepository;
     private final AgentCheckpointRepository checkpointRepository;
-    private final ConversationDeletionRepository deletionRepository;
 
     public AgentRunLifecycle(AgentRunRepository runRepository,
-                             AgentCheckpointRepository checkpointRepository,
-                             ConversationDeletionRepository deletionRepository) {
+                             AgentCheckpointRepository checkpointRepository) {
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.checkpointRepository = Objects.requireNonNull(checkpointRepository, "checkpointRepository must not be null");
-        this.deletionRepository = deletionRepository;
     }
 
     // ================================================================
@@ -79,24 +75,6 @@ public final class AgentRunLifecycle {
                 .conversationId(context.identity().conversationId())
                 .workspace(context.environment().workspaceDisplayName())
                 .node(AgentNodeNames.OBSERVATION)
-                .toolSteps(context.runtime().toolSteps())
-                .modelAttempts(context.runtime().modelAttempts())
-                .lastTool(context.runtime().lastTool())
-                .checkpointVersion(checkpoint.getVersion())
-                .build());
-    }
-
-    public List<AgentEvent> pauseForApproval(AgentContext context) {
-        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.APPROVAL_GATE, "pause_approval");
-        context.setCheckpointVersion(checkpoint.getVersion());
-        saveRun(context, AgentNodeNames.APPROVAL_GATE, AgentRunStatus.WAITING_APPROVAL);
-        return List.of(AgentEvent.builder()
-                .type(AgentEventType.CHECKPOINT_SAVED)
-                .runId(context.identity().runId())
-                .requestId(context.identity().requestId())
-                .conversationId(context.identity().conversationId())
-                .workspace(context.environment().workspaceDisplayName())
-                .node(AgentNodeNames.APPROVAL_GATE)
                 .toolSteps(context.runtime().toolSteps())
                 .modelAttempts(context.runtime().modelAttempts())
                 .lastTool(context.runtime().lastTool())
@@ -147,14 +125,6 @@ public final class AgentRunLifecycle {
     // ================================================================
 
     private AgentCheckpoint saveCheckpoint(AgentContext context, String currentNode, String reason) {
-        if (isConversationDeleted(context)) {
-            return AgentCheckpoint.builder()
-                    .runId(context.identity().runId())
-                    .currentNode(currentNode)
-                    .contextSnapshot(AgentContextSnapshot.from(context))
-                    .reason(reason)
-                    .build();
-        }
         context.runtime().enterNode(currentNode);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         return checkpointRepository.save(AgentCheckpoint.builder()
@@ -166,9 +136,6 @@ public final class AgentRunLifecycle {
     }
 
     private void saveRun(AgentContext context, String currentNode, AgentRunStatus fallbackStatus) {
-        if (isConversationDeleted(context)) {
-            return;
-        }
         AgentRuntimeState runtime = context.runtime();
         AgentIdentity id = context.identity();
         AgentBudgetState budget = context.budget();
@@ -224,15 +191,5 @@ public final class AgentRunLifecycle {
             return AgentRunStatus.FAILED;
         }
         return fallback;
-    }
-
-    private boolean isConversationDeleted(AgentContext context) {
-        String conversationId = context.identity().conversationId();
-        if (conversationId == null || deletionRepository == null) {
-            return false;
-        }
-        return deletionRepository.find(conversationId)
-                .map(d -> !"FAILED".equals(d.getStatus()))
-                .orElse(false);
     }
 }

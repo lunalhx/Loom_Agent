@@ -125,7 +125,7 @@ public class ContextManagerTest {
         String output = "line1\nline2\nline3\nline4\nline5";
         history(ctx).appendWithEventKey("assistant", "a", ConversationEntryType.ASSISTANT_ACTION,
                 "run:1:assistant", "run_shell", null, null, null);
-        history(ctx).appendWithEventKey("user", "<untrusted_tool_output>\n" + output + "\n</untrusted_tool_output>",
+        history(ctx).appendWithEventKey("user", output,
                 ConversationEntryType.TOOL_RESULT, "run:1:tool_result", "run_shell", null, null, null);
 
         ContextBuildResult result = manager.build(ctx);

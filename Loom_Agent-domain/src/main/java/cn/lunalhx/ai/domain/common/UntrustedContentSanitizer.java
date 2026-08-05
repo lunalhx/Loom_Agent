@@ -1,11 +1,9 @@
 package cn.lunalhx.ai.domain.common;
 
-import java.util.regex.Pattern;
-
+/**
+ * Minimal XML escaping helpers for prompt rendering.
+ */
 public final class UntrustedContentSanitizer {
-
-    private static final Pattern UNESCAPED_AMPERSAND = Pattern.compile(
-            "&(?!(?:amp|lt|gt|quot|#39);)");
 
     private UntrustedContentSanitizer() {
     }
@@ -14,10 +12,8 @@ public final class UntrustedContentSanitizer {
         if (value == null) {
             return "";
         }
-        return UNESCAPED_AMPERSAND.matcher(value).replaceAll("&amp;")
+        return value.replace("&", "&amp;")
                 .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+                .replace(">", "&gt;");
     }
 }

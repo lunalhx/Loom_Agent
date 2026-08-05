@@ -2,18 +2,15 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.service.context.AgentContextFactory;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 
 public record AgentLoopComponents(
         AgentContextFactory contextFactory,
-        AgentResumeCoordinator resumeCoordinator,
         AgentNodeLifecycle nodeLifecycle,
         AgentEventFactory eventFactory,
         AgentRunRepository runRepository,
         AgentCheckpointRepository checkpointRepository,
-        ApprovalStore approvalStore,
         AgentRunLifecycle lifecycle,
         ConversationHistoryAppendService ledgerAppendService
 ) {}

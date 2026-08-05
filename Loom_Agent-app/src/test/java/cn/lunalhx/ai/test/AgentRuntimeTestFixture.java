@@ -3,9 +3,7 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
-import cn.lunalhx.ai.domain.agent.adapter.port.ApprovalStore;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
-import cn.lunalhx.ai.domain.agent.adapter.port.ConversationDeletionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
@@ -18,7 +16,6 @@ import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryAgentRunRepository;
-import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryApprovalStore;
 import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
@@ -30,7 +27,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
-import cn.lunalhx.ai.infrastructure.tool.RegexToolOutputSanitizer;
+import cn.lunalhx.ai.infrastructure.tool.NoopToolOutputSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
@@ -45,7 +42,6 @@ public final class AgentRuntimeTestFixture {
     private ModelGateway modelGateway;
     private List<AgentTool> tools = new ArrayList<>();
     private AgentRuntimeProperties properties;
-    private ApprovalStore approvalStore;
     private AgentRunRepository runRepository;
     private AgentCheckpointRepository checkpointRepository;
     private AgentWorkspaceResolver workspaceResolver;
@@ -87,11 +83,6 @@ public final class AgentRuntimeTestFixture {
 
     public AgentRuntimeTestFixture defaultProperties() {
         return properties(standardProperties(DEFAULT_WORKSPACE, DEFAULT_WORKSPACE));
-    }
-
-    public AgentRuntimeTestFixture approvalStore(ApprovalStore approvalStore) {
-        this.approvalStore = approvalStore;
-        return this;
     }
 
     public AgentRuntimeTestFixture runRepository(AgentRunRepository runRepository) {
@@ -143,10 +134,6 @@ public final class AgentRuntimeTestFixture {
         return properties != null ? properties : standardProperties();
     }
 
-    private ApprovalStore effectiveApprovalStore() {
-        return approvalStore != null ? approvalStore : new InMemoryApprovalStore();
-    }
-
     private AgentRunRepository effectiveRunRepository() {
         return runRepository != null ? runRepository : new InMemoryAgentRunRepository();
     }
@@ -172,7 +159,7 @@ public final class AgentRuntimeTestFixture {
     }
 
     private ToolOutputSanitizer effectiveToolOutputSanitizer() {
-        return toolOutputSanitizer != null ? toolOutputSanitizer : new RegexToolOutputSanitizer();
+        return toolOutputSanitizer != null ? toolOutputSanitizer : new NoopToolOutputSanitizer();
     }
 
     private Executor effectiveExecutor() {
@@ -185,7 +172,6 @@ public final class AgentRuntimeTestFixture {
 
     private AgentLoopFactory createAgentLoopFactory(AgentRuntimeProperties props) {
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(
-                effectiveApprovalStore(),
                 effectiveWorkspaceResolver(props),
                 effectiveRunRepository(),
                 effectiveCheckpointRepository(),
@@ -196,7 +182,7 @@ public final class AgentRuntimeTestFixture {
                 testModelRuntimeProperties(props));
         ConversationHistoryAppendService ledgerAppendService = new ConversationHistoryAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
-                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard(), null);
+                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard());
     }
 
     public DefaultAgentLoopService buildAgentLoop() {

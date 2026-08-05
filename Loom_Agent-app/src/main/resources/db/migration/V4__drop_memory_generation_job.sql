@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS agent_memory_generation_job;

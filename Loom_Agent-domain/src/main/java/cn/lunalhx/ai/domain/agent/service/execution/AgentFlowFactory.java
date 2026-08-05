@@ -10,7 +10,6 @@ import cn.lunalhx.ai.domain.agent.flow.middleware.ModelCallMiddlewareAssembler;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallFailureClassifier;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
 import cn.lunalhx.ai.domain.agent.flow.node.RecoveryChainFactory;
-import cn.lunalhx.ai.domain.agent.flow.node.ApprovalGateNode;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
@@ -23,6 +22,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -88,8 +88,7 @@ public class AgentFlowFactory {
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
-                new ApprovalGateNode(toolRegistry, state.approvalStore(), properties),
-                new ToolDispatchNode(toolRegistry, properties),
+                new ToolDispatchNode(new ToolExecutor(toolRegistry), properties),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService)
         ));

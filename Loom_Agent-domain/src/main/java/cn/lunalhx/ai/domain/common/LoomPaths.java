@@ -52,7 +52,6 @@ public final class LoomPaths {
     public Path backgroundTasks() { return home.resolve("background-tasks"); }
     public Path database() { return home.resolve("loom-agent.db"); }
     public Path contextArtifacts() { return home.resolve("context-artifacts"); }
-    public Path skills() { return home.resolve("skills"); }
     public Path conversationRoot(String conversationId) { return home.resolve("conversations").resolve(safeId(conversationId)); }
     public Path sessionTemp(String conversationId) { return conversationRoot(conversationId).resolve("tmp"); }
     public Path uploads(String conversationId) { return conversationRoot(conversationId).resolve("uploads"); }

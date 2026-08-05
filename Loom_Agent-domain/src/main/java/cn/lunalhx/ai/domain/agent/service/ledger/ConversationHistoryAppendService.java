@@ -18,7 +18,7 @@ import java.util.Objects;
  * <ul>
  *   <li><b>Assistant action</b> — model output / reasoning</li>
  *   <li><b>Tool result</b> — tool execution output, mapped to {@code "user"}
- *       role with {@code <untrusted_tool_output>} wrapping</li>
+ *       role</li>
  *   <li><b>User input</b> — mid-run user messages</li>
  *   <li><b>Control update</b> — system control events (approval, undo, etc.),
  *       mapped to {@code "user"} role</li>
@@ -27,8 +27,7 @@ import java.util.Objects;
  * <h3>Role mapping</h3>
  * <ul>
  *   <li>{@code ASSISTANT_ACTION} → role {@code "assistant"}</li>
- *   <li>{@code TOOL_RESULT} → role {@code "user"},
- *       content wrapped in {@code <untrusted_tool_output>…</untrusted_tool_output>}</li>
+ *   <li>{@code TOOL_RESULT} → role {@code "user"}</li>
  *   <li>{@code USER_INPUT} → role {@code "user"}</li>
  *   <li>{@code CONTROL_UPDATE} → role {@code "user"}</li>
  * </ul>
@@ -88,8 +87,7 @@ public final class ConversationHistoryAppendService {
     /**
      * Append a tool result.
      *
-     * <p>The raw tool output is wrapped in {@code <untrusted_tool_output>}
-     * tags to preserve the injection-protection semantic. Role is {@code "user"}.
+     * <p>Role is {@code "user"}.
      *
      * <p>If {@code rawOutput} exceeds the snip threshold, it is truncated
      * with a {@code [snipped]} marker. See class-level javadoc for rationale.
@@ -103,10 +101,7 @@ public final class ConversationHistoryAppendService {
             AgentContext context, String rawOutput, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
         SnipResult snipped = snip(context, rawOutput, null);
-        String wrapped = "<untrusted_tool_output>\n"
-                + snipped.output
-                + "\n</untrusted_tool_output>";
-        return appendWithMetadata(context, "user", wrapped,
+        return appendWithMetadata(context, "user", snipped.output,
                 ConversationEntryType.TOOL_RESULT, eventKey,
                 null, null, null, snipped.originalChars, snipped.renderChars);
     }
@@ -165,10 +160,7 @@ public final class ConversationHistoryAppendService {
             String toolName, String toolInputJson, String eventKey) {
         Objects.requireNonNull(rawOutput, "rawOutput must not be null");
         SnipResult snipped = snip(context, rawOutput, null);
-        String wrapped = "<untrusted_tool_output>\n"
-                + snipped.output
-                + "\n</untrusted_tool_output>";
-        return appendWithMetadata(context, "user", wrapped,
+        return appendWithMetadata(context, "user", snipped.output,
                 ConversationEntryType.TOOL_RESULT, eventKey,
                 toolName, toolInputJson, null, snipped.originalChars, snipped.renderChars);
     }

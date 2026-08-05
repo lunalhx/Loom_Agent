@@ -5,25 +5,36 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.commons.lang3.StringUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Deterministic, testable JSON decision parser for model outputs.
+ * Loom XML decision parser mirroring loom-code {@code LoomCode.parse}.
  *
- * <h3>Recovery pipeline</h3>
+ * <p>Parse priority (fixed):
  * <ol>
- *   <li>Strip markdown fences (```json ... ```, ``` ... ```).</li>
- *   <li>Try strict JSON parse.</li>
- *   <li>If strict parse fails, extract one complete outer JSON object or remove a trailing comma.</li>
- *   <li>Validate required fields (type must be "action" or "final").</li>
- *   <li>Return field-level error info when validation fails.</li>
+ *   <li>{@code <tool>{...json...}</tool>} — JSON object with name/args</li>
+ *   <li>XML-style tool with attributes and child tags</li>
+ *   <li>{@code <final>...</final>}</li>
+ *   <li>Non-blank bare text as final</li>
+ *   <li>Empty text or malformed structure -> RETRY (format retry, no tool step)</li>
  * </ol>
+ *
+ * <p>The {@code tool} kind is decided before {@code final} regardless of
+ * position, matching loom-code's tag-order comparison.
  */
 final class DecisionParser {
+
+    private static final Pattern XML_TOOL_PATTERN =
+            Pattern.compile("<tool(?<attrs>[^>]*)>(?<body>.*?)</tool>", Pattern.DOTALL);
+    private static final Pattern ATTR_PATTERN =
+            Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')");
+    private static final Pattern FINAL_PATTERN =
+            Pattern.compile("<final>(.*?)</final>", Pattern.DOTALL);
 
     private final ObjectMapper objectMapper;
 
@@ -35,286 +46,210 @@ final class DecisionParser {
      * Parse a raw model output string into an {@link AgentDecision}.
      *
      * @param rawOutput the raw text emitted by the model
-     * @return the parsed decision
-     * @throws DecisionParseException if the output cannot be recovered
+     * @return the parsed decision (type tool/final), or a retry decision when
+     *         the output is empty or structurally invalid
+     * @throws DecisionParseException if the output cannot be parsed at all
      */
     public AgentDecision parse(String rawOutput) throws DecisionParseException {
-        return parse(rawOutput, Set.of());
+        return parse(rawOutput, List.of());
     }
 
-    public AgentDecision parse(
-            String rawOutput, Set<String> visibleTools) throws DecisionParseException {
-        String text = StringUtils.trimToEmpty(rawOutput);
-        if (text.isEmpty()) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.EMPTY_OUTPUT,
-                    "模型输出为空");
-        }
+    public AgentDecision parse(String rawOutput, List<String> visibleTools) throws DecisionParseException {
+        String raw = String.valueOf(rawOutput);
+        String text = raw == null ? "" : raw;
 
-        // 1. Strip markdown fences
-        String stripped = stripMarkdownFence(text);
-
-        // 2. Try strict JSON parse
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(stripped);
-        } catch (Exception strictError) {
-            // 3. Attempt deterministic normalisation
-            String recovered = tryRecoverJson(stripped);
-            if (recovered == null) {
-                throw new DecisionParseException(
-                        DecisionParseErrorCode.INVALID_JSON,
-                        "模型输出不是合法 JSON",
-                        truncateForError(text));
-            }
+        // 1. <tool> JSON object (takes priority over <final> like loom-code)
+        if (text.contains("<tool>") && (isBefore(text, "<tool>", "<final>"))) {
+            String body = extract(text, "tool");
+            JsonNode payload;
             try {
-                root = objectMapper.readTree(recovered);
-            } catch (Exception recoveryError) {
-                throw new DecisionParseException(
-                        DecisionParseErrorCode.INVALID_JSON,
-                        "JSON 修复后仍无法解析: " + recoveryError.getMessage(),
-                        truncateForError(text));
+                payload = objectMapper.readTree(body);
+            } catch (Exception e) {
+                return retry("model returned malformed tool JSON");
             }
+            if (payload == null || !payload.isObject()) {
+                return retry("tool payload must be a JSON object");
+            }
+            String name = payload.path("name").asText("").strip();
+            if (name.isEmpty()) {
+                return retry("tool payload is missing a tool name");
+            }
+            JsonNode args = payload.path("args");
+            if (args == null || args.isMissingNode() || args.isNull()) {
+                args = objectMapper.createObjectNode();
+            }
+            if (!args.isObject()) {
+                return retry();
+            }
+            return toolDecision(name, args);
         }
 
-        if (root == null || root.isMissingNode()) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.INVALID_JSON,
-                    "解析结果为空");
-        }
-        if (!root.isObject()) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.NON_OBJECT_INPUT,
-                    "模型输出必须是 JSON 对象");
+        // 2. XML-style tool with attributes / child tags
+        if (text.contains("<tool") && isBefore(text, "<tool", "<final>")) {
+            Map<String, Object> xmlPayload = parseXmlTool(text);
+            if (xmlPayload != null) {
+                return toolDecision(
+                        String.valueOf(xmlPayload.get("name")),
+                        (JsonNode) xmlPayload.get("args"));
+            }
+            return retry();
         }
 
-        root = normaliseWrapper(root);
-        root = normaliseToolNameAsType(root, visibleTools);
+        // 3. <final>...</final>
+        if (text.contains("<final>")) {
+            String finalText = extract(text, "final");
+            if (!finalText.isBlank()) {
+                return finalDecision(finalText);
+            }
+            return retry("model returned an empty <final> answer");
+        }
 
-        return buildDecision(root);
+        // 4. Non-blank bare text as final
+        String stripped = text.strip();
+        if (!stripped.isEmpty()) {
+            return finalDecision(stripped);
+        }
+
+        // 5. Empty -> retry
+        return retry("model returned an empty response");
     }
 
-    // ------------------------------------------------------------------
-    // Normalisation
-    // ------------------------------------------------------------------
-
-    /**
-     * Attempt deterministic JSON recovery for common model output errors.
-     * Returns the recovered JSON string, or null if unrecoverable.
-     */
-    String tryRecoverJson(String text) {
-        // Strategy 1: Find the outermost JSON braces and extract
-        int firstBrace = text.indexOf('{');
-        int lastBrace = text.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            String candidate = text.substring(firstBrace, lastBrace + 1).trim();
-            if (isValidJson(candidate)) {
-                return candidate;
-            }
-        }
-
-        String fixed = fixCommonJsonErrors(text);
-        if (fixed != null && !fixed.equals(text) && isValidJson(fixed)) {
-            return fixed;
-        }
-
-        return null;
-    }
-
-    /**
-     * Fix a trailing comma before a closing object or array delimiter.
-     */
-    String fixCommonJsonErrors(String text) {
-        if (StringUtils.isBlank(text)) {
-            return null;
-        }
-        String fixed = text;
-
-        // Remove trailing commas before } or ]
-        fixed = fixed.replaceAll(",\\s*([}\\]])", "$1");
-
-        // Try to parse as-is first
-        if (isValidJson(fixed)) {
-            return fixed;
-        }
-
-        return null;
-    }
-
-    /**
-     * Normalise wrapper objects like {"action":{...}} or {"final":{...}}
-     * to the standard form by unwrapping if the inner object has a valid type field,
-     * or by merging the wrapper fields with the inner object.
-     */
-    JsonNode normaliseWrapper(JsonNode root) {
-        // Check for {"action": {...}} wrapper
-        if (root.has("action") && root.path("action").isObject()) {
-            JsonNode actionBody = root.path("action");
-            // If actionBody already has "type", use it directly
-            if (actionBody.has("type")) {
-                return actionBody;
-            }
-            // Merge: set type=action, copy fields from action body
-            ObjectNode merged = objectMapper.createObjectNode();
-            merged.put("type", "action");
-            actionBody.fields().forEachRemaining(f -> merged.set(f.getKey(), f.getValue()));
-            return merged;
-        }
-
-        // Check for {"final": {...}} wrapper
-        if (root.has("final") && root.path("final").isObject()) {
-            JsonNode finalBody = root.path("final");
-            if (finalBody.has("type")) {
-                return finalBody;
-            }
-            ObjectNode merged = objectMapper.createObjectNode();
-            merged.put("type", "final");
-            finalBody.fields().forEachRemaining(f -> merged.set(f.getKey(), f.getValue()));
-            return merged;
-        }
-
-        return root;
-    }
-
-    JsonNode normaliseToolNameAsType(JsonNode root, Set<String> visibleTools) {
-        String type = root.path("type").asText(null);
-        if (StringUtils.isBlank(type)
-                || "action".equals(type)
-                || "final".equals(type)
-                || root.has("tool")
-                || visibleTools == null
-                || !visibleTools.contains(type)) {
-            return root;
-        }
-        ObjectNode normalized = objectMapper.createObjectNode();
-        normalized.put("type", "action");
-        normalized.put("tool", type);
-        root.fields().forEachRemaining(field -> {
-            if (!"type".equals(field.getKey())) {
-                normalized.set(field.getKey(), field.getValue());
-            }
-        });
-        return normalized;
-    }
-
-    // ------------------------------------------------------------------
-    // Field extraction
-    // ------------------------------------------------------------------
-
-    private AgentDecision buildDecision(JsonNode root) throws DecisionParseException {
-        String type = root.path("type").asText(null);
-
-        // --- Type inference: common model output patterns without explicit type ---
-        if (StringUtils.isBlank(type)) {
-            boolean hasTool = !root.path("tool").isMissingNode()
-                    && StringUtils.isNotBlank(root.path("tool").asText(null));
-            boolean hasInput = !root.path("input").isMissingNode()
-                    && !root.path("input").isNull();
-            boolean hasAnswer = !root.path("answer").isMissingNode()
-                    && StringUtils.isNotBlank(root.path("answer").asText(null));
-
-            if (hasTool && hasInput) {
-                // Infer action when tool+input are present but type is missing
-                type = "action";
-            } else if (hasAnswer) {
-                // Infer final when answer is present but type is missing
-                type = "final";
-            } else {
-                throw new DecisionParseException(
-                        DecisionParseErrorCode.MISSING_TYPE,
-                        "type 字段不能为空，必须是 \"action\" 或 \"final\"",
-                        null,
-                        Map.of("expectedType", "action | final",
-                                "example", "{\"type\":\"action\",\"tool\":\"read_file\",\"input\":{\"path\":\"src/App.java\"}}"));
-            }
-        }
-
-        type = type.trim().toLowerCase();
-        if (!"action".equals(type) && !"final".equals(type)) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.INVALID_TYPE,
-                    "type 只能是 \"action\" 或 \"final\"，收到: \"" + type + "\"",
-                    null,
-                    Map.of("receivedType", type,
-                            "validTypes", List.of("action", "final")));
-        }
-
-        JsonNode input = root.path("input");
-        if (!input.isMissingNode() && !input.isNull() && !input.isObject()) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.NON_OBJECT_INPUT,
-                    "input 必须是 JSON 对象");
-        }
-        Map<String, Object> inputView = input.isMissingNode() || input.isNull()
-                ? Map.of()
-                : objectMapper.convertValue(input, new TypeReference<Map<String, Object>>() {});
-
-        String rawReason = root.path("reason").asText(null);
-        String reason = null;
-        if (StringUtils.isNotBlank(rawReason)) {
-            String trimmed = rawReason.trim();
-            reason = trimmed.length() > 240 ? trimmed.substring(0, 240) : trimmed;
-        }
-
-        // For action type, tool is required
-        String tool = root.path("tool").asText(null);
-        if ("action".equals(type) && StringUtils.isBlank(tool)) {
-            throw new DecisionParseException(
-                    DecisionParseErrorCode.MISSING_TOOL,
-                    "action.tool 不能为空",
-                    null,
-                    Map.of("expectedField", "tool",
-                            "example", "read_file"));
-        }
-
+    private AgentDecision toolDecision(String name, JsonNode args) {
+        Map<String, Object> inputView = objectMapper.convertValue(
+                args, new TypeReference<Map<String, Object>>() {});
         return AgentDecision.builder()
-                .type(type)
-                .thought(root.path("thought").asText(null))
-                .reason(reason)
-                .tool(tool)
-                .input(input)
+                .type("action")
+                .tool(name)
+                .input(args)
                 .inputView(inputView)
-                .answer(root.path("answer").asText(null))
-                .evidence(root.path("evidence").isArray()
-                        ? objectMapper.convertValue(
-                                root.path("evidence"),
-                                new TypeReference<List<Map<String, Object>>>() {})
-                        : List.of())
                 .build();
     }
 
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Strip markdown code fences: leading ```json, trailing ```.
-     * Handles multiple layers of fencing (common when models nest code blocks).
-     */
-    String stripMarkdownFence(String text) {
-        String result = StringUtils.trimToEmpty(text);
-        // Strip opening fence: ```json, ```JSON, ```, etc.
-        while (result.startsWith("```")) {
-            result = result.replaceFirst("^```[a-zA-Z]*\\s*", "").trim();
-        }
-        // Strip closing fence
-        while (result.endsWith("```")) {
-            result = result.replaceFirst("\\s*```$", "").trim();
-        }
-        return result;
+    private AgentDecision finalDecision(String answer) {
+        return AgentDecision.builder()
+                .type("final")
+                .answer(answer)
+                .build();
     }
 
-    private boolean isValidJson(String text) {
-        try {
-            objectMapper.readTree(text);
-            return true;
-        } catch (Exception e) {
+    private AgentDecision retry() {
+        return retry(null);
+    }
+
+    private AgentDecision retry(String problem) {
+        String prefix = "Runtime notice";
+        if (problem != null && !problem.isBlank()) {
+            prefix += ": " + problem;
+        } else {
+            prefix += ": model returned malformed tool output";
+        }
+        String message = prefix
+                + ". Reply with a valid <tool> call or a non-empty <final> answer. "
+                + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
+        return AgentDecision.builder()
+                .type("retry")
+                .answer(message)
+                .build();
+    }
+
+    private boolean isBefore(String text, String first, String second) {
+        int firstIndex = text.indexOf(first);
+        if (firstIndex == -1) {
             return false;
         }
+        int secondIndex = text.indexOf(second);
+        return secondIndex == -1 || firstIndex < secondIndex;
     }
 
-    private String truncateForError(String text) {
-        if (text == null) return "";
-        return text.length() > 500 ? text.substring(0, 500) + "..." : text;
+    private String extract(String text, String tag) {
+        String startTag = "<" + tag + ">";
+        String endTag = "</" + tag + ">";
+        int start = text.indexOf(startTag);
+        if (start == -1) {
+            return text;
+        }
+        start += startTag.length();
+        int end = text.indexOf(endTag, start);
+        if (end == -1) {
+            return text.substring(start).strip();
+        }
+        return text.substring(start, end).strip();
+    }
+
+    private String extractRaw(String text, String tag) {
+        String startTag = "<" + tag + ">";
+        String endTag = "</" + tag + ">";
+        int start = text.indexOf(startTag);
+        if (start == -1) {
+            return text;
+        }
+        start += startTag.length();
+        int end = text.indexOf(endTag, start);
+        if (end == -1) {
+            return text.substring(start);
+        }
+        return text.substring(start, end);
+    }
+
+    private Map<String, Object> parseXmlTool(String raw) {
+        Matcher matcher = XML_TOOL_PATTERN.matcher(raw);
+        if (!matcher.find()) {
+            return null;
+        }
+        String attrsText = matcher.group("attrs");
+        Map<String, String> attrs = parseAttrs(attrsText);
+        String name = attrs.getOrDefault("name", "").strip();
+        if (name.isEmpty()) {
+            return null;
+        }
+        String body = matcher.group("body");
+        Map<String, Object> args = new LinkedHashMap<>(attrs);
+        args.remove("name");
+        for (String key : List.of("content", "old_text", "new_text", "command", "task", "pattern", "path")) {
+            if (body.contains("<" + key + ">")) {
+                args.put(key, extractRaw(body, key));
+            }
+        }
+        String bodyText = body.strip();
+        if ("write_file".equals(name) && !args.containsKey("content") && !bodyText.isEmpty()) {
+            args.put("content", bodyText);
+        }
+        if ("delegate".equals(name) && !args.containsKey("task") && !bodyText.isEmpty()) {
+            args.put("task", bodyText.strip());
+        }
+        ObjectNode argsNode = objectMapper.valueToTree(coerceXmlValues(args));
+        return Map.of("name", name, "args", (Object) argsNode);
+    }
+
+    /**
+     * XML attributes are strings; integer-looking values are lifted to JSON
+     * numbers so integer-typed schema fields accept them (mirrors loom-code
+     * semantic validators calling {@code int(args.get("start", 1))}).
+     */
+    private Map<String, Object> coerceXmlValues(Map<String, Object> args) {
+        Map<String, Object> coerced = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : args.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String s) {
+                try {
+                    coerced.put(entry.getKey(), Long.parseLong(s));
+                    continue;
+                } catch (NumberFormatException ignored) {
+                    // keep as string
+                }
+            }
+            coerced.put(entry.getKey(), value);
+        }
+        return coerced;
+    }
+
+    private Map<String, String> parseAttrs(String text) {
+        Map<String, String> attrs = new LinkedHashMap<>();
+        Matcher matcher = ATTR_PATTERN.matcher(text == null ? "" : text);
+        while (matcher.find()) {
+            attrs.put(matcher.group(1),
+                    matcher.group(2) != null ? matcher.group(2) : matcher.group(3));
+        }
+        return attrs;
     }
 }

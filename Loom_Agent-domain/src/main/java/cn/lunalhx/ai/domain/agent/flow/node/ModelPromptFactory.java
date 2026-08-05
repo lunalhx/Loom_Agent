@@ -37,7 +37,7 @@ public class ModelPromptFactory {
                 .capability(ModelCapabilities.COMPLETE_AGENT_DECISION)
                 .purpose(ModelCallPurpose.CONTROL_JSON)
                 .deadlineEpochMs(deadlineEpochMs)
-                .outputFormat(OutputFormat.JSON_OBJECT)
+                .outputFormat(OutputFormat.TEXT)
                 .runtimeProperties(context.getRunConfig() == null ? null : context.getRunConfig().model())
                 .build();
     }

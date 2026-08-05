@@ -24,10 +24,6 @@ public class ToolCall {
     private String runId;
     private String rootRunId;
     private String conversationId;
-    private String approvedPolicyFingerprint;
-    private List<String> activeSkillNames;
-    private Boolean skillToolRestrictionActive;
-    private List<String> allowedToolNames;
     private AgentRuntimeProperties runtimeProperties;
 
     public WorkspaceRef workspaceRef() {

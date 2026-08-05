@@ -173,11 +173,6 @@ public final class WorkingContextMemoryService {
     }
 
     private String unwrapToolBoundary(String content) {
-        String open = "<untrusted_tool_output>\n";
-        String close = "\n</untrusted_tool_output>";
-        if (content != null && content.startsWith(open) && content.endsWith(close)) {
-            return content.substring(open.length(), content.length() - close.length());
-        }
         return content == null ? "" : content;
     }
 

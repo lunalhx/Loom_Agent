@@ -7,14 +7,10 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
-import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ApprovalDecision;
-import cn.lunalhx.ai.domain.agent.model.valobj.UserInputAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
@@ -95,163 +91,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     }
 
     private AgentContext resolveContext(AgentQuestion question) {
-        String conversationId = question.getConversationId();
-        if (StringUtils.isBlank(conversationId)) {
-            return components.contextFactory().create(question);
-        }
-
-        AgentRun previousRun = components.runRepository().findLatestRootByConversationId(conversationId).orElse(null);
-        if (previousRun == null) {
-            return components.contextFactory().create(question);
-        }
-
-        var checkpoint = components.checkpointRepository().latest(previousRun.getRunId()).orElse(null);
-        var previous = checkpoint != null ? checkpoint.getContextSnapshot() : null;
-        return components.contextFactory().createContinuation(question, previous);
-    }
-
-    @Override
-    public Flux<AgentEvent> resume(String approvalId, ApprovalDecision decision, String reason) {
-        return resume(approvalId, decision, reason, null, List.of());
-    }
-
-    @Override
-    public Flux<AgentEvent> resume(
-            String approvalId,
-            ApprovalDecision decision,
-            String reason,
-            String reasonCode,
-            List<String> allowedAlternatives) {
-        return executeAsync("resume", approvalId, (sink, capture) -> {
-            PendingApproval approval = components.approvalStore().find(approvalId).orElse(null);
-            String convId = null;
-            String runId = null;
-            if (approval != null) {
-                if (approval.getContext() != null) {
-                    convId = approval.getContext().getConversationId();
-                    runId = approval.getContext().getRunId();
-                } else {
-                    runId = approval.getRunId();
-                }
-            }
-            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
-            String token = null;
-            if (lockKey != null) {
-                token = executionGuard.tryAcquire(lockKey);
-                if (token == null) {
-                    emit(sink, List.of(components.eventFactory().conversationBusy(
-                            convId, runId, null, null, "resume_approval", Instant.now())));
-                    sink.complete();
-                    return;
-                }
-            }
-            try {
-                AgentResumePlan plan = components.resumeCoordinator().prepareApprovalResume(
-                        approvalId, decision, reason, reasonCode, allowedAlternatives);
-                capture.accept(plan.context());
-                continueFrom(plan, sink);
-            } finally {
-                if (token != null) {
-                    executionGuard.release(lockKey, token);
-                }
-            }
-        });
-    }
-
-    @Override
-    public Flux<AgentEvent> resumeRun(String runId) {
-        return executeAsync("resumeRun", runId, (sink, capture) -> {
-            AgentRun run = components.runRepository().find(runId).orElse(null);
-            String convId = run != null ? run.getConversationId() : null;
-            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
-            String token = null;
-            if (lockKey != null) {
-                token = executionGuard.tryAcquire(lockKey);
-                if (token == null) {
-                    emit(sink, List.of(components.eventFactory().conversationBusy(
-                            convId, runId, null, run != null ? run.getRunId() : null,
-                            "resumeRun", Instant.now())));
-                    sink.complete();
-                    return;
-                }
-            }
-            try {
-                AgentResumePlan plan = components.resumeCoordinator().prepareRunResume(runId);
-                capture.accept(plan.context());
-                continueFrom(plan, sink);
-            } finally {
-                if (token != null) {
-                    executionGuard.release(lockKey, token);
-                }
-            }
-        });
-    }
-
-    @Override
-    public Flux<AgentEvent> resumeWithUserInput(String runId, UserInputAction action, String message) {
-        return executeAsync("resumeWithUserInput", runId, (sink, capture) -> {
-            AgentRun run = components.runRepository().find(runId).orElse(null);
-            String convId = run != null ? run.getConversationId() : null;
-            String lockKey = ConversationExecutionGuard.effectiveLockKey(convId, runId);
-            String token = null;
-            if (lockKey != null) {
-                token = executionGuard.tryAcquire(lockKey);
-                if (token == null) {
-                    emit(sink, List.of(components.eventFactory().conversationBusy(
-                            convId, runId, null, run != null ? run.getRunId() : null,
-                            "resumeWithUserInput", Instant.now())));
-                    sink.complete();
-                    return;
-                }
-            }
-            try {
-                AgentResumePlan plan = components.resumeCoordinator().prepareUserInputResume(runId, action, message);
-                capture.accept(plan.context());
-                continueFrom(plan, sink);
-            } finally {
-                if (token != null) {
-                    executionGuard.release(lockKey, token);
-                }
-            }
-        });
-    }
-
-    @Override
-    public boolean cancelRun(String runId) {
-        if (StringUtils.isBlank(runId)) {
-            return false;
-        }
-        AtomicBoolean cancellation = cancellationRequests.get(runId);
-        return cancellation != null && cancellation.compareAndSet(false, true);
-    }
-
-    @Override
-    public void cancelConversation(String conversationId) {
-        if (StringUtils.isBlank(conversationId)) {
-            return;
-        }
-        Set<String> runIds = conversationRuns.getOrDefault(conversationId, Set.of());
-        for (String runId : runIds) {
-            cancelRun(runId);
-        }
-    }
-
-    @Override
-    public boolean hasActiveRuns(String conversationId) {
-        if (StringUtils.isBlank(conversationId)) {
-            return false;
-        }
-        Set<String> runIds = conversationRuns.get(conversationId);
-        if (runIds == null || runIds.isEmpty()) {
-            return false;
-        }
-        for (String runId : runIds) {
-            AtomicBoolean c = cancellationRequests.get(runId);
-            if (c != null && !c.get()) {
-                return true;
-            }
-        }
-        return false;
+        return components.contextFactory().create(question);
     }
 
     // ==================== 核心编排 ====================
@@ -276,15 +116,6 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 MDC.clear();
             }
         }), FluxSink.OverflowStrategy.BUFFER);
-    }
-
-    private void continueFrom(AgentResumePlan plan, FluxSink<AgentEvent> sink) {
-        emit(sink, plan.initialEvents());
-        if (plan.terminal()) {
-            sink.complete();
-            return;
-        }
-        runLoop(plan.context(), plan.startNode(), sink);
     }
 
     private void runLoop(AgentContext context, FluxSink<AgentEvent> sink) {
@@ -347,12 +178,6 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         break;
                     case COMPLETE:
                         finishComplete(context, result.getEvents(), sink);
-                        return;
-                    case PAUSE_APPROVAL:
-                        emit(sink, result.getEvents());
-                        emit(sink, lifecycle.pauseForApproval(context));
-                        emit(sink, List.of(components.eventFactory().pausedForApproval(context)));
-                        sink.complete();
                         return;
                     case PAUSE_USER_INPUT:
                         emit(sink, result.getEvents());

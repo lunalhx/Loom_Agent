@@ -102,14 +102,10 @@ public final class ShellRunner {
     }
 
     private static final class StringBuilderOut {
-        private static final int MAX = 12000;
         private final StringBuilder sb = new StringBuilder();
 
         synchronized void append(String chunk) {
-            if (sb.length() < MAX) {
-                int remaining = MAX - sb.length();
-                sb.append(chunk, 0, Math.min(chunk.length(), remaining));
-            }
+            sb.append(chunk);
         }
 
         synchronized String value() {

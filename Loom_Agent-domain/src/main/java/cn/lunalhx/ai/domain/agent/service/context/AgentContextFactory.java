@@ -4,7 +4,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
-import cn.lunalhx.ai.domain.agent.model.entity.PendingApproval;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -174,29 +173,6 @@ public final class AgentContextFactory {
             }
         }
         return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
-    }
-
-    public AgentContext prepareCheckpointResume(AgentContext context, String workspace, Long checkpointVersion) {
-        context.setRunConfig(runtimeConfigSource.captureRunConfig());
-        restoreWorkspace(context, workspace);
-        context.setStartedAt(Instant.now());
-        context.setCheckpointVersion(checkpointVersion);
-        context.setToolSpecs(toolSpecs);
-        if (context.getMaxAttempts() <= 0 && context.getMaxSteps() > 0) {
-            context.setMaxAttempts(Math.max(context.getMaxSteps() * 3, context.getMaxSteps() + 4));
-        }
-        return context;
-    }
-
-    public AgentContext prepareApprovalResume(AgentContext context, PendingApproval approval) {
-        context.setRunConfig(runtimeConfigSource.captureRunConfig());
-        restoreWorkspace(context, approval.getResolvedWorkspace() == null ? null : approval.getResolvedWorkspace().toString());
-        context.setWorkspace(approval.getWorkspace());
-        context.setWorkspaceDisplayName(approval.getWorkspaceDisplayName());
-        context.setStartedAt(Instant.now());
-        context.setPendingApprovalId(null);
-        context.setToolSpecs(toolSpecs);
-        return context;
     }
 
     private void restoreWorkspace(AgentContext context, String workspace) {
