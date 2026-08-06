@@ -56,13 +56,14 @@ public class ContextManagerV2Test {
         ContextBuildResult result = manager().build(ctx);
         assertEquals("prefix-content", result.systemPrefix());
         List<ChatMessage> messages = result.messages();
-        assertEquals(4, messages.size());
-        // Memory, Relevant memory, Transcript, Current user request
-        assertTrue(messages.get(0).getContent().startsWith("Memory:"));
-        assertTrue(messages.get(1).getContent().startsWith("Relevant memory:"));
-        assertTrue(messages.get(2).getContent().startsWith("Transcript:"));
-        assertTrue(messages.get(3).getContent().startsWith("Current user request:"));
-        assertEquals(List.of("prefix", "memory", "relevant_memory", "history", "current_request"),
+        assertEquals(5, messages.size());
+        // Workspace snapshot, Memory, Relevant memory, Transcript, Current user request
+        assertTrue(messages.get(0).getContent().startsWith("Workspace snapshot:"));
+        assertTrue(messages.get(1).getContent().startsWith("Memory:"));
+        assertTrue(messages.get(2).getContent().startsWith("Relevant memory:"));
+        assertTrue(messages.get(3).getContent().startsWith("Transcript:"));
+        assertTrue(messages.get(4).getContent().startsWith("Current user request:"));
+        assertEquals(List.of("prefix", "workspace", "memory", "relevant_memory", "history", "current_request"),
                 result.metadata().sectionOrder());
     }
 
@@ -108,7 +109,7 @@ public class ContextManagerV2Test {
         wm.addNote("D.java 无关内容", List.of("D.java"), "D.java", "process");
 
         ContextBuildResult result = manager().build(ctx);
-        String relevant = result.messages().get(1).getContent();
+        String relevant = result.messages().get(2).getContent();
         assertTrue(relevant.contains("A.java"));
         assertTrue(relevant.contains("B.java"));
         // Only 3 selected at most.

@@ -43,7 +43,8 @@ public class ModelCallNode extends AbstractAgentNode {
         super(AgentNodeNames.MODEL_CALL, List.of("stablePrefix", "conversationHistory", "requestId", "conversationId"));
         this.promptFactory = new ModelPromptFactory();
         this.budgetCoordinator = new ModelCallBudgetCoordinator(
-                terminalDeps.budgetGuard(), terminalDeps.traceRecorder(), promptFactory);
+                terminalDeps.budgetGuard(), terminalDeps.traceRecorder(), promptFactory,
+                terminalDeps.agentMetrics());
         this.chain = Objects.requireNonNull(assembler, "assembler must not be null")
                 .assemble(ctx -> executeTerminal(ctx, terminalDeps));
         this.properties = Objects.requireNonNull(properties, "properties must not be null");

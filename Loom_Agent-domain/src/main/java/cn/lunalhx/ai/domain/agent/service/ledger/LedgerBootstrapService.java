@@ -62,11 +62,34 @@ public final class LedgerBootstrapService {
 
         StablePrefix existing = context.getStablePrefix();
         if (existing == null || existing.isLegacyTwoField() || !existing.matches(candidate)) {
-            // Rebuild the prefix and replace it. No generation bump, no [Config Change] noise.
-            context.setStablePrefix(candidate);
+            switchGeneration(context, existing, candidate);
         }
 
         applyPendingContinuationIfPresent(context);
+    }
+
+    /**
+     * 稳定前缀发生真实不兼容变更时原子切换 generation：旧 generation 的历史
+     * 作为冻结基线保留（写入一条确定性的 SYSTEM_NOTE），随后冻结新前缀。
+     * 正常工具写入、dirty status、历史追加不会触发切换（matches 已排除动态
+     * 工作区信息）。
+     */
+    private void switchGeneration(AgentContext context, StablePrefix existing, StablePrefix candidate) {
+        if (existing == null) {
+            // 有 ledger 但从未冻结前缀（边缘状态）：只冻结，不切换 generation。
+            context.setStablePrefix(candidate);
+            return;
+        }
+        if (existing.fingerprint() != null && existing.fingerprint().equals(candidate.fingerprint())) {
+            return;
+        }
+        int newGeneration = context.incrementGeneration();
+        String note = ControlUpdateTexts.renderConfigChangeNote(
+                existing.fingerprint(), candidate.fingerprint(), newGeneration);
+        String eventKey = ConversationHistoryInitializer.eventKey(
+                context.getRunId(), "generation_" + newGeneration, "system_note");
+        appendService.appendSystemNote(context, note, eventKey);
+        context.setStablePrefix(candidate);
     }
 
     /**

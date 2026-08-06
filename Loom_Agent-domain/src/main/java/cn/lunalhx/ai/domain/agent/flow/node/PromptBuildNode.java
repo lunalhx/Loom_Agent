@@ -105,9 +105,15 @@ public class PromptBuildNode extends AbstractAgentNode {
         if (StringUtils.isBlank(pathScope)) {
             pathScope = null;
         }
+        boolean includeWorkspaceFacts = context.getRunConfig() != null
+                && context.getRunConfig().agent() != null
+                && context.getRunConfig().agent().getFeatureFlags() != null
+                && context.getRunConfig().agent().getFeatureFlags().stablePrefixWorkspaceFacts();
         WorkspaceFacts.Facts facts = collectFacts(context);
-        String workspaceFactsText = facts == null ? "" : facts.text();
-        String workspaceFingerprint = facts == null ? null : facts.workspaceFingerprint();
+        context.setWorkspaceSnapshot(facts == null ? "" : facts.dynamicText());
+        boolean stableIdentityOnly = includeWorkspaceFacts && facts != null;
+        String workspaceFactsText = stableIdentityOnly ? facts.identityText() : "";
+        String workspaceFingerprint = stableIdentityOnly ? facts.workspaceFingerprint() : null;
         return this.ledgerServices.prefixBuilder().build(
                 isDelegate,
                 delegateAllowed,

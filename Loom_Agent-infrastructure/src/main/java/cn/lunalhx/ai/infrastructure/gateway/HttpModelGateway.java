@@ -5,6 +5,9 @@ import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability;
+import cn.lunalhx.ai.domain.model.valobj.PromptCacheRequest;
+import cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 
 import java.net.URI;
@@ -29,11 +32,16 @@ import java.util.Optional;
  *   <li>ollama: {@code /api/generate}</li>
  * </ul>
  *
- * <p>OpenAI/Anthropic-compatible requests retry network errors and 5xx up to
- * three times with 0.5/1s backoff; ollama stays single-shot.
+ * <p>Prompt-cache protocol: cache fields are written only when the request is
+ * enabled (policy != NONE and feature flag on) and the provider/model
+ * capability declares support. The stable prefix stays in the {@code system}
+ * role; dynamic sections stay as separate user messages. When a provider
+ * rejects the cache parameters with a recognizable 4xx, the gateway retries
+ * once without cache fields (degradation event, never an infinite loop).
  */
 public class HttpModelGateway implements ModelGateway {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(HttpModelGateway.class);
     private static final int MAX_ATTEMPTS = 3;
     private static final long[] BACKOFF_MS = {500L, 1000L};
 
@@ -83,123 +91,147 @@ public class HttpModelGateway implements ModelGateway {
         return reactor.core.publisher.Flux.empty();
     }
 
+    @Override
+    public cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability promptCacheCapability() {
+        return PromptCacheCapability.fromProviderModel(provider, model, null);
+    }
+
     ModelChatResult execute(ChatPrompt prompt) {
-        String text = flattenPrompt(prompt);
         int maxTokens = prompt.getMaxTokens() == null ? 512 : prompt.getMaxTokens();
+        boolean featureEnabled = prompt.getCachePolicy() != null
+                && prompt.getCachePolicy() != ChatPrompt.CachePolicy.NONE;
+        PromptCacheRequest cacheRequest = ProviderPayloadSerializers.resolveCacheRequest(
+                prompt, prompt.getRuntimeProperties(), featureEnabled, provider);
+
+        if (log.isDebugEnabled()) {
+            // 脱敏诊断：只含结构长度与 key 前缀，绝不含 prompt 正文。
+            log.debug("prompt cache diagnostics: {}",
+                    PromptCacheDiagnostics.summary(prompt, cacheRequest));
+        }
 
         switch (provider) {
             case "ollama":
-                return callOllama(text, maxTokens);
+                return callOllama(prompt, maxTokens);
             case "openai":
-                return callOpenAI(text, maxTokens);
+                return callOpenAI(prompt, maxTokens, cacheRequest);
             case "anthropic":
             case "deepseek":
             default:
-                return callAnthropic(text, maxTokens);
+                return callAnthropic(prompt, maxTokens, cacheRequest);
         }
+    }
+
+    /**
+     * 针对明确的"缓存参数不支持"4xx 做一次无缓存回退。只回退一次，
+     * 认证、限流、普通 4xx 和网络错误沿用既有策略，绝不造成无限重试。
+     * 回退结果携带 fallbackReason，供 trace 观测降级事件。
+     */
+    private ModelChatResult callWithCacheFallback(java.util.function.Function<PromptCacheRequest, ModelChatResult> call,
+                                                  PromptCacheRequest cacheRequest) {
+        if (cacheRequest == null || !cacheRequest.enabled()) {
+            return call.apply(PromptCacheRequest.none(PromptCacheCapability.UNSUPPORTED));
+        }
+        try {
+            return call.apply(cacheRequest);
+        } catch (ModelGatewayTransportException e) {
+            if (e.getMessage() != null && isCacheParamRejection(e.getMessage())) {
+                ModelChatResult degraded = call.apply(PromptCacheRequest.none(PromptCacheCapability.UNSUPPORTED));
+                if (degraded != null) {
+                    degraded.setFallbackReason("prompt_cache_parameter_rejected");
+                }
+                return degraded;
+            }
+            throw e;
+        }
+    }
+
+    private boolean isCacheParamRejection(String message) {
+        return (message.contains("400") || message.contains("422") || message.contains("invalid_request_error"))
+                && (message.contains("cache") || message.contains("prompt_cache"));
     }
 
     // ==================== Anthropic Messages ====================
 
-    private ModelChatResult callAnthropic(String text, int maxTokens) {
-        Map<String, Object> payload = new java.util.LinkedHashMap<>();
-        payload.put("model", model);
-        payload.put("max_tokens", maxTokens);
-        payload.put("stream", false);
-        if (temperature != null) {
-            payload.put("temperature", temperature);
-        }
-        if (topP != null) {
-            payload.put("top_p", topP);
-        }
-        Map<String, Object> message = new java.util.LinkedHashMap<>();
-        message.put("role", "user");
-        message.put("content", List.of(Map.of("type", "text", "text", text)));
-        payload.put("messages", List.of(message));
+    private ModelChatResult callAnthropic(ChatPrompt prompt, int maxTokens, PromptCacheRequest cacheRequest) {
+        return callWithCacheFallback(request -> {
+            Map<String, Object> payload = ProviderPayloadSerializers.anthropicMessages(
+                    prompt, model, maxTokens, temperature, topP, request);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/v1/messages"))
-                .header("Content-Type", "application/json")
-                .header("x-api-key", apiKey == null ? "" : apiKey)
-                .header("anthropic-version", "2023-06-01")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(toJson(payload)))
-                .build();
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/messages"))
+                    .header("Content-Type", "application/json")
+                    .header("x-api-key", apiKey == null ? "" : apiKey)
+                    .header("anthropic-version", "2023-06-01")
+                    .timeout(Duration.ofSeconds(timeoutSeconds))
+                    .POST(HttpRequest.BodyPublishers.ofString(JsonSupport.toJson(payload)))
+                    .build();
 
-        String body = sendWithRetry(request, "Anthropic-compatible");
-        Map<String, Object> data = parseJson(body);
-        String error = asText(data.get("error"));
-        if (error != null) {
-            throw new ModelGatewayTransportException("Anthropic-compatible error: " + error);
-        }
-        Object content = data.get("content");
-        if (content instanceof List<?> items) {
-            for (Object item : items) {
-                if (item instanceof Map<?, ?> entry
-                        && "text".equals(entry.get("type"))
-                        && asText(entry.get("text")) != null) {
-                    Map<?, ?> usage = asMap(data.get("usage"));
-                    return ModelChatResult.builder()
-                            .content(asText(entry.get("text")))
-                            .finishReason("stop")
-                            .actualModel(model)
-                            .usage(usage(usage))
-                            .build();
+            String body = sendWithRetry(httpRequest, "Anthropic-compatible");
+            Map<String, Object> data = JsonSupport.parseJson(body);
+            String error = JsonSupport.asText(data.get("error"));
+            if (error != null) {
+                throw new ModelGatewayTransportException("Anthropic-compatible error: " + error);
+            }
+            Object content = data.get("content");
+            if (content instanceof List<?> items) {
+                for (Object item : items) {
+                    if (item instanceof Map<?, ?> entry
+                            && "text".equals(entry.get("type"))
+                            && JsonSupport.asText(entry.get("text")) != null) {
+                        Map<?, ?> usage = JsonSupport.asMap(data.get("usage"));
+                        return ModelChatResult.builder()
+                                .content(JsonSupport.asText(entry.get("text")))
+                                .finishReason("stop")
+                                .actualModel(model)
+                                .usage(usage(usage))
+                                .build();
+                    }
                 }
             }
-        }
-        throw new ModelGatewayTransportException("Anthropic-compatible error: could not extract text from response");
+            throw new ModelGatewayTransportException("Anthropic-compatible error: could not extract text from response");
+        }, cacheRequest);
     }
 
     // ==================== OpenAI Responses ====================
 
-    private ModelChatResult callOpenAI(String text, int maxTokens) {
-        Map<String, Object> payload = new java.util.LinkedHashMap<>();
-        payload.put("model", model);
-        payload.put("input", List.of(Map.of(
-                "role", "user",
-                "content", List.of(Map.of("type", "input_text", "text", text)))));
-        payload.put("max_output_tokens", maxTokens);
-        payload.put("stream", false);
-        if (temperature != null) {
-            payload.put("temperature", temperature);
-        }
-        if (topP != null) {
-            payload.put("top_p", topP);
-        }
+    private ModelChatResult callOpenAI(ChatPrompt prompt, int maxTokens, PromptCacheRequest cacheRequest) {
+        return callWithCacheFallback(request -> {
+            Map<String, Object> payload = ProviderPayloadSerializers.openAIResponses(
+                    prompt, model, maxTokens, temperature, topP, request);
 
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/responses"))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("User-Agent", "loom-code/0.1")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(toJson(payload)));
-        if (apiKey != null && !apiKey.isBlank()) {
-            builder.header("Authorization", "Bearer " + apiKey);
-        }
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "loom-code/0.1")
+                    .timeout(Duration.ofSeconds(timeoutSeconds))
+                    .POST(HttpRequest.BodyPublishers.ofString(JsonSupport.toJson(payload)));
+            if (apiKey != null && !apiKey.isBlank()) {
+                builder.header("Authorization", "Bearer " + apiKey);
+            }
 
-        String body = sendWithRetry(builder.build(), "OpenAI-compatible");
-        Map<String, Object> data = parseJson(body);
-        String error = asText(data.get("error"));
-        if (error != null) {
-            throw new ModelGatewayTransportException("OpenAI-compatible error: " + error);
-        }
-        String textContent = extractOpenAIText(data);
-        if (textContent == null || textContent.isBlank()) {
-            throw new ModelGatewayTransportException(
-                    "OpenAI-compatible error: could not extract text from response");
-        }
-        return ModelChatResult.builder()
-                .content(textContent)
-                .finishReason("stop")
-                .actualModel(model)
-                .usage(usage(asMap(data.get("usage"))))
-                .build();
+            String body = sendWithRetry(builder.build(), "OpenAI-compatible");
+            Map<String, Object> data = JsonSupport.parseJson(body);
+            String error = JsonSupport.asText(data.get("error"));
+            if (error != null) {
+                throw new ModelGatewayTransportException("OpenAI-compatible error: " + error);
+            }
+            String textContent = extractOpenAIText(data);
+            if (textContent == null || textContent.isBlank()) {
+                throw new ModelGatewayTransportException(
+                        "OpenAI-compatible error: could not extract text from response");
+            }
+            return ModelChatResult.builder()
+                    .content(textContent)
+                    .finishReason("stop")
+                    .actualModel(model)
+                    .usage(usage(JsonSupport.asMap(data.get("usage"))))
+                    .build();
+        }, cacheRequest);
     }
 
     private String extractOpenAIText(Map<String, Object> data) {
-        String outputText = asText(data.get("output_text"));
+        String outputText = JsonSupport.asText(data.get("output_text"));
         if (outputText != null) {
             return outputText;
         }
@@ -241,7 +273,7 @@ public class HttpModelGateway implements ModelGateway {
         if (content instanceof List<?> items) {
             for (Object item : items) {
                 if (item instanceof Map<?, ?> entry) {
-                    String text = asText(entry.get("text"));
+                    String text = JsonSupport.asText(entry.get("text"));
                     if (text != null) {
                         return text;
                     }
@@ -253,38 +285,25 @@ public class HttpModelGateway implements ModelGateway {
 
     // ==================== Ollama ====================
 
-    private ModelChatResult callOllama(String text, int maxTokens) {
-        Map<String, Object> options = new java.util.LinkedHashMap<>();
-        options.put("num_predict", maxTokens);
-        if (temperature != null) {
-            options.put("temperature", temperature);
-        }
-        if (topP != null) {
-            options.put("top_p", topP);
-        }
-        Map<String, Object> payload = new java.util.LinkedHashMap<>();
-        payload.put("model", model);
-        payload.put("prompt", text);
-        payload.put("stream", false);
-        payload.put("raw", false);
-        payload.put("think", false);
-        payload.put("options", options);
+    private ModelChatResult callOllama(ChatPrompt prompt, int maxTokens) {
+        Map<String, Object> payload = ProviderPayloadSerializers.ollama(
+                prompt, model, maxTokens, temperature, topP);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/generate"))
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(toJson(payload)))
+                .POST(HttpRequest.BodyPublishers.ofString(JsonSupport.toJson(payload)))
                 .build();
 
         String body = sendOnce(request, "Ollama");
-        Map<String, Object> data = parseJson(body);
-        String error = asText(data.get("error"));
+        Map<String, Object> data = JsonSupport.parseJson(body);
+        String error = JsonSupport.asText(data.get("error"));
         if (error != null) {
             throw new ModelGatewayTransportException("Ollama error: " + error);
         }
         return ModelChatResult.builder()
-                .content(asText(data.get("response")) == null ? "" : asText(data.get("response")))
+                .content(JsonSupport.asText(data.get("response")) == null ? "" : JsonSupport.asText(data.get("response")))
                 .finishReason("stop")
                 .actualModel(model)
                 .usage(null)
@@ -357,24 +376,11 @@ public class HttpModelGateway implements ModelGateway {
         }
     }
 
-    private static String flattenPrompt(ChatPrompt prompt) {
-        StringBuilder sb = new StringBuilder();
-        if (prompt.getSystemPrompt() != null && !prompt.getSystemPrompt().isBlank()) {
-            sb.append(prompt.getSystemPrompt()).append("\n\n");
-        }
-        if (prompt.getMessages() != null) {
-            for (ChatMessage message : prompt.getMessages()) {
-                if (message != null && message.getContent() != null && !message.getContent().isBlank()) {
-                    sb.append(message.getContent()).append("\n\n");
-                }
-            }
-        }
-        if (prompt.getMessage() != null && !prompt.getMessage().isBlank()) {
-            sb.append(prompt.getMessage());
-        }
-        return sb.toString().strip();
-    }
-
+    /**
+     * Normalize provider usage into {@link TokenUsage} with tri-state cache
+     * status. cache read/create tokens are recorded separately; providers that
+     * do not report cache fields stay UNKNOWN (never guessed as miss).
+     */
     private TokenUsage usage(Map<?, ?> usage) {
         if (usage == null || usage.isEmpty()) {
             return null;
@@ -407,6 +413,7 @@ public class HttpModelGateway implements ModelGateway {
         // unsupported unless their usage carries the fields.
         builder.cacheCapability(cacheReadTokens != null || cacheCreationTokens != null
                 ? "supported" : "unsupported");
+        builder.cacheStatus(PromptCacheStatus.fromUsage(builder.build()));
         return builder.build();
     }
 
@@ -430,100 +437,6 @@ public class HttpModelGateway implements ModelGateway {
             base = base.substring(0, base.length() - 1);
         }
         return base;
-    }
-
-    private static String toJson(Map<String, Object> payload) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> e : payload.entrySet()) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append('"').append(e.getKey()).append("\":");
-            sb.append(jsonValue(e.getValue()));
-        }
-        sb.append('}');
-        return sb.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static String jsonValue(Object value) {
-        if (value == null) {
-            return "null";
-        }
-        if (value instanceof String s) {
-            StringBuilder sb = new StringBuilder("\"");
-            for (char c : s.toCharArray()) {
-                switch (c) {
-                    case '"' -> sb.append("\\\"");
-                    case '\\' -> sb.append("\\\\");
-                    case '\n' -> sb.append("\\n");
-                    case '\r' -> sb.append("\\r");
-                    case '\t' -> sb.append("\\t");
-                    default -> {
-                        if (c < 0x20) {
-                            sb.append(String.format("\\u%04x", (int) c));
-                        } else {
-                            sb.append(c);
-                        }
-                    }
-                }
-            }
-            return sb.append('"').toString();
-        }
-        if (value instanceof Boolean || value instanceof Number) {
-            return String.valueOf(value);
-        }
-        if (value instanceof Map<?, ?> map) {
-            StringBuilder sb = new StringBuilder("{");
-            boolean first = true;
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                sb.append(jsonValue(String.valueOf(e.getKey()))).append(':')
-                        .append(jsonValue(e.getValue()));
-            }
-            return sb.append('}').toString();
-        }
-        if (value instanceof List<?> list) {
-            StringBuilder sb = new StringBuilder("[");
-            boolean first = true;
-            for (Object item : list) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                sb.append(jsonValue(item));
-            }
-            return sb.append(']').toString();
-        }
-        return jsonValue(String.valueOf(value));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> parseJson(String body) {
-        try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(body, Map.class);
-        } catch (Exception e) {
-            throw new ModelGatewayTransportException(
-                    "backend returned non-JSON content that could not be parsed: " + body);
-        }
-    }
-
-    private static String asText(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String s = String.valueOf(value);
-        return s.isEmpty() ? null : s;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<?, ?> asMap(Object value) {
-        return value instanceof Map<?, ?> map ? map : Map.of();
     }
 
     public static class ModelGatewayTransportException extends RuntimeException {

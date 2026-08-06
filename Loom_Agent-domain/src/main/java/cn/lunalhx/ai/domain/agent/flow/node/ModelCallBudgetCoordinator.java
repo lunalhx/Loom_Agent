@@ -19,11 +19,15 @@ final class ModelCallBudgetCoordinator {
     private final BudgetGuard budgetGuard;
     private final TraceRecorder traceRecorder;
     private final ModelPromptFactory promptFactory;
+    private final cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics agentMetrics;
 
-    ModelCallBudgetCoordinator(BudgetGuard budgetGuard, TraceRecorder traceRecorder, ModelPromptFactory promptFactory) {
+    ModelCallBudgetCoordinator(BudgetGuard budgetGuard, TraceRecorder traceRecorder,
+                               ModelPromptFactory promptFactory,
+                               cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics agentMetrics) {
         this.budgetGuard = budgetGuard;
         this.traceRecorder = traceRecorder;
         this.promptFactory = promptFactory;
+        this.agentMetrics = agentMetrics;
     }
 
     BudgetCheckResult checkBeforeModelCall(AgentContext context, String nodeName, String requestedModel,
@@ -66,13 +70,34 @@ final class ModelCallBudgetCoordinator {
         TraceCost cost = budgetGuard == null ? null
                 : budgetGuard.recordModelUsage(context, result.getActualModel(), result.getUsage());
         if (traceRecorder != null) {
-            Map<String, Object> extras = result.getUsage() == null
-                    ? null
-                    : Map.of("finishReason", StringUtils.defaultString(result.getFinishReason()));
+            Map<String, Object> extras = new java.util.LinkedHashMap<>();
+            extras.put("finishReason", StringUtils.defaultString(result.getFinishReason()));
+            if (result.getFallbackReason() != null) {
+                extras.put("fallbackReason", result.getFallbackReason());
+            }
+            cn.lunalhx.ai.domain.model.valobj.TokenUsage usage = result.getUsage();
+            if (usage != null) {
+                cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus status =
+                        cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.fromUsage(usage);
+                extras.put("promptCacheStatus", status == null ? "unknown" : status.name());
+                extras.put("promptCacheCapability", StringUtils.defaultString(usage.getCacheCapability(), "unsupported"));
+                if (usage.getPromptCacheHitTokens() != null) {
+                    extras.put("promptCacheReadTokens", usage.getPromptCacheHitTokens());
+                }
+                if (usage.getPromptCacheMissTokens() != null) {
+                    extras.put("promptCacheCreationTokens", usage.getPromptCacheMissTokens());
+                }
+                String fingerprint = context.getStablePrefix() == null
+                        ? null : context.getStablePrefix().fingerprint();
+                if (fingerprint != null) {
+                    extras.put("stablePrefixFingerprint", fingerprint);
+                }
+            }
             Map<String, Object> metadata = ModelCallTraceLabels.buildUsageMetadata(context, nodeName,
                     ModelCapabilities.COMPLETE_AGENT_DECISION, ModelCallPurpose.CONTROL_JSON,
-                    result.getActualModel(), result.getUsage(), extras);
-            traceRecorder.recordModelUsage(context, nodeName, result.getUsage(), cost, metadata);
+                    result.getActualModel(), usage, extras.isEmpty() ? null : extras);
+            traceRecorder.recordModelUsage(context, nodeName, usage, cost, metadata);
+            recordCacheMetrics(context, nodeName, result, usage);
         }
     }
 
@@ -81,5 +106,31 @@ final class ModelCallBudgetCoordinator {
             traceRecorder.recordModelGatewayEvent(context, eventType, nodeName, "success", 0L,
                     eventType, null, metadata);
         }
+    }
+
+    private void recordCacheMetrics(AgentContext context, String nodeName, ModelChatResult result,
+                                    cn.lunalhx.ai.domain.model.valobj.TokenUsage usage) {
+        if (agentMetrics == null) {
+            return;
+        }
+        cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus status =
+                cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.fromUsage(usage);
+        agentMetrics.recordPromptCache(
+                providerOf(context),
+                result == null ? null : result.getActualModel(),
+                usage == null ? "unsupported" : usage.getCacheCapability(),
+                "read",
+                status,
+                usage == null ? null : usage.getPromptCacheHitTokens(),
+                usage == null ? null : usage.getPromptCacheMissTokens(),
+                usage);
+    }
+
+    private String providerOf(AgentContext context) {
+        if (context == null || context.getRunConfig() == null
+                || context.getRunConfig().model() == null) {
+            return "unknown";
+        }
+        return StringUtils.defaultIfBlank(context.getRunConfig().model().getProvider(), "unknown");
     }
 }

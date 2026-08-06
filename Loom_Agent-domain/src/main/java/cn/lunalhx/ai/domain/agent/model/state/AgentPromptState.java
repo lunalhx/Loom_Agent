@@ -26,6 +26,7 @@ public final class AgentPromptState {
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
     private transient cn.lunalhx.ai.domain.agent.service.context.PreparedContextView preparedView;
+    private transient String workspaceSnapshot;
 
     public String modelOutput() { return modelOutput; }
 
@@ -50,6 +51,9 @@ public final class AgentPromptState {
     /** Transient per-round prepared context view, built by PromptBuildNode. */
     public cn.lunalhx.ai.domain.agent.service.context.PreparedContextView preparedView() { return preparedView; }
 
+    /** Transient per-round dynamic workspace snapshot (status/commits/docs). */
+    public String workspaceSnapshot() { return workspaceSnapshot; }
+
     /** Whether any ledger state is active (either flag is true). */
     public boolean isLedgerActive() {
         return conversationHistory != null;
@@ -69,6 +73,7 @@ public final class AgentPromptState {
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
     public void setPreparedView(cn.lunalhx.ai.domain.agent.service.context.PreparedContextView v) { this.preparedView = v; }
+    public void setWorkspaceSnapshot(String v) { this.workspaceSnapshot = v; }
 
     /** Ensures ledger state is initialized. Safe to call repeatedly. */
     public void ensureLedgerActive() {

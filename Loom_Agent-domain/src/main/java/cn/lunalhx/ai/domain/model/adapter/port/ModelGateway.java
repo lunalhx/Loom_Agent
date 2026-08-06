@@ -19,11 +19,15 @@ public interface ModelGateway {
         return null;
     }
 
-    /** Provider cache capability: NONE (no cache fields), or READ (prompt
-     *  cache read/write fields are honored). Never inferred from prompt
-     *  prefix similarity — only from the provider's actual response. */
+    /** Provider cache capability: UNSUPPORTED / KEYED_REQUEST / MESSAGE_BLOCK.
+     *  Never inferred from prompt prefix similarity — declared per provider/model. */
     default String cacheCapability() {
         return "unsupported";
+    }
+
+    /** Provider cache capability enum view (defaults to unsupported). */
+    default cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability promptCacheCapability() {
+        return cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability.UNSUPPORTED;
     }
 
 }

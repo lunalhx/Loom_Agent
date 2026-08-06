@@ -26,6 +26,13 @@ public class ModelPromptFactory {
 
         List<ChatMessage> messages = new ArrayList<>(view.messages());
 
+        String signature = context.getStablePrefix() == null
+                ? null : context.getStablePrefix().fingerprint();
+        boolean cacheEnabled = context.getRunConfig() != null
+                && context.getRunConfig().agent() != null
+                && context.getRunConfig().agent().getFeatureFlags() != null
+                && context.getRunConfig().agent().getFeatureFlags().promptCache();
+
         return ChatPrompt.builder()
                 .requestId(context.getRequestId())
                 .conversationId(context.getConversationId())
@@ -41,9 +48,13 @@ public class ModelPromptFactory {
                 .runtimeProperties(context.getRunConfig() == null ? null : context.getRunConfig().model())
                 // Cache key input: only the stable prefix signature is used,
                 // never the dynamic history / working memory / current request.
-                .stablePrefixSignature(context.getStablePrefix() == null
-                        ? null : context.getStablePrefix().fingerprint())
-                .cachePolicy(ChatPrompt.CachePolicy.READ)
+                .stablePrefixSignature(signature)
+                .cachePolicy(cacheEnabled ? ChatPrompt.CachePolicy.READ : ChatPrompt.CachePolicy.NONE)
+                .promptCacheCapability(cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability.fromProviderModel(
+                        context.getRunConfig() == null || context.getRunConfig().model() == null
+                                ? null : context.getRunConfig().model().getProvider(),
+                        requestedModel,
+                        context.getRunConfig() == null ? null : context.getRunConfig().model()))
                 .build();
     }
 

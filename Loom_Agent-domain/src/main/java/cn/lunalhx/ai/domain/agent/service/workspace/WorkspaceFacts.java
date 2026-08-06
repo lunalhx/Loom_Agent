@@ -13,14 +13,17 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Builds loom-code "Workspace Facts": cwd, repo root, current/default branch,
- * git status, last 5 commits, plus a navigation snippet of whitelisted project
- * docs (max 1200 chars each).
+ * Builds loom-code "Workspace Facts", split into a stable identity and a
+ * dynamic snapshot:
  *
- * <p>Structural identity (cwd, repo root, branch, default branch) is captured
- * separately as a {@code workspaceFingerprint} so that ordinary git status or
- * doc-content churn does not invalidate a {@code StablePrefix}; only a change
- * in the structural identity does.
+ * <p><b>Identity</b> (cwd, repo root, current/default branch) is the only part
+ * allowed inside a {@link cn.lunalhx.ai.domain.agent.model.entity.StablePrefix}.
+ * Ordinary git status, recent commits or doc-content churn does NOT invalidate
+ * the prefix or the prompt-cache key.
+ *
+ * <p><b>Dynamic snapshot</b> (git status, last 5 commits, whitelisted project
+ * docs) is rendered into the per-round dynamic context section so the model
+ * still sees fresh workspace state without touching the cache key.
  *
  * <p>Git commands are bounded to a 5-second timeout; non-git directories fall
  * back to stable values.
@@ -39,32 +42,25 @@ public final class WorkspaceFacts {
     public record Facts(String cwd, String repoRoot, String branch, String defaultBranch,
                         String status, List<String> recentCommits, Map<String, String> projectDocs) {
 
-        /** Deterministic fingerprint over everything actually rendered into the prompt:
-         *  structural identity plus git status, recent commits and project docs.
-         *  Any change (dirty status, new commit, doc edit) invalidates the prefix. */
+        /** Deterministic fingerprint over the structural workspace identity only.
+         *  Dynamic churn (dirty status, new commit, doc edit) never changes it. */
         public String workspaceFingerprint() {
-            return DigestUtils.sha256Hex(cwd + "\n" + repoRoot + "\n" + branch + "\n" + defaultBranch
-                    + "\n" + status + "\n" + String.join("\n", recentCommits == null ? List.of() : recentCommits)
-                    + "\n" + projectDocsText());
+            return DigestUtils.sha256Hex(cwd + "\n" + repoRoot + "\n" + branch + "\n" + defaultBranch);
         }
 
-        private String projectDocsText() {
-            if (projectDocs == null || projectDocs.isEmpty()) {
-                return "";
-            }
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<String, String> e : projectDocs.entrySet()) {
-                sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
-            }
-            return sb.toString();
-        }
-
-        public String text() {
+        /** Stable section allowed in the StablePrefix / prompt-cache key. */
+        public String identityText() {
             StringBuilder sb = new StringBuilder("Workspace:\n");
             sb.append("- cwd: ").append(cwd).append('\n');
             sb.append("- repo_root: ").append(repoRoot).append('\n');
             sb.append("- branch: ").append(branch).append('\n');
             sb.append("- default_branch: ").append(defaultBranch).append('\n');
+            return sb.toString().stripTrailing();
+        }
+
+        /** Dynamic section rendered per round; never part of a cache key. */
+        public String dynamicText() {
+            StringBuilder sb = new StringBuilder();
             sb.append("- status:\n").append(status).append('\n');
             sb.append("- recent_commits:\n");
             if (recentCommits == null || recentCommits.isEmpty()) {
@@ -83,6 +79,16 @@ public final class WorkspaceFacts {
                 }
             }
             return sb.toString().stripTrailing();
+        }
+
+        /** Full text: identity + dynamic snapshot (backward compatible). */
+        public String text() {
+            String identity = identityText();
+            String dynamic = dynamicText();
+            if (dynamic.isBlank()) {
+                return identity;
+            }
+            return identity + "\n" + dynamic;
         }
     }
 

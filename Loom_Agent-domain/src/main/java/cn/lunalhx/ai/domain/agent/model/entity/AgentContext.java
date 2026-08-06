@@ -161,6 +161,8 @@ public class AgentContext {
     public void setModelOutput(String v) { prompt.setModelOutput(v); }
     public cn.lunalhx.ai.domain.agent.service.context.PreparedContextView getPreparedView() { return prompt.preparedView(); }
     public void setPreparedView(cn.lunalhx.ai.domain.agent.service.context.PreparedContextView v) { prompt.setPreparedView(v); }
+    public String getWorkspaceSnapshot() { return prompt.workspaceSnapshot(); }
+    public void setWorkspaceSnapshot(String v) { prompt.setWorkspaceSnapshot(v); }
 
     // ---- conversation ledger delegates (C1) ----
     public ConversationHistory getConversationHistory() { return prompt.conversationHistory(); }

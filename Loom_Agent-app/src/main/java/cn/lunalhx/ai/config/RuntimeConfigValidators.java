@@ -66,6 +66,7 @@ public final class RuntimeConfigValidators implements RuntimeConfigValidator<Run
         }
         positive(value.getTotalBudgetChars(), "loom.agent.context.total-budget-chars");
         positive(value.getPrefixBudgetChars(), "loom.agent.context.prefix-budget-chars");
+        positive(value.getWorkspaceBudgetChars(), "loom.agent.context.workspace-budget-chars");
         positive(value.getMemoryBudgetChars(), "loom.agent.context.memory-budget-chars");
         positive(value.getRelevantMemoryBudgetChars(), "loom.agent.context.relevant-memory-budget-chars");
         positive(value.getHistoryBudgetChars(), "loom.agent.context.history-budget-chars");

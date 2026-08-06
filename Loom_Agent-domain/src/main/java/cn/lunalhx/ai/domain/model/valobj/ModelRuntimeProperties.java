@@ -13,6 +13,7 @@ public class ModelRuntimeProperties {
 
     private String provider = "deepseek";
     private Map<String, ProviderConfig> providers = new LinkedHashMap<>();
+    private Map<String, ProviderCacheConfig> promptCache = defaultPromptCache();
     private Long connectTimeoutMs = 10000L;
     private Long firstTokenTimeoutMs = 30000L;
     private Long streamTimeoutMs = 120000L;
@@ -29,6 +30,7 @@ public class ModelRuntimeProperties {
     public synchronized void replaceFrom(ModelRuntimeProperties replacement) {
         this.provider = replacement.provider;
         this.providers = replacement.providers;
+        this.promptCache = replacement.promptCache;
         this.connectTimeoutMs = replacement.connectTimeoutMs;
         this.firstTokenTimeoutMs = replacement.firstTokenTimeoutMs;
         this.streamTimeoutMs = replacement.streamTimeoutMs;
@@ -76,6 +78,19 @@ public class ModelRuntimeProperties {
         return capabilities;
     }
 
+    private static Map<String, ProviderCacheConfig> defaultPromptCache() {
+        return new LinkedHashMap<>();
+    }
+
+    /** 显式 provider/model prompt-cache 能力配置；未配置返回 {@code null}（= 不支持）。 */
+    public PromptCacheCapability promptCacheCapability(String provider, String model) {
+        ProviderCacheConfig config = promptCache.get(provider);
+        if (config == null || config.getCapability() == null) {
+            return null;
+        }
+        return config.getCapability();
+    }
+
     private static Map<String, ModelPricing> defaultPricing() {
         Map<String, ModelPricing> pricing = new LinkedHashMap<>();
         pricing.put("deepseek-v4-flash", new ModelPricing());
@@ -94,6 +109,18 @@ public class ModelRuntimeProperties {
         private Integer maxTokens = 2048;
         private Double topP;
         private Long timeoutSeconds = 300L;
+
+    }
+
+    /**
+     * Provider prompt-cache 协议配置。显式声明能力；不配置 = 不支持缓存。
+     * 未知或不支持 provider 只发送普通请求，绝不伪造缓存字段。
+     */
+    @Data
+    public static class ProviderCacheConfig {
+
+        private PromptCacheCapability capability = PromptCacheCapability.UNSUPPORTED;
+        private String retention = "in_memory";
 
     }
 

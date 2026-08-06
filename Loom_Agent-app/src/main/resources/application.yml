@@ -9,3 +9,8 @@ loom:
     long-term-memory:
       pinned-limit: 4
       min-relevance-score: 0.15
+  ai:
+    prompt-cache:
+      openai:
+        capability: KEYED_REQUEST
+        retention: in_memory

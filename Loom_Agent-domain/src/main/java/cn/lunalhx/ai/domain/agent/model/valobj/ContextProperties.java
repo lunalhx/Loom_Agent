@@ -18,6 +18,8 @@ public class ContextProperties {
     private Integer totalBudgetChars = 12000;
     private Integer prefixBudgetChars = 3600;
     private Integer prefixFloorChars = 900;
+    private Integer workspaceBudgetChars = 2200;
+    private Integer workspaceFloorChars = 400;
     private Integer memoryBudgetChars = 1600;
     private Integer memoryFloorChars = 400;
     private Integer relevantMemoryBudgetChars = 1200;

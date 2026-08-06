@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextProperties;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,7 +35,7 @@ import java.util.Map;
 public final class ContextManager {
 
     private static final List<String> SECTION_ORDER =
-            List.of("prefix", "memory", "relevant_memory", "history", "current_request");
+            List.of("prefix", "workspace", "memory", "relevant_memory", "history", "current_request");
 
     private final AgentRuntimeProperties properties;
     private final HistoryRenderer historyRenderer;
@@ -82,16 +83,19 @@ public final class ContextManager {
         Sections raw = renderSections(context, cfg);
 
         int prefixFloor = positive(cfg.getPrefixFloorChars(), 900);
+        int workspaceFloor = positive(cfg.getWorkspaceFloorChars(), 400);
         int memoryFloor = positive(cfg.getMemoryFloorChars(), 400);
         int relevantFloor = positive(cfg.getRelevantMemoryFloorChars(), 300);
         int historyFloor = positive(cfg.getHistoryFloorChars(), 1300);
 
         String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixFloor);
+        String trimmedWorkspace = TextUtil.clipHeadTail(raw.workspace, workspaceFloor);
         String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryFloor);
         String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantFloor);
         String trimmedHistory = TextUtil.clipHeadTail(raw.historyText, historyFloor);
 
-        int total = TextUtil.length(trimmedPrefix) + TextUtil.length(trimmedMemory)
+        int total = TextUtil.length(trimmedPrefix) + TextUtil.length(trimmedWorkspace)
+                + TextUtil.length(trimmedMemory)
                 + TextUtil.length(trimmedRelevant) + TextUtil.length(trimmedHistory)
                 + TextUtil.length(raw.currentRequest);
 
@@ -99,6 +103,7 @@ public final class ContextManager {
         Map<String, Integer> budget = sectionBudgetChars(cfg);
         Map<String, Integer> rendered = new LinkedHashMap<>();
         rendered.put("prefix", TextUtil.length(trimmedPrefix));
+        rendered.put("workspace", TextUtil.length(trimmedWorkspace));
         rendered.put("memory", TextUtil.length(trimmedMemory));
         rendered.put("relevant_memory", TextUtil.length(trimmedRelevant));
         rendered.put("history", TextUtil.length(trimmedHistory));
@@ -115,7 +120,7 @@ public final class ContextManager {
                         raw.currentRequest, true, TextUtil.length(raw.currentRequest));
 
         List<ChatMessage> messages = messages(
-                trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
+                trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
         return new ContextBuildResult(trimmedPrefix, messages, metadata, false, null);
     }
 
@@ -125,6 +130,7 @@ public final class ContextManager {
 
     private Sections renderSections(AgentContext context, ContextProperties cfg) {
         String prefix = renderPrefix(context);
+        String workspace = renderWorkspace(context);
         String memory = renderMemory(context);
         int currentRequestIndex = currentRequestEntryIndex(context);
         String currentRequest = renderCurrentRequest(context);
@@ -145,13 +151,21 @@ public final class ContextManager {
                 positive(cfg.getRecentHistoryItems(), 6),
                 historyBudget,
                 context.getWorkingMemory(), reductionEnabled);
-        return new Sections(prefix, memory, relevantMemory, historyResult.text(),
+        return new Sections(prefix, workspace, memory, relevantMemory, historyResult.text(),
                 currentRequest, historyResult, selected.size() + durable.size());
     }
 
     private String renderPrefix(AgentContext context) {
         StablePrefix stablePrefix = context.getStablePrefix();
         return stablePrefix == null ? "" : stablePrefix.frozenContent();
+    }
+
+    private String renderWorkspace(AgentContext context) {
+        String snapshot = context.getWorkspaceSnapshot();
+        if (StringUtils.isBlank(snapshot)) {
+            return "Workspace snapshot: - stable";
+        }
+        return "Workspace snapshot:\n" + snapshot;
     }
 
     private String renderMemory(AgentContext context) {
@@ -236,8 +250,9 @@ public final class ContextManager {
     // Assembly
     // ================================================================
 
-    private List<ChatMessage> messages(String memory, String relevant, String history, String currentRequest) {
+    private List<ChatMessage> messages(String workspace, String memory, String relevant, String history, String currentRequest) {
         List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.builder().role("user").content(workspace).build());
         messages.add(ChatMessage.builder().role("user").content(memory).build());
         messages.add(ChatMessage.builder().role("user").content(relevant).build());
         messages.add(ChatMessage.builder().role("user").content(history).build());
@@ -246,8 +261,9 @@ public final class ContextManager {
     }
 
     private ContextBuildResult assembleRaw(Sections raw, AgentContext context) {
-        List<ChatMessage> messages = messages(raw.memory, raw.relevantMemory, raw.historyText, raw.currentRequest);
-        int total = TextUtil.length(raw.prefix) + TextUtil.length(raw.memory)
+        List<ChatMessage> messages = messages(raw.workspace, raw.memory, raw.relevantMemory, raw.historyText, raw.currentRequest);
+        int total = TextUtil.length(raw.prefix) + TextUtil.length(raw.workspace)
+                + TextUtil.length(raw.memory)
                 + TextUtil.length(raw.relevantMemory) + TextUtil.length(raw.historyText)
                 + TextUtil.length(raw.currentRequest);
 
@@ -267,6 +283,8 @@ public final class ContextManager {
         int totalBudget = positive(cfg.getTotalBudgetChars(), 12000);
         int prefixBudget = positive(cfg.getPrefixBudgetChars(), 3600);
         int prefixFloor = positive(cfg.getPrefixFloorChars(), 900);
+        int workspaceBudget = positive(cfg.getWorkspaceBudgetChars(), 2200);
+        int workspaceFloor = positive(cfg.getWorkspaceFloorChars(), 400);
         int memoryBudget = positive(cfg.getMemoryBudgetChars(), 1600);
         int memoryFloor = positive(cfg.getMemoryFloorChars(), 400);
         int relevantBudget = positive(cfg.getRelevantMemoryBudgetChars(), 1200);
@@ -278,42 +296,49 @@ public final class ContextManager {
         int currentRequestChars = TextUtil.length(raw.currentRequest);
 
         String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixBudget);
+        String trimmedWorkspace = TextUtil.clipHeadTail(raw.workspace, workspaceBudget);
         String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryBudget);
         String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantBudget);
         String trimmedHistory = TextUtil.clipHeadTail(raw.historyText, historyBudget);
 
-        int total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        int total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
 
         List<String> reductions = new ArrayList<>();
-        // If still over budget, reduce in fixed order: relevant_memory → history → memory → prefix,
+        // If still over budget, reduce in fixed order: relevant_memory → history → memory → workspace → prefix,
         // each pressed to its floor, re-rendering after each change.
         if (total > totalBudget && TextUtil.length(trimmedRelevant) > relevantFloor) {
             trimmedRelevant = TextUtil.clipHeadTail(trimmedRelevant, relevantFloor);
             reductions.add("relevant_memory->floor");
-            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+            total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
         if (total > totalBudget && TextUtil.length(trimmedHistory) > historyFloor) {
             trimmedHistory = TextUtil.clipHeadTail(trimmedHistory, historyFloor);
             reductions.add("history->floor");
-            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+            total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
         if (total > totalBudget && TextUtil.length(trimmedMemory) > memoryFloor) {
             trimmedMemory = TextUtil.clipHeadTail(trimmedMemory, memoryFloor);
             reductions.add("memory->floor");
-            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+            total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+        }
+        if (total > totalBudget && TextUtil.length(trimmedWorkspace) > workspaceFloor) {
+            trimmedWorkspace = TextUtil.clipHeadTail(trimmedWorkspace, workspaceFloor);
+            reductions.add("workspace->floor");
+            total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
         if (total > totalBudget && TextUtil.length(trimmedPrefix) > prefixFloor) {
             trimmedPrefix = TextUtil.clipHeadTail(trimmedPrefix, prefixFloor);
             reductions.add("prefix->floor");
-            total = totalLength(trimmedPrefix, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
+            total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
 
         List<ChatMessage> messages = messages(
-                trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
+                trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
 
         Map<String, Integer> budget = sectionBudgetChars(cfg);
         Map<String, Integer> rendered = new LinkedHashMap<>();
         rendered.put("prefix", TextUtil.length(trimmedPrefix));
+        rendered.put("workspace", TextUtil.length(trimmedWorkspace));
         rendered.put("memory", TextUtil.length(trimmedMemory));
         rendered.put("relevant_memory", TextUtil.length(trimmedRelevant));
         rendered.put("history", TextUtil.length(trimmedHistory));
@@ -333,6 +358,7 @@ public final class ContextManager {
     private Map<String, Integer> sectionRawChars(Sections raw) {
         Map<String, Integer> map = new LinkedHashMap<>();
         map.put("prefix", TextUtil.length(raw.prefix));
+        map.put("workspace", TextUtil.length(raw.workspace));
         map.put("memory", TextUtil.length(raw.memory));
         map.put("relevant_memory", TextUtil.length(raw.relevantMemory));
         map.put("history", TextUtil.length(raw.historyText));
@@ -343,6 +369,7 @@ public final class ContextManager {
     private Map<String, Integer> sectionBudgetChars(ContextProperties cfg) {
         Map<String, Integer> map = new LinkedHashMap<>();
         map.put("prefix", positive(cfg.getPrefixBudgetChars(), 3600));
+        map.put("workspace", positive(cfg.getWorkspaceBudgetChars(), 2200));
         map.put("memory", positive(cfg.getMemoryBudgetChars(), 1600));
         map.put("relevant_memory", positive(cfg.getRelevantMemoryBudgetChars(), 1200));
         map.put("history", positive(cfg.getHistoryBudgetChars(), 5200));
@@ -350,8 +377,9 @@ public final class ContextManager {
         return map;
     }
 
-    private int totalLength(String prefix, String memory, String relevant, String history, int request) {
-        return TextUtil.length(prefix) + TextUtil.length(memory)
+    private int totalLength(String prefix, String workspace, String memory, String relevant, String history, int request) {
+        return TextUtil.length(prefix) + TextUtil.length(workspace)
+                + TextUtil.length(memory)
                 + TextUtil.length(relevant) + TextUtil.length(history) + request;
     }
 
@@ -368,7 +396,7 @@ public final class ContextManager {
     }
 
     /** Raw, pre-budget section texts plus render diagnostics. */
-    private record Sections(String prefix, String memory, String relevantMemory,
+    private record Sections(String prefix, String workspace, String memory, String relevantMemory,
                             String historyText, String currentRequest,
                             HistoryRenderer.HistoryResult historyResult, int relevantSelected) {
     }

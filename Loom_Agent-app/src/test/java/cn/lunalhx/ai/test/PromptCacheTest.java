@@ -70,6 +70,7 @@ public class PromptCacheTest {
         assertEquals(200, (int) usage.getPromptCacheMissTokens());
         assertEquals(Boolean.TRUE, usage.getCacheHit());
         assertEquals("supported", usage.getCacheCapability());
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.HIT, usage.getCacheStatus());
     }
 
     @Test
@@ -82,6 +83,18 @@ public class PromptCacheTest {
         assertNotNull(usage);
         assertEquals(700, (int) usage.getPromptCacheHitTokens());
         assertEquals(Boolean.TRUE, usage.getCacheHit());
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.HIT, usage.getCacheStatus());
+    }
+
+    @Test
+    public void explicitZeroCachedTokensIsMiss() throws Exception {
+        TokenUsage usage = HttpModelGatewayTestSupport.parseUsage(java.util.Map.of(
+                "input_tokens", 500,
+                "output_tokens", 100,
+                "cache_read_input_tokens", 0));
+        assertNotNull(usage);
+        assertEquals(0, (int) usage.getPromptCacheHitTokens());
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.MISS, usage.getCacheStatus());
     }
 
     @Test
@@ -93,6 +106,7 @@ public class PromptCacheTest {
         assertNull(usage.getPromptCacheHitTokens());
         assertEquals("unsupported", usage.getCacheCapability());
         assertNull(usage.getCacheHit());
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.UNKNOWN, usage.getCacheStatus());
     }
 
     @Test
@@ -103,6 +117,7 @@ public class PromptCacheTest {
                 .promptCacheHitTokens(80)
                 .cacheHit(true)
                 .cacheCapability("supported")
+                .cacheStatus(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.HIT)
                 .build();
         ModelChatResult result = ModelChatResult.builder()
                 .content("ok")
@@ -111,5 +126,59 @@ public class PromptCacheTest {
         assertNotNull(result.getUsage());
         assertEquals(80, (int) result.getUsage().getPromptCacheHitTokens());
         assertEquals(Boolean.TRUE, result.getUsage().getCacheHit());
+        assertEquals(cn.lunalhx.ai.domain.model.valobj.PromptCacheStatus.HIT, result.getUsage().getCacheStatus());
+    }
+
+    @Test
+    public void cacheKeyDerivedFromNamespaceModelAndPrefix() {
+        String key = cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.deriveKey(
+                "deepseek", "deepseek-v4-flash", "fp-1");
+        assertEquals(key, cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.deriveKey(
+                "deepseek", "deepseek-v4-flash", "fp-1"));
+        assertNotEquals(key, cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.deriveKey(
+                "deepseek", "deepseek-v4-flash", "fp-2"));
+        assertNotEquals(key, cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.deriveKey(
+                "openai", "deepseek-v4-flash", "fp-1"));
+        // 只依赖稳定前缀签名，不依赖动态 history
+        assertEquals(64, key.length());
+    }
+
+    @Test
+    public void cacheRequestDisabledWhenFlagOffOrNoCapability() {
+        cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties properties = new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties();
+        ChatPrompt prompt = ChatPrompt.builder()
+                .model("deepseek-v4-flash")
+                .stablePrefixSignature("fp-1")
+                .cachePolicy(ChatPrompt.CachePolicy.READ)
+                .build();
+        // 未配置 capability → 不支持，即使 flag 开启也不发送
+        cn.lunalhx.ai.domain.model.valobj.PromptCacheRequest request =
+                cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.buildRequest(prompt, properties, true);
+        assertFalse(request.enabled());
+        // flag 关闭 → NONE
+        cn.lunalhx.ai.domain.model.valobj.PromptCacheRequest disabled =
+                cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.buildRequest(prompt, properties, false);
+        assertFalse(disabled.enabled());
+        assertEquals(ChatPrompt.CachePolicy.NONE, disabled.getPolicy());
+    }
+
+    @Test
+    public void cacheRequestEnabledOnlyWithCapabilityAndSignature() {
+        cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties properties = new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties();
+        cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties.ProviderCacheConfig cfg =
+                new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties.ProviderCacheConfig();
+        cfg.setCapability(cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability.KEYED_REQUEST);
+        properties.getPromptCache().put("openai", cfg);
+        properties.setProvider("openai");
+
+        ChatPrompt prompt = ChatPrompt.builder()
+                .model("gpt-5")
+                .stablePrefixSignature("fp-1")
+                .cachePolicy(ChatPrompt.CachePolicy.READ)
+                .build();
+        cn.lunalhx.ai.domain.model.valobj.PromptCacheRequest request =
+                cn.lunalhx.ai.domain.model.service.PromptCacheKeyFactory.buildRequest(prompt, properties, true);
+        assertTrue(request.enabled());
+        assertNotNull(request.getCacheKey());
     }
 }

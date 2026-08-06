@@ -98,7 +98,7 @@ public class AgentFlowFactory {
                         contextManager, ledgerAppendService),
                 new ModelCallNode(assembler, properties, ledgerAppendService,
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
-                                modelGateway, budgetGuard, traceRecorder)),
+                                modelGateway, budgetGuard, traceRecorder, runtime.agentMetrics())),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
                 new ToolDispatchNode(new ToolExecutor(toolRegistry, approvalPrompt), properties),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,

@@ -18,5 +18,6 @@ public class TokenUsage {
     private Integer promptCacheMissTokens;
     private Boolean cacheHit;
     private String cacheCapability;
+    private PromptCacheStatus cacheStatus = PromptCacheStatus.UNKNOWN;
 
 }
