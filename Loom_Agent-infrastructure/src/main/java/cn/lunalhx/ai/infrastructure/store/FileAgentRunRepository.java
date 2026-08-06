@@ -24,10 +24,17 @@ public final class FileAgentRunRepository implements AgentRunRepository {
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileAgentRunRepository(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileAgentRunRepository(Path workspaceRoot, ObjectMapper mapper,
+                                  ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("runs");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     public Path root() {
@@ -52,8 +59,10 @@ public final class FileAgentRunRepository implements AgentRunRepository {
             if (run.getCreatedAt() == null) {
                 run.setCreatedAt(now);
             }
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, run);
             AtomicFiles.write(target,
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(run));
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
             return run;
         } catch (IOException e) {
             throw new IllegalStateException("cannot save run " + run.getRunId() + ": " + e.getMessage(), e);

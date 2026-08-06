@@ -23,10 +23,17 @@ public final class FileRunStore {
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileRunStore(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileRunStore(Path workspaceRoot, ObjectMapper mapper,
+                        ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("runs");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     public Path root() {
@@ -62,8 +69,10 @@ public final class FileRunStore {
 
     public void writeTaskState(String runId, Map<String, Object> taskState) {
         try {
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, taskState);
             AtomicFiles.write(taskStatePath(runId),
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(taskState));
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
         } catch (IOException e) {
             throw new IllegalStateException("cannot write task_state for " + runId + ": " + e.getMessage(), e);
         }
@@ -73,7 +82,9 @@ public final class FileRunStore {
         try {
             Path path = tracePath(runId);
             Files.createDirectories(path.getParent());
-            String line = mapper.writeValueAsString(event) + "\n";
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, event);
+            String line = mapper.writeValueAsString(redacted) + "\n";
             Files.writeString(path, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             throw new IllegalStateException("cannot append trace for " + runId + ": " + e.getMessage(), e);
@@ -82,8 +93,10 @@ public final class FileRunStore {
 
     public void writeReport(String runId, Map<String, Object> report) {
         try {
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, report);
             AtomicFiles.write(reportPath(runId),
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(report));
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
         } catch (IOException e) {
             throw new IllegalStateException("cannot write report for " + runId + ": " + e.getMessage(), e);
         }

@@ -54,19 +54,33 @@ public final class CliLoopTestFixture {
                                          AgentRuntimeProperties agent,
                                          List<ToolExecutor.ApprovalPrompt> ignored,
                                          List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools) {
+        return build(workspace, mapper, gateway, agent, ignored, tools,
+                cn.lunalhx.ai.domain.agent.service.context.SecretRedactor.none());
+    }
+
+    /** Build with a shared redactor wired into both the sanitizer and the
+     *  artifact writers, mirroring the CLI wiring. */
+    public static AgentLoopService build(Path workspace, ObjectMapper mapper,
+                                         ModelGateway gateway,
+                                         AgentRuntimeProperties agent,
+                                         List<ToolExecutor.ApprovalPrompt> ignored,
+                                         List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools,
+                                         cn.lunalhx.ai.domain.agent.service.context.SecretRedactor redactor) {
         Path root = workspace.toAbsolutePath().normalize();
         AgentWorkspaceResolver resolver = new AgentWorkspaceResolver(agent);
-        AgentRunRepository runs = new FileAgentRunRepository(root, mapper);
-        AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper);
-        TraceRecorder traces = new FileTraceRecorder(root, mapper);
+        AgentRunRepository runs = new FileAgentRunRepository(root, mapper,
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
+        AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper,
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
+        TraceRecorder traces = new FileTraceRecorder(root, mapper,
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         BudgetGuard budget = new DefaultBudgetGuard(agent);
         ModelRuntimeProperties model = AgentRuntimeTestFixture.testModelRuntimeProperties();
 
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(resolver, runs, checkpoints, mapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 agent, traces, budget, new NoopAgentMetrics(),
-                new RedactingToolOutputSanitizer(cn.lunalhx.ai.domain.agent.service.context.SecretRedactor.of(
-                        java.util.Set.of(), java.util.Set.of())),
+                new RedactingToolOutputSanitizer(redactor),
                 model);
         ConversationHistoryAppendService ledger = new ConversationHistoryAppendService();
         AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime, ledger,

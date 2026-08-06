@@ -98,6 +98,15 @@ public class CliSessionService implements AutoCloseable {
                 buildLoopWithSpring(spring, options));
     }
 
+    /** Build a shared artifact redactor from CLI options (writer last-defense). */
+    private static cn.lunalhx.ai.infrastructure.store.ArtifactRedactor artifactRedactor(CliOptions options) {
+        Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
+                ? Set.of() : Set.of(options.apiKey);
+        return new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(
+                SecretRedactor.of(Set.copyOf(options.secretEnvNames),
+                        new java.util.LinkedHashSet<>(options.secretValues), providerKeys));
+    }
+
     /** Test entry point: direct dependencies, no Spring context required. */
     CliSessionService(CliOptions options, ObjectMapper mapper,
                       AgentRuntimeProperties agent, ModelRuntimeProperties model,
@@ -113,40 +122,19 @@ public class CliSessionService implements AutoCloseable {
         this.runStore = runStore;
         this.checkpointStore = checkpointStore;
         this.traceRecorder = traceRecorder;
-        this.memoryStore = new FileDurableMemoryRepository(Path.of(options.workspaceRoot), mapper);
+        this.memoryStore = new FileDurableMemoryRepository(Path.of(options.workspaceRoot), mapper,
+                artifactRedactor(options));
         this.memoryPromotion = new cn.lunalhx.ai.domain.memory.service.MemoryPromotionService(memoryStore);
         this.agent = agent;
         this.model = model;
         applyOptions(agent, model, options);
-        Set<String> secretEnvNames = Set.copyOf(options.secretEnvNames);
-        Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
-                ? Set.of() : Set.of(options.apiKey);
-        this.redactor = SecretRedactor.of(collectSecretValues(options), providerKeys);
+        this.redactor = SecretRedactor.of(
+                Set.copyOf(options.secretEnvNames),
+                new java.util.LinkedHashSet<>(options.secretValues),
+                options.apiKey == null || options.apiKey.isBlank()
+                        ? Set.of() : Set.of(options.apiKey));
         this.session = openOrCreateSession();
         this.loopService = loopService;
-    }
-
-    /** Resolve configured secret env names to their actual values (the values
-     *  are what must never reach disk). Direct values (tests) are merged in. */
-    private static Set<String> collectSecretValues(CliOptions options) {
-        Set<String> values = new java.util.LinkedHashSet<>();
-        if (options.secretValues != null) {
-            for (String value : options.secretValues) {
-                if (value != null && !value.isBlank()) {
-                    values.add(value);
-                }
-            }
-        }
-        for (String name : options.secretEnvNames) {
-            if (name == null || name.isBlank()) {
-                continue;
-            }
-            String value = System.getenv(name);
-            if (value != null && !value.isBlank()) {
-                values.add(value);
-            }
-        }
-        return values;
     }
 
     private AgentSession openOrCreateSession() {
@@ -620,18 +608,20 @@ public class CliSessionService implements AutoCloseable {
         BudgetGuard budgetGuard = spring.getBean(BudgetGuard.class);
         cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics metrics = spring.getBean(
                 cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics.class);
+        cn.lunalhx.ai.infrastructure.store.ArtifactRedactor artifactRedactor = artifactRedactor(options);
         FileAgentSessionRepository sessionStore = new FileAgentSessionRepository(
-                Path.of(options.workspaceRoot), springMapper);
+                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
         FileAgentRunRepository runStore = new FileAgentRunRepository(
-                Path.of(options.workspaceRoot), springMapper);
+                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
         FileAgentCheckpointRepository checkpointStore = new FileAgentCheckpointRepository(
-                Path.of(options.workspaceRoot), springMapper);
+                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
         FileTraceRecorder traceRecorder = new FileTraceRecorder(
-                Path.of(options.workspaceRoot), springMapper);
+                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
         Set<String> secretEnvNames = Set.copyOf(options.secretEnvNames);
         Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
                 ? Set.of() : Set.of(options.apiKey);
-        SecretRedactor redactor = SecretRedactor.of(secretEnvNames, providerKeys);
+        SecretRedactor redactor = SecretRedactor.of(secretEnvNames,
+                new java.util.LinkedHashSet<>(options.secretValues), providerKeys);
 
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(
                 workspaceResolver, runStore, checkpointStore, springMapper);
@@ -642,8 +632,8 @@ public class CliSessionService implements AutoCloseable {
         ConversationHistoryAppendService ledgerAppendService = spring.getBean(ConversationHistoryAppendService.class);
         ContextManager contextManager = new ContextManager(springAgent, () -> {
             try {
-                return new FileDurableMemoryRepository(Path.of(options.workspaceRoot), springMapper)
-                        .findAllNewestFirst();
+                return new FileDurableMemoryRepository(Path.of(options.workspaceRoot), springMapper,
+                        artifactRedactor).findAllNewestFirst();
             } catch (Exception e) {
                 return List.of();
             }

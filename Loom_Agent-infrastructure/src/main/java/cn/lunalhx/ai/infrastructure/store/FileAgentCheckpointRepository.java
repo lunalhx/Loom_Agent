@@ -19,10 +19,17 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileAgentCheckpointRepository(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileAgentCheckpointRepository(Path workspaceRoot, ObjectMapper mapper,
+                                         ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("checkpoints");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     public Path root() {
@@ -54,8 +61,10 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
             }
             checkpoint.setVersion(nextVersion);
             checkpoint.setCreatedAt(Instant.now());
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, checkpoint);
             AtomicFiles.write(path(checkpoint.getRunId(), nextVersion),
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(checkpoint));
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
             return checkpoint;
         } catch (IOException e) {
             throw new IllegalStateException("cannot save checkpoint: " + e.getMessage(), e);

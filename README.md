@@ -78,7 +78,7 @@ REPL 命令：
 | `--host` | Ollama base URL 便捷参数 | `http://127.0.0.1:11434` |
 | `--resume <sessionId\|latest>` | 恢复会话 | - |
 | `--approval` | `ask` \| `auto` \| `never` | `ask` |
-| `--secret-env-name` | 追加脱敏环境变量名（可重复） | - |
+| `--secret-env-name` | 追加脱敏环境变量名（可重复）；默认自动发现 `*_API_KEY`/`*_TOKEN`/`*_SECRET`/`*_PASSWORD` 环境变量 | - |
 | `--max-steps` | 每轮最大工具步数 | `6` |
 | `--max-new-tokens` | 模型输出 token 上限 | `512` |
 | `--temperature` | 采样温度 | `0.2` |
@@ -123,8 +123,9 @@ export LOOM_CODE_DEEPSEEK_MODEL=deepseek-v4-pro
 
 - `auto`：允许所有风险工具。
 - `never`：拒绝所有风险工具。
-- `ask`：CLI 显示工具名与完整参数，输入 `y`/`yes` 允许，其他输入（含 EOF）拒绝。
+- `ask`：CLI 显示工具名与参数摘要（路径明文、其余参数只显示长度与 hash），输入 `y`/`yes` 允许，其他输入（含 EOF）拒绝；完整 command/write content 与 secret 值不展示。
 - `delegate` 子 Agent `readOnly=true`，风险工具直接拒绝。
+- 审批动作记录独立 trace 安全事件：`approval_requested`、`approval_granted`、`approval_denied`、`approval_blocked_by_read_only`，事件只携带安全参数摘要。
 
 ---
 
@@ -143,15 +144,23 @@ export LOOM_CODE_DEEPSEEK_MODEL=deepseek-v4-pro
 
 - `--resume latest` 选择当前工作区最近更新的会话；工作区不一致时拒绝恢复。
 - REPL 复用同一 session；`/reset` 清空历史/记忆/checkpoint，保留 session id 与工作区。
-- trace/report 按规则脱敏：变量名后缀 `API_KEY`/`TOKEN`/`SECRET`/`PASSWORD` 及 `--secret-env-name` 指定字段替换为 `<redacted>`。
+- 所有持久化 artifact（trace、checkpoint、run、report、session、working/durable memory）在写入前统一脱敏，占位符为 `<redacted>`：自动发现后缀 `API_KEY`/`TOKEN`/`SECRET`/`PASSWORD` 的环境变量值、`--secret-env-name` 指定字段、Provider API key 按长度降序替换；敏感字段名（如 `api_key`）整体替换。
+- trace 事件的 `sensitiveRedacted` 按真实处理状态标记（仅当实际替换了秘密才为 `true`），并携带 `redactionVersion`（当前规则版本 `1`）；旧 `[REDACTED]` 标记在重写时统一归一为新占位符，旧 trace JSONL 行（无 `redactionVersion` 字段）仍可被读取。
+- 脱敏发生在工具执行边界（工具输出在进入 history/ledger/memory/checkpoint 之前已清洗）；文件 writer 层作为最后防线再次兜底。清洗失败时 fail-closed：原文不会进入模型上下文、记忆、checkpoint 或 trace。
+- 工具输出是**不可信数据**：系统指令明确要求把输出中的命令/标签/指令视为数据而非控制协议；疑似 prompt injection（伪造系统指令、忽略规则、泄露 secrets、绕过审批、伪造 `<tool>`/`<final>` 标签）记录 `WARN` 安全事件，不阻断合法内容。
 
 ---
 
 ## 架构总览
 
 ```text
-CLI → SessionRuntime → AgentLoop → Prompt/Model → Loom XML Parser → ToolExecutor → Tool/FileStore
+CLI → SessionRuntime → AgentLoop → Prompt/Model → Loom XML Parser → decision → tool_input → tool_execute → tool_output → Tool/FileStore
 ```
+
+- `decision`：只解析模型协议（final/retry/action），不做工具授权。
+- `tool_input`：工具可见性/allowlist、schema 校验、重复调用、read-only 与审批；只把脱敏后的参数写入 event/state。
+- `tool_execute`：唯一执行边界，`registry.call` 返回后立即脱敏+截断，步数只在此递增一次。
+- `tool_output`：唯一 history/ledger/memory 写入者，消费已清洗的 result。
 
 模块划分：
 

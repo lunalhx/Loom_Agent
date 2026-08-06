@@ -82,6 +82,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 emit(sink, List.of(components.eventFactory().runStarted(context)));
                 emit(sink, lifecycle.initializeRun(context));
                 emit(sink, List.of(components.eventFactory().meta(context)));
+                emitSecretRedactionState(context);
                 runLoop(context, sink);
             } finally {
                 if (token != null) {
@@ -93,6 +94,22 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private AgentContext resolveContext(AgentQuestion question) {
         return components.contextFactory().create(question);
+    }
+
+    /** When {@code secretRedaction} is explicitly disabled, record a trace
+     *  security event so the behavior is never a silent default. */
+    private void emitSecretRedactionState(AgentContext context) {
+        try {
+            cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties runProperties =
+                    context.runtimeProperties(properties);
+            if (runProperties.getFeatureFlags() != null
+                    && !runProperties.getFeatureFlags().secretRedaction()) {
+                components.nodeLifecycle().traceRecorder().recordSecurityEvent(context,
+                        "secret_redaction_disabled", AgentNodeNames.PROMPT_BUILD, "warning",
+                        Map.of("policy", "noop"));
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     // ==================== 核心编排 ====================
@@ -165,7 +182,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 if (AgentNodeNames.MODEL_CALL.equals(currentNode)) {
                     lifecycle.recordModelAttempt(context);
                 }
-                if (AgentNodeNames.TOOL_DISPATCH.equals(currentNode)) {
+                if (AgentNodeNames.TOOL_OUTPUT.equals(currentNode)) {
                     emit(sink, lifecycle.checkpointAfterTool(context));
                 }
 

@@ -35,7 +35,10 @@ public class AgentTraceEvent {
     private TraceCost cost;
     private Map<String, Object> metadata;
     private Boolean replayable;
+    /** True when the writer actually redacted a secret from this event. */
     private Boolean sensitiveRedacted;
+    /** Redaction rules version applied by the writer (see SanitizationPolicy). */
+    private String redactionVersion;
     private Instant createdAt;
 
 }

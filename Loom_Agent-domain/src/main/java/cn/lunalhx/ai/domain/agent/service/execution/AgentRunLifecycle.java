@@ -64,17 +64,21 @@ public final class AgentRunLifecycle {
         saveRun(context, AgentNodeNames.MODEL_CALL, AgentRunStatus.RUNNING);
     }
 
+    /** Post-tool checkpoint: the snapshot already contains the sanitized
+     *  result, history, memory and ledger. The next recovery node is always
+     *  {@code prompt_build} and the running context's current node is never
+     *  mutated by the save. */
     public List<AgentEvent> checkpointAfterTool(AgentContext context) {
-        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.OBSERVATION, "after_tool");
+        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, "after_tool");
         context.setCheckpointVersion(checkpoint.getVersion());
-        saveRun(context, AgentNodeNames.OBSERVATION, AgentRunStatus.RUNNING);
+        saveRun(context, AgentNodeNames.PROMPT_BUILD, AgentRunStatus.RUNNING);
         return List.of(AgentEvent.builder()
                 .type(AgentEventType.CHECKPOINT_SAVED)
                 .runId(context.identity().runId())
                 .requestId(context.identity().requestId())
                 .conversationId(context.identity().conversationId())
                 .workspace(context.environment().workspaceDisplayName())
-                .node(AgentNodeNames.OBSERVATION)
+                .node(AgentNodeNames.PROMPT_BUILD)
                 .toolSteps(context.runtime().toolSteps())
                 .modelAttempts(context.runtime().modelAttempts())
                 .lastTool(context.runtime().lastTool())
@@ -140,7 +144,6 @@ public final class AgentRunLifecycle {
     // ================================================================
 
     private AgentCheckpoint saveCheckpoint(AgentContext context, String currentNode, String reason) {
-        context.runtime().enterNode(currentNode);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         return checkpointRepository.save(AgentCheckpoint.builder()
                 .runId(context.identity().runId())

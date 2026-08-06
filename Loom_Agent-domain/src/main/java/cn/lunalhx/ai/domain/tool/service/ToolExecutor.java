@@ -1,50 +1,36 @@
 package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
+import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * The single tool-execution boundary mirroring loom-code {@code ToolExecutor}.
+ * Execution service of the tool chain: the only entry point that calls the
+ * {@link ToolRegistry}. Input governance (allowlist, existence, schema,
+ * repeated-call, readOnly/approval) lives in {@link ToolInputGate}.
  *
- * <p>Fixed order of checks:
- * <ol>
- *   <li>allowedTools allowlist</li>
- *   <li>tool existence</li>
- *   <li>argument parse + semantic validation (before approval)</li>
- *   <li>consecutive repeated call (3rd identical call rejected)</li>
- *   <li>readOnly and approval policy</li>
- *   <li>workspace snapshot before risky tools</li>
- *   <li>execute tool</li>
- *   <li>clip output to 4000 chars</li>
- *   <li>snapshot + diff after risky tools</li>
- *   <li>memory / process note update</li>
- *   <li>unified metadata + observation event</li>
- * </ol>
+ * <p>Security boundary: the raw result returned by {@code registry.call} is
+ * handled restrictively inside this class — output is sanitized BEFORE it is
+ * clipped and BEFORE it is written to {@code context.toolResult}. A sanitizer
+ * failure is fail-closed: a fixed minimal error observation is written and raw
+ * output never reaches context, memory, checkpoint or trace.
  *
- * <p>No node or delegate may call the registry directly; this is the only
- * execution entry point.
+ * <p>This class never writes prompt/history/ledger/checkpoint; it produces one
+ * execution result plus metadata per call.
  */
 public class ToolExecutor {
 
     public static final int MAX_TOOL_OUTPUT = 4000;
 
-    public enum ApprovalPolicy { ASK, AUTO, NEVER }
-
-    /** Runtime policy for a single tool call. */
+    /** Runtime policy for a single tool call (shared with the input gate). */
     public record ToolRuntimePolicy(Set<String> allowedTools,
                                     boolean readOnly,
                                     ApprovalPolicy approvalPolicy,
@@ -59,102 +45,55 @@ public class ToolExecutor {
         }
     }
 
-    /** CLI-facing approval prompt: shows tool name + full args, y/yes allows. */
+    /** CLI-facing approval prompt. Receives only redacted/summarized args. */
     public interface ApprovalPrompt {
-        boolean ask(String toolName, JsonNode args);
+        boolean ask(String toolName, com.fasterxml.jackson.databind.JsonNode args);
     }
 
-    private final ToolRegistry registry;
-    private final ApprovalPrompt approvalPrompt;
+    public enum ApprovalPolicy { ASK, AUTO, NEVER }
 
-    public ToolExecutor(ToolRegistry registry, ApprovalPrompt approvalPrompt) {
+    private static final String SANITIZE_FAILED_OBSERVATION =
+            "tool_error: sanitization_failed - output withheld";
+
+    private final ToolRegistry registry;
+    private final ToolOutputSanitizer sanitizer;
+
+    public ToolExecutor(ToolRegistry registry, ToolOutputSanitizer sanitizer) {
         this.registry = registry;
-        this.approvalPrompt = approvalPrompt;
+        this.sanitizer = sanitizer;
     }
 
     public ToolExecutor(ToolRegistry registry) {
         this(registry, null);
     }
 
-    /**
-     * Execute one tool call with full governance. Tool history for the
-     * repeated-call check is maintained on the context; rejected calls are
-     * also recorded so subsequent checks stay consistent.
-     */
-    public ToolResult execute(AgentContext context, ToolCall call, ToolRuntimePolicy policy) {
+    /** The registry backing this executor (input gate construction). */
+    public ToolRegistry registry() {
+        return registry;
+    }
+
+    /** Execute one accepted tool call. Tool step counting is the caller's
+     *  responsibility (the execute node); rejected calls never reach here. */
+    public ToolResult execute(AgentContext context, ToolCall call) {
         String name = call.getName();
-        JsonNode args = normalizeArgs(call);
-
-        // 1. allowedTools
-        if (policy.allowedTools() != null && !policy.allowedTools().contains(name)) {
-            return rejected(context, call, "tool_not_allowed",
-                    "error: tool '" + name + "' is not allowed in this run",
-                    "rejected", "high", false, "tool_not_allowed");
-        }
-
-        // 2. tool existence
-        if (!registry.contains(name)) {
-            return rejected(context, call, "unknown_tool",
-                    "error: unknown tool '" + name + "'",
-                    "rejected", "high", false, "unknown_tool");
-        }
-
+        Path root = call.getWorkspaceRoot();
         boolean risky = registry.isRisky(name);
 
-        // 3. argument parse + semantic validation (before approval)
-        ToolInputValidationResult validation = registry.validateInput(name, args);
-        if (!validation.valid()) {
-            String detail = validation.errors().stream()
-                    .map(e -> e.pointer() + ": " + e.message())
-                    .reduce((a, b) -> a + "; ").orElse("invalid");
-            String example = exampleFor(name);
-            String message = "error: invalid arguments for " + name + ": " + detail
-                    + (example.isEmpty() ? "" : "\nexample: " + example);
-            return rejected(context, call, "invalid_arguments",
-                    message, "rejected", risky ? "high" : "low", !risky, "invalid_arguments");
-        }
-
-        // 4. consecutive repeated call
-        if (isRepeated(context, call, name, args)) {
-            return rejected(context, call, "repeated_identical_call",
-                    "error: repeated identical tool call for " + name
-                            + "; choose a different tool or return a final answer",
-                    "rejected", risky ? "high" : "low", !risky, "repeated_identical_call");
-        }
-
-        // 5. readOnly and approval policy
-        if (policy.readOnly() && risky) {
-            return rejected(context, call, "approval_denied",
-                    "error: approval denied for " + name + " (read-only run)",
-                    "rejected", "high", false, "read_only_block");
-        }
-        if (risky && !isApproved(policy, name, args)) {
-            return rejected(context, call, "approval_denied",
-                    "error: approval denied for " + name,
-                    "rejected", "high", false, "approval_denied");
-        }
-
-        // 6. snapshot before risky tools
-        Path root = call.getWorkspaceRoot();
+        // workspace snapshot before risky tools
         Map<String, String> before = risky ? WorkspaceFingerprint.snapshot(root) : Map.of();
         Map<String, String> after = before;
         try {
-            // 7. execute
             ToolResult result = registry.call(call);
-            // 8. clip output
-            String rawObservation = result.getObservation();
-            String clipped = clip(rawObservation);
-            result.setObservation(clipped);
-            result.setTruncated(clipped.length() < (rawObservation == null ? 0 : rawObservation.length()));
-            // 9. snapshot + diff after risky tools
             after = risky ? WorkspaceFingerprint.snapshot(root) : before;
             WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
 
+            applySafeOutput(result, name);
+
             String toolStatus = "ok";
             String toolErrorCode = "";
             if ("run_shell".equals(name)) {
-                int exitCode = parseExitCode(clipped);
+                int exitCode = parseExitCode(result.getObservation());
                 if (exitCode != 0 && workspaceChanged) {
                     toolStatus = "partial_success";
                     toolErrorCode = "tool_partial_success";
@@ -164,9 +103,7 @@ public class ToolExecutor {
                 }
             }
             applyMetadata(result, toolStatus, toolErrorCode, risky, diff, workspaceChanged, root);
-            // 10. memory / process note
             context.setToolResult(result);
-            recordToolEvent(context, call, name, args);
             return result;
         } catch (Exception e) {
             after = risky ? WorkspaceFingerprint.snapshot(root) : before;
@@ -185,95 +122,32 @@ public class ToolExecutor {
             result.setAffectedPaths(diff.affectedPaths());
             result.setWorkspaceChanged(workspaceChanged);
             result.setDiffSummary(diff.diffSummary());
-            result.setObservation(clip(result.getObservation()));
+            // Exception messages may embed secrets — sanitize before clip.
+            applySafeOutput(result, name);
             context.setToolResult(result);
-            recordToolEvent(context, call, name, args);
             return result;
         }
     }
 
-    private void recordToolEvent(AgentContext context, ToolCall call, String name, JsonNode args) {
-        if (context.getHistory() != null) {
-            List<cn.lunalhx.ai.domain.agent.model.entity.AgentStep> history =
-                    new ArrayList<>(context.getHistory());
-            history.add(cn.lunalhx.ai.domain.agent.model.entity.AgentStep.builder()
-                    .toolStep(history.size() + 1)
-                    .tool(name)
-                    .input(args == null ? null : args.toString())
-                    .observation(context.getToolResult() == null ? null : context.getToolResult().getObservation())
-                    .success(context.getToolResult() != null && context.getToolResult().isSuccess())
-                    .build());
-            context.setHistory(history);
+    /** Sanitize-then-clip; fail-closed on sanitizer failure. */
+    private void applySafeOutput(ToolResult result, String toolName) {
+        String rawObservation = result.getObservation() == null ? "" : result.getObservation();
+        ToolOutputSanitization sanitization;
+        try {
+            sanitization = sanitizer == null
+                    ? ToolOutputSanitization.clean(rawObservation)
+                    : sanitizer.sanitize(toolName, rawObservation);
+        } catch (Exception e) {
+            sanitization = ToolOutputSanitization.degraded(SANITIZE_FAILED_OBSERVATION);
         }
-    }
-
-    private boolean isRepeated(AgentContext context, ToolCall call, String name, JsonNode args) {
-        List<cn.lunalhx.ai.domain.agent.model.entity.AgentStep> history = context.getHistory();
-        if (history == null || history.size() < 2) {
-            return false;
+        if (sanitization.isDegraded()) {
+            result.setObservation(SANITIZE_FAILED_OBSERVATION);
+            result.setTruncated(false);
+            return;
         }
-        List<cn.lunalhx.ai.domain.agent.model.entity.AgentStep> recent = history.subList(history.size() - 2, history.size());
-        return recent.stream().allMatch(step -> name.equals(step.getTool())
-                && sameArgs(step.getInput(), args == null ? null : args.toString()));
-    }
-
-    private boolean sameArgs(String a, String b) {
-        if (a == null && b == null) {
-            return true;
-        }
-        return a != null && a.equals(b);
-    }
-
-    private boolean isApproved(ToolRuntimePolicy policy, String name, JsonNode args) {
-        if (policy.approvalPolicy() == ApprovalPolicy.AUTO) {
-            return true;
-        }
-        if (policy.approvalPolicy() == ApprovalPolicy.NEVER) {
-            return false;
-        }
-        if (approvalPrompt == null) {
-            return false;
-        }
-        return approvalPrompt.ask(name, args);
-    }
-
-    private JsonNode normalizeArgs(ToolCall call) {
-        JsonNode args = call.getInput();
-        if (args == null || args.isMissingNode() || args.isNull()) {
-            ObjectMapper mapper = new ObjectMapper();
-            return mapper.createObjectNode();
-        }
-        if (!args.isObject()) {
-            return args;
-        }
-        // sort keys for normalized comparison (repeated-call + metadata)
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode sorted = mapper.createObjectNode();
-        List<String> keys = new ArrayList<>();
-        args.fieldNames().forEachRemaining(keys::add);
-        keys.sort(Comparator.naturalOrder());
-        for (String key : keys) {
-            sorted.set(key, args.get(key));
-        }
-        return sorted;
-    }
-
-    private ToolResult rejected(AgentContext context, ToolCall call, String errorCode,
-                                String content, String toolStatus, String riskLevel,
-                                boolean readOnly, String securityEvent) {
-        ToolResult result = ToolResult.failure(errorCode, content, 0L);
-        result.setToolStatus("rejected");
-        result.setToolErrorCode(errorCode);
-        result.setSecurityEventType(securityEvent);
-        result.setRiskLevel(riskLevel);
-        result.setReadOnly(readOnly);
-        result.setAffectedPaths(List.of());
-        result.setWorkspaceChanged(false);
-        result.setDiffSummary(List.of());
-        result.setObservation(clip(content));
-        context.setToolResult(result);
-        recordToolEvent(context, call, call.getName(), normalizeArgs(call));
-        return result;
+        String clipped = clip(sanitization.getOutput());
+        result.setObservation(clipped);
+        result.setTruncated(clipped.length() < sanitization.getOutput().length());
     }
 
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,
@@ -314,18 +188,5 @@ public class ToolExecutor {
         }
         return text.substring(0, MAX_TOOL_OUTPUT)
                 + "\n...[truncated " + (text.length() - MAX_TOOL_OUTPUT) + " chars]";
-    }
-
-    private String exampleFor(String name) {
-        return switch (name) {
-            case "list_files" -> "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>";
-            case "read_file" -> "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\",\"start\":1,\"end\":80}}</tool>";
-            case "search" -> "<tool>{\"name\":\"search\",\"args\":{\"pattern\":\"binary_search\",\"path\":\".\"}}</tool>";
-            case "run_shell" -> "<tool>{\"name\":\"run_shell\",\"args\":{\"command\":\"mvn -q test\",\"timeout\":20}}</tool>";
-            case "write_file" -> "<tool name=\"write_file\" path=\"a.py\"><content>...</content></tool>";
-            case "patch_file" -> "<tool name=\"patch_file\" path=\"a.py\"><old_text>old</old_text><new_text>new</new_text></tool>";
-            case "delegate" -> "<tool>{\"name\":\"delegate\",\"args\":{\"task\":\"inspect README.md\",\"max_steps\":3}}</tool>";
-            default -> "";
-        };
     }
 }

@@ -52,13 +52,13 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":{\"msg\":\"hello\"}}</tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
         assertNull(ctx.getToolResult());
         assertEquals("action", ctx.getDecision().getType());
         assertEquals("msg_tool", ctx.getDecision().getTool());
@@ -68,20 +68,20 @@ public class DecisionNodeTest {
     public void jsonToolMissingArgsDefaultsToEmptyObject() {
         AgentTool t = tool("empty_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"empty_tool\"}</tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
     }
 
     @Test
     public void malformedToolJsonReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",</tool>", List.of(t.spec()));
 
@@ -95,7 +95,7 @@ public class DecisionNodeTest {
     public void missingToolNameReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -109,7 +109,7 @@ public class DecisionNodeTest {
     public void nonObjectArgsReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":[]}</tool>", List.of(t.spec()));
 
@@ -126,7 +126,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("write_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context(
                 "<tool name=\"write_file\" path=\"a.txt\"><content>hello\nworld</content></tool>",
@@ -134,7 +134,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
         assertEquals("a.txt", ctx.getDecision().getInput().path("path").asText());
         assertEquals("hello\nworld", ctx.getDecision().getInput().path("content").asText());
     }
@@ -144,7 +144,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("write_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context(
                 "<tool name=\"write_file\" path=\"a.txt\">\ndef f():\n    return 1\n</tool>",
@@ -152,7 +152,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
         assertTrue(ctx.getDecision().getInput().path("content").asText().contains("def f()"));
     }
 
@@ -161,7 +161,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("patch_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_text\":{\"type\":\"string\"},\"new_text\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_text\",\"new_text\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context(
                 "<tool name=\"patch_file\" path=\"a.py\"><old_text>return -1</old_text><new_text>return mid</new_text></tool>",
@@ -169,7 +169,7 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
         assertEquals("return -1", ctx.getDecision().getInput().path("old_text").asText());
         assertEquals("return mid", ctx.getDecision().getInput().path("new_text").asText());
     }
@@ -179,13 +179,13 @@ public class DecisionNodeTest {
         AgentTool t = tool("read_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool name='read_file' path='README.md'></tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
         assertEquals("README.md", ctx.getDecision().getInput().path("path").asText());
     }
 
@@ -193,7 +193,7 @@ public class DecisionNodeTest {
     public void xmlToolWithoutNameReturnsFormatRetry() {
         AgentTool t = tool("read_file", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool path=\"README.md\"></tool>", List.of(t.spec()));
 
@@ -208,7 +208,7 @@ public class DecisionNodeTest {
     public void finalTagCompletes() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<final>Done.</final>", List.of(t.spec()));
 
@@ -222,7 +222,7 @@ public class DecisionNodeTest {
     public void emptyFinalReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<final>   </final>", List.of(t.spec()));
 
@@ -235,7 +235,7 @@ public class DecisionNodeTest {
     public void bareTextCompletesAsFinal() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("just an answer", List.of(t.spec()));
 
@@ -249,7 +249,7 @@ public class DecisionNodeTest {
     public void emptyOutputReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("", List.of(t.spec()));
 
@@ -259,61 +259,63 @@ public class DecisionNodeTest {
         assertEquals(0, ctx.getToolSteps());
     }
 
-    // ---- Tool visibility / validation ----
+    // ---- Tool visibility / validation moved to the input gate ----
+    // DecisionNode only parses the protocol; unknown tools / invalid inputs
+    // still produce an action decision routed to TOOL_INPUT.
 
     @Test
-    public void unknownToolReturnsUnknownToolError() {
+    public void unknownToolStillRoutesToToolInputForGate() {
         AgentTool t = tool("known", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"unknown\",\"args\":{}}</tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
-        assertTrue(ctx.getToolResult().getObservation().contains("unknown"));
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertEquals("unknown", ctx.getDecision().getTool());
+        assertNull(ctx.getToolResult());
     }
 
     @Test
-    public void hiddenToolInRegistryIsRejected() {
+    public void hiddenToolStillRoutesToToolInputForGate() {
         AgentTool t1 = tool("exposed", "{\"type\":\"object\",\"additionalProperties\":false}");
         AgentTool t2 = tool("hidden", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t1, t2), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"hidden\",\"args\":{}}</tool>", List.of(t1.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("unknown_tool", ctx.getToolResult().getErrorCode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertEquals("hidden", ctx.getDecision().getTool());
+        assertNull(ctx.getToolResult());
     }
 
     @Test
-    public void missingRequiredFieldReturnsInvalidToolInput() {
+    public void missingRequiredFieldStillRoutesToToolInputForGate() {
         String schema = "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}},\"required\":[\"cmd\"],\"additionalProperties\":false}";
         AgentTool t = tool("test_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"test_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertNotNull(ctx.getToolResult());
-        assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
-        assertTrue(ctx.getToolResult().getObservation().contains("cmd"));
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertNull(ctx.getToolResult());
+        assertNotNull(ctx.getDecision());
     }
 
     @Test
-    public void wrongTypeReturnsInvalidToolInput() {
+    public void wrongTypeStillRoutesToToolInputForGate() {
         String schema = "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\"}},\"required\":[\"count\"],\"additionalProperties\":false}";
         AgentTool t = tool("count_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context(
                 "<tool>{\"name\":\"count_tool\",\"args\":{\"count\":\"not_a_number\"}}</tool>",
@@ -321,8 +323,8 @@ public class DecisionNodeTest {
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.OBSERVATION, result.getNextNode());
-        assertEquals("invalid_tool_input", ctx.getToolResult().getErrorCode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertNull(ctx.getToolResult());
     }
 
     @Test
@@ -330,7 +332,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"additionalProperties\":false}";
         AgentTool t = tool("int_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool>{\"name\":\"int_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -345,13 +347,13 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"start\":{\"type\":\"integer\"},\"end\":{\"type\":\"integer\"}},\"required\":[\"start\"],\"additionalProperties\":false}";
         AgentTool t = tool("range_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, registry, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
 
         AgentContext ctx = context("<tool name=\"range_tool\" start=\"1\" end=\"80\"></tool>", List.of(t.spec()));
 
         NodeResult result = node.apply(ctx);
 
-        assertEquals(AgentNodeNames.TOOL_DISPATCH, result.getNextNode());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
     }
 
     // ---- Helper ----

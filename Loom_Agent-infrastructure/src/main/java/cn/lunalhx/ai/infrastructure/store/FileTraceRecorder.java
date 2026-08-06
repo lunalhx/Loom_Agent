@@ -30,10 +30,17 @@ public final class FileTraceRecorder implements TraceRecorder {
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileTraceRecorder(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileTraceRecorder(Path workspaceRoot, ObjectMapper mapper,
+                             ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("runs");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     @Override
@@ -211,7 +218,14 @@ public final class FileTraceRecorder implements TraceRecorder {
         try {
             Path path = root.resolve(runId).resolve("trace.jsonl");
             Files.createDirectories(path.getParent());
-            Files.writeString(path, mapper.writeValueAsString(event) + "\n",
+            com.fasterxml.jackson.databind.JsonNode tree = mapper.valueToTree(event);
+            boolean changed = artifactRedactor.redactTree(tree);
+            // stamp truthful flags: only mark sensitiveRedacted when a secret
+            // was actually replaced, and always record the applied version.
+            tree = ((com.fasterxml.jackson.databind.node.ObjectNode) tree)
+                    .put("sensitiveRedacted", changed)
+                    .put("redactionVersion", artifactRedactor.redactionVersion());
+            Files.writeString(path, mapper.writeValueAsString(tree) + "\n",
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             throw new IllegalStateException("cannot append trace for " + runId + ": " + e.getMessage(), e);

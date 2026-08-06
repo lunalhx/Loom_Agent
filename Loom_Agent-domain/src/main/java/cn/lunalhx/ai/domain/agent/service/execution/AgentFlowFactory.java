@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ToolDispatchNode;
+import cn.lunalhx.ai.domain.agent.flow.node.ToolExecuteNode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
@@ -23,6 +24,7 @@ import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
+import cn.lunalhx.ai.domain.tool.service.ToolInputGate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -32,7 +34,9 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Node-graph factory for the loom-code six-node agent loop.
+ * Node-graph factory for the loom-code agent loop:
+ * {@code prompt_build → model_call → decision → tool_input → tool_execute →
+ * tool_output → prompt_build}.
  */
 public class AgentFlowFactory {
 
@@ -92,6 +96,16 @@ public class AgentFlowFactory {
         ModelCallMiddlewareAssembler assembler =
                 new ModelCallMiddlewareAssembler(errorRecoveryMiddleware, budgetMiddleware);
 
+        ToolExecutor executor = new ToolExecutor(toolRegistry, runtime.toolOutputSanitizer());
+        ToolInputGate inputGate = new ToolInputGate(toolRegistry, approvalPrompt);
+        if (traceRecorder != null) {
+            inputGate.withAuditSink((context, audit) -> traceRecorder.recordSecurityEvent(
+                    context, audit.eventType(), AgentNodeNames.TOOL_INPUT, "approval",
+                    java.util.Map.of(
+                            "tool", audit.toolName(),
+                            "argSummary", audit.argSummary())));
+        }
+
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new PromptBuildNode(
                         new LedgerPromptServices(bootstrapService, new StablePrefixBuilder()),
@@ -99,8 +113,9 @@ public class AgentFlowFactory {
                 new ModelCallNode(assembler, properties, ledgerAppendService,
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder, runtime.agentMetrics())),
-                new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
-                new ToolDispatchNode(new ToolExecutor(toolRegistry, approvalPrompt), properties),
+                new DecisionNode(objectMapper, properties, ledgerAppendService),
+                new ToolDispatchNode(inputGate, runtime.toolOutputSanitizer(), properties),
+                new ToolExecuteNode(executor),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService)
         ));

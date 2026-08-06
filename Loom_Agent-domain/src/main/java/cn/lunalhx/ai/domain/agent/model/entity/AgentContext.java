@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
@@ -199,6 +200,8 @@ public class AgentContext {
 
     public AgentDecision getDecision() { return action.decision(); }
     public void setDecision(AgentDecision v) { action.setDecision(v); }
+    public ToolCall getToolCall() { return action.toolCall(); }
+    public void setToolCall(ToolCall v) { action.setToolCall(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
 

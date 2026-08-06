@@ -24,10 +24,17 @@ public final class FileDurableMemoryRepository implements DurableMemoryRepositor
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileDurableMemoryRepository(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileDurableMemoryRepository(Path workspaceRoot, ObjectMapper mapper,
+                                       ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("memory");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     public Path root() {
@@ -162,14 +169,18 @@ public final class FileDurableMemoryRepository implements DurableMemoryRepositor
 
     private void writeTopic(String topic, List<MemoryEntry> entries) throws IOException {
         Files.createDirectories(root.resolve("topics"));
+        com.fasterxml.jackson.databind.JsonNode redacted =
+                artifactRedactor.toRedactedTree(mapper, entries);
         AtomicFiles.write(topicFile(topic),
-                mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(entries));
+                mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
     }
 
     private void writeIndex() throws IOException {
         List<MemoryEntry> all = findAll();
         Files.createDirectories(root);
+        com.fasterxml.jackson.databind.JsonNode redacted =
+                artifactRedactor.toRedactedTree(mapper, all);
         AtomicFiles.write(indexFile(),
-                mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(all));
+                mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
     }
 }

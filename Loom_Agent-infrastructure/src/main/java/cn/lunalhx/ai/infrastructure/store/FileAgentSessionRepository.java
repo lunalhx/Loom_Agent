@@ -21,10 +21,17 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
 
     private final Path root;
     private final ObjectMapper mapper;
+    private final ArtifactRedactor artifactRedactor;
 
     public FileAgentSessionRepository(Path workspaceRoot, ObjectMapper mapper) {
+        this(workspaceRoot, mapper, new ArtifactRedactor());
+    }
+
+    public FileAgentSessionRepository(Path workspaceRoot, ObjectMapper mapper,
+                                      ArtifactRedactor artifactRedactor) {
         this.root = workspaceRoot.resolve(".loom-code").resolve("sessions");
         this.mapper = mapper;
+        this.artifactRedactor = artifactRedactor;
     }
 
     public Path root() {
@@ -43,8 +50,10 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
             if (session.getCreatedAt() == null) {
                 session.setCreatedAt(session.getUpdatedAt());
             }
+            com.fasterxml.jackson.databind.JsonNode redacted =
+                    artifactRedactor.toRedactedTree(mapper, session);
             AtomicFiles.write(path(session.getId()),
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(session));
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
             return session;
         } catch (IOException e) {
             throw new IllegalStateException("cannot save session: " + e.getMessage(), e);

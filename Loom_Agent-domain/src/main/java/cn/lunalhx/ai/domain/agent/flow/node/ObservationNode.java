@@ -6,6 +6,8 @@ import cn.lunalhx.ai.domain.agent.flow.AbstractAgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentStep;
 import cn.lunalhx.ai.domain.agent.service.context.WorkingContextMemoryService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
@@ -19,10 +21,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Single recording entry for tool results, validation errors, and approval
- * denials. Unifies cleaning, working memory, ledger, history, and the
- * Observation event. Ledger event keys stay idempotent so checkpoint resume
- * never re-executes tools and never duplicates records.
+ * Tool output node ({@code tool_output}). The single recording entry for tool
+ * results, validation errors and approval denials.
+ *
+ * <p>Consumes the already-sanitized {@link ToolResult} produced by the
+ * executor as the primary boundary; the sanitizer here is a defensive
+ * idempotency check, not the only sanitizer. It unifies history, working
+ * memory, ledger, the observation event and security events. It never calls
+ * the underlying tool and never re-approves/re-validates input.
  */
 public class ObservationNode extends AbstractAgentNode {
 
@@ -38,7 +44,7 @@ public class ObservationNode extends AbstractAgentNode {
                            TraceRecorder traceRecorder,
                            AgentMetrics agentMetrics,
                            ConversationHistoryAppendService ledgerAppendService) {
-        super(AgentNodeNames.OBSERVATION, List.of("toolResult", "decision", "toolSteps"));
+        super(AgentNodeNames.TOOL_OUTPUT, List.of("toolResult", "decision", "toolSteps"));
         this.sanitizer = sanitizer;
         this.traceRecorder = traceRecorder;
         this.agentMetrics = agentMetrics;
@@ -49,16 +55,18 @@ public class ObservationNode extends AbstractAgentNode {
     @Override
     protected NodeResult doApply(AgentContext context) {
         ToolResult result = context.getToolResult();
-        appendStep(context, result != null && result.isSuccess());
+        appendSafeStep(context, result != null && result.isSuccess());
 
         String toolName = context.getDecision() != null && context.getDecision().getTool() != null
                 ? context.getDecision().getTool() : "unknown";
-        String rawObservation = result != null ? result.getObservation() : "";
-        if (rawObservation == null) {
-            rawObservation = "";
-        }
 
-        ToolOutputSanitization sanitization = sanitizeObservation(context, toolName, rawObservation);
+        ToolOutputSanitization sanitization = sanitizeObservation(context, toolName, result);
+        String safeOutput = sanitization.getOutput();
+        if (result != null && result.getObservation() != null && !safeOutput.equals(result.getObservation())) {
+            // defensive idempotency: the executor already sanitized; keep the
+            // safe value everywhere so no exit ever sees raw data.
+            result.setObservation(safeOutput);
+        }
 
         workingMemoryService.onToolResult(context, toolName, result);
 
@@ -67,7 +75,7 @@ public class ObservationNode extends AbstractAgentNode {
                     context.getRunId(), String.valueOf(Math.max(1, context.getToolSteps())), "tool_result");
             String toolInputJson = context.getDecision() != null && context.getDecision().getInput() != null
                     ? context.getDecision().getInput().toString() : null;
-            ledgerAppendService.appendToolResult(context, sanitization.getOutput(), result,
+            ledgerAppendService.appendToolResult(context, safeOutput, result,
                     toolName, toolInputJson, eventKey);
         }
 
@@ -75,16 +83,19 @@ public class ObservationNode extends AbstractAgentNode {
     }
 
     private ToolOutputSanitization sanitizeObservation(AgentContext context, String toolName,
-                                                       String rawObservation) {
+                                                       ToolResult result) {
+        String raw = result == null ? "" : result.getObservation();
         ToolOutputSanitization sanitization;
         try {
-            sanitization = sanitizer.sanitize(toolName, rawObservation);
+            sanitization = sanitizer.sanitize(toolName, raw == null ? "" : raw);
         } catch (Exception e) {
-            log.warn("Prompt injection scan failed for tool={}", toolName, e);
-            sanitization = ToolOutputSanitization.clean(rawObservation);
+            // Fail-closed: never fall back to raw output on sanitizer failure.
+            log.warn("Tool output sanitization failed for tool={}", toolName, e);
+            sanitization = ToolOutputSanitization.degraded(
+                    "tool_error: sanitization_failed - output withheld");
             if (traceRecorder != null) {
-                traceRecorder.recordSecurityEvent(context, "prompt_injection_scan_failed",
-                        AgentNodeNames.OBSERVATION, "error",
+                traceRecorder.recordSecurityEvent(context, "sanitization_failed",
+                        AgentNodeNames.TOOL_OUTPUT, "error",
                         Map.of("tool", toolName));
             }
         }
@@ -96,7 +107,7 @@ public class ObservationNode extends AbstractAgentNode {
             }
             if (traceRecorder != null) {
                 traceRecorder.recordSecurityEvent(context, "prompt_injection_detected",
-                        AgentNodeNames.OBSERVATION, "warning",
+                        AgentNodeNames.TOOL_OUTPUT, "warning",
                         Map.of(
                                 "tool", toolName,
                                 "matchCount", matchCount,
@@ -106,5 +117,18 @@ public class ObservationNode extends AbstractAgentNode {
         }
 
         return sanitization;
+    }
+
+    private void appendSafeStep(AgentContext context, boolean success) {
+        AgentStep step = AgentStep.builder()
+                .toolStep(Math.max(1, context.getToolSteps()))
+                .thought(context.getDecision() == null ? null : context.getDecision().getReason())
+                .tool(context.getDecision() == null ? "model_parse" : context.getDecision().getTool())
+                .input(context.getDecision() == null || context.getDecision().getInputView() == null
+                        ? null : String.valueOf(context.getDecision().getInputView()))
+                .observation(context.getToolResult() == null ? null : context.getToolResult().getObservation())
+                .success(success)
+                .build();
+        context.runtime().history().add(step);
     }
 }

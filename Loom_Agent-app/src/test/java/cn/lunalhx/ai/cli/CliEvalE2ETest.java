@@ -101,21 +101,21 @@ public class CliEvalE2ETest {
     @Test
     public void evalStepLimitTerminatesWithStepLimitStopReason() throws Exception {
         Path workspace = Files.createTempDirectory("eval-steps");
-        FakeModelGateway gateway = new FakeModelGateway(List.of(
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>",
-                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>"));
+        // Distinct calls so every one is accepted and consumes a tool step.
+        List<String> script = new java.util.ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            script.add("<tool>{\"name\":\"list_files\",\"args\":{\"path\":\"dir" + i + "\"}}</tool>");
+        }
+        FakeModelGateway gateway = new FakeModelGateway(script);
         AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
         agent.setMaxSteps(3);
         AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
         FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
         FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
         FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper);
-        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent, List.of());
+        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent, List.of(),
+                List.of(new cn.lunalhx.ai.infrastructure.loom.ListFilesTool(
+                        new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())));
         CliSessionService.CliOptions opts = options(workspace, gateway);
         opts.maxSteps = 3;
         CliSessionService session = new CliSessionService(opts, mapper, agent,

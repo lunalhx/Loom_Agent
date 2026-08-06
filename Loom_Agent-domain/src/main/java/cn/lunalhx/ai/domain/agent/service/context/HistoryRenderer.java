@@ -157,25 +157,25 @@ final class HistoryRenderer {
                 }
                 return RenderOutcome.line(
                         "[tool:read_file]" + (path != null ? " " + path : "") + "\nResult: "
-                                + firstLines(escape(content), 3), isOlder, true, false);
+                                + untrusted(firstLines(escape(content), 3)), isOlder, true, false);
             }
             if ("run_shell".equals(toolName)) {
                 return RenderOutcome.line(
                         "[tool:run_shell] command -> " + command(assistant) + "\n"
-                                + firstLines(escape(content), 3), false, true, false);
+                                + untrusted(firstLines(escape(content), 3)), false, true, false);
             }
             if (isOlder) {
                 return RenderOutcome.line(
-                        "[tool:" + toolName + "] " + singleLine(escape(content)), false, false, false);
+                        "[tool:" + toolName + "] " + untrusted(singleLine(escape(content))), false, false, false);
             }
             return RenderOutcome.line(
-                    "[tool:" + toolName + "] result:\n" + firstLines(escape(content), 3),
+                    "[tool:" + toolName + "] result:\n" + untrusted(firstLines(escape(content), 3)),
                     false, true, false);
         }
         if (item.type() == LogicalItem.Type.TOOL_RESULT) {
             String toolName = item.first().toolName() != null ? item.first().toolName() : "tool";
             return RenderOutcome.line(
-                    "[tool:" + toolName + "] " + singleLine(escape(unwrapToolBoundary(item.first().content()))),
+                    "[tool:" + toolName + "] " + untrusted(singleLine(escape(unwrapToolBoundary(item.first().content())))),
                     false, false, false);
         }
         String role = item.first().role();
@@ -187,6 +187,20 @@ final class HistoryRenderer {
         return RenderOutcome.line("User: " + (compressed
                 ? singleLine(item.first().content())
                 : item.first().content()), false, false, false);
+    }
+
+    /**
+     * Wrap already-escaped tool output in an explicit untrusted data section.
+     * Tool output that already carries the boundary (escaped or not) is left
+     * untouched to avoid double wrapping.
+     */
+    private String untrusted(String escapedContent) {
+        String value = escapedContent == null ? "" : escapedContent;
+        if (value.contains("<untrusted_tool_output>")
+                || value.contains("&lt;untrusted_tool_output&gt;")) {
+            return value;
+        }
+        return "<untrusted_tool_output>\n" + value + "\n</untrusted_tool_output>";
     }
 
     private String readPath(ConversationHistoryEntry assistant, ConversationHistoryEntry result) {

@@ -36,8 +36,7 @@ public final class AgentNodeLifecycle {
         this.nodes = nodes;
     }
 
-    public AgentNodeExecution execute(AgentContext context, AgentNode node, Consumer<List<AgentEvent>> emitter) {
-        String parentSpanId = context.trace().currentSpanId();
+    public AgentNodeExecution execute(AgentContext context, AgentNode node, Consumer<List<AgentEvent>> emitter) {        String parentSpanId = context.trace().currentSpanId();
         String spanId = traceRecorder.recordNodeStart(context, node, parentSpanId);
         context.trace().setParentSpanId(parentSpanId);
         context.trace().setCurrentSpanId(spanId);
@@ -69,6 +68,10 @@ public final class AgentNodeLifecycle {
             emitter.accept(result.getEvents());
         }
         return new AgentNodeExecution(result, nextNode);
+    }
+
+    public TraceRecorder traceRecorder() {
+        return traceRecorder;
     }
 
     public void cancelled(AgentContext context, Consumer<List<AgentEvent>> emitter) {
