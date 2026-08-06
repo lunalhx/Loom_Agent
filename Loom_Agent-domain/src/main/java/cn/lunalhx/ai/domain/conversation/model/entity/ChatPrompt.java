@@ -30,4 +30,14 @@ public class ChatPrompt {
     private List<ChatMessage> messages;
     private ModelRuntimeProperties runtimeProperties;
 
+    /** Deterministic signature of the stable prefix portion (tool catalog +
+     *  workspace facts + role protocol). Only this is allowed in a cache key. */
+    private String stablePrefixSignature;
+
+    /** Provider cache policy: NONE / READ / READ_WRITE. */
+    private CachePolicy cachePolicy = CachePolicy.READ;
+
+    public enum CachePolicy {
+        NONE, READ, READ_WRITE
+    }
 }

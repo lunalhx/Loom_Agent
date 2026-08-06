@@ -63,7 +63,30 @@ public final class AgentContextFactory {
         if (StringUtils.isBlank(question.getConversationId())) {
             context.setConversationId(UUID.randomUUID().toString());
         }
+        restoreSeed(context, question);
         return context;
+    }
+
+    /** A new root run seeded with the session's durable history/working memory
+     *  (not a node-position resume). The run keeps its own fresh identity. */
+    private void restoreSeed(AgentContext context, AgentQuestion question) {
+        AgentContextSnapshot previous = question.getSeedSnapshot();
+        if (previous == null) {
+            return;
+        }
+        if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
+            context.setConversationHistory(ConversationHistory.fromPersisted(
+                    new ArrayList<>(previous.getLedgerEntries()),
+                    previous.getLedgerNextSequence()));
+        }
+        if (previous.getWorkingMemory() != null) {
+            context.setWorkingMemory(previous.getWorkingMemory());
+        }
+        context.setStablePrefix(previous.getStablePrefix());
+        context.setGeneration(Math.max(0, previous.getGeneration()));
+        // The new user question joins the seeded ledger as raw user input so
+        // resumed sessions keep an append-only record of every request.
+        context.setPendingContinuation(context.getQuestion());
     }
 
     public AgentContext createContinuation(AgentQuestion question, AgentContextSnapshot previous) {
@@ -84,6 +107,8 @@ public final class AgentContextFactory {
         context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
         context.setQuestion(StringUtils.trim(question.getQuestion()));
         context.setPathScope(question.getPathScope());
+        context.setSessionId(question.getSessionId());
+        context.setCheckpointId(question.getCheckpointId());
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
@@ -110,6 +135,9 @@ public final class AgentContextFactory {
                 context.setStablePrefix(previous.getStablePrefix());
                 context.setGeneration(Math.max(0, previous.getGeneration()));
             }
+            if (previous.getWorkingMemory() != null) {
+                context.setWorkingMemory(previous.getWorkingMemory());
+            }
         }
 
         context.setPendingContinuation(context.getQuestion());
@@ -130,6 +158,8 @@ public final class AgentContextFactory {
         context.setAgentDepth(question.getAgentDepth() == null ? 0 : question.getAgentDepth());
         context.setQuestion(StringUtils.trim(question.getQuestion()));
         context.setPathScope(question.getPathScope());
+        context.setSessionId(question.getSessionId());
+        context.setCheckpointId(question.getCheckpointId());
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());

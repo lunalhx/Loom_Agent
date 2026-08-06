@@ -19,4 +19,11 @@ public interface ModelGateway {
         return null;
     }
 
+    /** Provider cache capability: NONE (no cache fields), or READ (prompt
+     *  cache read/write fields are honored). Never inferred from prompt
+     *  prefix similarity — only from the provider's actual response. */
+    default String cacheCapability() {
+        return "unsupported";
+    }
+
 }

@@ -1,0 +1,98 @@
+package cn.lunalhx.ai.test;
+
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard;
+import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
+import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
+import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
+import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
+import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
+import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
+import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
+import cn.lunalhx.ai.infrastructure.tool.NoopToolOutputSanitizer;
+import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.Executor;
+
+/**
+ * Builds a full standalone agent loop wired to file-backed run/checkpoint/
+ * trace stores inside a temp workspace — the same wiring the CLI uses, minus
+ * the Spring context. Used by the CLI-level offline E2E tests.
+ */
+public final class CliLoopTestFixture {
+
+    private CliLoopTestFixture() {
+    }
+
+    public static AgentLoopService build(Path workspace, ObjectMapper mapper,
+                                         ModelGateway gateway,
+                                         AgentRuntimeProperties agent,
+                                         List<ToolExecutor.ApprovalPrompt> ignored) {
+        return build(workspace, mapper, gateway, agent, ignored, List.of());
+    }
+
+    public static AgentLoopService build(Path workspace, ObjectMapper mapper,
+                                         ModelGateway gateway,
+                                         AgentRuntimeProperties agent,
+                                         List<ToolExecutor.ApprovalPrompt> ignored,
+                                         List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools) {
+        Path root = workspace.toAbsolutePath().normalize();
+        AgentWorkspaceResolver resolver = new AgentWorkspaceResolver(agent);
+        AgentRunRepository runs = new FileAgentRunRepository(root, mapper);
+        AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper);
+        TraceRecorder traces = new FileTraceRecorder(root, mapper);
+        BudgetGuard budget = new DefaultBudgetGuard(agent);
+        ModelRuntimeProperties model = AgentRuntimeTestFixture.testModelRuntimeProperties();
+
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(resolver, runs, checkpoints, mapper);
+        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
+                agent, traces, budget, new NoopAgentMetrics(),
+                new RedactingToolOutputSanitizer(cn.lunalhx.ai.domain.agent.service.context.SecretRedactor.of(
+                        java.util.Set.of(), java.util.Set.of())),
+                model);
+        ConversationHistoryAppendService ledger = new ConversationHistoryAppendService();
+        AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime, ledger,
+                new ContextManager(agent), new ConversationExecutionGuard(), null);
+        ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
+        return factory.createStandalone(registry, Runnable::run);
+    }
+
+    public static AgentRuntimeProperties agentProperties(Path workspace) {
+        AgentRuntimeProperties properties = new AgentRuntimeProperties();
+        properties.setWorkspaceRoot(workspace.toString());
+        properties.setAllowedWorkspaceRoots(List.of(workspace.toString()));
+        properties.setMaxSteps(6);
+        properties.setStepTimeoutMs(60_000L);
+        properties.setTotalTimeoutMs(300_000L);
+        properties.setToolTimeoutMs(10_000L);
+        properties.setObservationMaxChars(8000);
+        properties.setApprovalPolicy("never");
+        return properties;
+    }
+
+    public static ToolOutputSanitizer passthrough() {
+        return new NoopToolOutputSanitizer();
+    }
+
+    public static Executor inline() {
+        return Runnable::run;
+    }
+}

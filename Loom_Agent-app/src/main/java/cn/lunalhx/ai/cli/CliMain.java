@@ -84,11 +84,19 @@ public final class CliMain {
                 String.valueOf(options.temperature));
         System.setProperty("loom.ai.providers." + options.provider + ".max-tokens",
                 String.valueOf(options.maxNewTokens));
+        System.setProperty("loom.ai.providers." + options.provider + ".top-p",
+                String.valueOf(options.topP));
+        System.setProperty("loom.ai.providers." + options.provider + ".timeout-seconds",
+                String.valueOf(options.timeoutSeconds));
         System.setProperty("loom.ai.allowed-models", options.model);
         System.setProperty("loom.agent.workspace-root", options.workspaceRoot);
         System.setProperty("loom.agent.allowed-workspace-roots", options.workspaceRoot);
         System.setProperty("loom.agent.max-steps", String.valueOf(options.maxSteps));
         System.setProperty("loom.agent.approval-policy", options.approvalPolicy);
+        if (!options.secretEnvNames.isEmpty()) {
+            System.setProperty("loom.agent.secret-env-names",
+                    String.join(",", options.secretEnvNames));
+        }
 
         SpringApplication application = new SpringApplication(Application.class);
         application.setWebApplicationType(WebApplicationType.NONE);
@@ -135,7 +143,7 @@ public final class CliMain {
                     continue;
                 }
                 case "/memory" -> {
-                    System.out.println("(working memory shown in prompt)");
+                    System.out.println(session.memoryView());
                     continue;
                 }
                 default -> {
@@ -203,6 +211,9 @@ public final class CliMain {
         options.temperature = arguments.temperature;
         options.topP = arguments.topP;
         options.timeoutSeconds = arguments.timeoutSeconds;
+        options.secretEnvNames.addAll(arguments.secretEnvNames);
+        options.approvalPrompt = new CliSessionService.InteractiveApprovalPrompt(
+                arguments.approval != null && "ask".equals(arguments.approval));
         if (arguments.resume != null && !arguments.resume.isBlank()) {
             options.resumeSessionId = "latest".equals(arguments.resume)
                     ? sessionStoreLatest(options.workspaceRoot)

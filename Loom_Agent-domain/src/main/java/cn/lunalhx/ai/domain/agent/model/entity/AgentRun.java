@@ -17,12 +17,14 @@ import java.time.Instant;
 public class AgentRun {
 
     private String runId;
+    private String sessionId;
     private String parentRunId;
     private String rootRunId;
     private String requestId;
     private String conversationId;
     private AgentRunKind runKind;
     private Integer depth;
+    private Integer maxSteps;
     private String question;
     private String workspace;
     private AgentRunStatus status;

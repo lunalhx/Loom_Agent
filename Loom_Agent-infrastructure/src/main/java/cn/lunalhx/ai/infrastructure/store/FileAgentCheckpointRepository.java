@@ -1,0 +1,96 @@
+package cn.lunalhx.ai.infrastructure.store;
+
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Optional;
+
+/**
+ * File-backed {@link AgentCheckpoint} store under
+ * {@code .loom-code/checkpoints/<runId>/<version>.json}. Checkpoints carry
+ * the semantic {@code TaskCheckpoint} payload plus the context snapshot.
+ */
+public final class FileAgentCheckpointRepository implements AgentCheckpointRepository {
+
+    private final Path root;
+    private final ObjectMapper mapper;
+
+    public FileAgentCheckpointRepository(Path workspaceRoot, ObjectMapper mapper) {
+        this.root = workspaceRoot.resolve(".loom-code").resolve("checkpoints");
+        this.mapper = mapper;
+    }
+
+    public Path root() {
+        return root;
+    }
+
+    public Path path(String runId, long version) {
+        return root.resolve(runId).resolve(version + ".json");
+    }
+
+    @Override
+    public AgentCheckpoint save(AgentCheckpoint checkpoint) {
+        try {
+            Path dir = root.resolve(checkpoint.getRunId());
+            Files.createDirectories(dir);
+            long nextVersion;
+            try (var stream = Files.list(dir)) {
+                nextVersion = stream
+                        .filter(p -> p.getFileName().toString().endsWith(".json"))
+                        .mapToLong(p -> {
+                            String name = p.getFileName().toString();
+                            try {
+                                return Long.parseLong(name.substring(0, name.length() - ".json".length()));
+                            } catch (NumberFormatException e) {
+                                return 0L;
+                            }
+                        })
+                        .max().orElse(0L) + 1L;
+            }
+            checkpoint.setVersion(nextVersion);
+            checkpoint.setCreatedAt(Instant.now());
+            AtomicFiles.write(path(checkpoint.getRunId(), nextVersion),
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(checkpoint));
+            return checkpoint;
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot save checkpoint: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public Optional<AgentCheckpoint> latest(String runId) {
+        Path dir = root.resolve(runId);
+        if (!Files.isDirectory(dir)) {
+            return Optional.empty();
+        }
+        Path best = null;
+        long bestVersion = -1;
+        try (var stream = Files.list(dir)) {
+            for (Path file : (Iterable<Path>) stream.filter(p -> p.getFileName().toString().endsWith(".json"))::iterator) {
+                String name = file.getFileName().toString();
+                try {
+                    long version = Long.parseLong(name.substring(0, name.length() - ".json".length()));
+                    if (version > bestVersion) {
+                        bestVersion = version;
+                        best = file;
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        if (best == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(mapper.readValue(best.toFile(), AgentCheckpoint.class));
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
+}

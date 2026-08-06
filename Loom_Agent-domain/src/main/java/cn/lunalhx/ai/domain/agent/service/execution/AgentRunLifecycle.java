@@ -105,19 +105,34 @@ public final class AgentRunLifecycle {
     // ================================================================
 
     public void complete(AgentContext context) {
+        saveFinalCheckpoint(context, "run_complete");
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.COMPLETED);
     }
 
     public void stopped(AgentContext context) {
+        saveFinalCheckpoint(context, "run_stopped");
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.STOPPED);
     }
 
     public void failed(AgentContext context) {
+        saveFinalCheckpoint(context, "run_failed");
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.FAILED);
     }
 
     public void cancelled(AgentContext context) {
+        saveFinalCheckpoint(context, "run_cancelled");
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.STOPPED);
+    }
+
+    /** Terminal checkpoint so session sync captures the final ledger (incl. the
+     *  final answer system note) and the final working memory. */
+    private void saveFinalCheckpoint(AgentContext context, String reason) {
+        try {
+            AgentCheckpoint checkpoint = saveCheckpoint(context, context.runtime().currentNode(), reason);
+            context.setCheckpointVersion(checkpoint.getVersion());
+        } catch (Exception ignored) {
+            // checkpoint persistence must never mask the terminal outcome
+        }
     }
 
     // ================================================================
@@ -140,17 +155,20 @@ public final class AgentRunLifecycle {
         AgentIdentity id = context.identity();
         AgentBudgetState budget = context.budget();
         BudgetState budgetState = budget.budgetState();
+        cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition def = context.runDefinition();
 
         AgentRunStatus status = resolveStatus(runtime, fallbackStatus);
 
         runRepository.save(AgentRun.builder()
                 .runId(id.runId())
+                .sessionId(context.getSessionId())
                 .parentRunId(id.parentRunId())
                 .rootRunId(StringUtils.defaultIfBlank(id.rootRunId(), id.runId()))
                 .requestId(id.requestId())
                 .conversationId(id.conversationId())
                 .runKind(StringUtils.isBlank(id.parentRunId()) ? AgentRunKind.ROOT : AgentRunKind.CHILD)
                 .depth(id.agentDepth())
+                .maxSteps(def.maxSteps())
                 .question(context.runDefinition().question())
                 .workspace(context.environment().workspaceDisplayName())
                 .status(status)

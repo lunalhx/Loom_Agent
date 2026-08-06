@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -26,6 +27,7 @@ public class AgentLoopFactory {
     private final ConversationHistoryAppendService ledgerAppendService;
     private final ContextManager contextManager;
     private final ConversationExecutionGuard executionGuard;
+    private final ToolExecutor.ApprovalPrompt approvalPrompt;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                             AgentLoopStateDependencies state,
@@ -33,17 +35,28 @@ public class AgentLoopFactory {
                             ConversationHistoryAppendService ledgerAppendService,
                             ContextManager contextManager,
                             ConversationExecutionGuard executionGuard) {
+        this(modelGateway, state, runtime, ledgerAppendService, contextManager, executionGuard, null);
+    }
+
+    public AgentLoopFactory(ModelGateway modelGateway,
+                            AgentLoopStateDependencies state,
+                            AgentLoopRuntimeDependencies runtime,
+                            ConversationHistoryAppendService ledgerAppendService,
+                            ContextManager contextManager,
+                            ConversationExecutionGuard executionGuard,
+                            ToolExecutor.ApprovalPrompt approvalPrompt) {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.ledgerAppendService = Objects.requireNonNull(
                 ledgerAppendService, "ledgerAppendService must not be null");
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
         this.executionGuard = Objects.requireNonNull(executionGuard, "executionGuard must not be null");
+        this.approvalPrompt = approvalPrompt;
         LedgerBootstrapService bs = new LedgerBootstrapService(
                 ledgerAppendService, new ConversationHistoryInitializer());
 
         this.flowFactory = new AgentFlowFactory(modelGateway, state, runtime,
-                ledgerAppendService, bs, contextManager);
+                ledgerAppendService, bs, contextManager, approvalPrompt);
     }
 
     public DefaultAgentLoopService createStandalone(ToolRegistry toolRegistry, Executor executor) {

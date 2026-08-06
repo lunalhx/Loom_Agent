@@ -44,6 +44,7 @@ public class AgentContextSnapshot {
 
     // -- identity (durable) --
     private String runId;
+    private String sessionId;
     private String parentRunId;
     private String rootRunId;
     private String requestId;
@@ -55,6 +56,7 @@ public class AgentContextSnapshot {
     private String pathScope;
     private Integer maxSteps;
     private Integer maxAttempts;
+    private String checkpointId;
 
     // -- environment (only workspace ref; resolved path re-injected) --
     private WorkspaceRef workspace;
@@ -136,6 +138,7 @@ public class AgentContextSnapshot {
                 .schemaVersion(9)
                 // identity
                 .runId(id.runId())
+                .sessionId(context.getSessionId())
                 .parentRunId(id.parentRunId())
                 .rootRunId(id.rootRunId())
                 .requestId(id.requestId())
@@ -146,6 +149,7 @@ public class AgentContextSnapshot {
                 .pathScope(def.pathScope())
                 .maxSteps(def.maxSteps())
                 .maxAttempts(def.maxAttempts())
+                .checkpointId(context.getCheckpointId())
                 // environment
                 .workspace(context.environment().workspace())
                 // runtime
@@ -198,6 +202,7 @@ public class AgentContextSnapshot {
 
         // identity
         context.setRunId(runId);
+        context.setSessionId(sessionId);
         context.setParentRunId(parentRunId);
         context.setRootRunId(rootRunId);
         context.setRequestId(requestId);
@@ -209,6 +214,7 @@ public class AgentContextSnapshot {
         context.setPathScope(pathScope);
         context.setMaxSteps(maxSteps == null ? 0 : maxSteps);
         context.setMaxAttempts(maxAttempts == null ? 0 : maxAttempts);
+        context.setCheckpointId(checkpointId);
 
         // environment — workspace ref only; resolved path and toolSpecs re-injected by factory
         context.setWorkspace(workspace);

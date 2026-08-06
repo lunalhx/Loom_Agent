@@ -93,6 +93,10 @@ public class AgentContext {
     public void setQuestion(String v) { runDefinition = runDefinition.withQuestion(v); }
     public String getPathScope() { return runDefinition.pathScope(); }
     public void setPathScope(String v) { runDefinition = runDefinition.withPathScope(v); }
+    public String getSessionId() { return runDefinition.sessionId(); }
+    public void setSessionId(String v) { runDefinition = runDefinition.withSessionId(v); }
+    public String getCheckpointId() { return runDefinition.checkpointId(); }
+    public void setCheckpointId(String v) { runDefinition = runDefinition.withCheckpointId(v); }
     public int getMaxSteps() { return runDefinition.maxSteps(); }
     public void setMaxSteps(int v) { runDefinition = runDefinition.withMaxSteps(v); }
     public int getMaxAttempts() { return runDefinition.maxAttempts(); }

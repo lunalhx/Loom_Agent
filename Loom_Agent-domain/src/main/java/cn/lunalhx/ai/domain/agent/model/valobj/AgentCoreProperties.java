@@ -16,4 +16,5 @@ public class AgentCoreProperties {
     private Long toolTimeoutMs = 3000L;
     private Integer observationMaxChars = 4000;
     private Integer subAgentMaxDepth = 1;
+    private java.util.List<String> secretEnvNames = new ArrayList<>();
 }

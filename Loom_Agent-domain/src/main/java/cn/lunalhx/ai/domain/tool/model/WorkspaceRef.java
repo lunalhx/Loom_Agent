@@ -28,6 +28,7 @@ public class WorkspaceRef {
                 .build();
     }
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public boolean isLocal() {
         return StringUtils.isBlank(provider) || LOCAL_PROVIDER.equalsIgnoreCase(provider);
     }

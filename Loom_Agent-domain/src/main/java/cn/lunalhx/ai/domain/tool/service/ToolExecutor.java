@@ -142,9 +142,10 @@ public class ToolExecutor {
             // 7. execute
             ToolResult result = registry.call(call);
             // 8. clip output
-            String clipped = clip(result.getObservation());
+            String rawObservation = result.getObservation();
+            String clipped = clip(rawObservation);
             result.setObservation(clipped);
-            result.setTruncated(clipped.length() < (result.getObservation() == null ? 0 : result.getObservation().length()));
+            result.setTruncated(clipped.length() < (rawObservation == null ? 0 : rawObservation.length()));
             // 9. snapshot + diff after risky tools
             after = risky ? WorkspaceFingerprint.snapshot(root) : before;
             WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
@@ -286,7 +287,7 @@ public class ToolExecutor {
         result.setWorkspaceChanged(workspaceChanged);
         result.setDiffSummary(diff.diffSummary());
         if (root != null) {
-            result.setWorkspaceFingerprint(WorkspaceFingerprint.snapshot(root).hashCode() + "");
+            result.setWorkspaceFingerprint(WorkspaceFingerprint.stableFingerprint(root));
         }
     }
 

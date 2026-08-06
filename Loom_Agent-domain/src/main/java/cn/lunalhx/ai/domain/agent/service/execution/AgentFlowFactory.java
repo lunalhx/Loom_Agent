@@ -43,6 +43,7 @@ public class AgentFlowFactory {
     private final ConversationHistoryAppendService ledgerAppendService;
     private final LedgerBootstrapService bootstrapService;
     private final ContextManager contextManager;
+    private final ToolExecutor.ApprovalPrompt approvalPrompt;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                             AgentLoopStateDependencies state,
@@ -50,6 +51,16 @@ public class AgentFlowFactory {
                             ConversationHistoryAppendService ledgerAppendService,
                             LedgerBootstrapService bootstrapService,
                             ContextManager contextManager) {
+        this(modelGateway, state, runtime, ledgerAppendService, bootstrapService, contextManager, null);
+    }
+
+    public AgentFlowFactory(ModelGateway modelGateway,
+                            AgentLoopStateDependencies state,
+                            AgentLoopRuntimeDependencies runtime,
+                            ConversationHistoryAppendService ledgerAppendService,
+                            LedgerBootstrapService bootstrapService,
+                            ContextManager contextManager,
+                            ToolExecutor.ApprovalPrompt approvalPrompt) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -57,6 +68,7 @@ public class AgentFlowFactory {
         this.ledgerAppendService = Objects.requireNonNull(ledgerAppendService, "ledgerAppendService must not be null");
         this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService must not be null");
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
+        this.approvalPrompt = approvalPrompt;
     }
 
     public AgentFlowDefinition create(ToolRegistry toolRegistry) {
@@ -88,7 +100,7 @@ public class AgentFlowFactory {
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder)),
                 new DecisionNode(objectMapper, toolRegistry, properties, ledgerAppendService),
-                new ToolDispatchNode(new ToolExecutor(toolRegistry), properties),
+                new ToolDispatchNode(new ToolExecutor(toolRegistry, approvalPrompt), properties),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService)
         ));

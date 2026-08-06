@@ -105,8 +105,9 @@ public class PromptBuildNode extends AbstractAgentNode {
         if (StringUtils.isBlank(pathScope)) {
             pathScope = null;
         }
-        String workspaceFactsText = buildWorkspaceFacts(context);
-        String workspaceFingerprint = buildWorkspaceFingerprint(context);
+        WorkspaceFacts.Facts facts = collectFacts(context);
+        String workspaceFactsText = facts == null ? "" : facts.text();
+        String workspaceFingerprint = facts == null ? null : facts.workspaceFingerprint();
         return this.ledgerServices.prefixBuilder().build(
                 isDelegate,
                 delegateAllowed,
@@ -116,27 +117,16 @@ public class PromptBuildNode extends AbstractAgentNode {
                 workspaceFingerprint);
     }
 
-    private String buildWorkspaceFingerprint(AgentContext context) {
+    /** Collect workspace facts exactly once per round; both the rendered text and
+     *  the fingerprint come from the same capture. */
+    private WorkspaceFacts.Facts collectFacts(AgentContext context) {
         try {
             if (context.getResolvedWorkspace() == null) {
                 return null;
             }
-            WorkspaceFacts.Facts facts = WorkspaceFacts.build(context.getResolvedWorkspace(), null);
-            return facts.workspaceFingerprint();
+            return WorkspaceFacts.build(context.getResolvedWorkspace(), null);
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    private String buildWorkspaceFacts(AgentContext context) {
-        try {
-            if (context.getResolvedWorkspace() == null) {
-                return "";
-            }
-            WorkspaceFacts.Facts facts = WorkspaceFacts.build(context.getResolvedWorkspace(), null);
-            return facts.text();
-        } catch (Exception e) {
-            return "";
         }
     }
 

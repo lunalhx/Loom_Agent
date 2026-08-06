@@ -25,6 +25,8 @@ public class ToolCall {
     private String rootRunId;
     private String conversationId;
     private AgentRuntimeProperties runtimeProperties;
+    private java.util.Set<String> secretEnvNames;
+    private String recentSummary;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

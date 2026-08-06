@@ -14,6 +14,7 @@ import java.util.List;
 public class AgentQuestion {
 
     private String runId;
+    private String sessionId;
     private String parentRunId;
     private String rootRunId;
     private String requestId;
@@ -28,5 +29,7 @@ public class AgentQuestion {
     private String model;
     private List<String> allowedTools;
     private String approvalPolicy;
+    private String checkpointId;
+    private AgentContextSnapshot seedSnapshot;
 
 }

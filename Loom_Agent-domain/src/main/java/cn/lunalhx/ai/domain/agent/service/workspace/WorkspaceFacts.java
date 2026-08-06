@@ -39,9 +39,24 @@ public final class WorkspaceFacts {
     public record Facts(String cwd, String repoRoot, String branch, String defaultBranch,
                         String status, List<String> recentCommits, Map<String, String> projectDocs) {
 
-        /** Deterministic fingerprint of the workspace structural identity. */
+        /** Deterministic fingerprint over everything actually rendered into the prompt:
+         *  structural identity plus git status, recent commits and project docs.
+         *  Any change (dirty status, new commit, doc edit) invalidates the prefix. */
         public String workspaceFingerprint() {
-            return DigestUtils.sha256Hex(cwd + "\n" + repoRoot + "\n" + branch + "\n" + defaultBranch);
+            return DigestUtils.sha256Hex(cwd + "\n" + repoRoot + "\n" + branch + "\n" + defaultBranch
+                    + "\n" + status + "\n" + String.join("\n", recentCommits == null ? List.of() : recentCommits)
+                    + "\n" + projectDocsText());
+        }
+
+        private String projectDocsText() {
+            if (projectDocs == null || projectDocs.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, String> e : projectDocs.entrySet()) {
+                sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+            }
+            return sb.toString();
         }
 
         public String text() {

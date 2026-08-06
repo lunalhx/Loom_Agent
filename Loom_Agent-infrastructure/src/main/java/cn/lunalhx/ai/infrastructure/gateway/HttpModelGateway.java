@@ -69,8 +69,8 @@ public class HttpModelGateway implements ModelGateway {
                 cfg.getBaseUrl(),
                 cfg.getApiKey(),
                 cfg.getTemperature(),
-                null,
-                300L);
+                cfg.getTopP(),
+                cfg.getTimeoutSeconds() == null ? 300L : cfg.getTimeoutSeconds());
     }
 
     @Override
@@ -108,6 +108,9 @@ public class HttpModelGateway implements ModelGateway {
         payload.put("stream", false);
         if (temperature != null) {
             payload.put("temperature", temperature);
+        }
+        if (topP != null) {
+            payload.put("top_p", topP);
         }
         Map<String, Object> message = new java.util.LinkedHashMap<>();
         message.put("role", "user");
@@ -160,6 +163,9 @@ public class HttpModelGateway implements ModelGateway {
         payload.put("stream", false);
         if (temperature != null) {
             payload.put("temperature", temperature);
+        }
+        if (topP != null) {
+            payload.put("top_p", topP);
         }
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -378,11 +384,30 @@ public class HttpModelGateway implements ModelGateway {
         Object outputTokens = usage.get("output_tokens");
         Object completionTokens = usage.get("completion_tokens");
         Object totalTokens = usage.get("total_tokens");
-        return TokenUsage.builder()
+        // DeepSeek (Anthropic protocol) reports cache fields on usage itself.
+        Object cacheRead = usage.get("cache_read_input_tokens");
+        Object cacheCreation = usage.get("cache_creation_input_tokens");
+        // OpenAI reports them under prompt_tokens_details.cached_tokens.
+        if (cacheRead == null && usage.get("prompt_tokens_details") instanceof Map<?, ?> details) {
+            cacheRead = details.get("cached_tokens");
+        }
+        Integer cacheReadTokens = optionalInt(cacheRead);
+        Integer cacheCreationTokens = optionalInt(cacheCreation);
+        TokenUsage.TokenUsageBuilder builder = TokenUsage.builder()
                 .promptTokens(optionalInt(inputTokens != null ? inputTokens : promptTokens))
                 .completionTokens(optionalInt(outputTokens != null ? outputTokens : completionTokens))
                 .totalTokens(optionalInt(totalTokens))
-                .build();
+                .promptCacheHitTokens(cacheReadTokens)
+                .promptCacheMissTokens(cacheCreationTokens);
+        if (cacheReadTokens != null && cacheReadTokens > 0) {
+            builder.cacheHit(true);
+        }
+        // capability classification: only providers that actually returned
+        // cache fields are marked cache-capable; Anthropic/Ollama stay
+        // unsupported unless their usage carries the fields.
+        builder.cacheCapability(cacheReadTokens != null || cacheCreationTokens != null
+                ? "supported" : "unsupported");
+        return builder.build();
     }
 
     private static Integer optionalInt(Object value) {

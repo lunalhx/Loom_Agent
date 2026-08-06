@@ -1,10 +1,10 @@
 package cn.lunalhx.ai.config;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
-import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -14,14 +14,16 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Runs a bounded read-only delegate child agent for the {@code delegate} tool.
- * The child uses the six base tools (no delegate), {@code approvalPolicy=never},
- * and returns only the final {@code delegate_result}.
+ * Runs a bounded read-only delegate child agent for the {@code delegate} tool
+ * as a real child run: it inherits parent/root/session/workspace lineage, has
+ * its own independent ledger and working memory (it never mutates the parent
+ * session), receives only the parent task plus a short summary, uses only
+ * list/read/search tools, and is capped at three steps / one depth level.
  */
 @Component
 public class DelegateService implements DelegateRunner {
 
-    private static final int MAX_PARENT_HISTORY_CHARS = 300;
+    private static final int MAX_PARENT_SUMMARY_CHARS = 300;
 
     private final AgentLoopFactory loopFactory;
     private final ObjectProvider<ToolRegistry> toolRegistryProvider;
@@ -32,13 +34,16 @@ public class DelegateService implements DelegateRunner {
     }
 
     @Override
-    public String delegate(String task, int maxSteps) {
+    public String delegate(String task, int maxSteps, String parentRunId, String rootRunId,
+                           String sessionId, String workspace, String parentSummary) {
         AgentQuestion question = AgentQuestion.builder()
                 .question(task)
-                .parentRunId("delegate")
-                .rootRunId("delegate")
+                .parentRunId(parentRunId)
+                .rootRunId(rootRunId == null || rootRunId.isBlank() ? parentRunId : rootRunId)
+                .sessionId(sessionId)
+                .workspace(workspace)
                 .agentDepth(1)
-                .maxSteps(maxSteps)
+                .maxSteps(Math.min(3, maxSteps))
                 .approvalPolicy("never")
                 .allowedTools(List.of("list_files", "read_file", "search"))
                 .build();

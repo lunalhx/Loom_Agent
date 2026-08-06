@@ -133,12 +133,32 @@ public final class WorkingContextMemoryService {
         try {
             Path resolved = context.getResolvedWorkspace() == null
                     ? Path.of(path) : context.getResolvedWorkspace().resolve(path);
-            if (!Files.exists(resolved) || !Files.isRegularFile(resolved)) {
-                return null;
-            }
-            return DigestUtils.sha256Hex(Files.readAllBytes(resolved));
+            return sha256OfResolved(resolved);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** File SHA-256 relative to the process cwd; used by the renderer to re-verify summaries. */
+    public static String sha256OfFile(String path) {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        return sha256OfResolved(Path.of(path));
+    }
+
+    private static String sha256OfResolved(Path resolved) {
+        if (!Files.exists(resolved) || !Files.isRegularFile(resolved)) {
+            return null;
+        }
+        return DigestUtils.sha256Hex(readAll(resolved));
+    }
+
+    private static byte[] readAll(Path resolved) {
+        try {
+            return Files.readAllBytes(resolved);
+        } catch (Exception e) {
+            return new byte[0];
         }
     }
 

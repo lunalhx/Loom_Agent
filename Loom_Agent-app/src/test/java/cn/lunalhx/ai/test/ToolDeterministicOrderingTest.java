@@ -35,7 +35,9 @@ public class ToolDeterministicOrderingTest {
                 new cn.lunalhx.ai.infrastructure.loom.RunShellTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.PatchFileTool(null),
-                new cn.lunalhx.ai.infrastructure.loom.DelegateTool((task, maxSteps) -> "delegate_result:\nDone")),
+                new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
+                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary) ->
+                                "delegate_result:\nDone")),
                 new ToolSchemaValidator(objectMapper));
 
         List<ToolSpec> specs = registry.specs();
@@ -53,7 +55,9 @@ public class ToolDeterministicOrderingTest {
     public void baseSpecsExcludeDelegate() {
         ToolRegistry registry = new ToolRegistry(List.of(
                 new cn.lunalhx.ai.infrastructure.loom.ReadFileTool(null),
-                new cn.lunalhx.ai.infrastructure.loom.DelegateTool((task, maxSteps) -> "delegate_result:\nDone")),
+                new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
+                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary) ->
+                                "delegate_result:\nDone")),
                 new ToolSchemaValidator(objectMapper));
 
         List<ToolSpec> base = registry.baseSpecs();

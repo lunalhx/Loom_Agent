@@ -9,10 +9,13 @@ import org.springframework.stereotype.Component;
 
 /**
  * loom-code {@code delegate}: ask a bounded read-only child agent to
- * investigate. The actual child spawn is delegated to a {@link DelegateRunner}.
+ * investigate. The actual child spawn is delegated to a {@link DelegateRunner};
+ * the child inherits real lineage (parentRunId/rootRunId/sessionId/workspace).
  */
 @Component
 public class DelegateTool implements AgentTool {
+
+    private static final int MAX_PARENT_SUMMARY_CHARS = 300;
 
     private final DelegateRunner delegateRunner;
 
@@ -29,7 +32,7 @@ public class DelegateTool implements AgentTool {
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
                         "\"task\":{\"type\":\"string\",\"minLength\":1,\"description\":\"child task\"}," +
-                        "\"max_steps\":{\"type\":\"integer\",\"minimum\":1,\"default\":3,\"description\":\"max child steps\"}" +
+                        "\"max_steps\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":3,\"description\":\"max child steps\"}" +
                         "}," +
                         "\"required\":[\"task\"]," +
                         "\"additionalProperties\":false" +
@@ -42,16 +45,30 @@ public class DelegateTool implements AgentTool {
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         String task = text(call, "task", null);
-        int maxSteps = intValue(call, "max_steps", 3);
+        int maxSteps = Math.min(3, intValue(call, "max_steps", 3));
         if (task == null || task.isBlank()) {
             return failure("task must not be empty", startedAt);
         }
         try {
-            String result = delegateRunner.delegate(task, maxSteps);
+            String parentSummary = call.getRecentSummary() == null
+                    ? "" : abbreviate(call.getRecentSummary(), MAX_PARENT_SUMMARY_CHARS);
+            String result = delegateRunner.delegate(task, maxSteps,
+                    call.getRunId(),
+                    call.getRootRunId() == null ? call.getRunId() : call.getRootRunId(),
+                    call.getConversationId(),
+                    call.getWorkspaceRoot() == null ? null : call.getWorkspaceRoot().toString(),
+                    parentSummary);
             return ToolResult.success(result, false, elapsed(startedAt));
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);
         }
+    }
+
+    private String abbreviate(String value, int max) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     private String text(ToolCall call, String key, String def) {

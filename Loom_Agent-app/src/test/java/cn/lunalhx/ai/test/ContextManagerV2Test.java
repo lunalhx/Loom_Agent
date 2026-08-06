@@ -118,22 +118,26 @@ public class ContextManagerV2Test {
     // ---- old read_file folded + fresh file summary reuse ----
 
     @Test
-    public void oldDuplicateReadFoldedWithFreshSummary() {
+    public void oldDuplicateReadFoldedWithFreshSummary() throws Exception {
+        java.nio.file.Path tempDir = java.nio.file.Files.createTempDirectory("cmv2");
+        java.nio.file.Path file = tempDir.resolve("A.java");
+        java.nio.file.Files.writeString(file, "class A {}");
+        String sha = org.apache.commons.codec.digest.DigestUtils.sha256Hex(
+                java.nio.file.Files.readAllBytes(file));
         AgentContext ctx = context();
         WorkingContextMemory wm = ctx.workingMemoryOrCreate();
-        wm.putFileSummary(new WorkingContextMemory.FileSummary("A.java", "fresh-summary", Instant.now(), "sha"));
+        wm.putFileSummary(new WorkingContextMemory.FileSummary(file.toString(), "fresh-summary", Instant.now(), sha));
         history(ctx).appendWithEventKey("user", "任务", ConversationEntryType.USER_TASK, "run:init:user_task");
         // 20 older read_file pairs of A.java
         for (int i = 0; i < 20; i++) {
             history(ctx).appendWithEventKey("assistant", "a", ConversationEntryType.ASSISTANT_ACTION,
-                    "run:" + i + ":assistant", "read_file", "{\"path\":\"A.java\"}", null, null, null);
+                    "run:" + i + ":assistant", "read_file", "{\"path\":\"" + file + "\"}", null, null, null);
             history(ctx).appendWithEventKey("user", "<untrusted_tool_output>\nclass A {}\n</untrusted_tool_output>",
                     ConversationEntryType.TOOL_RESULT, "run:" + i + ":tool_result", "read_file",
-                    "{\"path\":\"A.java\"}", null, null, null);
+                    "{\"path\":\"" + file + "\"}", null, null, null);
         }
 
         ContextBuildResult result = manager().build(ctx);
-        String text = result.budgetText();
         assertTrue(result.metadata().historyDeduped() >= 1);
         assertTrue(result.metadata().summaryReuseCount() >= 1);
     }

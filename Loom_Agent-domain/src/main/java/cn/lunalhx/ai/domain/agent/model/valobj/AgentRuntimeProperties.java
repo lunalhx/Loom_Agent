@@ -11,6 +11,7 @@ public class AgentRuntimeProperties {
     private ContextProperties context = new ContextProperties();
     private ModelRecoveryProperties modelRecovery = new ModelRecoveryProperties();
     private String approvalPolicy = "ask";
+    private FeatureFlags featureFlags = new FeatureFlags();
 
     public synchronized void replaceFrom(AgentRuntimeProperties replacement) {
         this.core = replacement.core;
@@ -18,5 +19,6 @@ public class AgentRuntimeProperties {
         this.context = replacement.context;
         this.modelRecovery = replacement.modelRecovery;
         this.approvalPolicy = replacement.approvalPolicy;
+        this.featureFlags = replacement.featureFlags;
     }
 }

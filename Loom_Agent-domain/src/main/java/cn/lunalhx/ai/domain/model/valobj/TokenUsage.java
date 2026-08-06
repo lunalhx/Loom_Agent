@@ -16,5 +16,7 @@ public class TokenUsage {
     private Integer totalTokens;
     private Integer promptCacheHitTokens;
     private Integer promptCacheMissTokens;
+    private Boolean cacheHit;
+    private String cacheCapability;
 
 }

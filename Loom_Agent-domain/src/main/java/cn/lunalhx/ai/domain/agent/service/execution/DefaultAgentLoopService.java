@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -217,6 +218,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 StringUtils.defaultIfBlank(context.getFinalAnswer(), "未能生成最终回答"));
         context.runtime().complete(answer);
         context.setStopReason(AgentStopReason.FINAL_ANSWER_RETURNED);
+        updateTaskSummary(context, answer);
         if (components.ledgerAppendService() != null) {
             components.ledgerAppendService().appendSystemNote(context, answer,
                     ConversationHistoryInitializer.eventKey(context.getRunId(),
@@ -233,6 +235,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         String message = "已达到工具执行上限 (" + context.getMaxSteps() + " 步)，任务停止";
         context.runtime().stop(AgentStopReason.STEP_LIMIT_REACHED);
         context.setFinalAnswer(message);
+        updateTaskSummary(context, message);
         if (components.ledgerAppendService() != null) {
             components.ledgerAppendService().appendSystemNote(context, message,
                     ConversationHistoryInitializer.eventKey(context.getRunId(),
@@ -249,6 +252,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         String message = "模型连续重试达到上限 (" + context.getMaxAttempts() + " 次)，已停止";
         context.runtime().stop(AgentStopReason.RETRY_LIMIT_REACHED);
         context.setFinalAnswer(message);
+        updateTaskSummary(context, message);
         if (components.ledgerAppendService() != null) {
             components.ledgerAppendService().appendSystemNote(context, message,
                     ConversationHistoryInitializer.eventKey(context.getRunId(),
@@ -275,6 +279,16 @@ public class DefaultAgentLoopService implements AgentLoopService {
     }
 
     // ==================== 私有辅助 ====================
+
+    /** Keep the durable working-memory task summary in sync with the final outcome. */
+    private void updateTaskSummary(AgentContext context, String outcome) {
+        try {
+            WorkingContextMemory wm = context.workingMemoryOrCreate();
+            wm.setTaskSummary(StringUtils.abbreviate(outcome, 300));
+        } catch (Exception ignored) {
+            // best-effort; never break termination for a memory update
+        }
+    }
 
     private boolean isTotalTimeout(AgentContext context) {
         return Duration.between(context.runtime().startedAt(), Instant.now()).toMillis()

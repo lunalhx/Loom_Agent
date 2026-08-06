@@ -81,16 +81,23 @@ final class HistoryRenderer {
         Map<String, String> freshSummaries = new HashMap<>();
         if (wm != null) {
             for (WorkingContextMemory.FileSummary fs : wm.fileSummaries().values()) {
-                freshSummaries.put(fs.path(), fs.summary());
+                if (summaryStillValid(fs)) {
+                    freshSummaries.put(fs.path(), fs.summary());
+                }
             }
         }
 
-        // Render older (folded) items first, then recent items newest-last.
-        List<LogicalItem> ordered = new ArrayList<>(older);
-        ordered.addAll(recent);
+        // Render recent items first (newest wins budget), then older folded
+        // items only if budget remains. Lines are packed newest-first and
+        // reversed at the end so the transcript still reads chronologically.
+        List<LogicalItem> ordered = new ArrayList<>(recent);
+        ordered.addAll(older);
 
+        List<String> packed = new ArrayList<>();
         StringBuilder sb = new StringBuilder("Transcript:\n");
-        for (LogicalItem item : ordered) {
+        int used = TextUtil.length(sb.toString());
+        for (int i = ordered.size() - 1; i >= 0; i--) {
+            LogicalItem item = ordered.get(i);
             RenderOutcome outcome = renderLogicalItem(item, older.contains(item), freshSummaries, compressed);
             String line = outcome.line;
             if (line == null || line.isEmpty()) {
@@ -105,16 +112,20 @@ final class HistoryRenderer {
             if (outcome.summarized) {
                 summarized++;
             }
-            // Pack newest-first: recent items are appended in order at the end.
-            String candidate = sb.toString() + line + "\n";
-            if (TextUtil.length(candidate) > budgetChars) {
-                // Local clip of the single line to fit remaining budget.
-                int remaining = budgetChars - TextUtil.length(sb.toString());
+            int lineChars = TextUtil.length(line) + 1;
+            if (used + lineChars > budgetChars) {
+                int remaining = budgetChars - used;
                 if (remaining > 0) {
-                    sb.append(TextUtil.singleLine(line, remaining)).append('\n');
+                    String clipped = TextUtil.singleLine(line, remaining);
+                    packed.add(0, clipped);
+                    used += TextUtil.length(clipped) + 1;
                 }
                 break;
             }
+            packed.add(0, line);
+            used += lineChars;
+        }
+        for (String line : packed) {
             sb.append(line).append('\n');
         }
 
@@ -207,8 +218,19 @@ final class HistoryRenderer {
         return null;
     }
 
-    private String command(ConversationHistoryEntry assistant) {
-        String toolInputJson = assistant.toolInputJson();
+    /** Re-verify the file's SHA-256 before trusting a cached summary. */
+    private boolean summaryStillValid(WorkingContextMemory.FileSummary fs) {
+        if (fs.sha256() == null || fs.path() == null) {
+            return false;
+        }
+        try {
+            return fs.sha256().equals(WorkingContextMemoryService.sha256OfFile(fs.path()));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String command(ConversationHistoryEntry assistant) {        String toolInputJson = assistant.toolInputJson();
         if (toolInputJson != null && !toolInputJson.isBlank()) {
             try {
                 JsonNode node = MAPPER.readTree(toolInputJson);

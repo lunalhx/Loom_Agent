@@ -39,6 +39,11 @@ public class ModelPromptFactory {
                 .deadlineEpochMs(deadlineEpochMs)
                 .outputFormat(OutputFormat.TEXT)
                 .runtimeProperties(context.getRunConfig() == null ? null : context.getRunConfig().model())
+                // Cache key input: only the stable prefix signature is used,
+                // never the dynamic history / working memory / current request.
+                .stablePrefixSignature(context.getStablePrefix() == null
+                        ? null : context.getStablePrefix().fingerprint())
+                .cachePolicy(ChatPrompt.CachePolicy.READ)
                 .build();
     }
 

@@ -92,6 +92,8 @@ public class ModelRuntimeProperties {
         private String defaultModel;
         private Double temperature = 0.7;
         private Integer maxTokens = 2048;
+        private Double topP;
+        private Long timeoutSeconds = 300L;
 
     }
 

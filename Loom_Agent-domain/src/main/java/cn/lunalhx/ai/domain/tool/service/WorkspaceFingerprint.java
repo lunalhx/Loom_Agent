@@ -41,6 +41,16 @@ public final class WorkspaceFingerprint {
         return map;
     }
 
+    /** Deterministic SHA-256 over the sorted snapshot map (never Java hashCode). */
+    public static String stableFingerprint(Path root) {
+        Map<String, String> map = snapshot(root);
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : map.entrySet()) {
+            sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+        }
+        return sha256Bytes(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
     /** Compute affected paths + diff summary between two snapshots. */
     public static DiffResult diff(Map<String, String> before, Map<String, String> after) {
         List<String> affected = new ArrayList<>();
@@ -91,6 +101,15 @@ public final class WorkspaceFingerprint {
                 digest.update(buffer, 0, len);
             }
             return hex(digest.digest());
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String sha256Bytes(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return hex(digest.digest(bytes));
         } catch (Exception e) {
             return "";
         }

@@ -39,11 +39,20 @@ public final class ContextManager {
     private final AgentRuntimeProperties properties;
     private final HistoryRenderer historyRenderer;
     private final RelevantMemorySelector relevantSelector;
+    private final DurableMemorySelector durableSelector;
 
     public ContextManager(AgentRuntimeProperties properties) {
+        this(properties, null);
+    }
+
+    /** @param durableMemoryProvider workspace-scoped durable memory entries,
+     *                              newest first; null disables the section. */
+    public ContextManager(AgentRuntimeProperties properties,
+                          java.util.function.Supplier<List<cn.lunalhx.ai.domain.memory.model.MemoryEntry>> durableMemoryProvider) {
         this.properties = properties == null ? new AgentRuntimeProperties() : properties;
         this.historyRenderer = new HistoryRenderer();
         this.relevantSelector = new RelevantMemorySelector();
+        this.durableSelector = new DurableMemorySelector(durableMemoryProvider);
     }
 
     public ContextBuildResult build(AgentContext context) {
@@ -123,8 +132,12 @@ public final class ContextManager {
         List<RelevantMemorySelector.ScoredNote> selected = relevantSelector.select(
                 context.getWorkingMemory(), currentRequest,
                 positive(cfg.getRelevantMemoryLimit(), 3));
-        String relevantMemory = renderRelevantMemory(selected,
-                positive(cfg.getRelevantMemoryBudgetChars(), 1200));
+        int relevantBudget = positive(cfg.getRelevantMemoryBudgetChars(), 1200);
+        List<DurableMemorySelector.ScoredEntry> durable = durableSelector.select(
+                currentRequest,
+                positive(cfg.getRelevantMemoryLimit(), 3),
+                Math.max(200, relevantBudget / 2));
+        String relevantMemory = renderRelevantMemory(selected, durable, relevantBudget);
         int historyBudget = reductionEnabled
                 ? positive(cfg.getHistoryBudgetChars(), 5200) : Integer.MAX_VALUE;
         HistoryRenderer.HistoryResult historyResult = historyRenderer.render(
@@ -133,7 +146,7 @@ public final class ContextManager {
                 historyBudget,
                 context.getWorkingMemory(), reductionEnabled);
         return new Sections(prefix, memory, relevantMemory, historyResult.text(),
-                currentRequest, historyResult, selected.size());
+                currentRequest, historyResult, selected.size() + durable.size());
     }
 
     private String renderPrefix(AgentContext context) {
@@ -163,14 +176,26 @@ public final class ContextManager {
         return sb.toString();
     }
 
-    private String renderRelevantMemory(List<RelevantMemorySelector.ScoredNote> selected, int budgetChars) {
-        if (selected == null || selected.isEmpty()) {
+    private String renderRelevantMemory(List<RelevantMemorySelector.ScoredNote> selected,
+                                        List<DurableMemorySelector.ScoredEntry> durable,
+                                        int budgetChars) {
+        if ((selected == null || selected.isEmpty()) && (durable == null || durable.isEmpty())) {
             return "Relevant memory: - none";
         }
-        int perNote = Math.max(1, budgetChars / selected.size());
+        int durableChars = 0;
+        for (DurableMemorySelector.ScoredEntry d : durable) {
+            durableChars += d.entry().getContent().length() + d.entry().getTopic().length() + 12;
+        }
+        int workingChars = Math.max(1, budgetChars - durableChars);
+        int perNote = Math.max(1, workingChars / Math.max(1, selected.size()));
         StringBuilder sb = new StringBuilder("Relevant memory:\n");
         for (RelevantMemorySelector.ScoredNote scored : selected) {
             sb.append("- ").append(TextUtil.head(scored.note().text(), perNote)).append('\n');
+        }
+        for (DurableMemorySelector.ScoredEntry d : durable) {
+            sb.append("- durable[").append(d.entry().getTopic()).append("] ")
+                    .append(d.entry().getSubject()).append(": ")
+                    .append(TextUtil.head(d.entry().getContent(), 300)).append('\n');
         }
         return sb.toString();
     }

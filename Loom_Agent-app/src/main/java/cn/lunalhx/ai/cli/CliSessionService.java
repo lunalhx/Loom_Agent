@@ -1,18 +1,23 @@
 package cn.lunalhx.ai.cli;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
-import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
-import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
-import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
+import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.service.context.SecretRedactor;
 import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
@@ -25,90 +30,261 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.gateway.HttpModelGateway;
+import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileDurableMemoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileRunStore;
-import cn.lunalhx.ai.infrastructure.store.FileSessionStore;
+import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
+import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationContext;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * CLI session facade backed by {@code .loom-code/sessions/} and
- * {@code .loom-code/runs/}. Each REPL turn reuses the same session; after
- * every turn history, memory and checkpoints are written back from the agent
- * context. {@code /reset} clears history/memory/checkpoints but keeps the
- * session id and workspace.
+ * CLI session facade. One {@link AgentSession} per workspace session; every
+ * user turn creates a fresh root run whose context is seeded from the session
+ * (history, working memory, semantic checkpoint). Runs/traces/checkpoints and
+ * the session are all written from the loop's own state — never from a second
+ * CLI-side state machine.
  */
 public class CliSessionService implements AutoCloseable {
 
     private final AgentLoopService loopService;
-    private final AgentContextBuilder contextBuilder;
     private final AgentRuntimeProperties agent;
     private final ModelRuntimeProperties model;
     private final String workspace;
     private final String sessionId;
-    private final FileSessionStore sessionStore;
-    private final FileRunStore runStore;
+    private final AgentSessionRepository sessionStore;
+    private final AgentRunRepository runStore;
+    private final AgentCheckpointRepository checkpointStore;
+    private final TraceRecorder traceRecorder;
+    private final cn.lunalhx.ai.domain.memory.adapter.port.DurableMemoryRepository memoryStore;
+    private final cn.lunalhx.ai.domain.memory.service.MemoryPromotionService memoryPromotion;
     private final ObjectMapper mapper;
     private final CliOptions options;
+    private final SecretRedactor redactor;
 
-    private Map<String, Object> session;
+    private AgentSession session;
 
     public CliSessionService(ApplicationContext spring, CliOptions options) {
+        this(options, spring.getBean(ObjectMapper.class),
+                spring.getBean(AgentRuntimeProperties.class),
+                spring.getBean(ModelRuntimeProperties.class),
+                new FileAgentSessionRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
+                new FileAgentRunRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
+                new FileAgentCheckpointRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
+                new FileTraceRecorder(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
+                buildLoopWithSpring(spring, options));
+    }
+
+    /** Test entry point: direct dependencies, no Spring context required. */
+    CliSessionService(CliOptions options, ObjectMapper mapper,
+                      AgentRuntimeProperties agent, ModelRuntimeProperties model,
+                      AgentSessionRepository sessionStore, AgentRunRepository runStore,
+                      AgentCheckpointRepository checkpointStore, TraceRecorder traceRecorder,
+                      AgentLoopService loopService) {
         this.sessionId = options.resumeSessionId != null
                 ? options.resumeSessionId : "session-" + currentStamp();
         this.workspace = options.workspaceRoot;
         this.options = options;
-        this.mapper = spring.getBean(ObjectMapper.class);
-        this.sessionStore = new FileSessionStore(Path.of(workspace), mapper);
-        this.runStore = new FileRunStore(Path.of(workspace), mapper);
-        this.agent = spring.getBean(AgentRuntimeProperties.class);
-        this.model = spring.getBean(ModelRuntimeProperties.class);
+        this.mapper = mapper;
+        this.sessionStore = sessionStore;
+        this.runStore = runStore;
+        this.checkpointStore = checkpointStore;
+        this.traceRecorder = traceRecorder;
+        this.memoryStore = new FileDurableMemoryRepository(Path.of(options.workspaceRoot), mapper);
+        this.memoryPromotion = new cn.lunalhx.ai.domain.memory.service.MemoryPromotionService(memoryStore);
+        this.agent = agent;
+        this.model = model;
         applyOptions(agent, model, options);
+        Set<String> secretEnvNames = Set.copyOf(options.secretEnvNames);
+        Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
+                ? Set.of() : Set.of(options.apiKey);
+        this.redactor = SecretRedactor.of(collectSecretValues(options), providerKeys);
         this.session = openOrCreateSession();
-        this.contextBuilder = new AgentContextBuilder(spring, agent, model, session);
-        this.loopService = contextBuilder.build();
+        this.loopService = loopService;
     }
 
-    private Map<String, Object> openOrCreateSession() {
-        if (options.resumeSessionId != null) {
-            Map<String, Object> loaded = sessionStore.load(sessionId);
-            Object ws = loaded.get("workspace_root");
-            if (ws != null && !workspace.equals(ws)) {
-                throw new OptionsException("session " + sessionId
-                        + " belongs to workspace " + ws + ", refusing to switch to " + workspace);
+    /** Resolve configured secret env names to their actual values (the values
+     *  are what must never reach disk). Direct values (tests) are merged in. */
+    private static Set<String> collectSecretValues(CliOptions options) {
+        Set<String> values = new java.util.LinkedHashSet<>();
+        if (options.secretValues != null) {
+            for (String value : options.secretValues) {
+                if (value != null && !value.isBlank()) {
+                    values.add(value);
+                }
             }
-            return loaded;
         }
-        Map<String, Object> fresh = FileSessionStore.newSession(workspace);
+        for (String name : options.secretEnvNames) {
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            String value = System.getenv(name);
+            if (value != null && !value.isBlank()) {
+                values.add(value);
+            }
+        }
+        return values;
+    }
+
+    private AgentSession openOrCreateSession() {
+        if (options.resumeSessionId != null) {
+            ResumeResult result = resume(sessionId);
+            if (result.getKind() == ResumeResult.Kind.SCHEMA_INCOMPATIBLE) {
+                throw new OptionsException(result.getMessage());
+            }
+            if (result.getKind() == ResumeResult.Kind.WORKSPACE_MISMATCH) {
+                throw new OptionsException(result.getMessage());
+            }
+            if (result.getKind() == ResumeResult.Kind.NO_CHECKPOINT) {
+                System.out.println("(resume: session found, no semantic checkpoint)");
+            }
+            return result.getSession();
+        }
+        AgentSession fresh = AgentSession.builder()
+                .id(sessionId)
+                .schemaVersion(AgentSession.CURRENT_SCHEMA_VERSION)
+                .workspaceRoot(workspace)
+                .createdAt(Instant.now())
+                .history(new ArrayList<>())
+                .workingMemory(new WorkingContextMemory())
+                .checkpoint(null)
+                .keyFiles(new LinkedHashMap<>())
+                .runtimeIdentity(redactor == null ? null : "cli")
+                .build();
         return sessionStore.save(fresh);
     }
 
-    /** Run one turn synchronously, persist session + run artifacts, and return the final answer. */
+    /** Resume semantics: restore history + working memory + valid semantic
+     *  checkpoint. A new user turn creates a NEW root run; old runs are never
+     *  rewritten. Key-file changes invalidate the checkpoint summary. */
+    private ResumeResult resume(String id) {
+        Optional<AgentSession> loaded;
+        try {
+            loaded = sessionStore.find(id);
+        } catch (IllegalArgumentException e) {
+            throw new OptionsException(e.getMessage());
+        }
+        if (loaded.isEmpty()) {
+            throw new OptionsException("session not found: " + id);
+        }
+        AgentSession s = loaded.get();
+        if (!workspace.equals(s.getWorkspaceRoot())) {
+            return ResumeResult.builder()
+                    .kind(ResumeResult.Kind.WORKSPACE_MISMATCH)
+                    .session(s)
+                    .message("session " + id + " belongs to workspace "
+                            + s.getWorkspaceRoot() + ", refusing to switch to " + workspace)
+                    .build();
+        }
+        TaskCheckpoint checkpoint = s.getCheckpoint();
+        if (checkpoint == null) {
+            return ResumeResult.builder()
+                    .kind(ResumeResult.Kind.NO_CHECKPOINT)
+                    .session(s)
+                    .workingMemory(s.getWorkingMemory())
+                    .message("no semantic checkpoint in session " + id)
+                    .build();
+        }
+        List<String> invalidated = keyFilesInvalidated(checkpoint);
+        if (!invalidated.isEmpty()) {
+            checkpoint.setSummary(null);
+            checkpoint.setKeyFiles(new LinkedHashMap<>());
+            s.setCheckpoint(checkpoint);
+            sessionStore.save(s);
+            return ResumeResult.builder()
+                    .kind(ResumeResult.Kind.PARTIAL_RESUME)
+                    .session(s)
+                    .checkpoint(checkpoint)
+                    .workingMemory(s.getWorkingMemory())
+                    .invalidatedKeyFiles(invalidated)
+                    .message("key files changed: " + String.join(", ", invalidated)
+                            + "; stale checkpoint summary discarded")
+                    .build();
+        }
+        return ResumeResult.builder()
+                .kind(ResumeResult.Kind.FULL_RESTORE)
+                .session(s)
+                .checkpoint(checkpoint)
+                .workingMemory(s.getWorkingMemory())
+                .message("full restore")
+                .build();
+    }
+
+    private List<String> keyFilesInvalidated(TaskCheckpoint checkpoint) {
+        List<String> invalidated = new ArrayList<>();
+        Map<String, String> keyFiles = checkpoint.getKeyFiles();
+        if (keyFiles == null || keyFiles.isEmpty()) {
+            return invalidated;
+        }
+        for (Map.Entry<String, String> e : keyFiles.entrySet()) {
+            String current = sha256(Path.of(workspace).resolve(e.getKey()));
+            if (current == null || !current.equals(e.getValue())) {
+                invalidated.add(e.getKey());
+            }
+        }
+        return invalidated;
+    }
+
+    private static String sha256(Path file) {
+        try {
+            if (!Files.isRegularFile(file)) {
+                return null;
+            }
+            return org.apache.commons.codec.digest.DigestUtils.sha256Hex(Files.readAllBytes(file));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Run one turn: new root run seeded from session, persist real state. */
     public String runTurn(String prompt) {
+        // Redact the user request at the single choke point so no secret
+        // configured via --secret-env-name ever reaches the ledger, checkpoint,
+        // run.json, trace or report on disk.
+        String safePrompt = redactor.redact(prompt);
+        AgentContextSnapshot seed = seedSnapshot();
+        String runId = "run_" + currentStamp() + "-" + UUID.randomUUID().toString().substring(0, 6);
+
         AgentQuestion question = AgentQuestion.builder()
-                .question(prompt)
+                .question(safePrompt)
+                .runId(runId)
+                .sessionId(sessionId)
+                .conversationId(sessionId)
                 .workspace(workspace)
                 .maxSteps(options.maxSteps)
                 .approvalPolicy(options.approvalPolicy)
-                .conversationId(sessionId)
+                .seedSnapshot(seed)
                 .build();
 
-        String runId = "run_" + currentStamp() + "-" + UUID.randomUUID().toString().substring(0, 6);
-        Map<String, Object> taskState = FileRunStore.newTaskState(runId, "task_" + currentStamp(), prompt);
-        runStore.startRun(runId, taskState);
-        runStore.appendTrace(runId, trace("run_started", Map.of("task_id", taskState.get("task_id"))));
+        Map<String, Object> taskState = newTaskState(runId, safePrompt);
+        Map<String, Object> report = new LinkedHashMap<>();
 
         StringBuilder answer = new StringBuilder();
         StringBuilder error = new StringBuilder();
+        AgentEvent terminal = null;
         List<AgentEvent> events = loopService.ask(question)
                 .collectList()
                 .block(Duration.ofMinutes(30));
@@ -121,55 +297,232 @@ public class CliSessionService implements AutoCloseable {
                 if (event.getType() == AgentEventType.ERROR && event.getMessage() != null) {
                     error.append(event.getMessage()).append('\n');
                 }
-                if (event.getType() == AgentEventType.TOOL_CALL && event.getTool() != null) {
-                    runStore.appendTrace(runId, trace("tool_executed", Map.of(
-                            "name", event.getTool(),
-                            "args", event.getInput() == null ? Map.of() : event.getInput())));
+                if (event.getType() == AgentEventType.DONE) {
+                    terminal = event;
                 }
             }
         }
+
+        Optional<AgentRun> finalRun = runStore.find(runId);
+        AgentRun run = finalRun.orElse(null);
         String finalAnswer = answer.length() == 0 && error.length() > 0
                 ? "error: " + error.toString().strip()
                 : answer.length() == 0 ? "(empty answer)" : answer.toString();
-        taskState.put("final_answer", finalAnswer);
-        taskState.put("status", "completed");
-        runStore.writeTaskState(runId, taskState);
-        runStore.appendTrace(runId, trace("run_finished", Map.of(
-                "status", "completed", "final_answer", finalAnswer)));
-        runStore.writeReport(runId, report(runId, taskState, finalAnswer));
+
+        AgentStopReason stopReason = terminal != null && terminal.getStopReason() != null
+                ? terminal.getStopReason()
+                : (run != null && run.getStopReason() != null
+                        ? AgentStopReason.valueOf(run.getStopReason()) : AgentStopReason.MODEL_ERROR);
+        String status = run != null ? run.getStatus().name().toLowerCase() : "failed";
+
+        taskState.put("run_id", runId);
+        taskState.put("session_id", sessionId);
+        taskState.put("status", status);
+        taskState.put("stop_reason", stopReason.name());
+        taskState.put("final_answer", redactor.redact(finalAnswer));
+        taskState.put("tool_steps", run != null ? run.getToolSteps() : 0);
+        taskState.put("attempts", run != null ? run.getModelAttempts() : 0);
+        taskState.put("parent_run_id", run != null ? run.getParentRunId() : null);
+        taskState.put("root_run_id", run != null ? run.getRootRunId() : runId);
+
+        FileRunStore fileRunStore = new FileRunStore(Path.of(workspace), mapper);
+        fileRunStore.writeTaskState(runId, taskState);
+        fileRunStore.appendTrace(runId, trace("run_finished", Map.of(
+                "status", status, "stop_reason", stopReason.name(),
+                "final_answer", redactor.redact(finalAnswer))));
+        report.put("run_id", runId);
+        report.put("session_id", sessionId);
+        report.put("status", status);
+        report.put("stop_reason", stopReason.name());
+        report.put("final_answer", redactor.redact(finalAnswer));
+        report.put("tool_steps", run != null ? run.getToolSteps() : 0);
+        report.put("model_attempts", run != null ? run.getModelAttempts() : 0);
+        report.put("parent_run_id", run != null ? run.getParentRunId() : null);
+        report.put("root_run_id", run != null ? run.getRootRunId() : runId);
+        report.put("task_state", redactor.redactMap(taskState));
+        fileRunStore.writeReport(runId, report);
+
+        // Workspace durable memory: promote only when the user explicitly
+        // asked to remember and the final answer is a structured conclusion.
+        try {
+            memoryPromotion.promote(safePrompt, finalAnswer, runId);
+        } catch (Exception ignored) {
+            // memory promotion must never break the turn
+        }
 
         persistSession();
         return finalAnswer;
     }
 
-    private Map<String, Object> report(String runId, Map<String, Object> taskState, String finalAnswer) {
-        Map<String, Object> report = new LinkedHashMap<>();
-        report.put("run_id", runId);
-        report.put("status", taskState.get("status"));
-        report.put("stop_reason", "final_answer");
-        report.put("final_answer", finalAnswer);
-        report.put("tool_steps", taskState.get("tool_steps"));
-        report.put("task_state", taskState);
-        return report;
+    private AgentContextSnapshot seedSnapshot() {
+        if (session.getHistory() == null || session.getHistory().isEmpty()) {
+            return null;
+        }
+        return AgentContextSnapshot.builder()
+                .schemaVersion(9)
+                .ledgerEntries(session.getHistory())
+                .ledgerNextSequence(session.getLedgerNextSequence())
+                .workingMemory(session.getWorkingMemory())
+                .stablePrefix(null)
+                .generation(0)
+                .build();
+    }
+
+    private Map<String, Object> newTaskState(String runId, String userRequest) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("run_id", runId);
+        state.put("session_id", sessionId);
+        state.put("task_id", "task_" + currentStamp());
+        state.put("user_request", redactor.redact(userRequest));
+        state.put("status", "running");
+        state.put("stop_reason", null);
+        state.put("final_answer", null);
+        state.put("tool_steps", 0);
+        state.put("attempts", 0);
+        state.put("resume_status", options.resumeSessionId != null ? "resumed" : "none");
+        state.put("tool_calls", new ArrayList<>());
+        return state;
     }
 
     private Map<String, Object> trace(String event, Map<String, Object> payload) {
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("event", event);
-        entry.put("created_at", java.time.Instant.now().toString());
+        entry.put("created_at", Instant.now().toString());
         entry.putAll(payload);
         return entry;
     }
 
-    private void persistSession() {
+    /** Persist loop-derived state back into the session. The latest semantic
+     *  checkpoint of the newest root run is the single source of truth for
+     *  history, working memory and the task anchor. */
+    public void persistSession() {
+        Optional<AgentRun> latestRoot = runStore.findLatestRootByConversationId(sessionId);
+        if (latestRoot.isPresent()) {
+            AgentRun run = latestRoot.get();
+            session.setId(run.getSessionId() == null ? sessionId : run.getSessionId());
+            session.setUpdatedAt(Instant.now());
+            syncFromCheckpoint(run);
+            session.setCheckpoint(taskCheckpoint(run));
+        }
+        redactSessionInPlace();
         sessionStore.save(session);
     }
 
+    /** Redact every persisted text field in the session before it hits disk. */
+    private void redactSessionInPlace() {
+        if (session.getHistory() != null) {
+            List<cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry> redacted = new ArrayList<>();
+            for (cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry e : session.getHistory()) {
+                redacted.add(cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry.builder()
+                        .entryId(e.entryId())
+                        .sequence(e.sequence())
+                        .role(e.role())
+                        .content(redactor.redact(e.content()))
+                        .stableType(e.stableType())
+                        .eventKey(e.eventKey())
+                        .toolName(e.toolName())
+                        .toolInputJson(e.toolInputJson() == null ? null : redactor.redact(e.toolInputJson()))
+                        .artifactId(e.artifactId())
+                        .originalChars(e.originalChars())
+                        .renderChars(e.renderChars())
+                        .build());
+            }
+            session.setHistory(redacted);
+        }
+        WorkingContextMemory wm = session.getWorkingMemory();
+        if (wm != null) {
+            WorkingContextMemory redacted = new WorkingContextMemory();
+            redacted.setTaskSummary(redactor.redact(wm.taskSummary()));
+            for (String file : wm.recentFiles()) {
+                redacted.recordRecentFile(redactor.redact(file));
+            }
+            for (WorkingContextMemory.FileSummary fs : wm.fileSummaries().values()) {
+                redacted.putFileSummary(new WorkingContextMemory.FileSummary(
+                        redactor.redact(fs.path()), redactor.redact(fs.summary()),
+                        fs.createdAt(), fs.sha256()));
+            }
+            for (WorkingContextMemory.MemoryNote n : wm.notes()) {
+                redacted.addNote(new WorkingContextMemory.MemoryNote(
+                        redactor.redact(n.text()), n.tags(), redactor.redact(n.source()),
+                        n.createdAt(), n.sequence(), n.kind()));
+            }
+            session.setWorkingMemory(redacted);
+        }
+        TaskCheckpoint cp = session.getCheckpoint();
+        if (cp != null) {
+            cp.setGoal(redactor.redact(cp.getGoal()));
+            cp.setCompleted(redactor.redact(cp.getCompleted()));
+            cp.setExcluded(redactor.redact(cp.getExcluded()));
+            cp.setBlocker(redactor.redact(cp.getBlocker()));
+            cp.setNextStep(redactor.redact(cp.getNextStep()));
+            cp.setSummary(redactor.redact(cp.getSummary()));
+        }
+    }
+
+    private void syncFromCheckpoint(AgentRun run) {
+        Optional<cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint> latest =
+                checkpointStore.latest(run.getRunId());
+        if (latest.isEmpty()) {
+            return;
+        }
+        AgentContextSnapshot snapshot = latest.get().getContextSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        if (snapshot.getLedgerEntries() != null && !snapshot.getLedgerEntries().isEmpty()) {
+            session.setHistory(snapshot.getLedgerEntries());
+            session.setLedgerNextSequence(snapshot.getLedgerNextSequence());
+        }
+        if (snapshot.getWorkingMemory() != null) {
+            session.setWorkingMemory(snapshot.getWorkingMemory());
+        }
+        syncKeyFiles(snapshot);
+    }
+
+    private void syncKeyFiles(AgentContextSnapshot snapshot) {
+        WorkingContextMemory wm = snapshot.getWorkingMemory();
+        Map<String, String> keyFiles = new LinkedHashMap<>();
+        if (wm != null && wm.fileSummaries() != null) {
+            for (WorkingContextMemory.FileSummary fs : wm.fileSummaries().values()) {
+                if (fs.path() != null && fs.sha256() != null) {
+                    keyFiles.put(fs.path(), fs.sha256());
+                }
+            }
+        }
+        session.setKeyFiles(keyFiles);
+    }
+
+    private TaskCheckpoint taskCheckpoint(AgentRun run) {
+        TaskCheckpoint checkpoint = session.getCheckpoint();
+        if (checkpoint == null) {
+            checkpoint = new TaskCheckpoint();
+            checkpoint.setSchemaVersion(TaskCheckpoint.CURRENT_SCHEMA_VERSION);
+            checkpoint.setCreatedAt(Instant.now());
+        }
+        checkpoint.setSessionId(sessionId);
+        checkpoint.setRunId(run.getRunId());
+        checkpoint.setGoal(run.getQuestion());
+        checkpoint.setSummary(StringUtils.abbreviate(
+                org.apache.commons.lang3.StringUtils.defaultString(run.getFinalAnswer(),
+                        org.apache.commons.lang3.StringUtils.defaultString(run.getStopReason())), 500));
+        checkpoint.setNextStep(org.apache.commons.lang3.StringUtils.defaultIfBlank(run.getStopReason(),
+                AgentStopReason.FINAL_ANSWER_RETURNED.name()));
+        checkpoint.setRuntimeIdentity(run.getRootRunId());
+        checkpoint.setKeyFiles(session.getKeyFiles());
+        checkpoint.setWorkingMemory(session.getWorkingMemory());
+        checkpoint.setHistory(session.getHistory());
+        checkpoint.setLedgerNextSequence(session.getLedgerNextSequence());
+        checkpoint.setUpdatedAt(Instant.now());
+        return checkpoint;
+    }
+
     public void reset() {
-        session.put("history", new ArrayList<>());
-        session.put("memory", FileSessionStore.defaultMemory());
-        session.put("checkpoints", new LinkedHashMap<>());
-        persistSession();
+        session.setHistory(new ArrayList<>());
+        session.setLedgerNextSequence(0);
+        session.setWorkingMemory(new WorkingContextMemory());
+        session.setCheckpoint(null);
+        session.setKeyFiles(new LinkedHashMap<>());
+        sessionStore.save(session);
     }
 
     @Override
@@ -181,12 +534,133 @@ public class CliSessionService implements AutoCloseable {
         return sessionId;
     }
 
+    /** Current in-memory session state (tests). */
+    AgentSession sessionState() {
+        return session;
+    }
+
+    AgentRunRepository runRepository() {
+        return runStore;
+    }
+
+    AgentSessionRepository sessionRepository() {
+        return sessionStore;
+    }
+
+    /** Working memory + workspace durable memory view for {@code /memory}. */
+    public String memoryView() {
+        StringBuilder sb = new StringBuilder();
+        WorkingContextMemory wm = session.getWorkingMemory();
+        sb.append("working memory:\n");
+        if (wm == null || wm.isEmpty()) {
+            sb.append("  (none)\n");
+        } else {
+            if (wm.taskSummary() != null) {
+                sb.append("  - task: ").append(wm.taskSummary()).append('\n');
+            }
+            if (!wm.recentFiles().isEmpty()) {
+                sb.append("  - recent files: ").append(String.join(", ", wm.recentFiles())).append('\n');
+            }
+            for (WorkingContextMemory.FileSummary fs : wm.fileSummaries().values()) {
+                sb.append("  - file: ").append(fs.path()).append('\n')
+                        .append("    summary: ").append(fs.summary()).append('\n');
+            }
+        }
+        sb.append("durable memory (workspace):\n");
+        List<cn.lunalhx.ai.domain.memory.model.MemoryEntry> entries = memoryStore.findAllNewestFirst();
+        if (entries.isEmpty()) {
+            sb.append("  (none)\n");
+        } else {
+            for (cn.lunalhx.ai.domain.memory.model.MemoryEntry e : entries) {
+                sb.append("  - [").append(e.getTopic()).append("] ")
+                        .append(e.getSubject()).append(": ").append(e.getContent()).append('\n');
+            }
+        }
+        return sb.toString().stripTrailing();
+    }
+
     public Path sessionPath() {
-        return sessionStore.path(sessionId);
+        return ((FileAgentSessionRepository) sessionStore).path(sessionId);
+    }
+
+    /** Interactive approval prompt; non-interactive environments reject by default. */
+    public static final class InteractiveApprovalPrompt implements ToolExecutor.ApprovalPrompt {
+        private final BufferedReader reader = new BufferedReader(
+                new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        private final boolean interactive;
+
+        public InteractiveApprovalPrompt(boolean interactive) {
+            this.interactive = interactive;
+        }
+
+        @Override
+        public boolean ask(String toolName, JsonNode args) {
+            if (!interactive) {
+                return false;
+            }
+            System.out.println();
+            System.out.println("approval required: " + toolName
+                    + (args == null ? "" : " " + args));
+            System.out.print("allow? [y/N] ");
+            System.out.flush();
+            try {
+                String line = reader.readLine();
+                return line != null && line.strip().equalsIgnoreCase("y");
+            } catch (IOException e) {
+                return false;
+            }
+        }
+    }
+
+    private static AgentLoopService buildLoopWithSpring(ApplicationContext spring, CliOptions options) {
+        ObjectMapper springMapper = spring.getBean(ObjectMapper.class);
+        AgentRuntimeProperties springAgent = spring.getBean(AgentRuntimeProperties.class);
+        ModelRuntimeProperties springModel = spring.getBean(ModelRuntimeProperties.class);
+        AgentWorkspaceResolver workspaceResolver = spring.getBean(AgentWorkspaceResolver.class);
+        BudgetGuard budgetGuard = spring.getBean(BudgetGuard.class);
+        cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics metrics = spring.getBean(
+                cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics.class);
+        FileAgentSessionRepository sessionStore = new FileAgentSessionRepository(
+                Path.of(options.workspaceRoot), springMapper);
+        FileAgentRunRepository runStore = new FileAgentRunRepository(
+                Path.of(options.workspaceRoot), springMapper);
+        FileAgentCheckpointRepository checkpointStore = new FileAgentCheckpointRepository(
+                Path.of(options.workspaceRoot), springMapper);
+        FileTraceRecorder traceRecorder = new FileTraceRecorder(
+                Path.of(options.workspaceRoot), springMapper);
+        Set<String> secretEnvNames = Set.copyOf(options.secretEnvNames);
+        Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
+                ? Set.of() : Set.of(options.apiKey);
+        SecretRedactor redactor = SecretRedactor.of(secretEnvNames, providerKeys);
+
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
+                workspaceResolver, runStore, checkpointStore, springMapper);
+        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
+                springAgent, traceRecorder, budgetGuard, metrics,
+                new RedactingToolOutputSanitizer(redactor), springModel,
+                spring.getBean(cn.lunalhx.ai.config.AgentRuntimeConfigRegistry.class));
+        ConversationHistoryAppendService ledgerAppendService = spring.getBean(ConversationHistoryAppendService.class);
+        ContextManager contextManager = new ContextManager(springAgent, () -> {
+            try {
+                return new FileDurableMemoryRepository(Path.of(options.workspaceRoot), springMapper)
+                        .findAllNewestFirst();
+            } catch (Exception e) {
+                return List.of();
+            }
+        });
+        ConversationExecutionGuard executionGuard = spring.getBean(ConversationExecutionGuard.class);
+        ThreadPoolExecutor executor = spring.getBean(ThreadPoolExecutor.class);
+        ToolRegistry registry = spring.getBean(ToolRegistry.class);
+        ModelGateway gateway = options.modelGateway != null
+                ? options.modelGateway : HttpModelGateway.fromProperties(springModel);
+        ToolExecutor.ApprovalPrompt approvalPrompt = options.approvalPrompt;
+        AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime,
+                ledgerAppendService, contextManager, executionGuard, approvalPrompt);
+        return factory.createStandalone(registry, executor);
     }
 
     private static String currentStamp() {
-        return java.time.Instant.now().toString()
+        return Instant.now().toString()
                 .replace(":", "").replace("-", "").replace(".", "").substring(0, 15);
     }
 
@@ -197,6 +671,7 @@ public class CliSessionService implements AutoCloseable {
         agent.setAllowedWorkspaceRoots(List.of(options.workspaceRoot));
         agent.setMaxSteps(options.maxSteps);
         agent.setApprovalPolicy(options.approvalPolicy);
+        agent.getCore().setSecretEnvNames(new ArrayList<>(options.secretEnvNames));
 
         model.setProvider(options.provider);
         model.setDefaultModel(options.model);
@@ -207,53 +682,9 @@ public class CliSessionService implements AutoCloseable {
         cfg.setDefaultModel(options.model);
         cfg.setTemperature(options.temperature);
         cfg.setMaxTokens(options.maxNewTokens);
+        cfg.setTopP(options.topP);
+        cfg.setTimeoutSeconds(options.timeoutSeconds);
         model.getProviders().put(options.provider, cfg);
-    }
-
-    /**
-     * Assembles the loop with session history/memory restored into the
-     * context on every turn.
-     */
-    private static final class AgentContextBuilder {
-        private final ApplicationContext spring;
-        private final AgentRuntimeProperties agent;
-        private final ModelRuntimeProperties model;
-        private final Map<String, Object> session;
-        private AgentLoopFactory factory;
-        private ToolRegistry registry;
-
-        AgentContextBuilder(ApplicationContext spring, AgentRuntimeProperties agent,
-                            ModelRuntimeProperties model, Map<String, Object> session) {
-            this.spring = spring;
-            this.agent = agent;
-            this.model = model;
-            this.session = session;
-        }
-
-        AgentLoopService build() {
-            AgentWorkspaceResolver workspaceResolver = spring.getBean(AgentWorkspaceResolver.class);
-            AgentRunRepository runRepository = spring.getBean(AgentRunRepository.class);
-            AgentCheckpointRepository checkpointRepository = spring.getBean(AgentCheckpointRepository.class);
-            TraceRecorder traceRecorder = spring.getBean(TraceRecorder.class);
-            BudgetGuard budgetGuard = spring.getBean(BudgetGuard.class);
-            AgentMetrics metrics = spring.getBean(AgentMetrics.class);
-            ToolOutputSanitizer sanitizer = spring.getBean(ToolOutputSanitizer.class);
-            ObjectMapper mapper = spring.getBean(ObjectMapper.class);
-
-            AgentLoopStateDependencies state = new AgentLoopStateDependencies(
-                    workspaceResolver, runRepository, checkpointRepository, mapper);
-            AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
-                    agent, traceRecorder, budgetGuard, metrics, sanitizer, model);
-            ConversationHistoryAppendService ledgerAppendService = spring.getBean(ConversationHistoryAppendService.class);
-            ContextManager contextManager = spring.getBean(ContextManager.class);
-            ConversationExecutionGuard executionGuard = spring.getBean(ConversationExecutionGuard.class);
-            ThreadPoolExecutor executor = spring.getBean(ThreadPoolExecutor.class);
-            this.registry = spring.getBean(ToolRegistry.class);
-            ModelGateway gateway = HttpModelGateway.fromProperties(model);
-            this.factory = new AgentLoopFactory(gateway, state, runtime,
-                    ledgerAppendService, contextManager, executionGuard);
-            return factory.createStandalone(registry, executor);
-        }
     }
 
     public static class OptionsException extends RuntimeException {
@@ -276,5 +707,9 @@ public class CliSessionService implements AutoCloseable {
         public double topP = 0.9;
         public long timeoutSeconds = 300;
         public String resumeSessionId;
+        public final List<String> secretEnvNames = new ArrayList<>();
+        public final List<String> secretValues = new ArrayList<>();
+        public ToolExecutor.ApprovalPrompt approvalPrompt;
+        public ModelGateway modelGateway;
     }
 }

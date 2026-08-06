@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /**
  * loom-code {@code run_shell}: run a shell command in the repo root via
@@ -54,7 +55,9 @@ public class RunShellTool implements AgentTool {
         }
         try {
             Path root = LoomToolSupport.root(workspacePort, call);
-            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, java.util.Set.of());
+            Set<String> secretEnvNames = call.getSecretEnvNames() == null
+                    ? java.util.Set.of() : call.getSecretEnvNames();
+            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames);
             String stdout = result.stdout().isBlank() ? "(empty)" : result.stdout().stripTrailing();
             String stderr = result.stderr().isBlank() ? "(empty)" : result.stderr().stripTrailing();
             String observation = "exit_code: " + result.exitCode() + "\nstdout:\n" + stdout + "\nstderr:\n" + stderr;
