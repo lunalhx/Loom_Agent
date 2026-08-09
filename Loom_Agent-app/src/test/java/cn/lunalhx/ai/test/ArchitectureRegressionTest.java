@@ -78,10 +78,19 @@ public class ArchitectureRegressionTest {
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "org.springframework.web..",
                             "org.springframework.boot.web..",
-                            "org.springframework.ai..",
                             "org.mybatis..",
                             "org.flywaydb..",
                             "org.sqlite..");
+
+    @ArchTest
+    public static final ArchRule spring_ai_is_confined_to_the_mcp_bridge =
+            noClasses().that()
+                    .resideOutsideOfPackage("cn.lunalhx.ai.config..")
+                    .and().resideOutsideOfPackage("cn.lunalhx.ai.infrastructure.mcp..")
+                    .should().dependOnClassesThat().resideInAnyPackage("org.springframework.ai..")
+                    .as("spring-ai dependencies are only allowed in the MCP bridge "
+                            + "(cn.lunalhx.ai.config + cn.lunalhx.ai.infrastructure.mcp)")
+                    .because("the domain must stay free of Spring AI");
 
     @ArchTest
     public static final ArchRule no_http_controllers_remain =

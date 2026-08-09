@@ -18,6 +18,19 @@ loom:
     tool-timeout-ms: ${AGENT_TOOL_TIMEOUT_MS:3000}
     observation-max-chars: ${AGENT_OBSERVATION_MAX_CHARS:4000}
     approval-policy: ${AGENT_APPROVAL_POLICY:ask}
+  mcp:
+    # MCP 工具总开关；默认关闭，开启时配合 spring.ai.mcp.client.stdio.connections 使用
+    enabled: ${MCP_ENABLED:false}
+    servers: {}
+
+spring:
+  ai:
+    mcp:
+      client:
+        enabled: ${MCP_ENABLED:false}
+        type: sync
+        stdio:
+          connections: {}
 
 logging:
   level:

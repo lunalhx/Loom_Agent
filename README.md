@@ -10,6 +10,7 @@
   - [交互式 REPL](#交互式-repl)
 - [命令行参数](#命令行参数)
 - [工具系统](#工具系统)
+- [MCP 外部工具](#mcp-外部工具)
 - [审批策略](#审批策略)
 - [会话与存储](#会话与存储)
 - [架构总览](#架构总览)
@@ -116,6 +117,51 @@ export LOOM_CODE_DEEPSEEK_MODEL=deepseek-v4-pro
 <tool name="write_file" path="a.py"><content>...</content></tool>
 <final>Done.</final>
 ```
+
+---
+
+## MCP 外部工具
+
+通过 [Model Context Protocol](https://modelcontextprotocol.io) 接入外部工具服务器（stdio 传输），工具注册进统一的 `ToolRegistry`，审批与脱敏复用内置工具同一链路。默认关闭：
+
+```bash
+export MCP_ENABLED=true
+```
+
+配置示例（`application.yml` 或环境变量）：
+
+```yaml
+spring:
+  ai:
+    mcp:
+      client:
+        enabled: ${MCP_ENABLED:false}
+        type: sync
+        stdio:
+          connections:
+            github:
+              command: npx
+              args: ["-y", "@modelcontextprotocol/server-github"]
+              env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}" }
+
+loom:
+  mcp:
+    enabled: ${MCP_ENABLED:false}
+    servers:
+      github:
+        approval-mode: writes          # auto | writes | prompt | approve
+        enabled-tools: ["get_issue"]   # 工具白名单（空 = 全部）
+        disabled-tools: ["delete_repo"] # 工具黑名单（白名单之后应用）
+```
+
+要点：
+
+- **工具命名**：`<server>_<tool>`，如 server `github` 的 `get_issue` → `github_get_issue`；非法字符替换为 `_`。
+- **审批映射**：`approval-mode=auto` 的工具不询问；其余（`writes`/`prompt`/`approve`）标记为 risky，走与内置 `run_shell` 相同的审批策略（`--approval ask` 时逐次确认）。`approve` 暂映射为 `writes` 行为。
+- **容错**：单个 server 连接或 `tools/list` 失败仅记日志跳过，不阻塞启动；失败工具不注册。
+- **工具冲突**：与内置工具重名的 MCP 工具跳过注册。
+- **关闭清理**：进程退出时 stdio 子进程随 client 一起终止。
+- 当前仅支持 stdio 本地传输；StreamableHTTP/SSE 与 OAuth 为后续版本。
 
 ---
 

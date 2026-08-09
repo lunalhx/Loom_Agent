@@ -28,10 +28,12 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.gateway.HttpModelGateway;
+import cn.lunalhx.ai.infrastructure.mcp.McpToolCatalog;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
@@ -42,6 +44,7 @@ import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 
 import java.io.BufferedReader;
@@ -641,12 +644,36 @@ public class CliSessionService implements AutoCloseable {
         ConversationExecutionGuard executionGuard = spring.getBean(ConversationExecutionGuard.class);
         ThreadPoolExecutor executor = spring.getBean(ThreadPoolExecutor.class);
         ToolRegistry registry = spring.getBean(ToolRegistry.class);
+        // MCP tools are merged before the loop is assembled so the flow's
+        // tool spec snapshot (AgentFlowFactory.create) includes them.
+        mergeMcpTools(registry, spring);
         ModelGateway gateway = options.modelGateway != null
                 ? options.modelGateway : HttpModelGateway.fromProperties(springModel);
         ToolExecutor.ApprovalPrompt approvalPrompt = options.approvalPrompt;
         AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime,
                 ledgerAppendService, contextManager, executionGuard, approvalPrompt);
         return factory.createStandalone(registry, executor);
+    }
+
+    /** Append MCP tools to the shared registry; missing/failed catalog is a no-op. */
+    private static void mergeMcpTools(ToolRegistry registry, ApplicationContext spring) {
+        try {
+            ObjectProvider<McpToolCatalog> catalogProvider = spring.getBeanProvider(McpToolCatalog.class);
+            McpToolCatalog catalog = catalogProvider.getIfAvailable();
+            if (catalog == null) {
+                return;
+            }
+            java.util.List<AgentTool> mcpTools = catalog.catalog();
+            if (mcpTools.isEmpty()) {
+                return;
+            }
+            java.util.List<AgentTool> merged = new java.util.ArrayList<>(registry.tools());
+            merged.addAll(mcpTools);
+            registry.replace(merged);
+            System.out.println("[mcp] registered " + mcpTools.size() + " MCP tool(s)");
+        } catch (Exception e) {
+            System.out.println("[mcp] tool registration skipped: " + e.getMessage());
+        }
     }
 
     private static String currentStamp() {

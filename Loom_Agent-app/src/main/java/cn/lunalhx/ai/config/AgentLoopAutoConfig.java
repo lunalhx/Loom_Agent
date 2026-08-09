@@ -12,14 +12,22 @@ import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.infrastructure.mcp.McpToolCatalog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration(proxyBeanMethods = false)
 public class AgentLoopAutoConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentLoopAutoConfig.class);
 
     @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
@@ -35,7 +43,22 @@ public class AgentLoopAutoConfig {
     @Bean
     public AgentLoopService agentLoopService(AgentLoopFactory factory,
                                              ToolRegistry registry,
-                                             ThreadPoolExecutor executor) {
+                                             ThreadPoolExecutor executor,
+                                             ObjectProvider<McpToolCatalog> mcpCatalogProvider) {
+        McpToolCatalog catalog = mcpCatalogProvider.getIfAvailable();
+        if (catalog != null) {
+            try {
+                java.util.List<AgentTool> mcpTools = catalog.catalog();
+                if (!mcpTools.isEmpty()) {
+                    java.util.List<AgentTool> merged = new ArrayList<>(registry.tools());
+                    merged.addAll(mcpTools);
+                    registry.replace(merged);
+                    log.info("registered {} MCP tool(s)", mcpTools.size());
+                }
+            } catch (Exception e) {
+                log.warn("MCP tool registration skipped: {}", e.getMessage());
+            }
+        }
         return factory.createStandalone(registry, executor);
     }
 }

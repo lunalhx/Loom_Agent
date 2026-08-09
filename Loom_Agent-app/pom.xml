@@ -52,6 +52,11 @@
             <version>1.3.0</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+            <version>1.0.0</version>
+        </dependency>
 
         <!-- 工程模块 -->
         <dependency>
