@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability;
 import cn.lunalhx.ai.domain.model.valobj.PromptCacheRequest;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * 由稳定前缀派生 prompt-cache 请求契约。
@@ -37,6 +38,9 @@ public final class PromptCacheKeyFactory {
         String cacheKey = deriveKey(
                 properties == null ? "unknown" : properties.getProvider(),
                 prompt.getModel(), prompt.getStablePrefixSignature());
+        if (StringUtils.isBlank(prompt.getPromptCacheRetention()) && properties != null) {
+            prompt.setPromptCacheRetention(properties.promptCacheRetention(properties.getProvider()));
+        }
         return request(prompt, policy, capability, cacheKey);
     }
 
@@ -59,6 +63,11 @@ public final class PromptCacheKeyFactory {
         String cacheKey = deriveKey(
                 providerNamespace == null ? "unknown" : providerNamespace,
                 prompt.getModel(), prompt.getStablePrefixSignature());
+        if (StringUtils.isBlank(prompt.getPromptCacheRetention())
+                && prompt.getRuntimeProperties() != null) {
+            prompt.setPromptCacheRetention(
+                    prompt.getRuntimeProperties().promptCacheRetention(providerNamespace));
+        }
         return request(prompt, policy, capability, cacheKey);
     }
 

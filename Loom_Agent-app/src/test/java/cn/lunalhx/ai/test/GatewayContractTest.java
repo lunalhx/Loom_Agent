@@ -199,4 +199,23 @@ public class GatewayContractTest {
             }
         }
     }
+
+    @Test
+    public void messageBlockCacheControlLandsOnSystemOnly() throws Exception {
+        HttpModelGateway g = gateway("deepseek");
+        ChatPrompt p = prompt("system-prefix",
+                List.of(ChatMessage.builder().role("user").content("history").build(),
+                        ChatMessage.builder().role("user").content("current-request").build()));
+        p.setPromptCacheCapability(PromptCacheCapability.MESSAGE_BLOCK);
+        p.setPromptCacheRetention("in_memory");
+        g.complete(p).block(java.time.Duration.ofSeconds(5));
+
+        JsonNode root = mapper.readTree(lastBody.get());
+        // cache_control 只落在 system 段（稳定边界），动态 message 不带断点
+        assertTrue(root.get("system").get(0).get("text").asText().contains("system-prefix"));
+        assertTrue(root.get("system").get(1).has("cache_control"));
+        for (JsonNode message : root.get("messages")) {
+            assertFalse(message.get("content").toString().contains("cache_control"));
+        }
+    }
 }

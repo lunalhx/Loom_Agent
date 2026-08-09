@@ -14,3 +14,6 @@ loom:
       openai:
         capability: KEYED_REQUEST
         retention: in_memory
+      deepseek:
+        capability: MESSAGE_BLOCK
+        retention: in_memory

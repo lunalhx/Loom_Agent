@@ -91,6 +91,12 @@ public class ModelRuntimeProperties {
         return config.getCapability();
     }
 
+    /** provider prompt-cache retention 配置；未配置返回 {@code null}。 */
+    public String promptCacheRetention(String provider) {
+        ProviderCacheConfig config = promptCache.get(provider);
+        return config == null ? null : config.getRetention();
+    }
+
     private static Map<String, ModelPricing> defaultPricing() {
         Map<String, ModelPricing> pricing = new LinkedHashMap<>();
         pricing.put("deepseek-v4-flash", new ModelPricing());

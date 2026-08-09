@@ -85,11 +85,16 @@ final class ProviderPayloadSerializers {
             payload.put("top_p", topP);
         }
         List<Map<String, Object>> messages = new ArrayList<>();
-        if (prompt.getSystemPrompt() != null && !prompt.getSystemPrompt().isBlank()) {
-            payload.put("system", List.of(Map.of("type", "text", "text", prompt.getSystemPrompt())));
-        }
         boolean cacheBlocks = cacheRequest != null && cacheRequest.enabled()
                 && cacheRequest.getCapability() == PromptCacheCapability.MESSAGE_BLOCK;
+        if (prompt.getSystemPrompt() != null && !prompt.getSystemPrompt().isBlank()) {
+            List<Map<String, Object>> systemBlocks = new ArrayList<>();
+            systemBlocks.add(Map.of("type", "text", "text", prompt.getSystemPrompt()));
+            if (cacheBlocks) {
+                systemBlocks.add(Map.of("type", "cache_control", "cache_control", Map.of("type", "ephemeral")));
+            }
+            payload.put("system", systemBlocks);
+        }
         for (ChatMessage message : prompt.getMessages()) {
             if (message != null && message.getContent() != null && !message.getContent().isBlank()) {
                 Map<String, Object> content = new LinkedHashMap<>();
@@ -97,9 +102,6 @@ final class ProviderPayloadSerializers {
                 content.put("text", message.getContent());
                 List<Map<String, Object>> blocks = new ArrayList<>();
                 blocks.add(content);
-                if (cacheBlocks) {
-                    blocks.add(Map.of("type", "cache_control", "cache_control", Map.of("type", "ephemeral")));
-                }
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("role", "assistant".equals(message.getRole()) ? "assistant" : "user");
                 entry.put("content", blocks);
