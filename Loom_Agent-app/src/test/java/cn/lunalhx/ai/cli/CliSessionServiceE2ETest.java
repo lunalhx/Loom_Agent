@@ -3,9 +3,11 @@ package cn.lunalhx.ai.cli;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
@@ -28,6 +30,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 
 import static org.junit.Assert.*;
 
@@ -106,6 +110,123 @@ public class CliSessionServiceE2ETest {
         assertFalse(persisted.getHistory().isEmpty());
         assertNotNull(persisted.getCheckpoint());
         assertNotNull(persisted.getWorkingMemory());
+        session.close();
+    }
+
+    @Test
+    public void newCommandCreatesIndependentSessionAndOriginalRemainsResumable() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-new-session");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService first = service(workspace,
+                countingFinalAnswerGateway("before new", modelCalls));
+        String originalId = first.sessionId();
+        first.runTurn("preserve this conversation");
+
+        first.close();
+        CliSessionService.CliOptions reopenedOptions = options(workspace,
+                countingFinalAnswerGateway("unused", modelCalls));
+        reopenedOptions.resumeSessionId = originalId;
+        AgentRuntimeProperties reopenedAgent = CliLoopTestFixture.agentProperties(workspace);
+        CliSessionService reopened = new CliSessionService(reopenedOptions, mapper, reopenedAgent,
+                new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper,
+                        countingFinalAnswerGateway("unused", modelCalls),
+                        reopenedAgent, java.util.List.of()));
+        assertEquals(originalId, reopened.sessionId());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(reopened, "/new",
+                new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+        String newId = reopened.sessionId();
+
+        assertNotEquals(originalId, newId);
+        assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("new session: " + newId));
+        assertEquals(1, modelCalls.get());
+        AgentSession original = reopened.sessionRepository().find(originalId).orElseThrow();
+        AgentSession fresh = reopened.sessionRepository().find(newId).orElseThrow();
+        assertFalse(original.getHistory().isEmpty());
+        assertNotNull(original.getCheckpoint());
+        assertTrue(fresh.getHistory().isEmpty());
+        assertTrue(fresh.getWorkingMemory().isEmpty());
+        assertNull(fresh.getCheckpoint());
+        assertTrue(fresh.getKeyFiles().isEmpty());
+        assertEquals(1, reopened.runRepository().findByConversationId(originalId).size());
+        assertTrue(reopened.runRepository().findByConversationId(newId).isEmpty());
+        reopened.close();
+
+        CliSessionService.CliOptions resumeOptions = options(workspace,
+                countingFinalAnswerGateway("after resume", modelCalls));
+        resumeOptions.resumeSessionId = originalId;
+        AgentRuntimeProperties resumeAgent = CliLoopTestFixture.agentProperties(workspace);
+        CliSessionService resumed = new CliSessionService(resumeOptions, mapper, resumeAgent,
+                new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper,
+                        countingFinalAnswerGateway("after resume", modelCalls),
+                        resumeAgent, java.util.List.of()));
+        assertEquals(originalId, resumed.sessionId());
+        assertEquals("after resume", resumed.runTurn("continue original conversation"));
+        assertEquals(2, resumed.runRepository().findByConversationId(originalId).size());
+        AgentSession freshAfterResume = resumed.sessionRepository().find(newId).orElseThrow();
+        assertTrue(freshAfterResume.getHistory().isEmpty());
+        resumed.close();
+    }
+
+    @Test
+    public void resetCommandIsUnavailableWithoutStartingARun() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-reset-removed");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace,
+                countingFinalAnswerGateway("must not be called", modelCalls));
+        String sessionId = session.sessionId();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        assertTrue(CliMain.handleControl(session, "/reset",
+                new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+
+        assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("/reset is unavailable"));
+        assertEquals(sessionId, session.sessionId());
+        assertEquals(0, modelCalls.get());
+        assertTrue(session.runRepository().findByConversationId(sessionId).isEmpty());
+        AgentSession persisted = session.sessionRepository().find(sessionId).orElseThrow();
+        assertTrue(persisted.getHistory().isEmpty());
+        session.close();
+    }
+
+    @Test
+    public void staleSessionCannotOverwriteNewerPersistedState() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-stale-session");
+        CliSessionService session = service(workspace, finalAnswerGateway("unused"));
+        String sessionId = session.sessionId();
+        session.runTurn("old state");
+
+        FileAgentSessionRepository externalStore = new FileAgentSessionRepository(workspace, mapper);
+        AgentSession newer = externalStore.find(sessionId).orElseThrow();
+        newer.setRuntimeIdentity("authoritative-newer-state");
+        newer.getHistory().add(ConversationHistoryEntry.builder()
+                .entryId("external-entry")
+                .sequence(newer.getLedgerNextSequence())
+                .role("user")
+                .content("newer persisted state")
+                .stableType(ConversationEntryType.USER_INPUT)
+                .build());
+        newer.setLedgerNextSequence(newer.getLedgerNextSequence() + 1);
+        externalStore.save(newer);
+
+        session.persistSession();
+
+        AgentSession persisted = externalStore.find(sessionId).orElseThrow();
+        assertEquals("authoritative-newer-state", persisted.getRuntimeIdentity());
+        assertTrue(persisted.getHistory().stream()
+                .anyMatch(entry -> "newer persisted state".equals(entry.content())));
         session.close();
     }
 
@@ -322,6 +443,25 @@ public class CliSessionServiceE2ETest {
                             .actualModel("deepseek-v4-flash")
                             .build());
                 }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<final>" + answer + "</final>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway countingFinalAnswerGateway(String answer, AtomicInteger calls) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
                 return Mono.just(ModelChatResult.builder()
                         .content("<final>" + answer + "</final>")
                         .finishReason("stop")

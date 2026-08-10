@@ -7,6 +7,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
@@ -23,7 +24,7 @@ public final class CliMain {
             /help    Show this help message.
             /memory  Show the agent's distilled working memory.
             /session Show the session id.
-            /reset   Clear the current session history and memory.
+            /new     Create a new independent session.
             /exit    Exit the agent.
             """;
 
@@ -60,6 +61,9 @@ public final class CliMain {
                 printWelcome(session, options);
                 if (arguments.prompt != null && !arguments.prompt.isBlank()) {
                     System.out.println();
+                    if (handleControl(session, arguments.prompt.strip(), System.out)) {
+                        return 0;
+                    }
                     System.out.println(runSafe(session, arguments.prompt));
                     return 0;
                 }
@@ -125,6 +129,9 @@ public final class CliMain {
             if (input.isEmpty()) {
                 continue;
             }
+            if (handleControl(session, input, System.out)) {
+                continue;
+            }
             switch (input) {
                 case "/exit", "/quit" -> {
                     return 0;
@@ -135,11 +142,6 @@ public final class CliMain {
                 }
                 case "/session" -> {
                     System.out.println(session.sessionId());
-                    continue;
-                }
-                case "/reset" -> {
-                    session.reset();
-                    System.out.println("session reset");
                     continue;
                 }
                 case "/memory" -> {
@@ -153,6 +155,22 @@ public final class CliMain {
             System.out.println();
             System.out.println(runSafe(session, input));
         }
+    }
+
+    static boolean handleControl(CliSessionService session, String input, PrintStream output) {
+        return switch (input) {
+            case "/new" -> {
+                String previousId = session.sessionId();
+                String newId = session.newSession();
+                output.println("new session: " + newId + " (previous: " + previousId + ")");
+                yield true;
+            }
+            case "/reset" -> {
+                output.println("error: /reset is unavailable; use /new");
+                yield true;
+            }
+            default -> false;
+        };
     }
 
     private static String runSafe(CliSessionService session, String prompt) {

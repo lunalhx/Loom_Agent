@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.mcp.McpToolCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,14 +31,21 @@ public class AgentLoopAutoConfig {
     private static final Logger log = LoggerFactory.getLogger(AgentLoopAutoConfig.class);
 
     @Bean
+    public ToolExecutor.ApprovalPrompt approvalPrompt(AgentRuntimeProperties agent) {
+        return new cn.lunalhx.ai.cli.CliSessionService.InteractiveApprovalPrompt(
+                "ask".equalsIgnoreCase(agent.getApprovalPolicy()));
+    }
+
+    @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
                                              ConversationHistoryAppendService ledgerAppendService,
                                              ContextManager contextManager,
-                                             ConversationExecutionGuard executionGuard) {
+                                             ConversationExecutionGuard executionGuard,
+                                             ObjectProvider<ToolExecutor.ApprovalPrompt> approvalPromptProvider) {
         return new AgentLoopFactory(modelGateway, state, runtime, ledgerAppendService,
-                contextManager, executionGuard);
+                contextManager, executionGuard, approvalPromptProvider.getIfAvailable());
     }
 
     @Bean

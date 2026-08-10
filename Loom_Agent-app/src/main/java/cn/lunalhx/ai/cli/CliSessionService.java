@@ -3,7 +3,6 @@ package cn.lunalhx.ai.cli;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
-import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
@@ -18,33 +17,16 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.context.SecretRedactor;
-import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
-import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
-import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
-import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
-import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
-import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
-import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
-import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
-import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
-import cn.lunalhx.ai.infrastructure.gateway.HttpModelGateway;
-import cn.lunalhx.ai.infrastructure.mcp.McpToolCatalog;
-import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
-import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileDurableMemoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileRunStore;
-import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
-import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 
 import java.io.BufferedReader;
@@ -62,7 +44,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * CLI session facade. One {@link AgentSession} per workspace session; every
@@ -77,7 +58,7 @@ public class CliSessionService implements AutoCloseable {
     private final AgentRuntimeProperties agent;
     private final ModelRuntimeProperties model;
     private final String workspace;
-    private final String sessionId;
+    private String sessionId;
     private final AgentSessionRepository sessionStore;
     private final AgentRunRepository runStore;
     private final AgentCheckpointRepository checkpointStore;
@@ -94,11 +75,11 @@ public class CliSessionService implements AutoCloseable {
         this(options, spring.getBean(ObjectMapper.class),
                 spring.getBean(AgentRuntimeProperties.class),
                 spring.getBean(ModelRuntimeProperties.class),
-                new FileAgentSessionRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
-                new FileAgentRunRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
-                new FileAgentCheckpointRepository(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
-                new FileTraceRecorder(Path.of(options.workspaceRoot), spring.getBean(ObjectMapper.class)),
-                buildLoopWithSpring(spring, options));
+                spring.getBean(AgentSessionRepository.class),
+                spring.getBean(AgentRunRepository.class),
+                spring.getBean(AgentCheckpointRepository.class),
+                spring.getBean(TraceRecorder.class),
+                spring.getBean(AgentLoopService.class));
     }
 
     /** Build a shared artifact redactor from CLI options (writer last-defense). */
@@ -117,7 +98,7 @@ public class CliSessionService implements AutoCloseable {
                       AgentCheckpointRepository checkpointStore, TraceRecorder traceRecorder,
                       AgentLoopService loopService) {
         this.sessionId = options.resumeSessionId != null
-                ? options.resumeSessionId : "session-" + currentStamp();
+                ? options.resumeSessionId : newSessionId();
         this.workspace = options.workspaceRoot;
         this.options = options;
         this.mapper = mapper;
@@ -154,8 +135,12 @@ public class CliSessionService implements AutoCloseable {
             }
             return result.getSession();
         }
+        return createFreshSession(sessionId);
+    }
+
+    private AgentSession createFreshSession(String id) {
         AgentSession fresh = AgentSession.builder()
-                .id(sessionId)
+                .id(id)
                 .schemaVersion(AgentSession.CURRENT_SCHEMA_VERSION)
                 .workspaceRoot(workspace)
                 .createdAt(Instant.now())
@@ -166,6 +151,13 @@ public class CliSessionService implements AutoCloseable {
                 .runtimeIdentity(redactor == null ? null : "cli")
                 .build();
         return sessionStore.save(fresh);
+    }
+
+    /** Create and activate a new durable Session without starting a Run. */
+    public synchronized String newSession() {
+        sessionId = newSessionId();
+        session = createFreshSession(sessionId);
+        return sessionId;
     }
 
     /** Resume semantics: restore history + working memory + valid semantic
@@ -386,9 +378,23 @@ public class CliSessionService implements AutoCloseable {
     /** Persist loop-derived state back into the session. The latest semantic
      *  checkpoint of the newest root run is the single source of truth for
      *  history, working memory and the task anchor. */
-    public void persistSession() {
+    public synchronized void persistSession() {
+        // Re-read the durable Session before applying loop-derived state. A
+        // service instance may have been resumed before another process or
+        // CLI instance persisted a newer Session; its stale object must not
+        // replace that newer state on close.
+        Instant knownUpdatedAt = session.getUpdatedAt();
+        boolean durableStateAdvanced = sessionStore.find(sessionId)
+                .map(current -> {
+                    boolean advanced = current.getUpdatedAt() != null
+                            && (knownUpdatedAt == null
+                            || current.getUpdatedAt().isAfter(knownUpdatedAt));
+                    session = current;
+                    return advanced;
+                })
+                .orElse(false);
         Optional<AgentRun> latestRoot = runStore.findLatestRootByConversationId(sessionId);
-        if (latestRoot.isPresent()) {
+        if (latestRoot.isPresent() && !durableStateAdvanced) {
             AgentRun run = latestRoot.get();
             session.setId(run.getSessionId() == null ? sessionId : run.getSessionId());
             session.setUpdatedAt(Instant.now());
@@ -507,15 +513,6 @@ public class CliSessionService implements AutoCloseable {
         return checkpoint;
     }
 
-    public void reset() {
-        session.setHistory(new ArrayList<>());
-        session.setLedgerNextSequence(0);
-        session.setWorkingMemory(new WorkingContextMemory());
-        session.setCheckpoint(null);
-        session.setKeyFiles(new LinkedHashMap<>());
-        sessionStore.save(session);
-    }
-
     @Override
     public void close() {
         persistSession();
@@ -603,82 +600,14 @@ public class CliSessionService implements AutoCloseable {
         }
     }
 
-    private static AgentLoopService buildLoopWithSpring(ApplicationContext spring, CliOptions options) {
-        ObjectMapper springMapper = spring.getBean(ObjectMapper.class);
-        AgentRuntimeProperties springAgent = spring.getBean(AgentRuntimeProperties.class);
-        ModelRuntimeProperties springModel = spring.getBean(ModelRuntimeProperties.class);
-        AgentWorkspaceResolver workspaceResolver = spring.getBean(AgentWorkspaceResolver.class);
-        BudgetGuard budgetGuard = spring.getBean(BudgetGuard.class);
-        cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics metrics = spring.getBean(
-                cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics.class);
-        cn.lunalhx.ai.infrastructure.store.ArtifactRedactor artifactRedactor = artifactRedactor(options);
-        FileAgentSessionRepository sessionStore = new FileAgentSessionRepository(
-                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
-        FileAgentRunRepository runStore = new FileAgentRunRepository(
-                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
-        FileAgentCheckpointRepository checkpointStore = new FileAgentCheckpointRepository(
-                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
-        FileTraceRecorder traceRecorder = new FileTraceRecorder(
-                Path.of(options.workspaceRoot), springMapper, artifactRedactor);
-        Set<String> secretEnvNames = Set.copyOf(options.secretEnvNames);
-        Set<String> providerKeys = options.apiKey == null || options.apiKey.isBlank()
-                ? Set.of() : Set.of(options.apiKey);
-        SecretRedactor redactor = SecretRedactor.of(secretEnvNames,
-                new java.util.LinkedHashSet<>(options.secretValues), providerKeys);
-
-        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
-                workspaceResolver, runStore, checkpointStore, springMapper);
-        AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
-                springAgent, traceRecorder, budgetGuard, metrics,
-                new RedactingToolOutputSanitizer(redactor), springModel,
-                spring.getBean(cn.lunalhx.ai.config.AgentRuntimeConfigRegistry.class));
-        ConversationHistoryAppendService ledgerAppendService = spring.getBean(ConversationHistoryAppendService.class);
-        ContextManager contextManager = new ContextManager(springAgent, () -> {
-            try {
-                return new FileDurableMemoryRepository(Path.of(options.workspaceRoot), springMapper,
-                        artifactRedactor).findAllNewestFirst();
-            } catch (Exception e) {
-                return List.of();
-            }
-        });
-        ConversationExecutionGuard executionGuard = spring.getBean(ConversationExecutionGuard.class);
-        ThreadPoolExecutor executor = spring.getBean(ThreadPoolExecutor.class);
-        ToolRegistry registry = spring.getBean(ToolRegistry.class);
-        // MCP tools are merged before the loop is assembled so the flow's
-        // tool spec snapshot (AgentFlowFactory.create) includes them.
-        mergeMcpTools(registry, spring);
-        ModelGateway gateway = options.modelGateway != null
-                ? options.modelGateway : HttpModelGateway.fromProperties(springModel);
-        ToolExecutor.ApprovalPrompt approvalPrompt = options.approvalPrompt;
-        AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime,
-                ledgerAppendService, contextManager, executionGuard, approvalPrompt);
-        return factory.createStandalone(registry, executor);
-    }
-
-    /** Append MCP tools to the shared registry; missing/failed catalog is a no-op. */
-    private static void mergeMcpTools(ToolRegistry registry, ApplicationContext spring) {
-        try {
-            ObjectProvider<McpToolCatalog> catalogProvider = spring.getBeanProvider(McpToolCatalog.class);
-            McpToolCatalog catalog = catalogProvider.getIfAvailable();
-            if (catalog == null) {
-                return;
-            }
-            java.util.List<AgentTool> mcpTools = catalog.catalog();
-            if (mcpTools.isEmpty()) {
-                return;
-            }
-            java.util.List<AgentTool> merged = new java.util.ArrayList<>(registry.tools());
-            merged.addAll(mcpTools);
-            registry.replace(merged);
-            System.out.println("[mcp] registered " + mcpTools.size() + " MCP tool(s)");
-        } catch (Exception e) {
-            System.out.println("[mcp] tool registration skipped: " + e.getMessage());
-        }
-    }
-
     private static String currentStamp() {
         return Instant.now().toString()
                 .replace(":", "").replace("-", "").replace(".", "").substring(0, 15);
+    }
+
+    private static String newSessionId() {
+        return "session-" + currentStamp() + "-"
+                + UUID.randomUUID().toString().substring(0, 8);
     }
 
     private static void applyOptions(AgentRuntimeProperties agent,

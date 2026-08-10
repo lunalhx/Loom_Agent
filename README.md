@@ -61,7 +61,7 @@ REPL 命令：
 /help    显示帮助
 /memory  显示工作记忆
 /session 显示当前 session 路径
-/reset   清空当前会话历史与记忆（保留 session id 与工作区）
+/new     创建独立的新会话并保留当前会话
 /exit    退出
 ```
 
@@ -189,7 +189,7 @@ loom:
 ```
 
 - `--resume latest` 选择当前工作区最近更新的会话；工作区不一致时拒绝恢复。
-- REPL 复用同一 session；`/reset` 清空历史/记忆/checkpoint，保留 session id 与工作区。
+- REPL 复用同一 session；`/new` 创建独立会话，旧 session 可通过 `--resume` 显式恢复。
 - 所有持久化 artifact（trace、checkpoint、run、report、session、working/durable memory）在写入前统一脱敏，占位符为 `<redacted>`：自动发现后缀 `API_KEY`/`TOKEN`/`SECRET`/`PASSWORD` 的环境变量值、`--secret-env-name` 指定字段、Provider API key 按长度降序替换；敏感字段名（如 `api_key`）整体替换。
 - trace 事件的 `sensitiveRedacted` 按真实处理状态标记（仅当实际替换了秘密才为 `true`），并携带 `redactionVersion`（当前规则版本 `1`）；旧 `[REDACTED]` 标记在重写时统一归一为新占位符，旧 trace JSONL 行（无 `redactionVersion` 字段）仍可被读取。
 - 脱敏发生在工具执行边界（工具输出在进入 history/ledger/memory/checkpoint 之前已清洗）；文件 writer 层作为最后防线再次兜底。清洗失败时 fail-closed：原文不会进入模型上下文、记忆、checkpoint 或 trace。
