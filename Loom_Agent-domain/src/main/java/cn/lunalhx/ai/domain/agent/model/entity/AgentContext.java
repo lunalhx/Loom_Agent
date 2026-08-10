@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
@@ -51,7 +52,8 @@ public class AgentContext {
 
     public AgentContext() {
         this.identity = new AgentIdentity(null, null, null, null, null, 0);
-        this.runDefinition = new AgentRunDefinition(null, null, 0, 0);
+        this.runDefinition = new AgentRunDefinition(null, null, null, null,
+                0, 0, CollaborationMode.BUILD);
         this.environment = new AgentEnvironmentState();
         this.runtime = new AgentRuntimeState();
         this.prompt = new AgentPromptState();
@@ -102,6 +104,10 @@ public class AgentContext {
     public void setMaxSteps(int v) { runDefinition = runDefinition.withMaxSteps(v); }
     public int getMaxAttempts() { return runDefinition.maxAttempts(); }
     public void setMaxAttempts(int v) { runDefinition = runDefinition.withMaxAttempts(v); }
+    public CollaborationMode getCollaborationMode() { return runDefinition.collaborationMode(); }
+    public void setCollaborationMode(CollaborationMode v) {
+        runDefinition = runDefinition.withCollaborationMode(v);
+    }
 
     // ==================== environment delegates ====================
 

@@ -18,7 +18,7 @@ import java.util.Objects;
  *       root, branch, default branch). Ordinary git status or doc churn does
  *       NOT invalidate it.</li>
  *   <li>{@code toolSignature} — deterministic hash of the sorted tool catalog
- *       (schema, description, risky attribute).</li>
+ *       (schema, description, capability and approval metadata).</li>
  *   <li>{@code runtimeSignature} — deterministic hash of execution constraints
  *       (main/delegate identity, path scope).</li>
  * </ul>

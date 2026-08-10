@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
@@ -23,16 +24,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v9 — only durable state needed for recovery.
+ * Checkpoint snapshot v10 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v9 adopts loom-code loop semantics: {@code toolSteps}/{@code modelAttempts} counters
+ * <p>v10 adopts loom-code loop semantics and persists the immutable Run mode snapshot.
+ * {@code toolSteps}/{@code modelAttempts} counters
  * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
  * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
- * Only v9 snapshots are recoverable; v8 and earlier are rejected at restore time.
+ * Only v10 snapshots are recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -40,7 +42,9 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    private int schemaVersion = 9;
+    public static final int CURRENT_SCHEMA_VERSION = 10;
+
+    private Integer schemaVersion;
 
     // -- identity (durable) --
     private String runId;
@@ -50,6 +54,7 @@ public class AgentContextSnapshot {
     private String requestId;
     private String conversationId;
     private Integer agentDepth;
+    private CollaborationMode runModeSnapshot;
 
     // -- run definition (durable) --
     private String question;
@@ -68,8 +73,6 @@ public class AgentContextSnapshot {
     private Integer parseErrors;
     private Instant startedAt;
     private List<AgentStep> history;
-    // Legacy field — no longer written; kept for Jackson backward compat on old snapshots
-    private List<DynamicTextEntry> dynamicTextEntries;
     private String currentNode;
     private Long checkpointVersion;
     private String finalAnswer;
@@ -135,7 +138,7 @@ public class AgentContextSnapshot {
         AgentTraceState trace = context.trace();
 
         return AgentContextSnapshot.builder()
-                .schemaVersion(9)
+                .schemaVersion(CURRENT_SCHEMA_VERSION)
                 // identity
                 .runId(id.runId())
                 .sessionId(context.getSessionId())
@@ -144,6 +147,7 @@ public class AgentContextSnapshot {
                 .requestId(id.requestId())
                 .conversationId(id.conversationId())
                 .agentDepth(id.agentDepth())
+                .runModeSnapshot(def.collaborationMode())
                 // run definition
                 .question(def.question())
                 .pathScope(def.pathScope())
@@ -198,6 +202,7 @@ public class AgentContextSnapshot {
     }
 
     public AgentContext restore() {
+        ensureCurrentShape();
         AgentContext context = new AgentContext();
 
         // identity
@@ -208,6 +213,7 @@ public class AgentContextSnapshot {
         context.setRequestId(requestId);
         context.setConversationId(conversationId);
         context.setAgentDepth(agentDepth == null ? 0 : agentDepth);
+        context.setCollaborationMode(runModeSnapshot);
 
         // run definition
         context.setQuestion(question);
@@ -268,5 +274,15 @@ public class AgentContextSnapshot {
         context.setWorkingMemory(workingMemory);
 
         return context;
+    }
+
+    /** Reject obsolete persisted shapes instead of silently migrating them. */
+    public void ensureCurrentShape() {
+        if (schemaVersion == null || schemaVersion != CURRENT_SCHEMA_VERSION
+                || runModeSnapshot == null) {
+            throw new IllegalArgumentException(
+                    "checkpoint snapshot uses an incompatible schema; "
+                            + "no automatic migration is performed");
+        }
     }
 }

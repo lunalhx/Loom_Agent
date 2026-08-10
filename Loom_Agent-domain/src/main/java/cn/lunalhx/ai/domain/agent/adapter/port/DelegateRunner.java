@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.agent.adapter.port;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+
 /**
  * Delegate capability for the loom-code {@code delegate} tool: spawn a bounded
  * read-only child agent as a real child run with proper lineage and return its
@@ -17,5 +19,6 @@ public interface DelegateRunner {
      * @param parentSummary recent parent summary (max 300 chars)
      */
     String delegate(String task, int maxSteps, String parentRunId, String rootRunId,
-                    String sessionId, String workspace, String parentSummary);
+                    String sessionId, String workspace, String parentSummary,
+                    CollaborationMode collaborationMode);
 }

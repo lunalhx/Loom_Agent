@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.store;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -45,6 +46,7 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
     @Override
     public AgentSession save(AgentSession session) {
         try {
+            validateCurrent(session, session.getId(), path(session.getId()));
             Files.createDirectories(root);
             session.setUpdatedAt(Instant.now());
             if (session.getCreatedAt() == null) {
@@ -76,18 +78,7 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
                                 + "no automatic migration is performed, refusing to touch the original file: "
                                 + target);
             }
-            ObjectMapper lenient = mapper.copy()
-                    .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-            AgentSession session = lenient.readValue(target.toFile(), AgentSession.class);
-            if (session.getSchemaVersion() == null
-                    || session.getSchemaVersion() != AgentSession.CURRENT_SCHEMA_VERSION) {
-                throw new IllegalArgumentException(
-                        "session " + sessionId + " uses an incompatible schema version ("
-                                + session.getSchemaVersion() + "); expected "
-                                + AgentSession.CURRENT_SCHEMA_VERSION
-                                + " — no automatic migration, refusing to touch the original file");
-            }
-            return Optional.of(session);
+            return Optional.of(readCurrent(target, sessionId));
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (IOException e) {
@@ -106,11 +97,7 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
         try (var stream = Files.list(root)) {
             for (Path file : (Iterable<Path>) stream.filter(p -> p.toString().endsWith(".json"))::iterator) {
                 try {
-                    AgentSession session = mapper.readValue(file.toFile(), AgentSession.class);
-                    if (session.getSchemaVersion() == null
-                            || session.getSchemaVersion() != AgentSession.CURRENT_SCHEMA_VERSION) {
-                        continue;
-                    }
+                    AgentSession session = readCurrent(file, file.getFileName().toString());
                     if (!workspaceRoot.equals(session.getWorkspaceRoot())) {
                         continue;
                     }
@@ -130,9 +117,42 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
         }
         String name = best.getFileName().toString();
         try {
-            return Optional.of(mapper.readValue(best.toFile(), AgentSession.class));
-        } catch (IOException e) {
+            return Optional.of(readCurrent(best, best.getFileName().toString()));
+        } catch (Exception e) {
             return Optional.empty();
+        }
+    }
+
+    private AgentSession readCurrent(Path target, String sessionId) throws IOException {
+        AgentSession session = mapper.readValue(target.toFile(), AgentSession.class);
+        validateCurrent(session, sessionId, target);
+        return session;
+    }
+
+    private void validateCurrent(AgentSession session, String sessionId, Path target) {
+        if (session.getSchemaVersion() == null
+                || session.getSchemaVersion() != AgentSession.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException(
+                    "session " + sessionId + " uses an incompatible schema version ("
+                            + session.getSchemaVersion() + "); expected "
+                            + AgentSession.CURRENT_SCHEMA_VERSION
+                            + " — no automatic migration, refusing to touch the original file: "
+                            + target);
+        }
+        if (session.getCollaborationMode() == null) {
+            throw new IllegalArgumentException(
+                    "session " + sessionId + " has no collaboration mode; "
+                            + "the current schema requires an explicit mode — "
+                            + "no automatic migration, refusing to touch the original file: "
+                            + target);
+        }
+        if (session.getCheckpoint() != null
+                && (session.getCheckpoint().getSchemaVersion() == null
+                || session.getCheckpoint().getSchemaVersion() != TaskCheckpoint.CURRENT_SCHEMA_VERSION
+                || session.getCheckpoint().getRunModeSnapshot() == null)) {
+            throw new IllegalArgumentException(
+                    "session " + sessionId + " contains an incompatible checkpoint schema; "
+                            + "no automatic migration, refusing to touch the original file: " + target);
         }
     }
 

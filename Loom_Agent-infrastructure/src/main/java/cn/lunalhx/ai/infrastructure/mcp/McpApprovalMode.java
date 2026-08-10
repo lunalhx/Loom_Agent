@@ -1,14 +1,13 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 /**
- * Codex-style per-server approval mapping, folded into the shared
- * {@code ToolSpec.risky} flag of the loom tool chain.
+ * Codex-style per-server base-session approval mapping.
  *
  * <ul>
- *   <li>{@link #AUTO}: risky = false — tools run without asking</li>
- *   <li>{@link #WRITES}: risky = true — only read-only tools skip approval</li>
- *   <li>{@link #PROMPT}: risky = true — always ask (same loom behaviour as WRITES)</li>
- *   <li>{@link #APPROVE}: risky = true — one-shot pre-approval not yet supported,
+ *   <li>{@link #AUTO}: no session approval is required</li>
+ *   <li>{@link #WRITES}: session policy approval is required</li>
+ *   <li>{@link #PROMPT}: session policy approval is required</li>
+ *   <li>{@link #APPROVE}: one-shot pre-approval is not yet supported,
  *       mapped to the same loom behaviour as WRITES</li>
  * </ul>
  */

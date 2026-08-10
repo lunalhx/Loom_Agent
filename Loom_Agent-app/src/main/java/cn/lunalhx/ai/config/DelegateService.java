@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import org.springframework.beans.factory.ObjectProvider;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -35,7 +37,8 @@ public class DelegateService implements DelegateRunner {
 
     @Override
     public String delegate(String task, int maxSteps, String parentRunId, String rootRunId,
-                           String sessionId, String workspace, String parentSummary) {
+                           String sessionId, String workspace, String parentSummary,
+                           CollaborationMode collaborationMode) {
         AgentQuestion question = AgentQuestion.builder()
                 .question(task)
                 .parentRunId(parentRunId)
@@ -45,6 +48,8 @@ public class DelegateService implements DelegateRunner {
                 .agentDepth(1)
                 .maxSteps(Math.min(3, maxSteps))
                 .approvalPolicy("never")
+                .collaborationMode(Objects.requireNonNull(collaborationMode,
+                        "delegate collaboration mode must not be null"))
                 .allowedTools(List.of("list_files", "read_file", "search"))
                 .build();
         AtomicReference<String> answer = new AtomicReference<>("");

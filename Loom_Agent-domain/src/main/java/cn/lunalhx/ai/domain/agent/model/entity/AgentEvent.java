@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,6 +24,7 @@ public class AgentEvent {
     private String conversationId;
     private String workspace;
     private String parentRunId;
+    private CollaborationMode runModeSnapshot;
     private Long elapsedMs;
     private Integer toolSteps;
     private Integer modelAttempts;
@@ -34,7 +36,6 @@ public class AgentEvent {
     private String toolCallId;
     private Map<String, Object> input;
     private String approvalId;
-    private String riskReason;
     private String operationPreview;
     private Instant expiresAt;
     private String observation;

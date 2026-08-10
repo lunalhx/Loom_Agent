@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.tool.model;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,6 +28,9 @@ public class ToolCall {
     private AgentRuntimeProperties runtimeProperties;
     private java.util.Set<String> secretEnvNames;
     private String recentSummary;
+    private CollaborationMode collaborationMode;
+    private EffectProfile effectProfile;
+    private boolean approvalRequired;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

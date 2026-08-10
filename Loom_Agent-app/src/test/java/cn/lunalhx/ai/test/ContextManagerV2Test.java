@@ -268,8 +268,12 @@ public class ContextManagerV2Test {
         StablePrefixBuilder builder = new StablePrefixBuilder();
         List<ToolSpec> specs = List.of(ToolSpec.builder().name("read_file")
                 .description("Read").inputSchema("{}").build());
-        StablePrefix a = builder.build(false, true, null, specs, "Workspace:\n- status: M A.java", "ws-fp");
-        StablePrefix b = builder.build(false, true, null, specs, "Workspace:\n- status: M B.java", "ws-fp");
+        StablePrefix a = builder.build(false, true, null, specs,
+                "Workspace:\n- status: M A.java", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix b = builder.build(false, true, null, specs,
+                "Workspace:\n- status: M B.java", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertTrue(a.matches(b));
     }
 
@@ -280,8 +284,10 @@ public class ContextManagerV2Test {
                 .description("Read").inputSchema("{}").build());
         List<ToolSpec> specB = List.of(ToolSpec.builder().name("write_file")
                 .description("Write").inputSchema("{}").build());
-        StablePrefix a = builder.build(false, true, null, specA, "", "ws-fp");
-        StablePrefix b = builder.build(false, true, null, specB, "", "ws-fp");
+        StablePrefix a = builder.build(false, true, null, specA, "", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix b = builder.build(false, true, null, specB, "", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertFalse(a.matches(b));
         assertNotEquals(a.toolSignature(), b.toolSignature());
     }
@@ -291,8 +297,10 @@ public class ContextManagerV2Test {
         StablePrefixBuilder builder = new StablePrefixBuilder();
         List<ToolSpec> specs = List.of(ToolSpec.builder().name("read_file")
                 .description("Read").inputSchema("{}").build());
-        StablePrefix main = builder.build(false, true, null, specs, "", "ws-fp");
-        StablePrefix delegate = builder.build(true, false, null, specs, "", "ws-fp");
+        StablePrefix main = builder.build(false, true, null, specs, "", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix delegate = builder.build(true, false, null, specs, "", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertFalse(main.matches(delegate));
         assertNotEquals(main.runtimeSignature(), delegate.runtimeSignature());
     }

@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
@@ -372,6 +373,24 @@ public class CliSessionServiceE2ETest {
         assertTrue(Files.readString(legacy).contains("schema_version"));
     }
 
+    @Test
+    public void currentSchemaSessionWithoutModeIsRejected() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-schema-missing-mode");
+        Path sessionsDir = Files.createDirectories(workspace.resolve(".loom-code").resolve("sessions"));
+        Path invalid = sessionsDir.resolve("missing-mode.json");
+        Files.writeString(invalid, "{\"id\":\"missing-mode\",\"schemaVersion\":"
+                + AgentSession.CURRENT_SCHEMA_VERSION + ",\"workspaceRoot\":\""
+                + workspace + "\",\"history\":[]}");
+
+        try {
+            new FileAgentSessionRepository(workspace, mapper).find("missing-mode");
+            fail("expected missing mode rejection");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("collaboration mode"));
+        }
+        assertTrue(Files.readString(invalid).contains("schemaVersion"));
+    }
+
     // ---- key file change invalidates checkpoint summary on resume ----
 
     @Test
@@ -504,7 +523,7 @@ public class CliSessionServiceE2ETest {
                         .anyMatch(e -> e.content() != null && e.content().contains("approval denied")));
     }
 
-    /** Gateway: first call invokes the given risky tool, then returns the final answer. */
+    /** Gateway: first call invokes the given approval-controlled tool, then returns the final answer. */
     private ModelGateway runShellGateway(String tool, String answer) {
         AtomicInteger calls = new AtomicInteger();
         return new ModelGateway() {
@@ -583,7 +602,8 @@ public class CliSessionServiceE2ETest {
 
         @Override
         public String delegate(String task, int maxSteps, String parentRunId, String rootRunId,
-                               String sessionId, String workspacePath, String parentSummary) {
+                               String sessionId, String workspacePath, String parentSummary,
+                               CollaborationMode collaborationMode) {
             ModelGateway childGateway = new ModelGateway() {
                 @Override
                 public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
@@ -614,6 +634,7 @@ public class CliSessionServiceE2ETest {
                             .agentDepth(1)
                             .maxSteps(Math.min(3, maxSteps))
                             .approvalPolicy("never")
+                            .collaborationMode(collaborationMode)
                             .allowedTools(java.util.List.of("list_files", "read_file", "search"))
                             .build())
                     .doOnNext(e -> {

@@ -171,7 +171,8 @@ public class SecurityContractTest {
                                 .name("run_shell")
                                 .description("shell")
                                 .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
-                                .risky(true)
+                                .capabilityEnvelope(cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope.shell())
+                                .approvalRequirement(cn.lunalhx.ai.domain.tool.model.ApprovalRequirement.SESSION_POLICY)
                                 .build();
                     }
 
@@ -200,6 +201,7 @@ public class SecurityContractTest {
         cn.lunalhx.ai.domain.tool.model.ToolResult result = gate.evaluate(ctx, call,
                 cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy.root(
                         java.util.Set.of("run_shell"),
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD,
                         cn.lunalhx.ai.domain.tool.service.ToolExecutor.ApprovalPolicy.ASK));
         assertNull(result);
         assertFalse(shown.get().contains("R4W_SECRET_123"));

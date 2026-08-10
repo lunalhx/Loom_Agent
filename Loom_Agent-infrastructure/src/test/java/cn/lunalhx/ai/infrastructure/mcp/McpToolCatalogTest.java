@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.Test;
@@ -29,7 +30,7 @@ public class McpToolCatalogTest {
     }
 
     @Test
-    public void catalogPrefixesAllToolsAndMarksRiskyByApprovalMode() {
+    public void catalogPrefixesAllToolsAndCarriesApprovalRequirement() {
         McpSyncClient auto = client("safe", tool("read"));
         McpSyncClient writes = client("db", tool("query"), tool("delete"));
 
@@ -41,11 +42,11 @@ public class McpToolCatalogTest {
         List<AgentTool> tools = catalog.catalog();
         assertEquals(3, tools.size());
         assertEquals("safe_read", tools.get(0).spec().getName());
-        assertFalse(tools.get(0).isRisky());
+        assertEquals(ApprovalRequirement.NONE, tools.get(0).spec().getApprovalRequirement());
         assertEquals("db_query", tools.get(1).spec().getName());
-        assertTrue(tools.get(1).isRisky());
+        assertEquals(ApprovalRequirement.SESSION_POLICY, tools.get(1).spec().getApprovalRequirement());
         assertEquals("db_delete", tools.get(2).spec().getName());
-        assertTrue(tools.get(2).isRisky());
+        assertEquals(ApprovalRequirement.SESSION_POLICY, tools.get(2).spec().getApprovalRequirement());
     }
 
     @Test
@@ -81,7 +82,8 @@ public class McpToolCatalogTest {
         McpSyncClient client = client("reported-name", tool("read"));
         McpToolCatalog catalog = new McpToolCatalog(List.of(client),
                 Map.of("reported-name", new McpServerConfig(McpApprovalMode.AUTO, List.of(), List.of())));
-        assertFalse(catalog.catalog().get(0).isRisky());
+        assertEquals(ApprovalRequirement.NONE,
+                catalog.catalog().get(0).spec().getApprovalRequirement());
     }
 
     @Test

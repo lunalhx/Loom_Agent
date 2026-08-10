@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
@@ -66,6 +67,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .runId(context.getRunId())
                 .rootRunId(context.getRootRunId())
                 .conversationId(context.getConversationId())
+                .collaborationMode(context.getCollaborationMode())
                 .runtimeProperties(context.runtimeProperties(properties))
                 .secretEnvNames(context.runtimeProperties(properties).getSecretEnvNames() == null
                         ? null : Set.copyOf(context.runtimeProperties(properties).getSecretEnvNames()))
@@ -130,8 +132,12 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 ? null : Set.copyOf(context.getAllowedTools());
         // delegate is only visible while depth < maxDepth; even if the model
         // calls it directly, the executor must reject it at depth limit.
-        if (allowedTools != null && allowedTools.contains("delegate") && depth >= maxDepth) {
-            allowedTools = new java.util.HashSet<>(allowedTools);
+        if (depth >= maxDepth) {
+            allowedTools = allowedTools == null
+                    ? context.getToolSpecs().stream()
+                    .map(cn.lunalhx.ai.domain.tool.model.ToolSpec::getName)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))
+                    : new java.util.HashSet<>(allowedTools);
             allowedTools.remove("delegate");
         }
         ToolExecutor.ApprovalPolicy approvalPolicy = switch (context.getApprovalPolicy() == null
@@ -140,8 +146,14 @@ public class ToolDispatchNode extends AbstractAgentNode {
             case "never" -> ToolExecutor.ApprovalPolicy.NEVER;
             default -> ToolExecutor.ApprovalPolicy.ASK;
         };
-        boolean readOnly = context.getParentRunId() != null;
-        return new ToolExecutor.ToolRuntimePolicy(allowedTools, readOnly, approvalPolicy, depth, maxDepth);
+        return new ToolExecutor.ToolRuntimePolicy(
+                allowedTools,
+                context.getCollaborationMode(),
+                approvalPolicy,
+                depth,
+                maxDepth,
+                ExecutionProfile.forRun(context.getCollaborationMode(),
+                        context.getParentRunId() != null));
     }
 
     private String toolCallId(AgentContext context, AgentDecision decision, String rawInput) {

@@ -170,6 +170,7 @@ public final class AgentRunLifecycle {
                 .requestId(id.requestId())
                 .conversationId(id.conversationId())
                 .runKind(StringUtils.isBlank(id.parentRunId()) ? AgentRunKind.ROOT : AgentRunKind.CHILD)
+                .runModeSnapshot(def.collaborationMode())
                 .depth(id.agentDepth())
                 .maxSteps(def.maxSteps())
                 .question(context.runDefinition().question())

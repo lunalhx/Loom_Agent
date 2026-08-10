@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,6 +30,7 @@ public class AgentQuestion {
     private String model;
     private List<String> allowedTools;
     private String approvalPolicy;
+    private CollaborationMode collaborationMode;
     private String checkpointId;
     private AgentContextSnapshot seedSnapshot;
 

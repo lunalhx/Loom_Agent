@@ -3,6 +3,8 @@ package cn.lunalhx.ai.infrastructure.loom;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.springframework.stereotype.Component;
@@ -40,7 +42,8 @@ public class PatchFileTool implements AgentTool {
                         "\"required\":[\"path\",\"old_text\",\"new_text\"]," +
                         "\"additionalProperties\":false" +
                         "}")
-                .risky(true)
+                .capabilityEnvelope(ToolCapabilityEnvelope.repositoryMutation())
+                .approvalRequirement(ApprovalRequirement.SESSION_POLICY)
                 .build();
     }
 

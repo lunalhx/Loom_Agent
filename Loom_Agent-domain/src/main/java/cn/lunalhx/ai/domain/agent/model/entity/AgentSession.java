@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,11 +28,12 @@ import java.util.Map;
 @AllArgsConstructor
 public class AgentSession {
 
-    public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final int CURRENT_SCHEMA_VERSION = 2;
 
     private String id;
-    private Integer schemaVersion = CURRENT_SCHEMA_VERSION;
+    private Integer schemaVersion;
     private String workspaceRoot;
+    private CollaborationMode collaborationMode;
     private Instant createdAt;
     private Instant updatedAt;
 

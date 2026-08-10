@@ -2,6 +2,8 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
@@ -22,7 +24,8 @@ public class ToolDeterministicOrderingTest {
                 .name(name)
                 .description("desc " + name)
                 .inputSchema("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}")
-                .risky(false)
+                .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
+                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 
@@ -36,7 +39,7 @@ public class ToolDeterministicOrderingTest {
                 new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.PatchFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
-                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary) ->
+                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary, mode) ->
                                 "delegate_result:\nDone")),
                 new ToolSchemaValidator(objectMapper));
 
@@ -56,7 +59,7 @@ public class ToolDeterministicOrderingTest {
         ToolRegistry registry = new ToolRegistry(List.of(
                 new cn.lunalhx.ai.infrastructure.loom.ReadFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
-                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary) ->
+                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary, mode) ->
                                 "delegate_result:\nDone")),
                 new ToolSchemaValidator(objectMapper));
 

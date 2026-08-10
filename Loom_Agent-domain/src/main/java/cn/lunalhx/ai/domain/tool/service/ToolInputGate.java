@@ -2,7 +2,12 @@ package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentStep;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
+import cn.lunalhx.ai.domain.tool.model.EffectProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -14,32 +19,20 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * Input-governance service of the tool chain. Sole owner of:
- * <ul>
- *   <li>allowedTools allowlist</li>
- *   <li>tool existence</li>
- *   <li>argument parse + semantic validation (before approval)</li>
- *   <li>consecutive repeated call (3rd identical call rejected)</li>
- *   <li>readOnly and approval policy</li>
- * </ul>
- *
- * <p>Rejected calls produce a unified safe {@link ToolResult}; the raw input
- * is never written to state (only a sanitized/redacted display value is).
- *
- * <p>This gate never executes tools and never writes output.
+ * Pre-execution governance for tool calls. It owns the base allowlist,
+ * catalog existence, schema validation, repeated-call guard, effect boundary,
+ * and independent approval requirement. It never executes a tool.
  */
 public class ToolInputGate {
 
     private final ToolRegistry registry;
     private final ToolExecutor.ApprovalPrompt approvalPrompt;
     private final ObjectMapper mapper = new ObjectMapper();
-
-    /** Optional trace recorder for approval security events. */
     private java.util.function.BiConsumer<AgentContext, ApprovalAudit> auditSink;
 
-    /** Approval audit event: only safe parameter summaries, never raw input. */
     public record ApprovalAudit(String eventType, String toolName, Map<String, Object> argSummary) {
     }
 
@@ -52,35 +45,42 @@ public class ToolInputGate {
         this(registry, null);
     }
 
-    /** Wire an audit sink for {@code approval_requested}/{@code approval_granted}/
-     *  {@code approval_denied}/{@code approval_blocked_by_read_only} events. */
     public ToolInputGate withAuditSink(java.util.function.BiConsumer<AgentContext, ApprovalAudit> sink) {
         this.auditSink = sink;
         return this;
     }
 
-    /** Run the fixed governance order; returns {@code null} when accepted. */
+    /** Returns null only when the call is authorized and may execute. */
     public ToolResult evaluate(AgentContext context, ToolCall call,
                                ToolExecutor.ToolRuntimePolicy policy) {
         String name = call.getName();
         JsonNode args = normalizeArgs(call);
-        boolean risky = registry.isRisky(name);
+        CollaborationMode mode = Objects.requireNonNull(context.getCollaborationMode(),
+                "run collaboration mode must not be null");
+        boolean delegateRun = context.getParentRunId() != null || context.getAgentDepth() > 0;
+        ExecutionProfile executionProfile = ExecutionProfile.forRun(mode, delegateRun);
 
-        // 1. allowedTools
         if (policy.allowedTools() != null && !policy.allowedTools().contains(name)) {
             return rejected(call, "tool_not_allowed",
                     "error: tool '" + name + "' is not allowed in this run",
-                    "rejected", "high", false, "tool_not_allowed");
+                    "tool_not_allowed", EffectProfile.unknown());
         }
 
-        // 2. tool existence
+        // Catalog projection is only a model hint in Build; in Plan it is also
+        // re-derived here so hidden/stale/fabricated calls cannot widen access.
+        if (mode == CollaborationMode.PLAN
+                && !registry.isPlanVisible(name, policy.allowedTools())) {
+            return rejected(call, "plan_mode_denied",
+                    "error: tool '" + name + "' is not available in Plan Mode",
+                    "plan_mode_denied", EffectProfile.unknown());
+        }
+
         if (!registry.contains(name)) {
             return rejected(call, "unknown_tool",
                     "error: unknown tool '" + name + "'",
-                    "rejected", "high", false, "unknown_tool");
+                    "unknown_tool", EffectProfile.unknown());
         }
 
-        // 3. argument parse + semantic validation (before approval)
         ToolInputValidationResult validation = registry.validateInput(name, args);
         if (!validation.valid()) {
             String detail = validation.errors().stream()
@@ -89,33 +89,42 @@ public class ToolInputGate {
             String example = exampleFor(name);
             String message = "error: invalid arguments for " + name + ": " + detail
                     + (example.isEmpty() ? "" : "\nexample: " + example);
-            return rejected(call, "invalid_arguments",
-                    message, "rejected", risky ? "high" : "low", !risky, "invalid_arguments");
+            return rejected(call, "invalid_arguments", message,
+                    "invalid_arguments", EffectProfile.unknown());
         }
 
-        // 4. consecutive repeated call
-        if (isRepeated(context, call, name, args)) {
+        call.setInput(args);
+        if (isRepeated(context, name, args)) {
             return rejected(call, "repeated_identical_call",
                     "error: repeated identical tool call for " + name
                             + "; choose a different tool or return a final answer",
-                    "rejected", risky ? "high" : "low", !risky, "repeated_identical_call");
+                    "repeated_identical_call", EffectProfile.unknown());
         }
 
-        // 5. readOnly and approval policy
-        Map<String, Object> argSummary = ApprovalDisplay.summarize(args);
-        if (policy.readOnly() && risky) {
-            audit(context, "approval_blocked_by_read_only", name, argSummary);
-            return rejected(call, "approval_denied",
-                    "error: approval denied for " + name + " (read-only run)",
-                    "rejected", "high", false, "read_only_block");
+        CallEffectAssessment assessment = registry.assessEffect(
+                name, call, executionProfile);
+        EffectProfile effectProfile = assessment.profile();
+        boolean restrictedRun = mode == CollaborationMode.PLAN || delegateRun;
+        if (restrictedRun && (!assessment.trusted()
+                || !executionProfile.allows(effectProfile))) {
+            audit(context, "plan_mode_denied", name, ApprovalDisplay.summarize(args));
+            return rejected(call, "plan_mode_denied",
+                    "error: effect profile is not authorized for this run",
+                    "plan_mode_denied", effectProfile);
         }
-        if (risky && !isApproved(policy, name, args)) {
+
+        ApprovalRequirement requirement = registry.approvalRequirement(name);
+        call.setEffectProfile(effectProfile);
+        call.setApprovalRequired(requirement.required());
+        Map<String, Object> argSummary = ApprovalDisplay.summarize(args);
+        if (requirement.required() && !isApproved(policy, name, args)) {
             audit(context, "approval_denied", name, argSummary);
             return rejected(call, "approval_denied",
                     "error: approval denied for " + name,
-                    "rejected", "high", false, "approval_denied");
+                    "approval_denied", effectProfile);
         }
-        audit(context, "approval_granted", name, argSummary);
+        audit(context, requirement.required() ? "approval_granted" : "call_authorized",
+                name, argSummary);
         return null;
     }
 
@@ -126,7 +135,7 @@ public class ToolInputGate {
         }
     }
 
-    private boolean isRepeated(AgentContext context, ToolCall call, String name, JsonNode args) {
+    private boolean isRepeated(AgentContext context, String name, JsonNode args) {
         List<AgentStep> history = context.getHistory();
         if (history == null || history.size() < 2) {
             return false;
@@ -153,20 +162,19 @@ public class ToolInputGate {
         if (approvalPrompt == null) {
             return false;
         }
-        // Approval displays only the summarized view (path + length + hash),
-        // never full command/content or secret values.
         return approvalPrompt.ask(name, mapper.valueToTree(ApprovalDisplay.summarize(args)));
     }
 
     private ToolResult rejected(ToolCall call, String errorCode,
-                                String content, String toolStatus, String riskLevel,
-                                boolean readOnly, String securityEvent) {
+                                String content, String securityEvent,
+                                EffectProfile effectProfile) {
         ToolResult result = ToolResult.failure(errorCode, content, 0L);
         result.setToolStatus("rejected");
         result.setToolErrorCode(errorCode);
         result.setSecurityEventType(securityEvent);
-        result.setRiskLevel(riskLevel);
-        result.setReadOnly(readOnly);
+        result.setEffectProfile(effectProfile);
+        result.setApprovalRequired(call.isApprovalRequired());
+        result.setReadOnly(effectProfile != null && effectProfile.isReadOnly());
         result.setAffectedPaths(List.of());
         result.setWorkspaceChanged(false);
         result.setDiffSummary(List.of());
@@ -182,7 +190,6 @@ public class ToolInputGate {
         if (!args.isObject()) {
             return args;
         }
-        // sort keys for normalized comparison (repeated-call + metadata)
         ObjectNode sorted = mapper.createObjectNode();
         List<String> keys = new ArrayList<>();
         args.fieldNames().forEachRemaining(keys::add);

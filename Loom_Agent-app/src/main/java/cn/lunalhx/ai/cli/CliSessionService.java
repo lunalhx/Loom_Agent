@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
@@ -41,6 +42,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -133,16 +135,23 @@ public class CliSessionService implements AutoCloseable {
             if (result.getKind() == ResumeResult.Kind.NO_CHECKPOINT) {
                 System.out.println("(resume: session found, no semantic checkpoint)");
             }
-            return result.getSession();
+            AgentSession resumed = result.getSession();
+            if (options.startupMode != null) {
+                resumed.setCollaborationMode(options.startupMode);
+                sessionStore.save(resumed);
+            }
+            return resumed;
         }
-        return createFreshSession(sessionId);
+        return createFreshSession(sessionId,
+                options.startupMode == null ? CollaborationMode.BUILD : options.startupMode);
     }
 
-    private AgentSession createFreshSession(String id) {
+    private AgentSession createFreshSession(String id, CollaborationMode mode) {
         AgentSession fresh = AgentSession.builder()
                 .id(id)
                 .schemaVersion(AgentSession.CURRENT_SCHEMA_VERSION)
                 .workspaceRoot(workspace)
+                .collaborationMode(Objects.requireNonNull(mode, "collaboration mode must not be null"))
                 .createdAt(Instant.now())
                 .history(new ArrayList<>())
                 .workingMemory(new WorkingContextMemory())
@@ -156,7 +165,7 @@ public class CliSessionService implements AutoCloseable {
     /** Create and activate a new durable Session without starting a Run. */
     public synchronized String newSession() {
         sessionId = newSessionId();
-        session = createFreshSession(sessionId);
+        session = createFreshSession(sessionId, session.getCollaborationMode());
         return sessionId;
     }
 
@@ -259,6 +268,7 @@ public class CliSessionService implements AutoCloseable {
                 .workspace(workspace)
                 .maxSteps(options.maxSteps)
                 .approvalPolicy(options.approvalPolicy)
+                .collaborationMode(session.getCollaborationMode())
                 .seedSnapshot(seed)
                 .build();
 
@@ -342,7 +352,8 @@ public class CliSessionService implements AutoCloseable {
             return null;
         }
         return AgentContextSnapshot.builder()
-                .schemaVersion(9)
+                .schemaVersion(10)
+                .runModeSnapshot(session.getCollaborationMode())
                 .ledgerEntries(session.getHistory())
                 .ledgerNextSequence(session.getLedgerNextSequence())
                 .workingMemory(session.getWorkingMemory())
@@ -505,6 +516,7 @@ public class CliSessionService implements AutoCloseable {
         checkpoint.setNextStep(org.apache.commons.lang3.StringUtils.defaultIfBlank(run.getStopReason(),
                 AgentStopReason.FINAL_ANSWER_RETURNED.name()));
         checkpoint.setRuntimeIdentity(run.getRootRunId());
+        checkpoint.setRunModeSnapshot(run.getRunModeSnapshot());
         checkpoint.setKeyFiles(session.getKeyFiles());
         checkpoint.setWorkingMemory(session.getWorkingMemory());
         checkpoint.setHistory(session.getHistory());
@@ -520,6 +532,20 @@ public class CliSessionService implements AutoCloseable {
 
     public String sessionId() {
         return sessionId;
+    }
+
+    public synchronized CollaborationMode collaborationMode() {
+        return session.getCollaborationMode();
+    }
+
+    /** Explicit user mode transition; it only changes the durable Session. */
+    public synchronized CollaborationMode setCollaborationMode(CollaborationMode mode) {
+        if (mode == null) {
+            throw new OptionsException("mode must be build or plan");
+        }
+        session.setCollaborationMode(mode);
+        sessionStore.save(session);
+        return mode;
     }
 
     /** Current in-memory session state (tests). */
@@ -647,6 +673,8 @@ public class CliSessionService implements AutoCloseable {
         public String apiKey;
         public String workspaceRoot;
         public String approvalPolicy = "ask";
+        /** Explicit startup selection; null preserves a resumed Session mode. */
+        public CollaborationMode startupMode;
         public int maxSteps = 6;
         public int maxNewTokens = 512;
         public double temperature = 0.2;

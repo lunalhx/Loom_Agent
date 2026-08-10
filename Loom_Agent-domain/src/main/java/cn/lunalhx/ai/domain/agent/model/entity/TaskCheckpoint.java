@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -28,9 +29,9 @@ import java.util.Map;
 @AllArgsConstructor
 public class TaskCheckpoint {
 
-    public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final int CURRENT_SCHEMA_VERSION = 2;
 
-    private Integer schemaVersion = CURRENT_SCHEMA_VERSION;
+    private Integer schemaVersion;
     private String sessionId;
     private String runId;
     private String goal;
@@ -40,6 +41,7 @@ public class TaskCheckpoint {
     private String nextStep;
     private String summary;
     private String runtimeIdentity;
+    private CollaborationMode runModeSnapshot;
 
     /** Path → SHA-256 of the key files this checkpoint depends on. */
     @Builder.Default

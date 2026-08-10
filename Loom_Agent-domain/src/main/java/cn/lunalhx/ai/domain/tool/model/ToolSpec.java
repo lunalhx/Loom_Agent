@@ -5,13 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Contract for a single loom-code tool.
- *
- * <p>Converged to four fields only: name, description, input JSON Schema and
- * {@code risky}. Multi-role visibility, skill permissions and MCP source
- * semantics are removed.
- */
+/** Contract for a single loom-code tool and its independent governance metadata. */
 @Data
 @Builder
 @NoArgsConstructor
@@ -22,10 +16,13 @@ public class ToolSpec {
     private String description;
     private String inputSchema;
     @Builder.Default
-    private boolean risky = false;
+    private ToolCapabilityEnvelope capabilityEnvelope = ToolCapabilityEnvelope.untrustedUnknown();
+    @Builder.Default
+    private ApprovalRequirement approvalRequirement = ApprovalRequirement.NONE;
 
     public ToolSpec(String name, String description, String inputSchema) {
-        this(name, description, inputSchema, false);
+        this(name, description, inputSchema,
+                ToolCapabilityEnvelope.untrustedUnknown(), ApprovalRequirement.NONE);
     }
 
 }

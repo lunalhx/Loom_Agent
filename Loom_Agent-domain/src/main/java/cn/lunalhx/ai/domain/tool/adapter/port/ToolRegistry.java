@@ -1,11 +1,16 @@
 package cn.lunalhx.ai.domain.tool.adapter.port;
 
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,6 +88,25 @@ public class ToolRegistry {
                 .collect(Collectors.toList());
     }
 
+    /** Model-visible catalog projected for the immutable Run mode snapshot. */
+    public List<ToolSpec> effectiveSpecs(CollaborationMode mode) {
+        return effectiveSpecs(mode, null);
+    }
+
+    /** Model-visible catalog projected from mode and base-session allowlist. */
+    public List<ToolSpec> effectiveSpecs(CollaborationMode mode,
+                                         Collection<String> allowedTools) {
+        CollaborationMode effectiveMode = Objects.requireNonNull(mode,
+                "collaboration mode must not be null");
+        return tools.get().values().stream()
+                .filter(tool -> allowedTools == null || allowedTools.isEmpty()
+                        || allowedTools.contains(tool.spec().getName()))
+                .filter(tool -> effectiveMode != CollaborationMode.PLAN
+                        || isPlanVisible(tool))
+                .map(AgentTool::spec)
+                .collect(Collectors.toList());
+    }
+
     public List<AgentTool> tools() {
         return List.copyOf(tools.get().values());
     }
@@ -109,8 +133,47 @@ public class ToolRegistry {
         return tool.call(call);
     }
 
-    public boolean isRisky(String name) {
+    public ApprovalRequirement approvalRequirement(String name) {
         AgentTool tool = tools.get().get(name);
-        return tool != null && tool.isRisky();
+        return tool == null || tool.spec().getApprovalRequirement() == null
+                ? ApprovalRequirement.NONE : tool.spec().getApprovalRequirement();
+    }
+
+    public CallEffectAssessment assessEffect(String name, ToolCall call,
+                                              ExecutionProfile executionProfile) {
+        AgentTool tool = tools.get().get(name);
+        return tool == null ? CallEffectAssessment.untrusted()
+                : tool.assessEffect(call, executionProfile);
+    }
+
+    public boolean isPlanVisible(String name) {
+        AgentTool tool = tools.get().get(name);
+        return tool != null && isPlanVisible(tool);
+    }
+
+    public boolean isPlanVisible(String name, Collection<String> allowedTools) {
+        return (allowedTools == null || allowedTools.isEmpty() || allowedTools.contains(name))
+                && isPlanVisible(name);
+    }
+
+    private boolean isPlanVisible(AgentTool tool) {
+        ToolSpec spec = tool.spec();
+        if ("run_shell".equals(spec.getName())) {
+            return false;
+        }
+        ExecutionProfile planProfile = ExecutionProfile.forRun(CollaborationMode.PLAN, false);
+        ToolCall probe = ToolCall.builder()
+                .name(spec.getName())
+                .input(JsonNodeFactory.instance.objectNode())
+                .collaborationMode(CollaborationMode.PLAN)
+                .build();
+        CallEffectAssessment assessment;
+        try {
+            assessment = tool.assessEffect(probe, planProfile);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        return assessment != null && assessment.trusted()
+                && planProfile.allows(assessment.profile());
     }
 }

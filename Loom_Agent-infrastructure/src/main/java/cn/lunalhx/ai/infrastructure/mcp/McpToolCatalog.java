@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -53,13 +54,14 @@ public class McpToolCatalog {
                 continue;
             }
             McpServerConfig config = resolveConfig(prefix);
-            boolean risky = config.approvalMode() != McpApprovalMode.AUTO;
+            ApprovalRequirement approvalRequirement = config.approvalMode() == McpApprovalMode.AUTO
+                    ? ApprovalRequirement.NONE : ApprovalRequirement.SESSION_POLICY;
             for (McpSchema.Tool tool : remoteTools) {
                 if (!allowed(config, tool.name())) {
                     log.info("[mcp] server '{}' tool '{}' filtered by config", prefix, tool.name());
                     continue;
                 }
-                tools.add(new McpAgentTool(client, prefix, tool, risky));
+                tools.add(new McpAgentTool(client, prefix, tool, approvalRequirement));
             }
         }
         return tools;

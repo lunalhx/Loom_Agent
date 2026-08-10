@@ -5,53 +5,37 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
-import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
-import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public final class AgentContextFactory {
 
     private final AgentRuntimeProperties properties;
     private final AgentWorkspaceResolver workspaceResolver;
-    private final List<ToolSpec> toolSpecs;
-    private final ConversationHistoryAppendService ledgerAppendService;
     private final AgentRuntimeConfigSource runtimeConfigSource;
+    private final ToolRegistry toolRegistry;
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
-                               List<ToolSpec> toolSpecs) {
-        this(properties, workspaceResolver, toolSpecs, null);
-    }
-
-    public AgentContextFactory(AgentRuntimeProperties properties,
-                               AgentWorkspaceResolver workspaceResolver,
-                               List<ToolSpec> toolSpecs,
-                               ConversationHistoryAppendService ledgerAppendService) {
-        this(properties, workspaceResolver, toolSpecs, ledgerAppendService,
-                () -> AgentRunConfig.startup(properties,
-                        new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties()));
-    }
-
-    public AgentContextFactory(AgentRuntimeProperties properties,
-                               AgentWorkspaceResolver workspaceResolver,
-                               List<ToolSpec> toolSpecs,
-                               ConversationHistoryAppendService ledgerAppendService,
-                               AgentRuntimeConfigSource runtimeConfigSource) {
-        this.properties = properties;
-        this.workspaceResolver = workspaceResolver;
-        this.toolSpecs = List.copyOf(toolSpecs);
-        this.ledgerAppendService = ledgerAppendService;
-        this.runtimeConfigSource = runtimeConfigSource;
+                               AgentRuntimeConfigSource runtimeConfigSource,
+                               ToolRegistry toolRegistry) {
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.workspaceResolver = Objects.requireNonNull(workspaceResolver,
+                "workspaceResolver must not be null");
+        this.runtimeConfigSource = Objects.requireNonNull(runtimeConfigSource,
+                "runtimeConfigSource must not be null");
+        this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
     }
 
     public AgentContext create(AgentQuestion question) {
@@ -74,6 +58,7 @@ public final class AgentContextFactory {
         if (previous == null) {
             return;
         }
+        previous.ensureCurrentShape();
         if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
             context.setConversationHistory(ConversationHistory.fromPersisted(
                     new ArrayList<>(previous.getLedgerEntries()),
@@ -96,6 +81,9 @@ public final class AgentContextFactory {
 
         AgentContext context = new AgentContext();
         context.setRunConfig(runtimeConfigSource.captureRunConfig());
+        if (previous != null) {
+            previous.ensureCurrentShape();
+        }
         context.setRunId(runId);
         context.setParentRunId(question.getParentRunId());
         String rootRunId = previous != null && StringUtils.isNotBlank(previous.getRootRunId())
@@ -109,6 +97,7 @@ public final class AgentContextFactory {
         context.setPathScope(question.getPathScope());
         context.setSessionId(question.getSessionId());
         context.setCheckpointId(question.getCheckpointId());
+        context.setCollaborationMode(resolveMode(question, previous));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
@@ -120,8 +109,9 @@ public final class AgentContextFactory {
         context.setToolSteps(0);
         context.setModelAttempts(0);
         context.setParseErrors(0);
-        context.setToolSpecs(toolSpecs);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
+        context.setToolSpecs(toolRegistry.effectiveSpecs(
+                context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
@@ -160,6 +150,7 @@ public final class AgentContextFactory {
         context.setPathScope(question.getPathScope());
         context.setSessionId(question.getSessionId());
         context.setCheckpointId(question.getCheckpointId());
+        context.setCollaborationMode(resolveMode(question, question.getSeedSnapshot()));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
@@ -171,8 +162,9 @@ public final class AgentContextFactory {
         context.setToolSteps(0);
         context.setModelAttempts(0);
         context.setParseErrors(0);
-        context.setToolSpecs(toolSpecs);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
+        context.setToolSpecs(toolRegistry.effectiveSpecs(
+                context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
@@ -203,6 +195,16 @@ public final class AgentContextFactory {
             }
         }
         return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
+    }
+
+    private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {
+        if (question.getCollaborationMode() != null) {
+            return question.getCollaborationMode();
+        }
+        if (previous != null && previous.getRunModeSnapshot() != null) {
+            return previous.getRunModeSnapshot();
+        }
+        return CollaborationMode.BUILD;
     }
 
     private void restoreWorkspace(AgentContext context, String workspace) {

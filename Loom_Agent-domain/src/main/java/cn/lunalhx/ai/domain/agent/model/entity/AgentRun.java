@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,6 +24,7 @@ public class AgentRun {
     private String requestId;
     private String conversationId;
     private AgentRunKind runKind;
+    private CollaborationMode runModeSnapshot;
     private Integer depth;
     private Integer maxSteps;
     private String question;

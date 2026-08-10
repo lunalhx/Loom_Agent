@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.store;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -97,7 +98,17 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
             return Optional.empty();
         }
         try {
-            return Optional.of(mapper.readValue(best.toFile(), AgentCheckpoint.class));
+            AgentCheckpoint checkpoint = mapper.readValue(best.toFile(), AgentCheckpoint.class);
+            AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
+            if (snapshot == null
+                    || snapshot.getSchemaVersion() == null
+                    || snapshot.getSchemaVersion() != AgentContextSnapshot.CURRENT_SCHEMA_VERSION
+                    || snapshot.getRunModeSnapshot() == null) {
+                throw new IllegalArgumentException(
+                        "checkpoint " + best + " uses an incompatible schema; "
+                                + "no automatic migration is performed");
+            }
+            return Optional.of(checkpoint);
         } catch (IOException e) {
             return Optional.empty();
         }

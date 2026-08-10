@@ -1,47 +1,58 @@
 package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
+import cn.lunalhx.ai.domain.tool.model.EffectProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolEffect;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
- * Execution service of the tool chain: the only entry point that calls the
- * {@link ToolRegistry}. Input governance (allowlist, existence, schema,
- * repeated-call, readOnly/approval) lives in {@link ToolInputGate}.
- *
- * <p>Security boundary: the raw result returned by {@code registry.call} is
- * handled restrictively inside this class — output is sanitized BEFORE it is
- * clipped and BEFORE it is written to {@code context.toolResult}. A sanitizer
- * failure is fail-closed: a fixed minimal error observation is written and raw
- * output never reaches context, memory, checkpoint or trace.
- *
- * <p>This class never writes prompt/history/ledger/checkpoint; it produces one
- * execution result plus metadata per call.
+ * Execution service of the tool chain. Input governance lives in
+ * {@link ToolInputGate}; this class repeats the immutable Plan boundary as a
+ * last pre-execution check so direct callers cannot bypass it.
  */
 public class ToolExecutor {
 
     public static final int MAX_TOOL_OUTPUT = 4000;
 
-    /** Runtime policy for a single tool call (shared with the input gate). */
+    /** Runtime policy for one call, including the frozen collaboration mode. */
     public record ToolRuntimePolicy(Set<String> allowedTools,
-                                    boolean readOnly,
+                                    CollaborationMode mode,
                                     ApprovalPolicy approvalPolicy,
                                     int depth,
-                                    int maxDepth) {
-        public static ToolRuntimePolicy root(Set<String> allowedTools, ApprovalPolicy policy) {
-            return new ToolRuntimePolicy(allowedTools, false, policy, 0, 1);
+                                    int maxDepth,
+                                    ExecutionProfile executionProfile) {
+        public ToolRuntimePolicy {
+            mode = Objects.requireNonNull(mode, "collaboration mode must not be null");
+            approvalPolicy = Objects.requireNonNull(approvalPolicy,
+                    "approval policy must not be null");
+            executionProfile = ExecutionProfile.forRun(mode, depth > 0);
         }
 
-        public static ToolRuntimePolicy delegateChild(Set<String> allowedTools) {
-            return new ToolRuntimePolicy(allowedTools, true, ApprovalPolicy.NEVER, 1, 1);
+        public static ToolRuntimePolicy root(Set<String> allowedTools,
+                                             CollaborationMode mode,
+                                             ApprovalPolicy policy) {
+            return new ToolRuntimePolicy(allowedTools, mode, policy, 0, 1,
+                    ExecutionProfile.forRun(mode, false));
+        }
+
+        public static ToolRuntimePolicy delegateChild(Set<String> allowedTools,
+                                                      CollaborationMode mode) {
+            return new ToolRuntimePolicy(allowedTools, mode, ApprovalPolicy.NEVER, 1, 1,
+                    ExecutionProfile.forRun(mode, true));
         }
     }
 
@@ -54,6 +65,8 @@ public class ToolExecutor {
 
     private static final String SANITIZE_FAILED_OBSERVATION =
             "tool_error: sanitization_failed - output withheld";
+    private static final String PLAN_DENIED_MESSAGE =
+            "error: tool call is not authorized by Plan Mode";
 
     private final ToolRegistry registry;
     private final ToolOutputSanitizer sanitizer;
@@ -67,24 +80,49 @@ public class ToolExecutor {
         this(registry, null);
     }
 
-    /** The registry backing this executor (input gate construction). */
     public ToolRegistry registry() {
         return registry;
     }
 
-    /** Execute one accepted tool call. Tool step counting is the caller's
-     *  responsibility (the execute node); rejected calls never reach here. */
+    /** Execute one accepted tool call; rejected calls never reach here. */
     public ToolResult execute(AgentContext context, ToolCall call) {
         String name = call.getName();
-        Path root = call.getWorkspaceRoot();
-        boolean risky = registry.isRisky(name);
+        CollaborationMode mode = context.getCollaborationMode();
+        boolean delegateRun = context.getParentRunId() != null;
+        ExecutionProfile executionProfile = ExecutionProfile.forRun(mode, delegateRun);
+        CallEffectAssessment assessment = registry.assessEffect(name, call, executionProfile);
+        EffectProfile effectProfile = assessment.profile();
 
-        // workspace snapshot before risky tools
-        Map<String, String> before = risky ? WorkspaceFingerprint.snapshot(root) : Map.of();
+        boolean planDenied = mode == CollaborationMode.PLAN
+                && (!assessment.trusted()
+                || !registry.isPlanVisible(name, context.getAllowedTools())
+                || !executionProfile.allows(effectProfile));
+        boolean delegateDenied = delegateRun
+                && (!assessment.trusted() || !executionProfile.allows(effectProfile));
+        if (planDenied || delegateDenied) {
+            ToolResult result = ToolResult.failure("plan_mode_denied", PLAN_DENIED_MESSAGE, 0L);
+            result.setToolStatus("rejected");
+            result.setToolErrorCode("plan_mode_denied");
+            result.setSecurityEventType("plan_mode_denied");
+            applyEffectMetadata(result, effectProfile, registry.approvalRequirement(name));
+            result.setAffectedPaths(java.util.List.of());
+            result.setWorkspaceChanged(false);
+            result.setDiffSummary(java.util.List.of());
+            result.setObservation(PLAN_DENIED_MESSAGE);
+            context.setToolResult(result);
+            return result;
+        }
+
+        call.setEffectProfile(effectProfile);
+        call.setApprovalRequired(registry.approvalRequirement(name).required());
+        Path root = call.getWorkspaceRoot();
+        boolean inspectWorkspace = requiresWorkspaceInspection(effectProfile);
+        Map<String, String> before = inspectWorkspace
+                ? WorkspaceFingerprint.snapshot(root) : Map.of();
         Map<String, String> after = before;
         try {
             ToolResult result = registry.call(call);
-            after = risky ? WorkspaceFingerprint.snapshot(root) : before;
+            after = inspectWorkspace ? WorkspaceFingerprint.snapshot(root) : before;
             WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
 
@@ -102,11 +140,12 @@ public class ToolExecutor {
                     toolErrorCode = "tool_failed";
                 }
             }
-            applyMetadata(result, toolStatus, toolErrorCode, risky, diff, workspaceChanged, root);
+            applyMetadata(result, toolStatus, toolErrorCode, effectProfile,
+                    registry.approvalRequirement(name), diff, workspaceChanged, root);
             context.setToolResult(result);
             return result;
         } catch (Exception e) {
-            after = risky ? WorkspaceFingerprint.snapshot(root) : before;
+            after = inspectWorkspace ? WorkspaceFingerprint.snapshot(root) : before;
             WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
             String securityEvent = e.getMessage() != null && e.getMessage().contains("path escapes workspace")
@@ -117,19 +156,24 @@ public class ToolExecutor {
             result.setToolStatus(workspaceChanged ? "partial_success" : "error");
             result.setToolErrorCode(workspaceChanged ? "tool_partial_success" : "tool_failed");
             result.setSecurityEventType(securityEvent);
-            result.setRiskLevel(risky ? "high" : "low");
-            result.setReadOnly(!risky);
+            applyEffectMetadata(result, effectProfile, registry.approvalRequirement(name));
             result.setAffectedPaths(diff.affectedPaths());
             result.setWorkspaceChanged(workspaceChanged);
             result.setDiffSummary(diff.diffSummary());
-            // Exception messages may embed secrets — sanitize before clip.
             applySafeOutput(result, name);
             context.setToolResult(result);
             return result;
         }
     }
 
-    /** Sanitize-then-clip; fail-closed on sanitizer failure. */
+    private boolean requiresWorkspaceInspection(EffectProfile profile) {
+        if (profile == null || !profile.complete()
+                || profile.outboundDisclosure() != OutboundDisclosure.NONE) {
+            return true;
+        }
+        return profile.effects().stream().anyMatch(effect -> effect != ToolEffect.REPOSITORY_READ);
+    }
+
     private void applySafeOutput(ToolResult result, String toolName) {
         String rawObservation = result.getObservation() == null ? "" : result.getObservation();
         ToolOutputSanitization sanitization;
@@ -151,18 +195,25 @@ public class ToolExecutor {
     }
 
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,
-                               boolean risky, WorkspaceFingerprint.DiffResult diff,
+                               EffectProfile effectProfile, ApprovalRequirement approvalRequirement,
+                               WorkspaceFingerprint.DiffResult diff,
                                boolean workspaceChanged, Path root) {
         result.setToolStatus(toolStatus);
         result.setToolErrorCode(toolErrorCode);
-        result.setRiskLevel(risky ? "high" : "low");
-        result.setReadOnly(!risky);
+        applyEffectMetadata(result, effectProfile, approvalRequirement);
         result.setAffectedPaths(diff.affectedPaths());
         result.setWorkspaceChanged(workspaceChanged);
         result.setDiffSummary(diff.diffSummary());
         if (root != null) {
             result.setWorkspaceFingerprint(WorkspaceFingerprint.stableFingerprint(root));
         }
+    }
+
+    private void applyEffectMetadata(ToolResult result, EffectProfile effectProfile,
+                                     ApprovalRequirement approvalRequirement) {
+        result.setEffectProfile(effectProfile);
+        result.setApprovalRequired(approvalRequirement.required());
+        result.setReadOnly(effectProfile != null && effectProfile.isReadOnly());
     }
 
     private int parseExitCode(String content) {

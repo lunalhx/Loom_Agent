@@ -19,8 +19,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * v8 snapshot compatibility: old snapshots carry a two-field {@link StablePrefix}
- * and flat {@code List<String>} working-memory notes. Restore must normalize them.
+ * Obsolete checkpoint shapes are rejected after ticket 02 moves the persisted
+ * checkpoint directly to the mode-bearing v10 shape.
  */
 public class AgentContextSnapshotV8CompatTest {
 
@@ -31,7 +31,7 @@ public class AgentContextSnapshotV8CompatTest {
     }
 
     @Test
-    public void legacyStringNotesAreNormalizedToStructuredNotes() throws Exception {
+    public void obsoleteSnapshotShapeIsRejected() throws Exception {
         String json = """
                 {
                   "schemaVersion": 8,
@@ -53,27 +53,12 @@ public class AgentContextSnapshotV8CompatTest {
                 """;
         AgentContextSnapshot snapshot = mapper().readValue(json, AgentContextSnapshot.class);
 
-        assertEquals(8, snapshot.getSchemaVersion());
-        // Two-field prefix preserved and flagged legacy.
-        assertTrue(snapshot.getStablePrefix().isLegacyTwoField());
-        assertEquals("fp", snapshot.getStablePrefix().fingerprint());
-
-        // Legacy string notes normalized into structured MemoryNotes.
-        WorkingContextMemory wm = snapshot.getWorkingMemory();
-        assertFalse(wm.notes().isEmpty());
-        assertEquals(2, wm.notes().size());
-        assertEquals("note one", wm.notes().get(0).text());
-        assertEquals("note two", wm.notes().get(1).text());
-
-        // Ledger restored append-only.
-        AgentContext ctx = snapshot.restore();
-        ConversationHistory history = ctx.getConversationHistory();
-        assertEquals(1, history.size());
-        List<ConversationHistoryEntry> entries = history.entries();
-        assertEquals("task", entries.get(0).content());
-        assertEquals(ConversationEntryType.USER_TASK, entries.get(0).stableType());
-        // Structured notes preserved through restore.
-        assertEquals(2, ctx.getWorkingMemory().notes().size());
+        try {
+            snapshot.restore();
+            throw new AssertionError("expected obsolete checkpoint schema rejection");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("incompatible schema"));
+        }
     }
 
     @Test

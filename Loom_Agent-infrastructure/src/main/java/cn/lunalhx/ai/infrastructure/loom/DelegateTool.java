@@ -3,9 +3,14 @@ package cn.lunalhx.ai.infrastructure.loom;
 import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.springframework.stereotype.Component;
+
+import java.util.Objects;
 
 /**
  * loom-code {@code delegate}: ask a bounded read-only child agent to
@@ -37,7 +42,8 @@ public class DelegateTool implements AgentTool {
                         "\"required\":[\"task\"]," +
                         "\"additionalProperties\":false" +
                         "}")
-                .risky(false)
+                .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
+                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 
@@ -52,12 +58,14 @@ public class DelegateTool implements AgentTool {
         try {
             String parentSummary = call.getRecentSummary() == null
                     ? "" : abbreviate(call.getRecentSummary(), MAX_PARENT_SUMMARY_CHARS);
+            CollaborationMode mode = Objects.requireNonNull(call.getCollaborationMode(),
+                    "delegate call is missing its immutable collaboration mode");
             String result = delegateRunner.delegate(task, maxSteps,
                     call.getRunId(),
                     call.getRootRunId() == null ? call.getRunId() : call.getRootRunId(),
                     call.getConversationId(),
                     call.getWorkspaceRoot() == null ? null : call.getWorkspaceRoot().toString(),
-                    parentSummary);
+                    parentSummary, mode);
             return ToolResult.success(result, false, elapsed(startedAt));
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);

@@ -26,8 +26,9 @@ public class ToolResult {
     private String toolStatus;
     private String toolErrorCode;
     private String securityEventType;
-    private String riskLevel;
     private Boolean readOnly;
+    private EffectProfile effectProfile;
+    private Boolean approvalRequired;
     private List<String> affectedPaths;
     private Boolean workspaceChanged;
     private String workspaceFingerprint;

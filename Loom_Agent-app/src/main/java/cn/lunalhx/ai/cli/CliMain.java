@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.cli;
 
 import cn.lunalhx.ai.Application;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -24,6 +25,7 @@ public final class CliMain {
             /help    Show this help message.
             /memory  Show the agent's distilled working memory.
             /session Show the session id.
+            /mode plan|build  Show or change the collaboration mode.
             /new     Create a new independent session.
             /exit    Exit the agent.
             """;
@@ -112,7 +114,7 @@ public final class CliMain {
     private static int repl(CliSessionService session) {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         while (true) {
-            System.out.print("\nloom-code> ");
+            System.out.print("\nloom-code [" + session.collaborationMode().cliName() + "]> ");
             System.out.flush();
             String line;
             try {
@@ -158,6 +160,21 @@ public final class CliMain {
     }
 
     static boolean handleControl(CliSessionService session, String input, PrintStream output) {
+        if (input.equals("/mode")) {
+            output.println("mode: " + session.collaborationMode().cliName());
+            return true;
+        }
+        if (input.startsWith("/mode ")) {
+            String value = input.substring("/mode ".length()).strip();
+            try {
+                CollaborationMode mode = CollaborationMode.parse(value);
+                session.setCollaborationMode(mode);
+                output.println("mode: " + mode.cliName());
+            } catch (IllegalArgumentException | CliSessionService.OptionsException e) {
+                output.println("error: mode must be build or plan");
+            }
+            return true;
+        }
         return switch (input) {
             case "/new" -> {
                 String previousId = session.sessionId();
@@ -224,6 +241,7 @@ public final class CliMain {
         }
         options.workspaceRoot = Path.of(arguments.cwd).toAbsolutePath().normalize().toString();
         options.approvalPolicy = arguments.approval;
+        options.startupMode = arguments.mode;
         options.maxSteps = arguments.maxSteps;
         options.maxNewTokens = arguments.maxNewTokens;
         options.temperature = arguments.temperature;
@@ -276,5 +294,6 @@ public final class CliMain {
         System.out.println("provider: " + options.provider + "  model: " + options.model);
         System.out.println("workspace: " + options.workspaceRoot);
         System.out.println("approval: " + options.approvalPolicy + "  session: " + session.sessionId());
+        System.out.println("mode: " + session.collaborationMode().cliName());
     }
 }

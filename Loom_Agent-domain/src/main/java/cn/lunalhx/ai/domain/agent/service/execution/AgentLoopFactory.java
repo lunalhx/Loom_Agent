@@ -70,15 +70,15 @@ public class AgentLoopFactory {
 
     AgentLoopAssembly assemble(ToolRegistry toolRegistry) {
         AgentFlowDefinition flow = flowFactory.create(toolRegistry);
-        AgentLoopComponents components = buildComponents(flow);
+        AgentLoopComponents components = buildComponents(flow, toolRegistry);
         return new AgentLoopAssembly(runtime.properties(), flow, components);
     }
 
-    private AgentLoopComponents buildComponents(AgentFlowDefinition flow) {
+    private AgentLoopComponents buildComponents(AgentFlowDefinition flow, ToolRegistry toolRegistry) {
         AgentEventFactory eventFactory = new AgentEventFactory();
         AgentContextFactory contextFactory = new AgentContextFactory(
-                runtime.properties(), state.workspaceResolver(), flow.toolSpecs(),
-                ledgerAppendService, runtime.runtimeConfigSource());
+                runtime.properties(), state.workspaceResolver(),
+                runtime.runtimeConfigSource(), toolRegistry);
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), eventFactory, flow.nodes());
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(

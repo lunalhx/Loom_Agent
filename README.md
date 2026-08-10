@@ -157,7 +157,7 @@ loom:
 要点：
 
 - **工具命名**：`<server>_<tool>`，如 server `github` 的 `get_issue` → `github_get_issue`；非法字符替换为 `_`。
-- **审批映射**：`approval-mode=auto` 的工具不询问；其余（`writes`/`prompt`/`approve`）标记为 risky，走与内置 `run_shell` 相同的审批策略（`--approval ask` 时逐次确认）。`approve` 暂映射为 `writes` 行为。
+- **审批映射**：`approval-mode=auto` 的工具不询问；其余（`writes`/`prompt`/`approve`）要求 Session 审批策略处理（`--approval ask` 时逐次确认）。MCP 的效果分类在 Plan Mode 中仍按未知处理并拒绝，`approve` 暂映射为 `writes` 行为。
 - **容错**：单个 server 连接或 `tools/list` 失败仅记日志跳过，不阻塞启动；失败工具不注册。
 - **工具冲突**：与内置工具重名的 MCP 工具跳过注册。
 - **关闭清理**：进程退出时 stdio 子进程随 client 一起终止。
@@ -167,10 +167,10 @@ loom:
 
 ## 审批策略
 
-- `auto`：允许所有风险工具。
-- `never`：拒绝所有风险工具。
+- `auto`：自动满足需要 Session 审批的工具调用。
+- `never`：拒绝需要 Session 审批的工具调用。
 - `ask`：CLI 显示工具名与参数摘要（路径明文、其余参数只显示长度与 hash），输入 `y`/`yes` 允许，其他输入（含 EOF）拒绝；完整 command/write content 与 secret 值不展示。
-- `delegate` 子 Agent `readOnly=true`，风险工具直接拒绝。
+- `delegate` 子 Agent 继承父 Run 的模式，并额外限制为只读工具。
 - 审批动作记录独立 trace 安全事件：`approval_requested`、`approval_granted`、`approval_denied`、`approval_blocked_by_read_only`，事件只携带安全参数摘要。
 
 ---

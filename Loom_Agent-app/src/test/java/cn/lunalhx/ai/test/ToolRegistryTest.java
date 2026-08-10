@@ -3,6 +3,8 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
@@ -23,11 +25,16 @@ public class ToolRegistryTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    private static AgentTool makeTool(String name, String description, String schema, boolean risky) {
+    private static AgentTool makeTool(String name, String description, String schema,
+                                      ApprovalRequirement approvalRequirement) {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
-                return ToolSpec.builder().name(name).description(description).inputSchema(schema).risky(risky).build();
+                ToolCapabilityEnvelope envelope = "run_shell".equals(name)
+                        ? ToolCapabilityEnvelope.shell() : ToolCapabilityEnvelope.repositoryRead();
+                return ToolSpec.builder().name(name).description(description).inputSchema(schema)
+                        .capabilityEnvelope(envelope)
+                        .approvalRequirement(approvalRequirement).build();
             }
 
             @Override
@@ -38,7 +45,7 @@ public class ToolRegistryTest {
     }
 
     private static AgentTool makeTool(String name) {
-        return makeTool(name, "tool " + name, VALID_SCHEMA, false);
+        return makeTool(name, "tool " + name, VALID_SCHEMA, ApprovalRequirement.NONE);
     }
 
     @Test
@@ -90,11 +97,18 @@ public class ToolRegistryTest {
     }
 
     @Test
-    public void riskyToolReported() {
+    public void approvalRequirementIsReportedSeparatelyFromEffects() {
         ToolRegistry registry = new ToolRegistry(
-                List.of(makeTool("run_shell", "d", VALID_SCHEMA, true)), new ToolSchemaValidator(mapper));
-        assertTrue(registry.isRisky("run_shell"));
-        assertFalse(registry.isRisky("nope"));
+                List.of(makeTool("run_shell", "d", VALID_SCHEMA,
+                        ApprovalRequirement.SESSION_POLICY)), new ToolSchemaValidator(mapper));
+        assertEquals(ApprovalRequirement.SESSION_POLICY, registry.approvalRequirement("run_shell"));
+        assertEquals(ApprovalRequirement.NONE, registry.approvalRequirement("nope"));
+        assertEquals(ToolCapabilityEnvelope.shell().toEffectProfile(),
+                registry.assessEffect("run_shell",
+                        ToolCall.builder().name("run_shell").build(),
+                        cn.lunalhx.ai.domain.tool.model.ExecutionProfile.forRun(
+                                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, false))
+                        .profile());
     }
 
     @Test

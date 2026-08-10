@@ -1,7 +1,10 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,8 +20,8 @@ import java.util.Map;
  * <p>The exposed name is {@code <server>_<tool>} (non {@code [a-zA-Z0-9_-]}
  * characters replaced by {@code _}), identical to the naming used by
  * {@code McpToolUtils.prefixedToolName} so the model-visible name always
- * matches the registry key. {@code risky} is derived from the server
- * {@code approval_mode}: {@code auto} → false, everything else → true.
+ * matches the registry key. MCP effect/permission mapping is intentionally
+ * incomplete in this ticket, so MCP tools are unavailable in Plan Mode.
  *
  * <p>This class only forwards one call to the MCP client; governance
  * (allowlist, schema, approval, sanitization) stays in the shared tool chain.
@@ -32,13 +35,15 @@ public class McpAgentTool implements AgentTool {
     private final McpSyncClient client;
     private final String serverName;
     private final McpSchema.Tool tool;
-    private final boolean risky;
+    private final ApprovalRequirement approvalRequirement;
 
-    public McpAgentTool(McpSyncClient client, String serverName, McpSchema.Tool tool, boolean risky) {
+    public McpAgentTool(McpSyncClient client, String serverName, McpSchema.Tool tool,
+                        ApprovalRequirement approvalRequirement) {
         this.client = client;
         this.serverName = serverName;
         this.tool = tool;
-        this.risky = risky;
+        this.approvalRequirement = approvalRequirement == null
+                ? ApprovalRequirement.SESSION_POLICY : approvalRequirement;
     }
 
     public static String prefixedName(String serverName, String toolName) {
@@ -60,8 +65,14 @@ public class McpAgentTool implements AgentTool {
                 .name(prefixedName(serverName, tool.name()))
                 .description(tool.description() == null ? "" : tool.description())
                 .inputSchema(toJsonSchema(tool.inputSchema()))
-                .risky(risky)
+                .capabilityEnvelope(ToolCapabilityEnvelope.untrustedUnknown())
+                .approvalRequirement(approvalRequirement)
                 .build();
+    }
+
+    @Override
+    public CallEffectAssessment assessEffect(ToolCall call) {
+        return CallEffectAssessment.untrusted();
     }
 
     @Override

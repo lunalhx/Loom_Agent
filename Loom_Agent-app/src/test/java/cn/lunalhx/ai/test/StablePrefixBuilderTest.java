@@ -3,6 +3,8 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import org.junit.Test;
 
 import java.util.List;
@@ -21,7 +23,8 @@ public class StablePrefixBuilderTest {
                 .name(name)
                 .description(desc)
                 .inputSchema("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}")
-                .risky(false)
+                .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
+                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 
@@ -31,8 +34,10 @@ public class StablePrefixBuilderTest {
                 tool("write_file", "Write a text file"),
                 tool("read_file", "Read a UTF-8 file"),
                 tool("list_files", "List files"));
-        StablePrefix a = builder.build(false, true, null, specs, "");
-        StablePrefix b = builder.build(false, true, null, specs, "");
+        StablePrefix a = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix b = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertEquals(a.frozenContent(), b.frozenContent());
         assertEquals(a.fingerprint(), b.fingerprint());
     }
@@ -44,8 +49,10 @@ public class StablePrefixBuilderTest {
         List<ToolSpec> specsB = List.of(
                 tool("read_file", "R"), tool("write_file", "W"), tool("search", "S"));
         // Content is deterministically sorted by name, so order should not matter.
-        StablePrefix a = builder.build(false, true, null, specsA, "");
-        StablePrefix b = builder.build(false, true, null, specsB, "");
+        StablePrefix a = builder.build(false, true, null, specsA, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix b = builder.build(false, true, null, specsB, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertEquals(a.fingerprint(), b.fingerprint());
     }
 
@@ -54,15 +61,19 @@ public class StablePrefixBuilderTest {
         List<ToolSpec> specsA = List.of(tool("read_file", "Read a file"));
         List<ToolSpec> specsB = List.of(tool("read_file", "Read a UTF-8 file"));
         assertNotEquals(
-                builder.build(false, true, null, specsA, "").fingerprint(),
-                builder.build(false, true, null, specsB, "").fingerprint());
+                builder.build(false, true, null, specsA, "", null,
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD).fingerprint(),
+                builder.build(false, true, null, specsB, "", null,
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD).fingerprint());
     }
 
     @Test
     public void delegateRoleChangesContent() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"));
-        StablePrefix main = builder.build(false, true, null, specs, "");
-        StablePrefix delegate = builder.build(true, false, null, specs, "");
+        StablePrefix main = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        StablePrefix delegate = builder.build(true, false, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertNotEquals(main.frozenContent(), delegate.frozenContent());
         assertTrue(delegate.frozenContent().contains("read-only"));
     }
@@ -70,25 +81,31 @@ public class StablePrefixBuilderTest {
     @Test
     public void workspaceFactsAreIncluded() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"));
-        StablePrefix withFacts = builder.build(false, true, null, specs, "Workspace:\n- cwd: /tmp");
+        StablePrefix withFacts = builder.build(false, true, null, specs,
+                "Workspace:\n- cwd: /tmp", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertTrue(withFacts.frozenContent().contains("cwd: /tmp"));
-        StablePrefix without = builder.build(false, true, null, specs, "");
+        StablePrefix without = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertNotEquals(withFacts.fingerprint(), without.fingerprint());
     }
 
     @Test
     public void buildRoleProtocolTextContainsProtocolRules() {
-        String text = StablePrefixBuilder.buildRoleProtocolText(false, true, null);
+        String text = StablePrefixBuilder.buildRoleProtocolText(false, true, null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertTrue(text.contains("Return exactly one <tool>...</tool> or one <final>...</final>."));
     }
 
     @Test
     public void buildCarriesSignatures() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"), tool("write_file", "Write"));
-        StablePrefix p = builder.build(false, true, "/scope", specs, "Workspace:", "ws-fp");
+        StablePrefix p = builder.build(false, true, "/scope", specs, "Workspace:", "ws-fp",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
         assertEquals("ws-fp", p.workspaceFingerprint());
         assertEquals(StablePrefixBuilder.toolSignature(specs), p.toolSignature());
-        assertEquals(StablePrefixBuilder.runtimeSignature(false, true, "/scope"), p.runtimeSignature());
+        assertEquals(StablePrefixBuilder.runtimeSignature(false, true, "/scope",
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD), p.runtimeSignature());
         assertFalse(p.isLegacyTwoField());
         assertTrue(p.builtAt() > 0);
     }
