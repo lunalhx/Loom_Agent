@@ -277,9 +277,9 @@ public class CliSessionService implements AutoCloseable {
         synchronized (this) {
             seed = seedSnapshot();
             runMode = session.getCollaborationMode();
-            planTarget = planTargetForRun();
-            planRevision = planRevisionForRun();
-            planStateVersion = session.getPlanStateVersion();
+            planTarget = runMode == CollaborationMode.PLAN ? planTargetForRun() : null;
+            planRevision = runMode == CollaborationMode.PLAN ? planRevisionForRun() : null;
+            planStateVersion = runMode == CollaborationMode.PLAN ? session.getPlanStateVersion() : 0L;
         }
         String runId = "run_" + currentStamp() + "-" + UUID.randomUUID().toString().substring(0, 6);
 

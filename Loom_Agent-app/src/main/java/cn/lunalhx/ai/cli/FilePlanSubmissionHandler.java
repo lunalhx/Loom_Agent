@@ -236,6 +236,11 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan Evidence drifted during the Run");
         }
+        if (!freshEvidence(context.getResolvedWorkspace(), context.getEvidenceReceipts(),
+                context.getRootRunId())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: current Run evidence provenance or freshness is invalid");
+        }
 
         PlanSubmission submission = context.getDecision().getPlanSubmission();
         if (StringUtils.isBlank(submission.getTitle())
@@ -487,12 +492,19 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
     }
 
     private boolean freshEvidence(Path workspaceRoot, List<EvidenceReceipt> receipts) {
+        return freshEvidence(workspaceRoot, receipts, null);
+    }
+
+    private boolean freshEvidence(Path workspaceRoot, List<EvidenceReceipt> receipts,
+                                  String rootRunId) {
         if (receipts == null || receipts.isEmpty()) {
             return true;
         }
         for (EvidenceReceipt receipt : receipts) {
             if (receipt == null
                     || StringUtils.isBlank(receipt.getSourceRunId())
+                    || (StringUtils.isNotBlank(rootRunId)
+                    && !Objects.equals(receipt.getRootRunId(), rootRunId))
                     || !PlanEvidenceVerifier.matches(workspaceRoot, receipt)) {
                 return false;
             }

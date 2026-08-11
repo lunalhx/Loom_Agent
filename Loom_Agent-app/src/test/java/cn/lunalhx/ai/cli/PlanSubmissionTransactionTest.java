@@ -248,6 +248,27 @@ public class PlanSubmissionTransactionTest {
         assertNull(persisted.getPendingPlanSubmission());
     }
 
+    @Test
+    public void currentRunEvidenceMustBelongToItsRootRun() throws Exception {
+        Path workspace = Files.createTempDirectory("plan-provenance");
+        Files.writeString(workspace.resolve("observed.txt"), "before\n");
+        AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        String sessionId = "session-provenance";
+        savePlanSession(sessions, workspace, sessionId);
+
+        AgentContext context = planContext(workspace, sessionId, "run-provenance");
+        EvidenceReceipt receipt = readReceipt("run-provenance");
+        receipt.setRootRunId("different-root-run");
+        context.setEvidenceReceipts(List.of(receipt));
+
+        FilePlanSubmissionHandler handler = new FilePlanSubmissionHandler(sessions, runs, mapper);
+        assertEquals("CONFLICT", handler.prepare(context).outcome().name());
+        AgentSession persisted = sessions.find(sessionId).orElseThrow();
+        assertTrue(persisted.getPlans().isEmpty());
+        assertNull(persisted.getPendingPlanSubmission());
+    }
+
     private void savePlanSession(AgentSessionRepository sessions, Path workspace,
                                  String sessionId) {
         sessions.save(AgentSession.builder()

@@ -182,6 +182,27 @@ public class CliSessionServiceE2ETest {
     }
 
     @Test
+    public void buildRunDoesNotBindSelectedPlan() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-build-unbound-plan");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace, planThenFinalGateway(modelCalls));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+        session.runTurn("submit a plan");
+
+        session.setCollaborationMode(CollaborationMode.BUILD);
+        assertEquals("build answer", session.runTurn("continue without a Plan"));
+
+        AgentRun buildRun = session.runRepository()
+                .findLatestRootByConversationId(session.sessionId()).orElseThrow();
+        assertEquals(CollaborationMode.BUILD, buildRun.getRunModeSnapshot());
+        assertNull(buildRun.getPlanTarget());
+        assertNull(buildRun.getPlanRevision());
+        assertEquals(0L, (long) buildRun.getPlanStateVersion());
+        assertEquals(2, modelCalls.get());
+        session.close();
+    }
+
+    @Test
     public void planNewClearsSelectionKeepsHistoryAndTargetsNextRunAsNew() throws Exception {
         Path workspace = Files.createTempDirectory("e2e-plan-new");
         AtomicInteger modelCalls = new AtomicInteger();
@@ -935,6 +956,31 @@ public class CliSessionServiceE2ETest {
                 calls.incrementAndGet();
                 return Mono.just(ModelChatResult.builder()
                         .content("<plan_submission>{\"title\":\"First plan\",\"body\":\"Start with repository research.\",\"dependencies\":[]}</plan_submission>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway planThenFinalGateway(AtomicInteger calls) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.getAndIncrement() == 0) {
+                    return Mono.just(ModelChatResult.builder()
+                            .content("<plan_submission>{\"title\":\"First plan\",\"body\":\"Start with research.\",\"dependencies\":[]}</plan_submission>")
+                            .finishReason("stop")
+                            .actualModel("deepseek-v4-flash")
+                            .build());
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<final>build answer</final>")
                         .finishReason("stop")
                         .actualModel("deepseek-v4-flash")
                         .build());
