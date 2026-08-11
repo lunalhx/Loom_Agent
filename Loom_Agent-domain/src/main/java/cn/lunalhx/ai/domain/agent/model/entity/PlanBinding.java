@@ -21,6 +21,7 @@ public final class PlanBinding {
     private final String title;
     private final String body;
     private final List<String> dependencies;
+    private final boolean issuedByPlanHandoff;
 
     @JsonCreator
     public PlanBinding(@JsonProperty("planId") String planId,
@@ -29,7 +30,22 @@ public final class PlanBinding {
                        @JsonProperty("planBasisIdentity") String planBasisIdentity,
                        @JsonProperty("title") String title,
                        @JsonProperty("body") String body,
-                       @JsonProperty("dependencies") List<String> dependencies) {
+                       @JsonProperty("dependencies") List<String> dependencies,
+                       @JsonProperty("issuedByPlanHandoff") Boolean issuedByPlanHandoff) {
+        this(planId, revision, planDocumentDigest, planBasisIdentity, title, body,
+                dependencies, Boolean.TRUE.equals(issuedByPlanHandoff));
+    }
+
+    public PlanBinding(String planId, Integer revision, String planDocumentDigest,
+                       String planBasisIdentity, String title, String body,
+                       List<String> dependencies) {
+        this(planId, revision, planDocumentDigest, planBasisIdentity, title, body,
+                dependencies, false);
+    }
+
+    private PlanBinding(String planId, Integer revision, String planDocumentDigest,
+                        String planBasisIdentity, String title, String body,
+                        List<String> dependencies, boolean issuedByPlanHandoff) {
         this.planId = Objects.requireNonNull(planId, "planId must not be null");
         this.revision = Objects.requireNonNull(revision, "revision must not be null");
         this.planDocumentDigest = Objects.requireNonNull(planDocumentDigest,
@@ -39,6 +55,16 @@ public final class PlanBinding {
         this.title = Objects.requireNonNull(title, "title must not be null");
         this.body = Objects.requireNonNull(body, "body must not be null");
         this.dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
+        this.issuedByPlanHandoff = issuedByPlanHandoff;
+    }
+
+    /** Creates the only binding form that can authorize Plan Deviation. */
+    public static PlanBinding fromHandoff(String planId, Integer revision,
+                                          String planDocumentDigest,
+                                          String planBasisIdentity, String title,
+                                          String body, List<String> dependencies) {
+        return new PlanBinding(planId, revision, planDocumentDigest, planBasisIdentity,
+                title, body, dependencies, true);
     }
 
     public String getPlanId() {
@@ -69,6 +95,10 @@ public final class PlanBinding {
         return dependencies;
     }
 
+    public boolean isIssuedByPlanHandoff() {
+        return issuedByPlanHandoff;
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {
@@ -83,13 +113,14 @@ public final class PlanBinding {
                 && Objects.equals(planBasisIdentity, that.planBasisIdentity)
                 && Objects.equals(title, that.title)
                 && Objects.equals(body, that.body)
-                && Objects.equals(dependencies, that.dependencies);
+                && Objects.equals(dependencies, that.dependencies)
+                && issuedByPlanHandoff == that.issuedByPlanHandoff;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(planId, revision, planDocumentDigest, planBasisIdentity,
-                title, body, dependencies);
+                title, body, dependencies, issuedByPlanHandoff);
     }
 
     /** Complete constraints sent as the current request of the bound Run. */

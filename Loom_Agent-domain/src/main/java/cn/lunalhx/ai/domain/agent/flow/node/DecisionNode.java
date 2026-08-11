@@ -5,17 +5,19 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
 /**
- * Parses Loom XML tool/final/retry decisions. This node performs no tool
+ * Parses Loom XML tool/final/terminal/retry decisions. This node performs no tool
  * authorization, no input validation, no {@link ToolResult} construction and
  * no tool-step counting — those belong to {@code tool_input} and
  * {@code tool_execute}. Unknown tools, invalid parameters and parse errors
@@ -53,6 +55,9 @@ public class DecisionNode extends AbstractAgentNode {
             if ("plan_submission".equals(type)) {
                 return NodeResult.complete(List.of());
             }
+            if ("plan_deviation".equals(type)) {
+                return NodeResult.complete(List.of());
+            }
             if ("retry".equals(type)) {
                 return formatRetry(context, decision);
             }
@@ -68,8 +73,11 @@ public class DecisionNode extends AbstractAgentNode {
     }
 
     private NodeResult formatRetry(AgentContext context, AgentDecision decision) {
+        String message = decision.getAnswer() == null
+                ? "Runtime notice: model returned malformed tool output"
+                : decision.getAnswer();
         context.setToolResult(ToolResult.failure("parse_error",
-                decision.getAnswer() == null ? "Runtime notice: model returned malformed tool output" : decision.getAnswer(),
+                message + "\n" + actionGuidance(context),
                 0L));
         return NodeResult.nextRound(List.of());
     }
@@ -77,10 +85,8 @@ public class DecisionNode extends AbstractAgentNode {
     private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
         context.setParseErrors(context.getParseErrors() + 1);
         String repairMsg = e.toModelMessage();
-        String guidance = "Reply with a valid <tool> call, one exact <plan_submission> JSON action, or a non-empty <final> answer. "
-                + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
         context.setToolResult(ToolResult.failure("parse_error",
-                repairMsg + "\n" + guidance, 0L));
+                repairMsg + "\n" + actionGuidance(context), 0L));
         if (ledgerAppendService != null) {
             String note = ControlUpdateTexts.renderParseErrorNote(
                     truncateModelOutput(context),
@@ -91,6 +97,23 @@ public class DecisionNode extends AbstractAgentNode {
             ledgerAppendService.appendSystemNote(context, note, eventKey);
         }
         return NodeResult.nextRound(List.of());
+    }
+
+    private String actionGuidance(AgentContext context) {
+        String terminalAction = "";
+        if (context.getCollaborationMode() == CollaborationMode.PLAN
+                && StringUtils.isBlank(context.getParentRunId())) {
+            terminalAction = ", one exact <plan_submission> JSON action";
+        } else if (context.getCollaborationMode()
+                == CollaborationMode.BUILD
+                && StringUtils.isBlank(context.getParentRunId())
+                && context.getPlanBinding() != null
+                && context.getPlanBinding().isIssuedByPlanHandoff()) {
+            terminalAction = ", or one exact <plan_deviation> JSON action";
+        }
+        return "Reply with a valid <tool> call" + terminalAction
+                + " or a non-empty <final> answer. "
+                + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
     }
 
     private String truncateModelOutput(AgentContext context) {

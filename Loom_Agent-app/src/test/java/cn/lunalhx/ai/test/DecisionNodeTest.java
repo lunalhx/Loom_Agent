@@ -356,6 +356,160 @@ public class DecisionNodeTest {
         assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(duplicate).getPhase());
     }
 
+    // ---- plan deviation ----
+
+    @Test
+    public void exactPlanDeviationCompletesWithStructuredPayload() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"The required API is outside the bound scope.\"},\"workspace_changes\":[{\"path\":\"src/main/java/example/Feature.java\",\"operation\":\"modified\",\"summary\":\"Added the initial implementation.\"}]}</plan_deviation>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("plan_deviation", ctx.getDecision().getType());
+        assertNotNull(ctx.getDecision().getPlanDeviation());
+        assertEquals("scope", ctx.getDecision().getPlanDeviation().getConflict().getKind());
+        assertEquals("The required API is outside the bound scope.",
+                ctx.getDecision().getPlanDeviation().getConflict().getSummary());
+        assertEquals(1, ctx.getDecision().getPlanDeviation().getWorkspaceChanges().size());
+        assertEquals("src/main/java/example/Feature.java",
+                ctx.getDecision().getPlanDeviation().getWorkspaceChanges().get(0).getPath());
+    }
+
+    @Test
+    public void planDeviationCannotFallBackToAnotherAction() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><final>fallback</final>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void planDeviationCannotBeCombinedWithPlanSubmission() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]}</plan_submission>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void planDeviationCannotBeCombinedWithTool() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><tool>{\"name\":\"msg_tool\",\"args\":{}}</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void planDeviationRejectsMalformedJson() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[}</plan_deviation>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void markerInsideToolPayloadRemainsData() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool>{\"name\":\"msg_tool\",\"args\":{\"message\":\"<plan_deviation>\"}}</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_NODE, result.getPhase());
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertEquals("action", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void markerInsidePlanSubmissionPayloadRemainsData() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_submission>{\"title\":\"A\",\"body\":\"The text mentions <plan_deviation> as data.\",\"dependencies\":[]}</plan_submission>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("plan_submission", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void ordinaryDeviationProseRemainsFinalAnswer() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context("Continuing would be a deviation from the agreed scope.",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("final", ctx.getDecision().getType());
+        assertEquals("Continuing would be a deviation from the agreed scope.",
+                ctx.getDecision().getAnswer());
+    }
+
+    @Test
+    public void planDeviationRejectsUnknownFieldsAndUnsafePaths() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext unknownField = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[],\"run_id\":\"fake\"}</plan_deviation>",
+                List.of(t.spec()));
+        AgentContext unsafePath = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[{\"path\":\"../outside.txt\",\"operation\":\"modified\",\"summary\":\"changed\"}]}</plan_deviation>",
+                List.of(t.spec()));
+        AgentContext duplicateField = context(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"kind\":\"objective\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation>",
+                List.of(t.spec()));
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(unknownField).getPhase());
+        assertEquals("retry", unknownField.getDecision().getType());
+        assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(unsafePath).getPhase());
+        assertEquals("retry", unsafePath.getDecision().getType());
+        assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(duplicateField).getPhase());
+        assertEquals("retry", duplicateField.getDecision().getType());
+    }
+
     // ---- Tool visibility / validation moved to the input gate ----
     // DecisionNode only parses the protocol; unknown tools / invalid inputs
     // still produce an action decision routed to TOOL_INPUT.

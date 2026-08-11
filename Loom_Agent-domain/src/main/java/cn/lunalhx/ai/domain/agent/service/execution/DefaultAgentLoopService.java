@@ -10,11 +10,15 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanDeviation;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
@@ -66,6 +70,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), (sink, capture) -> {
             AutoCloseable startLease = null;
             try {
+                if (isTerminalRun(question)) {
+                    rejectTerminalRun(question, sink);
+                    return;
+                }
                 AgentRunStartGuard startGuard = question == null ? null : question.getRunStartGuard();
                 if (startGuard != null) {
                     try {
@@ -121,6 +129,28 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private AgentContext resolveContext(AgentQuestion question) {
         return components.contextFactory().create(question);
+    }
+
+    private boolean isTerminalRun(AgentQuestion question) {
+        if (question == null || StringUtils.isBlank(question.getRunId())) {
+            return false;
+        }
+        return components.runRepository().find(question.getRunId())
+                .map(AgentRun::getStatus)
+                .filter(AgentRunStatus::terminal)
+                .isPresent();
+    }
+
+    private void rejectTerminalRun(AgentQuestion question, FluxSink<AgentEvent> sink) {
+        AgentContext context = resolveContext(question);
+        String message = "Run is already terminal and cannot be resumed";
+        context.runtime().fail(AgentStopReason.RUNTIME_SCHEMA_MISMATCH,
+                "terminal_run_reentry", message);
+        context.setFinalAnswer(message);
+        emit(sink, List.of(components.eventFactory().agentError(context)));
+        emit(sink, List.of(components.eventFactory().done(
+                context, AgentStopReason.RUNTIME_SCHEMA_MISMATCH)));
+        sink.complete();
     }
 
     /** When {@code secretRedaction} is explicitly disabled, record a trace
@@ -262,6 +292,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
             finishPlanSubmission(context, sink);
             return;
         }
+        if (context.getDecision() != null
+                && "plan_deviation".equals(context.getDecision().getType())) {
+            finishPlanDeviation(context, sink);
+            return;
+        }
         String answer = StringUtils.defaultIfBlank(
                 context.getDecision() == null ? null : context.getDecision().getAnswer(),
                 StringUtils.defaultIfBlank(context.getFinalAnswer(), "未能生成最终回答"));
@@ -278,6 +313,72 @@ public class DefaultAgentLoopService implements AgentLoopService {
         components.nodeLifecycle().recordStop(context);
         lifecycle.complete(context);
         sink.complete();
+    }
+
+    private void finishPlanDeviation(AgentContext context, FluxSink<AgentEvent> sink) {
+        PlanDeviation deviation = context.getDecision().getPlanDeviation();
+        if (!isEligiblePlanDeviation(context) || !isWellFormedPlanDeviation(deviation)) {
+            String message = "Plan Deviation rejected: only a root Build Run with an immutable Plan binding may report it";
+            context.runtime().fail(AgentStopReason.RUNTIME_SCHEMA_MISMATCH,
+                    "plan_deviation_rejected", message);
+            context.setFinalAnswer(message);
+            updateTaskSummary(context, message);
+            emit(sink, List.of(components.eventFactory().agentError(context)));
+            emit(sink, List.of(components.eventFactory().done(
+                    context, AgentStopReason.RUNTIME_SCHEMA_MISMATCH)));
+            components.nodeLifecycle().recordStop(context);
+            lifecycle.failed(context);
+            sink.complete();
+            return;
+        }
+
+        String message = renderPlanDeviation(deviation);
+        context.stopRun(AgentStopReason.PLAN_DEVIATION);
+        context.setFinalAnswer(message);
+        updateTaskSummary(context, message);
+        emit(sink, List.of(components.eventFactory().answer(context, message)));
+        emit(sink, List.of(components.eventFactory().done(
+                context, AgentStopReason.PLAN_DEVIATION)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.stopped(context);
+        sink.complete();
+    }
+
+    private boolean isEligiblePlanDeviation(AgentContext context) {
+        return context.getCollaborationMode() == CollaborationMode.BUILD
+                && StringUtils.isBlank(context.getParentRunId())
+                && context.getPlanBinding() != null
+                && context.getPlanBinding().isIssuedByPlanHandoff();
+    }
+
+    private boolean isWellFormedPlanDeviation(PlanDeviation deviation) {
+        if (deviation == null || deviation.getConflict() == null
+                || deviation.getConflict().getKind() == null
+                || deviation.getConflict().getSummary() == null
+                || deviation.getConflict().getSummary().isBlank()
+                || !PlanDeviation.isSupportedConflictKind(deviation.getConflict().getKind())) {
+            return false;
+        }
+        if (deviation.getWorkspaceChanges() == null) {
+            return false;
+        }
+        return deviation.getWorkspaceChanges().stream().allMatch(change ->
+                change != null
+                        && PlanDeviation.isValidWorkspacePath(change.getPath())
+                        && PlanDeviation.isSupportedOperation(change.getOperation())
+                        && change.getSummary() != null
+                        && !change.getSummary().isBlank());
+    }
+
+    private String renderPlanDeviation(PlanDeviation deviation) {
+        String changes = deviation.getWorkspaceChanges().isEmpty()
+                ? "none"
+                : deviation.getWorkspaceChanges().stream()
+                .map(change -> change.getPath() + " (" + change.getOperation() + ")")
+                .collect(java.util.stream.Collectors.joining(", "));
+        return "Plan Deviation: " + deviation.getConflict().getKind()
+                + ": " + deviation.getConflict().getSummary()
+                + "; workspace changes: " + changes;
     }
 
     private void finishPlanSubmission(AgentContext context, FluxSink<AgentEvent> sink) {

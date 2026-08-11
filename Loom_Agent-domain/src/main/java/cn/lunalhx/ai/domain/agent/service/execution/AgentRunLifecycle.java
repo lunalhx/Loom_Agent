@@ -179,6 +179,10 @@ public final class AgentRunLifecycle {
                 .planRevision(def.planRevision())
                 .planStateVersion(def.planStateVersion())
                 .planBinding(def.planBinding())
+                .planDeviation(context.getStopReason() == AgentStopReason.PLAN_DEVIATION
+                        && context.getDecision() != null
+                        && "plan_deviation".equals(context.getDecision().getType())
+                        ? context.getDecision().getPlanDeviation() : null)
                 .status(status)
                 .currentNode(currentNode)
                 .toolSteps(runtime.toolSteps())
@@ -205,7 +209,8 @@ public final class AgentRunLifecycle {
         AgentStopReason reason = runtime.stopReason();
         if (reason == AgentStopReason.USER_CANCELLED
                 || reason == AgentStopReason.STEP_LIMIT_REACHED
-                || reason == AgentStopReason.RETRY_LIMIT_REACHED) {
+                || reason == AgentStopReason.RETRY_LIMIT_REACHED
+                || reason == AgentStopReason.PLAN_DEVIATION) {
             return AgentRunStatus.STOPPED;
         }
         if (reason == AgentStopReason.FINAL_ANSWER_RETURNED

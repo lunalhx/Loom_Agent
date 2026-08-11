@@ -4,10 +4,12 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
@@ -21,6 +23,9 @@ import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.test.CliLoopTestFixture;
+import cn.lunalhx.ai.test.FakeModelGateway;
+import cn.lunalhx.ai.infrastructure.loom.WriteFileTool;
+import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 import reactor.core.publisher.Flux;
@@ -41,6 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class PlanHandoffE2ETest {
@@ -207,25 +213,211 @@ public class PlanHandoffE2ETest {
         assertEquals(Integer.valueOf(1), request.getPlanBinding().getRevision());
     }
 
+    @Test
+    public void deviationStopsBoundRunAndPreservesWorkspaceAndPlan() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation");
+        FakeModelGateway gateway = new FakeModelGateway(List.of(
+                "<plan_submission>{\"title\":\"First plan\",\"body\":\"Write the requested feature.\",\"dependencies\":[]}</plan_submission>",
+                "<tool>{\"name\":\"write_file\",\"args\":{\"path\":\"before-deviation.txt\",\"content\":\"kept\"}}</tool>",
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"Continuing requires changing files outside the bound scope.\"},\"workspace_changes\":[{\"path\":\"before-deviation.txt\",\"operation\":\"created\",\"summary\":\"Created before discovering the scope conflict.\"}]}</plan_deviation>"));
+        CliSessionService session = service(workspace, gateway, null,
+                List.of(new WriteFileTool(new LocalWorkspacePort())));
+        try {
+            session.setCollaborationMode(CollaborationMode.PLAN);
+            session.runTurn("submit a plan");
+            AgentSession planned = session.sessionRepository().find(session.sessionId()).orElseThrow();
+            String planId = planned.getCurrentPlanId();
+
+            session.setCollaborationMode(CollaborationMode.BUILD);
+            String answer = session.handoffPlan(planId);
+
+            assertTrue(answer.contains("Plan Deviation"));
+            assertEquals(3, gateway.callCount());
+            assertEquals("kept", Files.readString(workspace.resolve("before-deviation.txt")));
+
+            AgentRun run = session.runRepository()
+                    .findLatestRootByConversationId(session.sessionId()).orElseThrow();
+            assertEquals(AgentRunStatus.STOPPED, run.getStatus());
+            assertEquals("PLAN_DEVIATION", run.getStopReason());
+            assertNotNull(run.getPlanDeviation());
+            assertEquals("scope", run.getPlanDeviation().getConflict().getKind());
+            assertEquals("before-deviation.txt",
+                    run.getPlanDeviation().getWorkspaceChanges().get(0).getPath());
+
+            AgentSession after = session.sessionRepository().find(session.sessionId()).orElseThrow();
+            assertEquals(planId, after.getCurrentPlanId());
+            assertEquals(1, after.getPlans().get(0).getRevisions().size());
+            assertEquals(Integer.valueOf(1), after.getPlans().get(0).currentRevision().getRevision());
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
+    public void fabricatedRootBindingFailsClosed() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation-fabricated-binding");
+        FakeModelGateway gateway = deviationGateway();
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent,
+                List.of());
+
+        loop.ask(AgentQuestion.builder()
+                .runId("fabricated-root")
+                .rootRunId("fabricated-root")
+                .sessionId("session-1")
+                .conversationId("conversation-1")
+                .workspace(workspace.toString())
+                .question("report a deviation")
+                .maxSteps(4)
+                .maxAttempts(4)
+                .approvalPolicy("never")
+                .collaborationMode(CollaborationMode.BUILD)
+                .planBinding(new PlanBinding("plan_1", 1, "doc", "basis",
+                        "Title", "Objective", List.of()))
+                .build()).collectList().block();
+
+        AgentRun run = new FileAgentRunRepository(workspace, mapper)
+                .find("fabricated-root").orElseThrow();
+        assertEquals(AgentRunStatus.FAILED, run.getStatus());
+        assertEquals("RUNTIME_SCHEMA_MISMATCH", run.getStopReason());
+        assertNull(run.getPlanDeviation());
+    }
+
+    @Test
+    public void planDeviationRunCannotBeReentered() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation-reentry");
+        FakeModelGateway gateway = new FakeModelGateway(List.of(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation>",
+                "<final>must not run</final>"));
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent,
+                List.of());
+        PlanBinding binding = PlanBinding.fromHandoff("plan_1", 1, "doc", "basis",
+                "Title", "Objective", List.of());
+        AgentQuestion question = AgentQuestion.builder()
+                .runId("terminal-root")
+                .rootRunId("terminal-root")
+                .sessionId("session-1")
+                .conversationId("conversation-1")
+                .workspace(workspace.toString())
+                .question("report a deviation")
+                .maxSteps(4)
+                .maxAttempts(4)
+                .approvalPolicy("never")
+                .collaborationMode(CollaborationMode.BUILD)
+                .planBinding(binding)
+                .build();
+
+        loop.ask(question).collectList().block();
+        loop.ask(question).collectList().block();
+
+        assertEquals(1, gateway.callCount());
+        AgentRun run = new FileAgentRunRepository(workspace, mapper)
+                .find("terminal-root").orElseThrow();
+        assertEquals(AgentRunStatus.STOPPED, run.getStatus());
+        assertEquals("PLAN_DEVIATION", run.getStopReason());
+    }
+
+    @Test
+    public void deviationFromUnboundBuildRunFailsClosed() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation-unbound");
+        FakeModelGateway gateway = deviationGateway();
+        CliSessionService session = service(workspace, gateway);
+        try {
+            String answer = session.runTurn("report a deviation");
+
+            assertTrue(answer.contains("Plan Deviation rejected"));
+            AgentRun run = session.runRepository()
+                    .findLatestRootByConversationId(session.sessionId()).orElseThrow();
+            assertEquals(AgentRunStatus.FAILED, run.getStatus());
+            assertEquals("RUNTIME_SCHEMA_MISMATCH", run.getStopReason());
+            assertNull(run.getPlanDeviation());
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
+    public void deviationFromPlanRunFailsClosed() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation-plan");
+        FakeModelGateway gateway = deviationGateway();
+        CliSessionService session = service(workspace, gateway);
+        try {
+            session.setCollaborationMode(CollaborationMode.PLAN);
+            String answer = session.runTurn("report a deviation");
+
+            assertTrue(answer.contains("Plan Deviation rejected"));
+            AgentRun run = session.runRepository()
+                    .findLatestRootByConversationId(session.sessionId()).orElseThrow();
+            assertEquals(AgentRunStatus.FAILED, run.getStatus());
+            assertEquals("RUNTIME_SCHEMA_MISMATCH", run.getStopReason());
+            assertNull(run.getPlanDeviation());
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
+    public void deviationFromChildRunFailsClosed() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-deviation-child");
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        FakeModelGateway gateway = deviationGateway();
+        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent,
+                List.of());
+        PlanBinding binding = new PlanBinding("plan_1", 1, "doc", "basis",
+                "Title", "Objective", List.of());
+
+        loop.ask(AgentQuestion.builder()
+                .runId("child-run")
+                .parentRunId("parent-run")
+                .rootRunId("root-run")
+                .sessionId("session-1")
+                .conversationId("conversation-1")
+                .workspace(workspace.toString())
+                .question("report a deviation")
+                .maxSteps(4)
+                .maxAttempts(4)
+                .approvalPolicy("never")
+                .collaborationMode(CollaborationMode.BUILD)
+                .planBinding(binding)
+                .build()).collectList().block();
+
+        AgentRun child = new FileAgentRunRepository(workspace, mapper)
+                .find("child-run").orElseThrow();
+        assertEquals(AgentRunStatus.FAILED, child.getStatus());
+        assertEquals("RUNTIME_SCHEMA_MISMATCH", child.getStopReason());
+        assertNull(child.getPlanDeviation());
+    }
+
+    private FakeModelGateway deviationGateway() {
+        return new FakeModelGateway(List.of(
+                "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation>"));
+    }
+
     private CliSessionService service(Path workspace, ModelGateway gateway) {
-        return service(workspace, gateway, null);
+        return service(workspace, gateway, null, List.of());
     }
 
     private CliSessionService service(Path workspace, ModelGateway gateway, String resumeSessionId) {
+        return service(workspace, gateway, resumeSessionId, List.of());
+    }
+
+    private CliSessionService service(Path workspace, ModelGateway gateway, String resumeSessionId,
+                                      List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools) {
         AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
         AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
         FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
         FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
         FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper);
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent,
-                java.util.List.of());
+                java.util.List.of(), tools);
         CliSessionService.CliOptions options = new CliSessionService.CliOptions();
         options.provider = "deepseek";
         options.model = "deepseek-v4-flash";
         options.baseUrl = "http://unused";
         options.apiKey = "";
         options.workspaceRoot = workspace.toString();
-        options.approvalPolicy = "never";
+        options.approvalPolicy = tools.isEmpty() ? "never" : "auto";
         options.maxSteps = 6;
         options.maxNewTokens = 512;
         options.temperature = 0.2;

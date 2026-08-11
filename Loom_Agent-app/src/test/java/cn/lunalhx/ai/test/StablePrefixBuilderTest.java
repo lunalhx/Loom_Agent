@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
@@ -105,6 +106,28 @@ public class StablePrefixBuilderTest {
                 cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.PLAN);
         assertTrue(root.contains("<plan_submission>"));
         assertFalse(delegate.contains("<plan_submission>"));
+    }
+
+    @Test
+    public void planDeviationProtocolIsOnlyAdvertisedToBoundBuildRoot() {
+        PlanBinding binding = PlanBinding.fromHandoff("plan_1", 1, "doc", "basis",
+                "Title", "Objective and validation", List.of());
+        List<ToolSpec> specs = List.of(tool("read_file", "Read"));
+
+        StablePrefix root = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, binding);
+        StablePrefix delegate = builder.build(true, false, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, binding);
+        StablePrefix unbound = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+        StablePrefix forged = builder.build(false, true, null, specs, "", null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD,
+                new PlanBinding("plan_1", 1, "doc", "basis", "Title", "Objective", List.of()));
+
+        assertTrue(root.frozenContent().contains("<plan_deviation>"));
+        assertFalse(delegate.frozenContent().contains("<plan_deviation>"));
+        assertFalse(unbound.frozenContent().contains("<plan_deviation>"));
+        assertFalse(forged.frozenContent().contains("<plan_deviation>"));
     }
 
     @Test

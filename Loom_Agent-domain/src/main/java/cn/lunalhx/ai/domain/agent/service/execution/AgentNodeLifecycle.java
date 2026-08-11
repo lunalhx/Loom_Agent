@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
 
@@ -121,6 +122,9 @@ public final class AgentNodeLifecycle {
         }
         if (StringUtils.isNotBlank(context.runtime().errorCode())) {
             return "failed";
+        }
+        if (context.getStopReason() == AgentStopReason.PLAN_DEVIATION) {
+            return "stopped";
         }
         if (context.recovery().contextRecoveryStage() == cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage.WAITING_USER_INPUT) {
             return "waiting_user_input";

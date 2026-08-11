@@ -681,7 +681,7 @@ public class CliSessionService implements AutoCloseable {
             if (!PlanFreshness.isFresh(Path.of(workspace), latest)) {
                 throw new OptionsException("Plan is stale; refresh its Evidence before handoff: " + targetId);
             }
-            binding = new PlanBinding(targetId, revision.getRevision(),
+            binding = PlanBinding.fromHandoff(targetId, revision.getRevision(),
                     revision.getContentDigest(), basisIdentity, revision.getTitle(),
                     revision.getBody(), revision.getDependencies());
             expectedPlanStateVersion = before.getPlanStateVersion();

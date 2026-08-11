@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.flow.node;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanDeviation;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,6 +22,7 @@ import java.util.regex.Pattern;
  *
  * <p>Parse priority (fixed):
  * <ol>
+ *   <li>Plan Deviation and Plan Submission terminal actions</li>
  *   <li>{@code <tool>{...json...}</tool>} — JSON object with name/args</li>
  *   <li>XML-style tool with attributes and child tags</li>
  *   <li>{@code <final>...</final>}</li>
@@ -28,8 +30,9 @@ import java.util.regex.Pattern;
  *   <li>Empty text or malformed structure -> RETRY (format retry, no tool step)</li>
  * </ol>
  *
- * <p>The {@code tool} kind is decided before {@code final} regardless of
- * position, matching loom-code's tag-order comparison.
+ * <p>Terminal action markers are resolved before ordinary tool/final parsing;
+ * the {@code tool} kind is decided before {@code final} otherwise, matching
+ * loom-code's tag-order comparison.
  */
 final class DecisionParser {
 
@@ -41,8 +44,16 @@ final class DecisionParser {
             Pattern.compile("<final>(.*?)</final>", Pattern.DOTALL);
     private static final String PLAN_SUBMISSION_OPEN = "<plan_submission>";
     private static final String PLAN_SUBMISSION_CLOSE = "</plan_submission>";
+    private static final String PLAN_DEVIATION_OPEN = "<plan_deviation>";
+    private static final String PLAN_DEVIATION_CLOSE = "</plan_deviation>";
     private static final Set<String> PLAN_SUBMISSION_FIELDS =
             Set.of("title", "body", "dependencies");
+    private static final Set<String> PLAN_DEVIATION_FIELDS =
+            Set.of("conflict", "workspace_changes");
+    private static final Set<String> PLAN_DEVIATION_CONFLICT_FIELDS =
+            Set.of("kind", "summary");
+    private static final Set<String> PLAN_DEVIATION_CHANGE_FIELDS =
+            Set.of("path", "operation", "summary");
 
     private final ObjectMapper objectMapper;
 
@@ -54,7 +65,7 @@ final class DecisionParser {
      * Parse a raw model output string into an {@link AgentDecision}.
      *
      * @param rawOutput the raw text emitted by the model
-     * @return the parsed decision (type tool/final), or a retry decision when
+     * @return the parsed decision (type tool/final/plan_submission/plan_deviation), or a retry decision when
      *         the output is empty or structurally invalid
      * @throws DecisionParseException if the output cannot be parsed at all
      */
@@ -65,13 +76,24 @@ final class DecisionParser {
     public AgentDecision parse(String rawOutput, List<String> visibleTools) throws DecisionParseException {
         String raw = String.valueOf(rawOutput);
         String text = raw == null ? "" : raw;
-
-        // 1. Plan Submission is an exact terminal action and takes priority
-        // over every other protocol form. Inspect the outer wrapper first so
-        // marker-like strings inside a tool/final payload remain data.
         String stripped = text.strip();
+
+        // 1. Plan Deviation is an exact terminal action and takes priority
+        // over every other protocol form. Inspect the outer wrapper first so
+        // marker-like strings inside a payload remain data.
+        if (isExactPlanDeviationWrapper(stripped)) {
+            return parsePlanDeviation(text);
+        }
+        // 2. Plan Submission remains the next exact terminal action. This
+        // check must happen before marker detection so literal tags inside a
+        // valid JSON string remain payload data.
         if (isExactPlanWrapper(stripped)) {
             return parsePlanSubmission(text);
+        }
+        if (hasPlanDeviationMarker(text)
+                && !isExactToolWrapper(stripped)
+                && !isExactFinalWrapper(stripped)) {
+            return retry("model returned an invalid plan deviation wrapper");
         }
         if (hasPlanSubmissionMarker(text)
                 && !isExactToolWrapper(stripped)
@@ -79,7 +101,7 @@ final class DecisionParser {
             return retry("model returned an invalid plan submission wrapper");
         }
 
-        // 2. <tool> JSON object (takes priority over <final> like loom-code)
+        // 3. <tool> JSON object (takes priority over <final> like loom-code)
         if (text.contains("<tool>") && (isBefore(text, "<tool>", "<final>"))) {
             String body = extract(text, "tool");
             JsonNode payload;
@@ -105,7 +127,7 @@ final class DecisionParser {
             return toolDecision(name, args);
         }
 
-        // 3. XML-style tool with attributes / child tags
+        // 4. XML-style tool with attributes / child tags
         if (text.contains("<tool") && isBefore(text, "<tool", "<final>")) {
             Map<String, Object> xmlPayload = parseXmlTool(text);
             if (xmlPayload != null) {
@@ -116,7 +138,7 @@ final class DecisionParser {
             return retry();
         }
 
-        // 4. <final>...</final>
+        // 5. <final>...</final>
         if (text.contains("<final>")) {
             String finalText = extract(text, "final");
             if (!finalText.isBlank()) {
@@ -125,13 +147,94 @@ final class DecisionParser {
             return retry("model returned an empty <final> answer");
         }
 
-        // 5. Non-blank bare text as final
+        // 6. Non-blank bare text as final
         if (!stripped.isEmpty()) {
             return finalDecision(stripped);
         }
 
-        // 6. Empty -> retry
+        // 7. Empty -> retry
         return retry("model returned an empty response");
+    }
+
+    private AgentDecision parsePlanDeviation(String text) {
+        String stripped = text.strip();
+        String body = stripped.substring(
+                PLAN_DEVIATION_OPEN.length(),
+                stripped.length() - PLAN_DEVIATION_CLOSE.length()).strip();
+        JsonNode payload;
+        try (JsonParser parser = objectMapper.getFactory().createParser(body)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            payload = objectMapper.readTree(parser);
+            if (parser.nextToken() != null) {
+                return retry("plan deviation payload must contain exactly one JSON value");
+            }
+        } catch (Exception e) {
+            return retry("model returned malformed plan deviation JSON");
+        }
+        if (payload == null || !payload.isObject()) {
+            return retry("plan deviation payload must be a JSON object");
+        }
+        if (!fieldNames(payload).equals(PLAN_DEVIATION_FIELDS)) {
+            return retry("plan deviation payload must contain exactly conflict and workspace_changes");
+        }
+
+        JsonNode conflict = payload.get("conflict");
+        if (conflict == null || !conflict.isObject()
+                || !fieldNames(conflict).equals(PLAN_DEVIATION_CONFLICT_FIELDS)) {
+            return retry("plan deviation conflict must contain exactly kind and summary");
+        }
+        JsonNode kind = conflict.get("kind");
+        JsonNode conflictSummary = conflict.get("summary");
+        if (kind == null || !kind.isTextual()
+                || !PlanDeviation.isSupportedConflictKind(kind.asText())
+                || conflictSummary == null || !conflictSummary.isTextual()
+                || conflictSummary.asText().isBlank()) {
+            return retry("plan deviation conflict kind or summary is invalid");
+        }
+
+        JsonNode changes = payload.get("workspace_changes");
+        if (changes == null || !changes.isArray()) {
+            return retry("plan deviation workspace_changes must be an array");
+        }
+        List<PlanDeviation.WorkspaceChange> workspaceChanges = new ArrayList<>();
+        for (JsonNode change : changes) {
+            if (change == null || !change.isObject()
+                    || !fieldNames(change).equals(PLAN_DEVIATION_CHANGE_FIELDS)) {
+                return retry("plan deviation workspace changes have invalid fields");
+            }
+            JsonNode path = change.get("path");
+            JsonNode operation = change.get("operation");
+            JsonNode summary = change.get("summary");
+            if (path == null || !path.isTextual()
+                    || !PlanDeviation.isValidWorkspacePath(path.asText())
+                    || operation == null || !operation.isTextual()
+                    || !PlanDeviation.isSupportedOperation(operation.asText())
+                    || summary == null || !summary.isTextual() || summary.asText().isBlank()) {
+                return retry("plan deviation workspace change is invalid");
+            }
+            workspaceChanges.add(PlanDeviation.WorkspaceChange.builder()
+                    .path(path.asText())
+                    .operation(operation.asText())
+                    .summary(summary.asText())
+                    .build());
+        }
+
+        return AgentDecision.builder()
+                .type("plan_deviation")
+                .planDeviation(PlanDeviation.builder()
+                        .conflict(PlanDeviation.Conflict.builder()
+                                .kind(kind.asText())
+                                .summary(conflictSummary.asText())
+                                .build())
+                        .workspaceChanges(workspaceChanges)
+                        .build())
+                .build();
+    }
+
+    private Set<String> fieldNames(JsonNode object) {
+        Set<String> fields = new HashSet<>();
+        object.fieldNames().forEachRemaining(fields::add);
+        return fields;
     }
 
     private AgentDecision parsePlanSubmission(String text) {
@@ -194,6 +297,15 @@ final class DecisionParser {
         return text.contains("<plan_submission") || text.contains("</plan_submission>");
     }
 
+    private boolean hasPlanDeviationMarker(String text) {
+        return text.contains("<plan_deviation") || text.contains("</plan_deviation>");
+    }
+
+    private boolean isExactPlanDeviationWrapper(String text) {
+        return text.startsWith(PLAN_DEVIATION_OPEN)
+                && text.endsWith(PLAN_DEVIATION_CLOSE);
+    }
+
     private boolean isExactPlanWrapper(String text) {
         return text.startsWith(PLAN_SUBMISSION_OPEN)
                 && text.endsWith(PLAN_SUBMISSION_CLOSE);
@@ -238,7 +350,7 @@ final class DecisionParser {
             prefix += ": model returned malformed tool output";
         }
         String message = prefix
-                + ". Reply with a valid <tool> call, one exact <plan_submission> JSON action, or a non-empty <final> answer. "
+                + ". Reply with a valid <tool> call or a non-empty <final> answer. "
                 + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
         return AgentDecision.builder()
                 .type("retry")
