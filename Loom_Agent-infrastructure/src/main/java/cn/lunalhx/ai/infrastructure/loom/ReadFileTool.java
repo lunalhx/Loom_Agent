@@ -83,6 +83,7 @@ public class ReadFileTool implements AgentTool {
                 String semantics = "read_file:utf8-lines:v1";
                 toolResult.setEvidenceCandidate(ToolEvidenceCandidate.builder()
                         .evidenceKey("read_file|" + normalizedScope)
+                        .observationType("read_file")
                         .toolSemantics(semantics)
                         .normalizedScope(normalizedScope)
                         .repositoryRelativePath(relativePath)
@@ -93,6 +94,7 @@ public class ReadFileTool implements AgentTool {
                         .complete(true)
                         .revalidation(EvidenceRevalidation.builder()
                                 .digestAlgorithm("SHA-256")
+                                .observationType("read_file")
                                 .toolSemantics(semantics)
                                 .repositoryRelativePath(relativePath)
                                 .startLine(start)

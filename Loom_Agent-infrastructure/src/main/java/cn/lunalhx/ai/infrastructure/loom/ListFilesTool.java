@@ -2,9 +2,11 @@ package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
-import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
+import cn.lunalhx.ai.domain.tool.model.ToolEvidenceCandidate;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.springframework.stereotype.Component;
@@ -12,23 +14,17 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 
-/**
- * loom-code {@code list_files}: list a single directory level, directories
- * first, case-insensitive name sort, max 200 entries.
- */
+/** loom-code {@code list_files}: list one complete directory level. */
 @Component
 public class ListFilesTool implements AgentTool {
 
-    private static final int MAX_ENTRIES = 200;
-
     private final WorkspacePort workspacePort;
+    private final ListFilesObservationService observationService;
 
     public ListFilesTool(WorkspacePort workspacePort) {
         this.workspacePort = workspacePort;
+        this.observationService = new ListFilesObservationService();
     }
 
     @Override
@@ -37,7 +33,7 @@ public class ListFilesTool implements AgentTool {
                 .name("list_files")
                 .description("List files in the workspace.")
                 .inputSchema("{" +
-                        "\"type\":\"object\"," +
+                        "\"type\":\"object\",\n" +
                         "\"properties\":{\"path\":{\"type\":\"string\",\"default\":\".\",\"description\":\"directory\"}}," +
                         "\"required\":[]," +
                         "\"additionalProperties\":false" +
@@ -58,26 +54,28 @@ public class ListFilesTool implements AgentTool {
             if (!Files.isDirectory(dir)) {
                 return failure("path is not a directory", startedAt);
             }
-            List<Path> entries = new ArrayList<>();
-            try (var stream = Files.list(dir)) {
-                stream.forEach(entries::add);
-            }
-            entries.removeIf(LoomToolSupport::isIgnored);
-            entries.sort(Comparator.comparing((Path p) -> Files.isDirectory(p))
-                    .thenComparing(p -> p.getFileName().toString().toLowerCase()));
 
-            StringBuilder out = new StringBuilder();
-            int shown = 0;
-            for (Path entry : entries) {
-                if (shown >= MAX_ENTRIES) {
-                    break;
-                }
-                String kind = Files.isDirectory(entry) ? "[D]" : "[F]";
-                out.append(kind).append(' ').append(LoomToolSupport.relative(root, entry)).append('\n');
-                shown++;
-            }
-            String result = out.toString().isEmpty() ? "(empty)" : out.toString().stripTrailing();
-            return ToolResult.success(LoomToolSupport.clip(result), false, elapsed(startedAt));
+            ListFilesObservationService.Observation observation =
+                    observationService.observe(root, dir);
+            String scope = observation.normalizedScope();
+            ToolResult result = ToolResult.success(observation.render(), false, elapsed(startedAt));
+            result.setEvidenceCandidate(ToolEvidenceCandidate.builder()
+                    .evidenceKey("list_files|" + scope)
+                    .observationType(ListFilesObservationService.OBSERVATION_TYPE)
+                    .toolSemantics(ListFilesObservationService.TOOL_SEMANTICS)
+                    .normalizedScope(scope)
+                    .repositoryRelativePath(scope)
+                    .digestAlgorithm("SHA-256")
+                    .stateDigest(observation.stateDigest())
+                    .complete(true)
+                    .revalidation(EvidenceRevalidation.builder()
+                            .digestAlgorithm("SHA-256")
+                            .observationType(ListFilesObservationService.OBSERVATION_TYPE)
+                            .toolSemantics(ListFilesObservationService.TOOL_SEMANTICS)
+                            .repositoryRelativePath(scope)
+                            .build())
+                    .build());
+            return result;
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);
         } catch (Exception e) {

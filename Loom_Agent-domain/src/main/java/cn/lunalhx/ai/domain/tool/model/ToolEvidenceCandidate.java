@@ -17,11 +17,15 @@ import lombok.NoArgsConstructor;
 public class ToolEvidenceCandidate {
 
     private String evidenceKey;
+    private String observationType;
     private String toolSemantics;
     private String normalizedScope;
     private String repositoryRelativePath;
     private Integer observedStartLine;
     private Integer observedEndLine;
+    private String normalizedQuery;
+    private String searchScope;
+    private String engineVersion;
     private String digestAlgorithm;
     private String stateDigest;
     private Boolean complete;

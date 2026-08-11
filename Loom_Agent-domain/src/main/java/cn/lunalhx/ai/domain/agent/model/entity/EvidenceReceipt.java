@@ -20,11 +20,15 @@ import lombok.NoArgsConstructor;
 public class EvidenceReceipt {
 
     private String evidenceKey;
+    private String observationType;
     private String toolSemantics;
     private String normalizedScope;
     private String repositoryRelativePath;
     private Integer observedStartLine;
     private Integer observedEndLine;
+    private String normalizedQuery;
+    private String searchScope;
+    private String engineVersion;
     private String digestAlgorithm;
     private String stateDigest;
     private Boolean complete;
@@ -40,11 +44,15 @@ public class EvidenceReceipt {
         }
         EvidenceReceipt receipt = EvidenceReceipt.builder()
                 .evidenceKey(candidate.getEvidenceKey())
+                .observationType(candidate.getObservationType())
                 .toolSemantics(candidate.getToolSemantics())
                 .normalizedScope(candidate.getNormalizedScope())
                 .repositoryRelativePath(candidate.getRepositoryRelativePath())
                 .observedStartLine(candidate.getObservedStartLine())
                 .observedEndLine(candidate.getObservedEndLine())
+                .normalizedQuery(candidate.getNormalizedQuery())
+                .searchScope(candidate.getSearchScope())
+                .engineVersion(candidate.getEngineVersion())
                 .digestAlgorithm(candidate.getDigestAlgorithm())
                 .stateDigest(candidate.getStateDigest())
                 .complete(true)
@@ -62,17 +70,39 @@ public class EvidenceReceipt {
 
     @JsonIgnore
     public boolean isRevalidatable() {
-        return isComplete()
-                && evidenceKey != null && !evidenceKey.isBlank()
-                && toolSemantics != null && !toolSemantics.isBlank()
-                && normalizedScope != null && !normalizedScope.isBlank()
-                && repositoryRelativePath != null && !repositoryRelativePath.isBlank()
-                && observedStartLine != null && observedStartLine >= 1
-                && observedEndLine != null && observedEndLine >= observedStartLine
-                && "SHA-256".equals(digestAlgorithm)
-                && stateDigest != null && !stateDigest.isBlank()
-                && revalidation != null
-                && revalidation.matches(toolSemantics, repositoryRelativePath,
-                observedStartLine, observedEndLine);
+        if (!isComplete()) {
+            return false;
+        }
+        if (evidenceKey == null || evidenceKey.isBlank()
+                || toolSemantics == null || toolSemantics.isBlank()
+                || normalizedScope == null || normalizedScope.isBlank()
+                || repositoryRelativePath == null || repositoryRelativePath.isBlank()
+                || !"SHA-256".equals(digestAlgorithm)
+                || stateDigest == null || stateDigest.isBlank()
+                || revalidation == null
+                || observationType == null || observationType.isBlank()) {
+            return false;
+        }
+        if ("read_file".equals(observationType)) {
+            if (observedStartLine == null || observedStartLine < 1
+                    || observedEndLine == null || observedEndLine < observedStartLine) {
+                return false;
+            }
+        } else if ("list_files".equals(observationType)) {
+            if (observedStartLine != null || observedEndLine != null) {
+                return false;
+            }
+        } else if ("search".equals(observationType)) {
+            if (observedStartLine != null || observedEndLine != null
+                    || normalizedQuery == null || normalizedQuery.isBlank()
+                    || searchScope == null || searchScope.isBlank()
+                    || engineVersion == null || engineVersion.isBlank()) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        return revalidation.matches(observationType, toolSemantics, repositoryRelativePath,
+                observedStartLine, observedEndLine, normalizedQuery, searchScope, engineVersion);
     }
 }

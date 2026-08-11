@@ -104,7 +104,7 @@ export LOOM_CODE_DEEPSEEK_MODEL=deepseek-v4-pro
 
 1. `list_files` — 列出工作区文件（目录优先，忽略大小写排序）
 2. `read_file` — 按行范围读取 UTF-8 文件（默认 1–200 行）
-3. `search` — `rg` 优先，fallback 大小写不敏感搜索
+3. `search` — 使用带版本语义的 `rg` 完整确定性搜索；引擎不可用时失败且不 fallback
 4. `run_shell` — `/bin/sh -c` 在仓库根执行（过滤环境变量）
 5. `write_file` — 创建父目录并覆盖写入
 6. `patch_file` — 字面量匹配替换（old_text 必须恰好出现一次）

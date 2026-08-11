@@ -26,7 +26,11 @@ public final class ReadFileEvidenceVerifier {
             }
             String digest = ReadFileEvidenceSupport.digest(file,
                     receipt.getObservedStartLine(), receipt.getObservedEndLine());
-            return receipt.getStateDigest().equals(digest);
+            return receipt.getRevalidation().matches("read_file", receipt.getToolSemantics(),
+                    receipt.getRepositoryRelativePath(), receipt.getObservedStartLine(),
+                    receipt.getObservedEndLine(), receipt.getNormalizedQuery(),
+                    receipt.getSearchScope(), receipt.getEngineVersion())
+                    && receipt.getStateDigest().equals(digest);
         } catch (IOException | RuntimeException e) {
             return false;
         }
