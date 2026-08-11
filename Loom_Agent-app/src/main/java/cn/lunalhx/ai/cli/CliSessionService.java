@@ -463,7 +463,7 @@ public class CliSessionService implements AutoCloseable {
     private boolean committedPlanSubmission(AgentRun run, AgentSession durableSession) {
         return run != null
                 && durableSession != null
-                && "PLAN_SUBMITTED".equals(run.getStopReason())
+                && AgentStopReason.PLAN_SUBMITTED.name().equals(run.getStopReason())
                 && durableSession.getPlanStateVersion() == run.getPlanStateVersion() + 1;
     }
 

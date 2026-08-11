@@ -1,6 +1,5 @@
 package cn.lunalhx.ai.cli;
 
-import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 
 import java.nio.file.Path;
@@ -15,11 +14,7 @@ public final class PlanFreshness {
         if (revision == null || revision.getPlanBasis() == null) {
             return false;
         }
-        for (EvidenceReceipt receipt : revision.getPlanBasis()) {
-            if (!PlanEvidenceVerifier.matches(workspaceRoot, receipt)) {
-                return false;
-            }
-        }
-        return true;
+        return PlanEvidenceVerifier.matchesAll(workspaceRoot,
+                revision.getPlanBasis(), null);
     }
 }
