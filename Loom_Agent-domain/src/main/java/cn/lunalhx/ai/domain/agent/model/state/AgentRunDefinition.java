@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
+import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 
 import java.util.Objects;
@@ -19,13 +20,14 @@ public final class AgentRunDefinition {
     private final String planTarget;
     private final Integer planRevision;
     private final long planStateVersion;
+    private final PlanBinding planBinding;
 
     public AgentRunDefinition(String question, String pathScope,
                               String sessionId, String checkpointId,
                               int maxSteps, int maxAttempts,
                               CollaborationMode collaborationMode,
                               String planTarget, Integer planRevision,
-                              long planStateVersion) {
+                              long planStateVersion, PlanBinding planBinding) {
         this.question = question;
         this.pathScope = pathScope;
         this.sessionId = sessionId;
@@ -37,6 +39,7 @@ public final class AgentRunDefinition {
         this.planTarget = planTarget;
         this.planRevision = planRevision;
         this.planStateVersion = planStateVersion;
+        this.planBinding = planBinding;
     }
 
     public String question() { return question; }
@@ -49,6 +52,7 @@ public final class AgentRunDefinition {
     public String planTarget() { return planTarget; }
     public Integer planRevision() { return planRevision; }
     public long planStateVersion() { return planStateVersion; }
+    public PlanBinding planBinding() { return planBinding; }
 
     public AgentRunDefinition withQuestion(String v) { return copy(v, pathScope, sessionId, checkpointId, maxSteps, maxAttempts); }
     public AgentRunDefinition withPathScope(String v) { return copy(question, v, sessionId, checkpointId, maxSteps, maxAttempts); }
@@ -58,26 +62,33 @@ public final class AgentRunDefinition {
     public AgentRunDefinition withMaxAttempts(int v) { return copy(question, pathScope, sessionId, checkpointId, maxSteps, v); }
     public AgentRunDefinition withCollaborationMode(CollaborationMode v) {
         return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
-                maxSteps, maxAttempts, v, planTarget, planRevision, planStateVersion);
+                maxSteps, maxAttempts, v, planTarget, planRevision, planStateVersion, planBinding);
     }
     public AgentRunDefinition withPlanTarget(String v) {
         return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
-                maxSteps, maxAttempts, collaborationMode, v, planRevision, planStateVersion);
+                maxSteps, maxAttempts, collaborationMode, v, planRevision, planStateVersion, planBinding);
     }
 
     public AgentRunDefinition withPlanRevision(Integer v) {
         return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
-                maxSteps, maxAttempts, collaborationMode, planTarget, v, planStateVersion);
+                maxSteps, maxAttempts, collaborationMode, planTarget, v, planStateVersion, planBinding);
     }
 
     public AgentRunDefinition withPlanStateVersion(long v) {
         return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
-                maxSteps, maxAttempts, collaborationMode, planTarget, planRevision, v);
+                maxSteps, maxAttempts, collaborationMode, planTarget, planRevision, v, planBinding);
+    }
+
+    public AgentRunDefinition withPlanBinding(PlanBinding v) {
+        return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
+                maxSteps, maxAttempts, collaborationMode, planTarget, planRevision,
+                planStateVersion, v);
     }
 
     private AgentRunDefinition copy(String question, String pathScope, String sessionId,
                                     String checkpointId, int maxSteps, int maxAttempts) {
         return new AgentRunDefinition(question, pathScope, sessionId, checkpointId,
-                maxSteps, maxAttempts, collaborationMode, planTarget, planRevision, planStateVersion);
+                maxSteps, maxAttempts, collaborationMode, planTarget, planRevision,
+                planStateVersion, planBinding);
     }
 }

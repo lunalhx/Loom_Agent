@@ -55,7 +55,7 @@ public class AgentContext {
     public AgentContext() {
         this.identity = new AgentIdentity(null, null, null, null, null, 0);
         this.runDefinition = new AgentRunDefinition(null, null, null, null,
-                0, 0, CollaborationMode.BUILD, null, null, 0L);
+                0, 0, CollaborationMode.BUILD, null, null, 0L, null);
         this.environment = new AgentEnvironmentState();
         this.runtime = new AgentRuntimeState();
         this.prompt = new AgentPromptState();
@@ -118,6 +118,8 @@ public class AgentContext {
     public void setPlanRevision(Integer v) { runDefinition = runDefinition.withPlanRevision(v); }
     public long getPlanStateVersion() { return runDefinition.planStateVersion(); }
     public void setPlanStateVersion(long v) { runDefinition = runDefinition.withPlanStateVersion(v); }
+    public PlanBinding getPlanBinding() { return runDefinition.planBinding(); }
+    public void setPlanBinding(PlanBinding v) { runDefinition = runDefinition.withPlanBinding(v); }
 
     // ==================== environment delegates ====================
 

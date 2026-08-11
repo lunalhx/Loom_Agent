@@ -19,6 +19,12 @@ public interface AgentSessionRepository {
      */
     boolean saveIfUnchanged(AgentSession session, Instant expectedUpdatedAt);
 
+    /**
+     * Acquire the same exclusive session lock used by compare-and-set writes.
+     * The lease must be closed as soon as the protected operation completes.
+     */
+    AutoCloseable acquireExclusive(String sessionId);
+
     Optional<AgentSession> find(String sessionId);
 
     /**

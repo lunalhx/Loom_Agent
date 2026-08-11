@@ -24,18 +24,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v11 — only durable state needed for recovery.
+ * Checkpoint snapshot v12 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v11 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
+ * <p>v12 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
  * and stores safe Plan Evidence receipts without raw observations.
  * {@code toolSteps}/{@code modelAttempts} counters
  * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
  * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
- * Only v11 snapshots are recoverable; earlier shapes are rejected at restore time.
+ * Only v12 snapshots are recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -43,7 +43,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    public static final int CURRENT_SCHEMA_VERSION = 11;
+    public static final int CURRENT_SCHEMA_VERSION = 12;
 
     private Integer schemaVersion;
 
@@ -63,6 +63,10 @@ public class AgentContextSnapshot {
     private Integer maxSteps;
     private Integer maxAttempts;
     private String checkpointId;
+    private String planTarget;
+    private Integer planRevision;
+    private Long planStateVersion;
+    private PlanBinding planBinding;
 
     // -- environment (only workspace ref; resolved path re-injected) --
     private WorkspaceRef workspace;
@@ -159,6 +163,10 @@ public class AgentContextSnapshot {
                 .maxSteps(def.maxSteps())
                 .maxAttempts(def.maxAttempts())
                 .checkpointId(context.getCheckpointId())
+                .planTarget(def.planTarget())
+                .planRevision(def.planRevision())
+                .planStateVersion(def.planStateVersion())
+                .planBinding(def.planBinding())
                 // environment
                 .workspace(context.environment().workspace())
                 // runtime
@@ -228,6 +236,10 @@ public class AgentContextSnapshot {
         context.setMaxSteps(maxSteps == null ? 0 : maxSteps);
         context.setMaxAttempts(maxAttempts == null ? 0 : maxAttempts);
         context.setCheckpointId(checkpointId);
+        context.setPlanTarget(planTarget);
+        context.setPlanRevision(planRevision);
+        context.setPlanStateVersion(planStateVersion == null ? 0L : planStateVersion);
+        context.setPlanBinding(planBinding);
 
         // environment — workspace ref only; resolved path and toolSpecs re-injected by factory
         context.setWorkspace(workspace);

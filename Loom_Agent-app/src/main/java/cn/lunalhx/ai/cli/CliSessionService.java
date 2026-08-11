@@ -2,6 +2,7 @@ package cn.lunalhx.ai.cli;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
@@ -9,7 +10,9 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.entity.Plan;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
@@ -29,6 +32,7 @@ import cn.lunalhx.ai.infrastructure.store.FileDurableMemoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileRunStore;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationContext;
 
@@ -265,6 +269,12 @@ public class CliSessionService implements AutoCloseable {
 
     /** Run one turn: new root run seeded from session, persist real state. */
     public String runTurn(String prompt) {
+        return runTurn(prompt, null, null, null);
+    }
+
+    private String runTurn(String prompt, PlanBinding planBinding,
+                           CollaborationMode modeOverride,
+                           AgentRunStartGuard runStartGuard) {
         // Redact the user request at the single choke point so no secret
         // configured via --secret-env-name ever reaches the ledger, checkpoint,
         // run.json, trace or report on disk.
@@ -276,10 +286,13 @@ public class CliSessionService implements AutoCloseable {
         long planStateVersion;
         synchronized (this) {
             seed = seedSnapshot();
-            runMode = session.getCollaborationMode();
-            planTarget = runMode == CollaborationMode.PLAN ? planTargetForRun() : null;
-            planRevision = runMode == CollaborationMode.PLAN ? planRevisionForRun() : null;
-            planStateVersion = runMode == CollaborationMode.PLAN ? session.getPlanStateVersion() : 0L;
+            runMode = modeOverride == null ? session.getCollaborationMode() : modeOverride;
+            planTarget = planBinding != null ? planBinding.getPlanId()
+                    : runMode == CollaborationMode.PLAN ? planTargetForRun() : null;
+            planRevision = planBinding != null ? planBinding.getRevision()
+                    : runMode == CollaborationMode.PLAN ? planRevisionForRun() : null;
+            planStateVersion = planBinding != null ? session.getPlanStateVersion()
+                    : runMode == CollaborationMode.PLAN ? session.getPlanStateVersion() : 0L;
         }
         String runId = "run_" + currentStamp() + "-" + UUID.randomUUID().toString().substring(0, 6);
 
@@ -295,6 +308,8 @@ public class CliSessionService implements AutoCloseable {
                 .planTarget(planTarget)
                 .planRevision(planRevision)
                 .planStateVersion(planStateVersion)
+                .planBinding(planBinding)
+                .runStartGuard(runStartGuard)
                 .seedSnapshot(seed)
                 .build();
 
@@ -621,6 +636,62 @@ public class CliSessionService implements AutoCloseable {
         session = current;
     }
 
+    /**
+     * Resolve and validate one exact fresh Plan head, then start a new Build
+     * Run with an immutable snapshot of that revision. The validation is
+     * repeated against durable state immediately before the Run is created so
+     * a concurrent selection or head advance cannot be silently adopted.
+     */
+    public String handoffPlan(String planId) {
+        PlanBinding binding;
+        long expectedPlanStateVersion;
+        String expectedCurrentPlanId;
+        synchronized (this) {
+            if (session.getCollaborationMode() != CollaborationMode.BUILD) {
+                throw new OptionsException("Plan handoff is available only in Build Mode");
+            }
+            AgentSession before = currentDurableSession();
+            if (before.getCollaborationMode() != CollaborationMode.BUILD) {
+                throw new OptionsException("Plan handoff is available only in Build Mode");
+            }
+            String targetId = StringUtils.defaultIfBlank(planId, before.getCurrentPlanId());
+            if (StringUtils.isBlank(targetId)) {
+                throw new OptionsException("no Current Plan selected");
+            }
+            Plan target = findPlan(before, targetId);
+            PlanRevision revision = target == null ? null : target.currentRevision();
+            if (revision == null) {
+                throw new OptionsException("unknown Plan or Plan has no latest revision: " + targetId);
+            }
+            if (!PlanFreshness.isFresh(Path.of(workspace), revision)) {
+                throw new OptionsException("Plan is stale; refresh its Evidence before handoff: " + targetId);
+            }
+            String basisIdentity = planBasisIdentity(revision);
+
+            AgentSession after = currentDurableSession();
+            Plan latestPlan = findPlan(after, targetId);
+            PlanRevision latest = latestPlan == null ? null : latestPlan.currentRevision();
+            if (after.getCollaborationMode() != CollaborationMode.BUILD
+                    || before.getPlanStateVersion() != after.getPlanStateVersion()
+                    || latest == null
+                    || !sameRevision(revision, latest)
+                    || !Objects.equals(after.getCurrentPlanId(), before.getCurrentPlanId())) {
+                throw new OptionsException("Plan handoff rejected: Plan head changed concurrently");
+            }
+            if (!PlanFreshness.isFresh(Path.of(workspace), latest)) {
+                throw new OptionsException("Plan is stale; refresh its Evidence before handoff: " + targetId);
+            }
+            binding = new PlanBinding(targetId, revision.getRevision(),
+                    revision.getContentDigest(), basisIdentity, revision.getTitle(),
+                    revision.getBody(), revision.getDependencies());
+            expectedPlanStateVersion = before.getPlanStateVersion();
+            expectedCurrentPlanId = before.getCurrentPlanId();
+            session = after;
+        }
+        return runTurn(binding.authoritativePrompt(), binding, CollaborationMode.BUILD,
+                handoffStartGuard(binding, expectedPlanStateVersion, expectedCurrentPlanId));
+    }
+
     /** Read-only Plan index; it never starts a model Run. */
     public synchronized String planListView() {
         List<Plan> plans = session.getPlans();
@@ -693,6 +764,81 @@ public class CliSessionService implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    private Plan findPlan(AgentSession source, String planId) {
+        if (source == null || source.getPlans() == null || StringUtils.isBlank(planId)) {
+            return null;
+        }
+        for (Plan plan : source.getPlans()) {
+            if (plan != null && Objects.equals(planId, plan.getPlanId())) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
+    private boolean sameRevision(PlanRevision expected, PlanRevision actual) {
+        return expected != null && actual != null
+                && Objects.equals(expected.getRevision(), actual.getRevision())
+                && Objects.equals(expected.getContentDigest(), actual.getContentDigest())
+                && Objects.equals(planBasisIdentity(expected), planBasisIdentity(actual));
+    }
+
+    private AgentRunStartGuard handoffStartGuard(PlanBinding expectedBinding,
+                                                 long expectedPlanStateVersion,
+                                                 String expectedCurrentPlanId) {
+        return () -> {
+            AutoCloseable lease = sessionStore.acquireExclusive(sessionId);
+            try {
+                AgentSession current = currentDurableSession();
+                Plan plan = findPlan(current, expectedBinding.getPlanId());
+                PlanRevision latest = plan == null ? null : plan.currentRevision();
+                if (current.getCollaborationMode() != CollaborationMode.BUILD
+                        || current.getPlanStateVersion() != expectedPlanStateVersion
+                        || !Objects.equals(current.getCurrentPlanId(), expectedCurrentPlanId)
+                        || !sameBinding(expectedBinding, latest)
+                        || !PlanFreshness.isFresh(Path.of(workspace), latest)) {
+                    closeQuietly(lease);
+                    throw new OptionsException(
+                            "Plan handoff rejected: Plan head changed concurrently");
+                }
+                return lease;
+            } catch (RuntimeException e) {
+                closeQuietly(lease);
+                throw e;
+            }
+        };
+    }
+
+    private boolean sameBinding(PlanBinding expected, PlanRevision actual) {
+        return expected != null && actual != null
+                && Objects.equals(expected.getRevision(), actual.getRevision())
+                && Objects.equals(expected.getPlanDocumentDigest(), actual.getContentDigest())
+                && Objects.equals(expected.getTitle(), actual.getTitle())
+                && Objects.equals(expected.getBody(), actual.getBody())
+                && Objects.equals(expected.getDependencies(), actual.getDependencies())
+                && Objects.equals(expected.getPlanBasisIdentity(), planBasisIdentity(actual));
+    }
+
+    private String planBasisIdentity(PlanRevision revision) {
+        try {
+            List<EvidenceReceipt> basis = revision == null || revision.getPlanBasis() == null
+                    ? List.of() : revision.getPlanBasis();
+            return DigestUtils.sha256Hex(mapper.writeValueAsBytes(basis));
+        } catch (Exception e) {
+            throw new OptionsException("cannot identify Plan Basis: " + e.getMessage());
+        }
+    }
+
+    private void closeQuietly(AutoCloseable lease) {
+        if (lease == null) {
+            return;
+        }
+        try {
+            lease.close();
+        } catch (Exception ignored) {
+        }
     }
 
     private void recoverPendingIfPresent() {

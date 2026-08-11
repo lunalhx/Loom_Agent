@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionResult;
 import cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase;
@@ -63,35 +64,59 @@ public class DefaultAgentLoopService implements AgentLoopService {
     @Override
     public Flux<AgentEvent> ask(AgentQuestion question) {
         return executeAsync("ask", question == null ? null : question.getWorkspace(), (sink, capture) -> {
-            AgentContext context = resolveContext(question);
-            capture.accept(context);
-            String lockKey = StringUtils.isBlank(context.getParentRunId())
-                    ? ConversationExecutionGuard.effectiveLockKey(
-                            context.getConversationId(), context.getRunId())
-                    : null;
-            String token = null;
-            if (lockKey != null) {
-                token = executionGuard.tryAcquire(lockKey);
-                if (token == null) {
-                    emit(sink, List.of(components.eventFactory().conversationBusy(
-                            context.getConversationId(), context.getRunId(), context.getRequestId(),
-                            null, "ask", Instant.now())));
-                    sink.complete();
-                    return;
-                }
-            }
+            AutoCloseable startLease = null;
             try {
-                emit(sink, List.of(components.eventFactory().runStarted(context)));
-                emit(sink, lifecycle.initializeRun(context));
-                emit(sink, List.of(components.eventFactory().meta(context)));
-                emitSecretRedactionState(context);
-                runLoop(context, sink);
-            } finally {
-                if (token != null) {
-                    executionGuard.release(lockKey, token);
+                AgentRunStartGuard startGuard = question == null ? null : question.getRunStartGuard();
+                if (startGuard != null) {
+                    try {
+                        startLease = startGuard.acquire();
+                    } catch (Exception e) {
+                        throw new IllegalStateException("Run start authorization failed", e);
+                    }
                 }
+                AgentContext context = resolveContext(question);
+                capture.accept(context);
+                String lockKey = StringUtils.isBlank(context.getParentRunId())
+                        ? ConversationExecutionGuard.effectiveLockKey(
+                                context.getConversationId(), context.getRunId())
+                        : null;
+                String token = null;
+                if (lockKey != null) {
+                    token = executionGuard.tryAcquire(lockKey);
+                    if (token == null) {
+                        emit(sink, List.of(components.eventFactory().conversationBusy(
+                                context.getConversationId(), context.getRunId(), context.getRequestId(),
+                                null, "ask", Instant.now())));
+                        return;
+                    }
+                }
+                try {
+                    emit(sink, List.of(components.eventFactory().runStarted(context)));
+                    emit(sink, lifecycle.initializeRun(context));
+                    emit(sink, List.of(components.eventFactory().meta(context)));
+                    emitSecretRedactionState(context);
+                    closeQuietly(startLease);
+                    startLease = null;
+                    runLoop(context, sink);
+                } finally {
+                    if (token != null) {
+                        executionGuard.release(lockKey, token);
+                    }
+                }
+            } finally {
+                closeQuietly(startLease);
             }
         });
+    }
+
+    private void closeQuietly(AutoCloseable lease) {
+        if (lease == null) {
+            return;
+        }
+        try {
+            lease.close();
+        } catch (Exception ignored) {
+        }
     }
 
     private AgentContext resolveContext(AgentQuestion question) {

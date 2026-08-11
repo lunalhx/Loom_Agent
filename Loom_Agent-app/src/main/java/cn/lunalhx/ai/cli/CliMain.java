@@ -28,6 +28,7 @@ public final class CliMain {
             /mode plan|build  Show or change the collaboration mode.
             /plan new  Start an independent Plan.
             /plan select <plan-id>  Select a Plan's latest revision.
+            /plan handoff [plan-id]  Start a Build Run bound to a fresh Plan revision.
             /plan list  List persisted Plans and computed freshness.
             /plan show  Show the current Plan and computed freshness.
             /new     Create a new independent session.
@@ -191,8 +192,18 @@ public final class CliMain {
             }
             return true;
         }
+        if (input.equals("/plan handoff") || input.startsWith("/plan handoff ")) {
+            String planId = input.equals("/plan handoff")
+                    ? null : input.substring("/plan handoff ".length()).strip();
+            try {
+                output.println(session.handoffPlan(planId));
+            } catch (CliSessionService.OptionsException e) {
+                output.println("error: " + e.getMessage());
+            }
+            return true;
+        }
         if (input.equals("/plan") || input.startsWith("/plan ")) {
-            output.println("error: use /plan new, /plan select <plan-id>, /plan list, or /plan show");
+            output.println("error: use /plan new, /plan select <plan-id>, /plan handoff [plan-id], /plan list, or /plan show");
             return true;
         }
         if (input.equals("/mode")) {

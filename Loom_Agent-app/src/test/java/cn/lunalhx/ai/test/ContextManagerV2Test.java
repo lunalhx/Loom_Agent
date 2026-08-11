@@ -270,10 +270,10 @@ public class ContextManagerV2Test {
                 .description("Read").inputSchema("{}").build());
         StablePrefix a = builder.build(false, true, null, specs,
                 "Workspace:\n- status: M A.java", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix b = builder.build(false, true, null, specs,
                 "Workspace:\n- status: M B.java", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertTrue(a.matches(b));
     }
 
@@ -285,9 +285,9 @@ public class ContextManagerV2Test {
         List<ToolSpec> specB = List.of(ToolSpec.builder().name("write_file")
                 .description("Write").inputSchema("{}").build());
         StablePrefix a = builder.build(false, true, null, specA, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix b = builder.build(false, true, null, specB, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertFalse(a.matches(b));
         assertNotEquals(a.toolSignature(), b.toolSignature());
     }
@@ -298,9 +298,9 @@ public class ContextManagerV2Test {
         List<ToolSpec> specs = List.of(ToolSpec.builder().name("read_file")
                 .description("Read").inputSchema("{}").build());
         StablePrefix main = builder.build(false, true, null, specs, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix delegate = builder.build(true, false, null, specs, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertFalse(main.matches(delegate));
         assertNotEquals(main.runtimeSignature(), delegate.runtimeSignature());
     }

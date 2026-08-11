@@ -121,7 +121,8 @@ public class PromptBuildNode extends AbstractAgentNode {
                 context.getToolSpecs(),
                 workspaceFactsText,
                 workspaceFingerprint,
-                context.getCollaborationMode());
+                context.getCollaborationMode(),
+                context.getPlanBinding());
     }
 
     /** Collect workspace facts exactly once per round; both the rendered text and

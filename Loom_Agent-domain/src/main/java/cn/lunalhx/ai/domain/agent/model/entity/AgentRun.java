@@ -33,6 +33,7 @@ public class AgentRun {
     private String planTarget;
     private Integer planRevision;
     private Long planStateVersion;
+    private PlanBinding planBinding;
     private AgentRunStatus status;
     private String currentNode;
     private Integer toolSteps;

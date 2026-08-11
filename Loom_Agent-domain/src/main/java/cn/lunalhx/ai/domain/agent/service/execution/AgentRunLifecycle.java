@@ -178,6 +178,7 @@ public final class AgentRunLifecycle {
                 .planTarget(def.planTarget())
                 .planRevision(def.planRevision())
                 .planStateVersion(def.planStateVersion())
+                .planBinding(def.planBinding())
                 .status(status)
                 .currentNode(currentNode)
                 .toolSteps(runtime.toolSteps())

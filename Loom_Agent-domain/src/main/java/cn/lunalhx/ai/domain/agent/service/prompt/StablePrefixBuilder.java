@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service.prompt;
 
 import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.common.UntrustedContentSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
@@ -78,7 +79,8 @@ public final class StablePrefixBuilder {
                               List<ToolSpec> toolSpecs,
                               String workspaceFactsText,
                               String workspaceFingerprint,
-                              CollaborationMode mode) {
+                              CollaborationMode mode,
+                              PlanBinding planBinding) {
         StringBuilder sb = new StringBuilder();
         appendRoleProtocol(sb, isDelegate, delegateAllowed, pathScope, mode);
         sb.append("\nCollaboration mode: ").append(mode.cliName()).append('\n');
@@ -88,6 +90,7 @@ public final class StablePrefixBuilder {
         sb.append('\n').append(responseExamples).append('\n');
         appendToolCatalog(sb, toolSpecs);
         appendWorkspaceFacts(sb, workspaceFactsText);
+        appendPlanBinding(sb, planBinding);
 
         String frozenContent = sb.toString();
         String fingerprint = DigestUtils.sha256Hex(frozenContent);
@@ -183,6 +186,20 @@ public final class StablePrefixBuilder {
             return;
         }
         sb.append('\n').append(UntrustedContentSanitizer.escapeXml(workspaceFactsText));
+    }
+
+    private void appendPlanBinding(StringBuilder sb, PlanBinding binding) {
+        if (binding == null) {
+            return;
+        }
+        sb.append("\nPlan Handoff Binding (immutable):\n")
+                .append("- plan: ").append(binding.getPlanId())
+                .append(" revision: ").append(binding.getRevision()).append('\n')
+                .append("- document digest: ").append(binding.getPlanDocumentDigest()).append('\n')
+                .append("- Plan Basis identity: ").append(binding.getPlanBasisIdentity()).append('\n')
+                .append("- authoritative constraints:\n")
+                .append(UntrustedContentSanitizer.escapeXml(binding.authoritativePrompt()))
+                .append('\n');
     }
 
     @SuppressWarnings("unchecked")

@@ -38,6 +38,7 @@ public class DelegateRequest {
     private String workspaceRoot;
     private WorkspaceRef workspace;
     private CollaborationMode modeSnapshot;
+    private PlanBinding planBinding;
     private OutboundDisclosure outboundDisclosureBoundary;
     private List<String> allowedTools;
     private String parentSummary;
@@ -85,6 +86,7 @@ public class DelegateRequest {
                         ? null : context.getResolvedWorkspace().toString())
                 .workspace(context.getWorkspace())
                 .modeSnapshot(context.getCollaborationMode())
+                .planBinding(context.getPlanBinding())
                 .outboundDisclosureBoundary(disclosureBoundary == null
                         ? OutboundDisclosure.NONE : disclosureBoundary)
                 .allowedTools(allowedTools)

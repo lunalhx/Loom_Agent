@@ -35,9 +35,9 @@ public class StablePrefixBuilderTest {
                 tool("read_file", "Read a UTF-8 file"),
                 tool("list_files", "List files"));
         StablePrefix a = builder.build(false, true, null, specs, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix b = builder.build(false, true, null, specs, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertEquals(a.frozenContent(), b.frozenContent());
         assertEquals(a.fingerprint(), b.fingerprint());
     }
@@ -50,9 +50,9 @@ public class StablePrefixBuilderTest {
                 tool("read_file", "R"), tool("write_file", "W"), tool("search", "S"));
         // Content is deterministically sorted by name, so order should not matter.
         StablePrefix a = builder.build(false, true, null, specsA, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix b = builder.build(false, true, null, specsB, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertEquals(a.fingerprint(), b.fingerprint());
     }
 
@@ -62,18 +62,18 @@ public class StablePrefixBuilderTest {
         List<ToolSpec> specsB = List.of(tool("read_file", "Read a UTF-8 file"));
         assertNotEquals(
                 builder.build(false, true, null, specsA, "", null,
-                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD).fingerprint(),
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null).fingerprint(),
                 builder.build(false, true, null, specsB, "", null,
-                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD).fingerprint());
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null).fingerprint());
     }
 
     @Test
     public void delegateRoleChangesContent() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"));
         StablePrefix main = builder.build(false, true, null, specs, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         StablePrefix delegate = builder.build(true, false, null, specs, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertNotEquals(main.frozenContent(), delegate.frozenContent());
         assertTrue(delegate.frozenContent().contains("read-only"));
     }
@@ -83,10 +83,10 @@ public class StablePrefixBuilderTest {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"));
         StablePrefix withFacts = builder.build(false, true, null, specs,
                 "Workspace:\n- cwd: /tmp", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertTrue(withFacts.frozenContent().contains("cwd: /tmp"));
         StablePrefix without = builder.build(false, true, null, specs, "", null,
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertNotEquals(withFacts.fingerprint(), without.fingerprint());
     }
 
@@ -111,7 +111,7 @@ public class StablePrefixBuilderTest {
     public void buildCarriesSignatures() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"), tool("write_file", "Write"));
         StablePrefix p = builder.build(false, true, "/scope", specs, "Workspace:", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
         assertEquals("ws-fp", p.workspaceFingerprint());
         assertEquals(StablePrefixBuilder.toolSignature(specs), p.toolSignature());
         assertEquals(StablePrefixBuilder.runtimeSignature(false, true, "/scope",

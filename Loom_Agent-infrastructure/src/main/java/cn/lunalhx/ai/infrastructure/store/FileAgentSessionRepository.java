@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * File-backed {@link AgentSession} store under
@@ -29,7 +30,7 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
     private final Path root;
     private final ObjectMapper mapper;
     private final ArtifactRedactor artifactRedactor;
-    private static final ConcurrentMap<Path, Object> SESSION_LOCKS = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<Path, ReentrantLock> SESSION_LOCKS = new ConcurrentHashMap<>();
 
     public FileAgentSessionRepository(Path workspaceRoot, ObjectMapper mapper) {
         this(workspaceRoot, mapper, new ArtifactRedactor());
@@ -52,9 +53,9 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
 
     @Override
     public AgentSession save(AgentSession session) {
-        Object lock = SESSION_LOCKS.computeIfAbsent(path(session.getId()).toAbsolutePath().normalize(),
-                ignored -> new Object());
-        synchronized (lock) {
+        ReentrantLock lock = sessionLock(session.getId());
+        lock.lock();
+        try {
             try {
                 Files.createDirectories(root);
                 try (FileChannel channel = FileChannel.open(lockPath(session.getId()),
@@ -66,14 +67,16 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
                 throw new IllegalStateException("cannot lock session " + session.getId()
                         + " for save: " + e.getMessage(), e);
             }
+        } finally {
+            lock.unlock();
         }
     }
 
     @Override
     public boolean saveIfUnchanged(AgentSession session, Instant expectedUpdatedAt) {
-        Object lock = SESSION_LOCKS.computeIfAbsent(path(session.getId()).toAbsolutePath().normalize(),
-                ignored -> new Object());
-        synchronized (lock) {
+        ReentrantLock lock = sessionLock(session.getId());
+        lock.lock();
+        try {
             try {
                 Files.createDirectories(root);
                 try (FileChannel channel = FileChannel.open(lockPath(session.getId()),
@@ -91,7 +94,38 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
                 throw new IllegalStateException("cannot lock session " + session.getId()
                         + " for compare-and-set: " + e.getMessage(), e);
             }
+        } finally {
+            lock.unlock();
         }
+    }
+
+    @Override
+    public AutoCloseable acquireExclusive(String sessionId) {
+        ReentrantLock lock = sessionLock(sessionId);
+        lock.lock();
+        FileChannel channel = null;
+        try {
+            Files.createDirectories(root);
+            channel = FileChannel.open(lockPath(sessionId),
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+            FileLock fileLock = channel.lock();
+            return new SessionLease(lock, channel, fileLock);
+        } catch (IOException | RuntimeException e) {
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (IOException ignored) {
+                }
+            }
+            lock.unlock();
+            throw new IllegalStateException("cannot acquire exclusive session lock " + sessionId
+                    + ": " + e.getMessage(), e);
+        }
+    }
+
+    private ReentrantLock sessionLock(String sessionId) {
+        return SESSION_LOCKS.computeIfAbsent(path(sessionId).toAbsolutePath().normalize(),
+                ignored -> new ReentrantLock());
     }
 
     private Path lockPath(String sessionId) {
@@ -219,9 +253,9 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
 
     @Override
     public void delete(String sessionId) {
-        Object lock = SESSION_LOCKS.computeIfAbsent(path(sessionId).toAbsolutePath().normalize(),
-                ignored -> new Object());
-        synchronized (lock) {
+        ReentrantLock lock = sessionLock(sessionId);
+        lock.lock();
+        try {
             try {
                 Files.createDirectories(root);
                 try (FileChannel channel = FileChannel.open(lockPath(sessionId),
@@ -230,6 +264,38 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
                     Files.deleteIfExists(path(sessionId));
                 }
             } catch (IOException ignored) {
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static final class SessionLease implements AutoCloseable {
+
+        private final ReentrantLock lock;
+        private final FileChannel channel;
+        private final FileLock fileLock;
+        private boolean closed;
+
+        private SessionLease(ReentrantLock lock, FileChannel channel, FileLock fileLock) {
+            this.lock = lock;
+            this.channel = channel;
+            this.fileLock = fileLock;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            try {
+                fileLock.release();
+                channel.close();
+            } catch (IOException e) {
+                throw new IllegalStateException("cannot release exclusive session lock", e);
+            } finally {
+                lock.unlock();
             }
         }
     }

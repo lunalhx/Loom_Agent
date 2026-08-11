@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.entity;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -36,6 +37,8 @@ public class AgentQuestion {
     private String planTarget;
     private Integer planRevision;
     private Long planStateVersion;
+    private PlanBinding planBinding;
     private AgentContextSnapshot seedSnapshot;
+    private AgentRunStartGuard runStartGuard;
 
 }

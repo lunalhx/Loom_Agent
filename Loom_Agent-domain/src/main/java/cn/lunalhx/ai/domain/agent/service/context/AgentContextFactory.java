@@ -100,6 +100,9 @@ public final class AgentContextFactory {
         context.setPlanTarget(question.getPlanTarget());
         context.setPlanRevision(question.getPlanRevision());
         context.setPlanStateVersion(question.getPlanStateVersion() == null ? 0L : question.getPlanStateVersion());
+        context.setPlanBinding(question.getPlanBinding() != null
+                ? question.getPlanBinding()
+                : previous == null ? null : previous.getPlanBinding());
         context.setCollaborationMode(resolveMode(question, previous));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
@@ -159,6 +162,7 @@ public final class AgentContextFactory {
         context.setPlanTarget(question.getPlanTarget());
         context.setPlanRevision(question.getPlanRevision());
         context.setPlanStateVersion(question.getPlanStateVersion() == null ? 0L : question.getPlanStateVersion());
+        context.setPlanBinding(question.getPlanBinding());
         context.setCollaborationMode(resolveMode(question, question.getSeedSnapshot()));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());

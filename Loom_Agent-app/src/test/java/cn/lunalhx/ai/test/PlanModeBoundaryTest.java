@@ -55,7 +55,7 @@ public class PlanModeBoundaryTest {
         ToolRegistry registry = registry(new AtomicInteger());
         String prompt = new StablePrefixBuilder()
                 .build(false, true, null, registry.effectiveSpecs(CollaborationMode.PLAN),
-                        "", null, CollaborationMode.PLAN)
+                        "", null, CollaborationMode.PLAN, null)
                 .frozenContent();
 
         assertTrue(prompt.contains("Collaboration mode: plan"));
