@@ -9,6 +9,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
+import cn.lunalhx.ai.domain.agent.model.state.PlanEvidenceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -49,6 +50,7 @@ public class AgentContext {
     private AgentBudgetState budget;
     private AgentRecoveryState recovery;
     private AgentTraceState trace;
+    private PlanEvidenceState evidence;
 
     public AgentContext() {
         this.identity = new AgentIdentity(null, null, null, null, null, 0);
@@ -61,6 +63,7 @@ public class AgentContext {
         this.budget = new AgentBudgetState();
         this.recovery = new AgentRecoveryState();
         this.trace = new AgentTraceState();
+        this.evidence = new PlanEvidenceState();
     }
 
     // ==================== component accessors ====================
@@ -74,6 +77,7 @@ public class AgentContext {
     public AgentBudgetState budget() { return budget; }
     public AgentRecoveryState recovery() { return recovery; }
     public AgentTraceState trace() { return trace; }
+    public PlanEvidenceState evidence() { return evidence; }
 
     // ==================== identity delegates ====================
 
@@ -210,6 +214,33 @@ public class AgentContext {
     public void setToolCall(ToolCall v) { action.setToolCall(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
+
+    // ==================== Plan Evidence ====================
+
+    public List<cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt> getEvidenceReceipts() {
+        return evidence.receipts();
+    }
+
+    public boolean isEvidenceDrift() { return evidence.drift(); }
+
+    public void recordEvidence(cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt receipt) {
+        evidence.record(receipt);
+    }
+
+    public void setEvidenceReceipts(
+            List<cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt> receipts) {
+        evidence.restore(receipts, evidence.drift());
+    }
+
+    public void setEvidenceDrift(boolean drift) {
+        evidence.restore(evidence.receipts(), drift);
+    }
+
+    public void restoreEvidence(
+            List<cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt> receipts,
+            boolean drift) {
+        evidence.restore(receipts, drift);
+    }
 
     // ==================== budget delegates ====================
 

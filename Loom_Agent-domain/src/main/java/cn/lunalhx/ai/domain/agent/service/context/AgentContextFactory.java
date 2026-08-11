@@ -128,6 +128,7 @@ public final class AgentContextFactory {
             if (previous.getWorkingMemory() != null) {
                 context.setWorkingMemory(previous.getWorkingMemory());
             }
+            context.restoreEvidence(previous.getEvidenceReceipts(), previous.isEvidenceDrift());
         }
 
         context.setPendingContinuation(context.getQuestion());

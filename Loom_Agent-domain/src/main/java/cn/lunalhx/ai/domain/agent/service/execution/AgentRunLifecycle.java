@@ -186,6 +186,8 @@ public final class AgentRunLifecycle {
                 .summaryJson(runtime.finalAnswer())
                 .blockedReason(StringUtils.defaultIfBlank(
                         context.budget().budgetBlockedReason(), context.recovery().contextBlockedReason()))
+                .evidenceReceipts(context.getEvidenceReceipts())
+                .evidenceDrift(context.isEvidenceDrift())
                 .usedTokens(budgetState.usedTokens())
                 .estimatedCost(budgetState.estimatedCost())
                 .updatedAt(Instant.now())

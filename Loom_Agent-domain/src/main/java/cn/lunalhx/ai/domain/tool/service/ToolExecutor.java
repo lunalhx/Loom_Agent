@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -126,6 +127,8 @@ public class ToolExecutor {
             WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
 
+            capturePlanEvidence(context, result);
+            result.clearTransientEvidence();
             applySafeOutput(result, name);
 
             String toolStatus = "ok";
@@ -192,6 +195,17 @@ public class ToolExecutor {
         String clipped = clip(sanitization.getOutput());
         result.setObservation(clipped);
         result.setTruncated(clipped.length() < sanitization.getOutput().length());
+    }
+
+    private void capturePlanEvidence(AgentContext context, ToolResult result) {
+        if (context.getCollaborationMode() != CollaborationMode.PLAN
+                || result == null || !result.isSuccess()
+                || result.getEvidenceCandidate() == null) {
+            return;
+        }
+        EvidenceReceipt receipt = EvidenceReceipt.from(
+                result.getEvidenceCandidate(), context.getRunId(), context.getRootRunId());
+        context.recordEvidence(receipt);
     }
 
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,

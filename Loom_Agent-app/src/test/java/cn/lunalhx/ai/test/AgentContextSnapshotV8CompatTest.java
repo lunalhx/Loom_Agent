@@ -20,7 +20,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Obsolete checkpoint shapes are rejected after ticket 02 moves the persisted
- * checkpoint directly to the mode-bearing v10 shape.
+ * checkpoint directly to the mode-and-evidence-bearing v11 shape.
  */
 public class AgentContextSnapshotV8CompatTest {
 

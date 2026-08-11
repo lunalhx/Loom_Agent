@@ -352,7 +352,7 @@ public class CliSessionService implements AutoCloseable {
             return null;
         }
         return AgentContextSnapshot.builder()
-                .schemaVersion(10)
+                .schemaVersion(AgentContextSnapshot.CURRENT_SCHEMA_VERSION)
                 .runModeSnapshot(session.getCollaborationMode())
                 .ledgerEntries(session.getHistory())
                 .ledgerNextSequence(session.getLedgerNextSequence())

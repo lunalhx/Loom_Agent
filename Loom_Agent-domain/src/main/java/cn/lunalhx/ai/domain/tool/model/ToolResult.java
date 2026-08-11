@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.tool.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -35,6 +36,10 @@ public class ToolResult {
     private List<String> diffSummary;
     private Map<String, Object> details;
 
+    /** Adapter metadata used before sanitization/clipping; never persisted. */
+    @JsonIgnore
+    private transient ToolEvidenceCandidate evidenceCandidate;
+
     public static ToolResult success(String observation, boolean truncated, long elapsedMs) {
         return ToolResult.builder()
                 .success(true)
@@ -59,5 +64,9 @@ public class ToolResult {
 
     public List<String> affectedPathsSafe() {
         return affectedPaths == null ? List.of() : affectedPaths;
+    }
+
+    public void clearTransientEvidence() {
+        evidenceCandidate = null;
     }
 }

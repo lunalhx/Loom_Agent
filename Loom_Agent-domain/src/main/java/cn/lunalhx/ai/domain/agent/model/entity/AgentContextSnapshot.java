@@ -24,17 +24,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v10 — only durable state needed for recovery.
+ * Checkpoint snapshot v11 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v10 adopts loom-code loop semantics and persists the immutable Run mode snapshot.
+ * <p>v11 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
+ * and stores safe Plan Evidence receipts without raw observations.
  * {@code toolSteps}/{@code modelAttempts} counters
  * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
  * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
- * Only v10 snapshots are recoverable; earlier shapes are rejected at restore time.
+ * Only v11 snapshots are recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -42,7 +43,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    public static final int CURRENT_SCHEMA_VERSION = 10;
+    public static final int CURRENT_SCHEMA_VERSION = 11;
 
     private Integer schemaVersion;
 
@@ -83,6 +84,10 @@ public class AgentContextSnapshot {
     // -- action (durable) --
     private AgentDecision decision;
     private ToolResult toolResult;
+
+    // -- Plan Evidence (safe receipts only) --
+    private List<EvidenceReceipt> evidenceReceipts;
+    private boolean evidenceDrift;
 
     // -- budget (durable usage snapshot) --
     private Long usedPromptTokens;
@@ -172,6 +177,8 @@ public class AgentContextSnapshot {
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
+                .evidenceReceipts(context.getEvidenceReceipts())
+                .evidenceDrift(context.isEvidenceDrift())
                 // budget
                 .usedPromptTokens(budget.usedPromptTokens())
                 .usedCompletionTokens(budget.usedCompletionTokens())
@@ -242,6 +249,7 @@ public class AgentContextSnapshot {
         // action
         context.setDecision(decision);
         context.setToolResult(toolResult);
+        context.restoreEvidence(evidenceReceipts, evidenceDrift);
 
         // budget
         context.setUsedPromptTokens(usedPromptTokens == null ? 0L : usedPromptTokens);
