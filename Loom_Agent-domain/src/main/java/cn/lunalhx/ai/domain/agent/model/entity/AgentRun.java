@@ -30,6 +30,8 @@ public class AgentRun {
     private Integer maxSteps;
     private String question;
     private String workspace;
+    private String planTarget;
+    private Long planStateVersion;
     private AgentRunStatus status;
     private String currentNode;
     private Integer toolSteps;

@@ -33,6 +33,8 @@ public class AgentQuestion {
     private String approvalPolicy;
     private CollaborationMode collaborationMode;
     private String checkpointId;
+    private String planTarget;
+    private Long planStateVersion;
     private AgentContextSnapshot seedSnapshot;
 
 }

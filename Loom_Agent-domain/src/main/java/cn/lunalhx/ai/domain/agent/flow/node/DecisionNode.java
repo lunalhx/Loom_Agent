@@ -50,6 +50,9 @@ public class DecisionNode extends AbstractAgentNode {
             if ("final".equals(type)) {
                 return NodeResult.complete(List.of());
             }
+            if ("plan_submission".equals(type)) {
+                return NodeResult.complete(List.of());
+            }
             if ("retry".equals(type)) {
                 return formatRetry(context, decision);
             }
@@ -74,7 +77,7 @@ public class DecisionNode extends AbstractAgentNode {
     private NodeResult handleParseError(AgentContext context, DecisionParseException e) {
         context.setParseErrors(context.getParseErrors() + 1);
         String repairMsg = e.toModelMessage();
-        String guidance = "Reply with a valid <tool> call or a non-empty <final> answer. "
+        String guidance = "Reply with a valid <tool> call, one exact <plan_submission> JSON action, or a non-empty <final> answer. "
                 + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
         context.setToolResult(ToolResult.failure("parse_error",
                 repairMsg + "\n" + guidance, 0L));

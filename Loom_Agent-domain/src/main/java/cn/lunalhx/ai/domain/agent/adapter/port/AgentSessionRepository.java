@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.adapter.port;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -11,6 +12,12 @@ import java.util.Optional;
 public interface AgentSessionRepository {
 
     AgentSession save(AgentSession session);
+
+    /**
+     * Atomically save only when the durable Session still has the supplied
+     * update version. Returns false when a newer writer won the race.
+     */
+    boolean saveIfUnchanged(AgentSession session, Instant expectedUpdatedAt);
 
     Optional<AgentSession> find(String sessionId);
 

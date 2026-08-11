@@ -2,6 +2,8 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -23,6 +25,7 @@ import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.infrastructure.tool.NoopToolOutputSanitizer;
 import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
@@ -70,6 +73,8 @@ public final class CliLoopTestFixture {
         AgentWorkspaceResolver resolver = new AgentWorkspaceResolver(agent);
         AgentRunRepository runs = new FileAgentRunRepository(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
+        AgentSessionRepository sessions = new FileAgentSessionRepository(root, mapper,
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         TraceRecorder traces = new FileTraceRecorder(root, mapper,
@@ -84,7 +89,8 @@ public final class CliLoopTestFixture {
                 model);
         ConversationHistoryAppendService ledger = new ConversationHistoryAppendService();
         AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime, ledger,
-                new ContextManager(agent), new ConversationExecutionGuard(), null);
+                new ContextManager(agent), new ConversationExecutionGuard(), null,
+                new cn.lunalhx.ai.cli.FilePlanSubmissionHandler(sessions, runs, mapper));
         ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
         return factory.createStandalone(registry, Runnable::run);
     }

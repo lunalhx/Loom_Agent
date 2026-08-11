@@ -97,6 +97,8 @@ public final class AgentContextFactory {
         context.setPathScope(question.getPathScope());
         context.setSessionId(question.getSessionId());
         context.setCheckpointId(question.getCheckpointId());
+        context.setPlanTarget(question.getPlanTarget());
+        context.setPlanStateVersion(question.getPlanStateVersion() == null ? 0L : question.getPlanStateVersion());
         context.setCollaborationMode(resolveMode(question, previous));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
@@ -153,6 +155,8 @@ public final class AgentContextFactory {
         context.setPathScope(question.getPathScope());
         context.setSessionId(question.getSessionId());
         context.setCheckpointId(question.getCheckpointId());
+        context.setPlanTarget(question.getPlanTarget());
+        context.setPlanStateVersion(question.getPlanStateVersion() == null ? 0L : question.getPlanStateVersion());
         context.setCollaborationMode(resolveMode(question, question.getSeedSnapshot()));
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());

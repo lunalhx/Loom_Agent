@@ -1,14 +1,18 @@
 package cn.lunalhx.ai.domain.agent.flow.node;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,6 +39,10 @@ final class DecisionParser {
             Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')");
     private static final Pattern FINAL_PATTERN =
             Pattern.compile("<final>(.*?)</final>", Pattern.DOTALL);
+    private static final String PLAN_SUBMISSION_OPEN = "<plan_submission>";
+    private static final String PLAN_SUBMISSION_CLOSE = "</plan_submission>";
+    private static final Set<String> PLAN_SUBMISSION_FIELDS =
+            Set.of("title", "body", "dependencies");
 
     private final ObjectMapper objectMapper;
 
@@ -58,7 +66,20 @@ final class DecisionParser {
         String raw = String.valueOf(rawOutput);
         String text = raw == null ? "" : raw;
 
-        // 1. <tool> JSON object (takes priority over <final> like loom-code)
+        // 1. Plan Submission is an exact terminal action and takes priority
+        // over every other protocol form. Inspect the outer wrapper first so
+        // marker-like strings inside a tool/final payload remain data.
+        String stripped = text.strip();
+        if (isExactPlanWrapper(stripped)) {
+            return parsePlanSubmission(text);
+        }
+        if (hasPlanSubmissionMarker(text)
+                && !isExactToolWrapper(stripped)
+                && !isExactFinalWrapper(stripped)) {
+            return retry("model returned an invalid plan submission wrapper");
+        }
+
+        // 2. <tool> JSON object (takes priority over <final> like loom-code)
         if (text.contains("<tool>") && (isBefore(text, "<tool>", "<final>"))) {
             String body = extract(text, "tool");
             JsonNode payload;
@@ -84,7 +105,7 @@ final class DecisionParser {
             return toolDecision(name, args);
         }
 
-        // 2. XML-style tool with attributes / child tags
+        // 3. XML-style tool with attributes / child tags
         if (text.contains("<tool") && isBefore(text, "<tool", "<final>")) {
             Map<String, Object> xmlPayload = parseXmlTool(text);
             if (xmlPayload != null) {
@@ -95,7 +116,7 @@ final class DecisionParser {
             return retry();
         }
 
-        // 3. <final>...</final>
+        // 4. <final>...</final>
         if (text.contains("<final>")) {
             String finalText = extract(text, "final");
             if (!finalText.isBlank()) {
@@ -104,14 +125,87 @@ final class DecisionParser {
             return retry("model returned an empty <final> answer");
         }
 
-        // 4. Non-blank bare text as final
-        String stripped = text.strip();
+        // 5. Non-blank bare text as final
         if (!stripped.isEmpty()) {
             return finalDecision(stripped);
         }
 
-        // 5. Empty -> retry
+        // 6. Empty -> retry
         return retry("model returned an empty response");
+    }
+
+    private AgentDecision parsePlanSubmission(String text) {
+        String stripped = text.strip();
+        if (!stripped.startsWith(PLAN_SUBMISSION_OPEN)
+                || !stripped.endsWith(PLAN_SUBMISSION_CLOSE)) {
+            return retry("model returned an invalid plan submission wrapper");
+        }
+
+        String body = stripped.substring(
+                PLAN_SUBMISSION_OPEN.length(),
+                stripped.length() - PLAN_SUBMISSION_CLOSE.length()).strip();
+        JsonNode payload;
+        try (JsonParser parser = objectMapper.getFactory().createParser(body)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            payload = objectMapper.readTree(parser);
+            if (parser.nextToken() != null) {
+                return retry("plan submission payload must contain exactly one JSON value");
+            }
+        } catch (Exception e) {
+            return retry("model returned malformed plan submission JSON");
+        }
+        if (payload == null || !payload.isObject()) {
+            return retry("plan submission payload must be a JSON object");
+        }
+
+        Set<String> fields = new HashSet<>();
+        payload.fieldNames().forEachRemaining(fields::add);
+        if (!fields.equals(PLAN_SUBMISSION_FIELDS)) {
+            return retry("plan submission payload must contain exactly title, body, and dependencies");
+        }
+
+        JsonNode title = payload.get("title");
+        JsonNode planBody = payload.get("body");
+        JsonNode dependencies = payload.get("dependencies");
+        if (title == null || !title.isTextual() || title.asText().isBlank()
+                || planBody == null || !planBody.isTextual() || planBody.asText().isBlank()
+                || dependencies == null || !dependencies.isArray()) {
+            return retry("plan submission title/body must be non-blank strings and dependencies must be an array");
+        }
+        List<String> dependencyValues = new ArrayList<>();
+        for (JsonNode dependency : dependencies) {
+            if (dependency == null || !dependency.isTextual()) {
+                return retry("plan submission dependencies must contain only strings");
+            }
+            dependencyValues.add(dependency.asText());
+        }
+
+        return AgentDecision.builder()
+                .type("plan_submission")
+                .planSubmission(cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission.builder()
+                        .title(title.asText())
+                        .body(planBody.asText())
+                        .dependencies(dependencyValues)
+                        .build())
+                .build();
+    }
+
+    private boolean hasPlanSubmissionMarker(String text) {
+        return text.contains("<plan_submission") || text.contains("</plan_submission>");
+    }
+
+    private boolean isExactPlanWrapper(String text) {
+        return text.startsWith(PLAN_SUBMISSION_OPEN)
+                && text.endsWith(PLAN_SUBMISSION_CLOSE);
+    }
+
+    private boolean isExactToolWrapper(String text) {
+        return (text.startsWith("<tool>") || text.startsWith("<tool "))
+                && text.endsWith("</tool>");
+    }
+
+    private boolean isExactFinalWrapper(String text) {
+        return text.startsWith("<final>") && text.endsWith("</final>");
     }
 
     private AgentDecision toolDecision(String name, JsonNode args) {
@@ -144,7 +238,7 @@ final class DecisionParser {
             prefix += ": model returned malformed tool output";
         }
         String message = prefix
-                + ". Reply with a valid <tool> call or a non-empty <final> answer. "
+                + ". Reply with a valid <tool> call, one exact <plan_submission> JSON action, or a non-empty <final> answer. "
                 + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
         return AgentDecision.builder()
                 .type("retry")

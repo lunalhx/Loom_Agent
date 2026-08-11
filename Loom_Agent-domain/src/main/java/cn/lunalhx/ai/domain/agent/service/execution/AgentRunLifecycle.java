@@ -175,6 +175,8 @@ public final class AgentRunLifecycle {
                 .maxSteps(def.maxSteps())
                 .question(context.runDefinition().question())
                 .workspace(context.environment().workspaceDisplayName())
+                .planTarget(def.planTarget())
+                .planStateVersion(def.planStateVersion())
                 .status(status)
                 .currentNode(currentNode)
                 .toolSteps(runtime.toolSteps())
@@ -204,14 +206,17 @@ public final class AgentRunLifecycle {
                 || reason == AgentStopReason.RETRY_LIMIT_REACHED) {
             return AgentRunStatus.STOPPED;
         }
-        if (reason == AgentStopReason.FINAL_ANSWER_RETURNED) {
+        if (reason == AgentStopReason.FINAL_ANSWER_RETURNED
+                || reason == AgentStopReason.PLAN_SUBMITTED) {
             return AgentRunStatus.COMPLETED;
         }
         if (reason == AgentStopReason.BUDGET_EXCEEDED
                 || reason == AgentStopReason.MODEL_ERROR
                 || reason == AgentStopReason.TIMEOUT
                 || reason == AgentStopReason.CONTEXT_OVERFLOW
-                || reason == AgentStopReason.RUNTIME_SCHEMA_MISMATCH) {
+                || reason == AgentStopReason.RUNTIME_SCHEMA_MISMATCH
+                || reason == AgentStopReason.PLAN_CONFLICT
+                || reason == AgentStopReason.PLAN_SUBMISSION_REJECTED) {
             return AgentRunStatus.FAILED;
         }
         return fallback;

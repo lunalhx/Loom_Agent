@@ -6,8 +6,12 @@ import cn.lunalhx.ai.domain.agent.model.entity.DelegateProvenance;
 import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
+import cn.lunalhx.ai.domain.agent.model.entity.Plan;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmissionTransaction;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -36,6 +40,8 @@ import reactor.core.publisher.Mono;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -119,6 +125,216 @@ public class CliSessionServiceE2ETest {
         assertFalse(persisted.getHistory().isEmpty());
         assertNotNull(persisted.getCheckpoint());
         assertNotNull(persisted.getWorkingMemory());
+        session.close();
+    }
+
+    @Test
+    public void approvedPlanSubmissionCreatesRevisionOneAndReadOnlyViews() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-submit");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace, planSubmissionGateway(modelCalls));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        String answer = session.runTurn("research and submit the first plan");
+
+        assertTrue(answer.contains("Plan submitted:"));
+        assertEquals(1, modelCalls.get());
+        AgentRun run = session.runRepository().findLatestRootByConversationId(session.sessionId())
+                .orElseThrow();
+        assertEquals("COMPLETED", run.getStatus().name());
+        assertEquals("PLAN_SUBMITTED", run.getStopReason());
+        assertEquals("PLAN", run.getRunModeSnapshot().name());
+        assertEquals("NEW", run.getPlanTarget());
+        assertEquals(0L, (long) run.getPlanStateVersion());
+
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertEquals(1L, persisted.getPlanStateVersion());
+        assertEquals(1, persisted.getPlans().size());
+        assertEquals(persisted.getCurrentPlanId(), persisted.getPlans().get(0).getPlanId());
+        assertEquals(1, persisted.getPlans().get(0).currentRevision().getRevision().intValue());
+        assertFalse(persisted.getPlans().get(0).currentRevision().getContentDigest().isBlank());
+
+        ByteArrayOutputStream listOutput = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(session, "/plan list",
+                new PrintStream(listOutput, true, java.nio.charset.StandardCharsets.UTF_8)));
+        assertTrue(listOutput.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains(persisted.getCurrentPlanId()));
+        assertTrue(listOutput.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("freshness: fresh"));
+
+        ByteArrayOutputStream showOutput = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(session, "/plan show",
+                new PrintStream(showOutput, true, java.nio.charset.StandardCharsets.UTF_8)));
+        String shown = showOutput.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(shown.contains("revision: 1"));
+        assertTrue(shown.contains("First plan"));
+        assertEquals(1, modelCalls.get());
+        session.close();
+    }
+
+    @Test
+    public void ordinaryFinalInPlanModeDoesNotCreatePlan() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-final");
+        CliSessionService session = service(workspace, finalAnswerGateway("research only"));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        assertEquals("research only", session.runTurn("research only"));
+
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertTrue(persisted.getPlans().isEmpty());
+        assertNull(persisted.getCurrentPlanId());
+        assertEquals(0L, persisted.getPlanStateVersion());
+        assertEquals("FINAL_ANSWER_RETURNED",
+                session.runRepository().findLatestRootByConversationId(session.sessionId())
+                        .orElseThrow().getStopReason());
+        session.close();
+    }
+
+    @Test
+    public void planSubmissionFromBuildModeCreatesNoPlan() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-build-reject");
+        CliSessionService session = service(workspace,
+                planSubmissionGateway(new AtomicInteger()));
+
+        String answer = session.runTurn("submit a plan from build mode");
+
+        assertTrue(answer.contains("root PLAN Run"));
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertTrue(persisted.getPlans().isEmpty());
+        assertNull(persisted.getCurrentPlanId());
+        assertEquals(0L, persisted.getPlanStateVersion());
+        assertEquals("PLAN_SUBMISSION_REJECTED",
+                session.runRepository().findLatestRootByConversationId(session.sessionId())
+                        .orElseThrow().getStopReason());
+        session.close();
+    }
+
+    @Test
+    public void delegatePlanSubmissionCreatesNoPlan() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-delegate-reject");
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        AgentLoopService childLoop = CliLoopTestFixture.build(workspace, mapper,
+                planSubmissionGateway(new AtomicInteger()), agent, java.util.List.of());
+
+        childLoop.ask(AgentQuestion.builder()
+                        .runId("child-plan-run")
+                        .parentRunId("parent-run")
+                        .rootRunId("root-run")
+                        .sessionId("missing-session")
+                        .conversationId("conversation")
+                        .question("submit a plan")
+                        .workspace(workspace.toString())
+                        .maxSteps(3)
+                        .maxAttempts(3)
+                        .approvalPolicy("never")
+                        .collaborationMode(CollaborationMode.PLAN)
+                        .build())
+                .collectList()
+                .block();
+
+        AgentRun child = runs.find("child-plan-run").orElseThrow();
+        assertEquals("PLAN_SUBMISSION_REJECTED", child.getStopReason());
+        assertFalse(Files.exists(workspace.resolve(".loom-code/sessions/missing-session.json")));
+    }
+
+    @Test
+    public void changedPlanStateVersionBeforeSubmissionEndsInPlanConflict() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-state-conflict");
+        CliSessionService session = service(workspace,
+                planSubmissionGateway(new AtomicInteger()));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        FileAgentSessionRepository external = new FileAgentSessionRepository(workspace, mapper);
+        AgentSession changed = external.find(session.sessionId()).orElseThrow();
+        changed.setPlanStateVersion(9L);
+        external.save(changed);
+
+        String answer = session.runTurn("submit the first plan");
+
+        assertTrue(answer.toLowerCase().contains("plan conflict"));
+        AgentSession persisted = external.find(session.sessionId()).orElseThrow();
+        assertTrue(persisted.getPlans().isEmpty());
+        assertNull(persisted.getCurrentPlanId());
+        assertEquals(9L, persisted.getPlanStateVersion());
+        assertEquals("PLAN_CONFLICT",
+                session.runRepository().findLatestRootByConversationId(session.sessionId())
+                        .orElseThrow().getStopReason());
+        session.close();
+    }
+
+    @Test
+    public void reliedOnFileMutationBeforeSubmissionEndsInPlanConflict() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-conflict");
+        Path observed = workspace.resolve("observed.txt");
+        Files.writeString(observed, "before\n");
+        CliSessionService session = serviceWithReadTool(workspace,
+                readThenPlanWithMutationGateway(observed));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        String answer = session.runTurn("inspect and submit a plan");
+
+        assertTrue(answer.toLowerCase().contains("plan conflict"));
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertTrue(persisted.getPlans().isEmpty());
+        assertNull(persisted.getCurrentPlanId());
+        assertEquals(0L, persisted.getPlanStateVersion());
+        AgentRun run = session.runRepository().findLatestRootByConversationId(session.sessionId())
+                .orElseThrow();
+        assertEquals("FAILED", run.getStatus().name());
+        assertEquals("PLAN_CONFLICT", run.getStopReason());
+        session.close();
+    }
+
+    @Test
+    public void planShowRecomputesFreshnessAfterRepositoryMutation() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-stale-view");
+        Path observed = workspace.resolve("observed.txt");
+        Files.writeString(observed, "before\n");
+        CliSessionService session = serviceWithReadTool(workspace,
+                readThenPlanGateway());
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        assertTrue(session.runTurn("inspect and submit a plan").contains("Plan submitted:"));
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertEquals(1, persisted.getPlans().get(0).currentRevision().getPlanBasis().size());
+        assertTrue(session.planShowView().contains("freshness: fresh"));
+
+        Files.writeString(observed, "changed\n");
+
+        assertTrue(session.planShowView().contains("freshness: stale"));
+        session.close();
+    }
+
+    @Test
+    public void planControlsDoNotRecoverOrWritePendingTransactions() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-read-only");
+        CliSessionService session = service(workspace, finalAnswerGateway("unused"));
+        FileAgentSessionRepository external = new FileAgentSessionRepository(workspace, mapper);
+        AgentSession durable = external.find(session.sessionId()).orElseThrow();
+        Plan pendingPlan = Plan.builder()
+                .planId("pending-plan")
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .revisions(List.of(PlanRevision.builder()
+                        .revision(1)
+                        .title("Pending")
+                        .body("Pending body")
+                        .dependencies(List.of())
+                        .build()))
+                .build();
+        durable.setPendingPlanSubmission(PlanSubmissionTransaction.builder()
+                .transactionId("pending-transaction")
+                .runId("missing-run")
+                .expectedPlanStateVersion(durable.getPlanStateVersion())
+                .plan(pendingPlan)
+                .build());
+        external.save(durable);
+
+        assertTrue(session.planListView().contains("(none)"));
+        assertEquals("plan: (none)", session.planShowView());
+        AgentSession after = external.find(session.sessionId()).orElseThrow();
+        assertNotNull(after.getPendingPlanSubmission());
         session.close();
     }
 
@@ -491,6 +707,82 @@ public class CliSessionServiceE2ETest {
                 calls.incrementAndGet();
                 return Mono.just(ModelChatResult.builder()
                         .content("<final>" + answer + "</final>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway planSubmissionGateway(AtomicInteger calls) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                calls.incrementAndGet();
+                return Mono.just(ModelChatResult.builder()
+                        .content("<plan_submission>{\"title\":\"First plan\",\"body\":\"Start with repository research.\",\"dependencies\":[]}</plan_submission>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway readThenPlanWithMutationGateway(Path observed) {
+        AtomicInteger calls = new AtomicInteger();
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.getAndIncrement() == 0) {
+                    return Mono.just(ModelChatResult.builder()
+                            .content("<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"observed.txt\",\"start\":1,\"end\":1}}</tool>")
+                            .finishReason("stop")
+                            .actualModel("deepseek-v4-flash")
+                            .build());
+                }
+                try {
+                    Files.writeString(observed, "after\n");
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<plan_submission>{\"title\":\"First plan\",\"body\":\"Use the observed repository state.\",\"dependencies\":[]}</plan_submission>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway readThenPlanGateway() {
+        AtomicInteger calls = new AtomicInteger();
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                if (calls.getAndIncrement() == 0) {
+                    return Mono.just(ModelChatResult.builder()
+                            .content("<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"observed.txt\",\"start\":1,\"end\":1}}</tool>")
+                            .finishReason("stop")
+                            .actualModel("deepseek-v4-flash")
+                            .build());
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<plan_submission>{\"title\":\"First plan\",\"body\":\"Use the observed repository state.\",\"dependencies\":[]}</plan_submission>")
                         .finishReason("stop")
                         .actualModel("deepseek-v4-flash")
                         .build());

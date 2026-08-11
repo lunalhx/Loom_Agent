@@ -2,6 +2,8 @@ package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
@@ -21,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -37,15 +40,25 @@ public class AgentLoopAutoConfig {
     }
 
     @Bean
+    public PlanSubmissionHandler planSubmissionHandler(AgentSessionRepository sessionRepository,
+                                                       AgentRunRepository runRepository,
+                                                       ObjectMapper mapper) {
+        return new cn.lunalhx.ai.cli.FilePlanSubmissionHandler(
+                sessionRepository, runRepository, mapper);
+    }
+
+    @Bean
     public AgentLoopFactory agentLoopFactory(ModelGateway modelGateway,
                                              AgentLoopStateDependencies state,
                                              AgentLoopRuntimeDependencies runtime,
                                              ConversationHistoryAppendService ledgerAppendService,
                                              ContextManager contextManager,
                                              ConversationExecutionGuard executionGuard,
-                                             ObjectProvider<ToolExecutor.ApprovalPrompt> approvalPromptProvider) {
+                                             ObjectProvider<ToolExecutor.ApprovalPrompt> approvalPromptProvider,
+                                             PlanSubmissionHandler planSubmissionHandler) {
         return new AgentLoopFactory(modelGateway, state, runtime, ledgerAppendService,
-                contextManager, executionGuard, approvalPromptProvider.getIfAvailable());
+                contextManager, executionGuard, approvalPromptProvider.getIfAvailable(),
+                planSubmissionHandler);
     }
 
     @Bean

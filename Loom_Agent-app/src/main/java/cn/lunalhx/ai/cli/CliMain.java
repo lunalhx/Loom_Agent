@@ -26,6 +26,8 @@ public final class CliMain {
             /memory  Show the agent's distilled working memory.
             /session Show the session id.
             /mode plan|build  Show or change the collaboration mode.
+            /plan list  List persisted Plans and computed freshness.
+            /plan show  Show the current Plan and computed freshness.
             /new     Create a new independent session.
             /exit    Exit the agent.
             """;
@@ -160,6 +162,18 @@ public final class CliMain {
     }
 
     static boolean handleControl(CliSessionService session, String input, PrintStream output) {
+        if (input.equals("/plan list")) {
+            output.println(session.planListView());
+            return true;
+        }
+        if (input.equals("/plan show")) {
+            output.println(session.planShowView());
+            return true;
+        }
+        if (input.equals("/plan") || input.startsWith("/plan ")) {
+            output.println("error: use /plan list or /plan show");
+            return true;
+        }
         if (input.equals("/mode")) {
             output.println("mode: " + session.collaborationMode().cliName());
             return true;

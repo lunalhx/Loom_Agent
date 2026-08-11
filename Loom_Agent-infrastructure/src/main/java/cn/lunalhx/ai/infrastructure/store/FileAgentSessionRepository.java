@@ -6,10 +6,16 @@ import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * File-backed {@link AgentSession} store under
@@ -23,6 +29,7 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
     private final Path root;
     private final ObjectMapper mapper;
     private final ArtifactRedactor artifactRedactor;
+    private static final ConcurrentMap<Path, Object> SESSION_LOCKS = new ConcurrentHashMap<>();
 
     public FileAgentSessionRepository(Path workspaceRoot, ObjectMapper mapper) {
         this(workspaceRoot, mapper, new ArtifactRedactor());
@@ -45,9 +52,63 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
 
     @Override
     public AgentSession save(AgentSession session) {
+        Object lock = SESSION_LOCKS.computeIfAbsent(path(session.getId()).toAbsolutePath().normalize(),
+                ignored -> new Object());
+        synchronized (lock) {
+            try {
+                Files.createDirectories(root);
+                try (FileChannel channel = FileChannel.open(lockPath(session.getId()),
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                     FileLock ignored = channel.lock()) {
+                    return saveUnlocked(session);
+                }
+            } catch (IOException e) {
+                throw new IllegalStateException("cannot lock session " + session.getId()
+                        + " for save: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    @Override
+    public boolean saveIfUnchanged(AgentSession session, Instant expectedUpdatedAt) {
+        Object lock = SESSION_LOCKS.computeIfAbsent(path(session.getId()).toAbsolutePath().normalize(),
+                ignored -> new Object());
+        synchronized (lock) {
+            try {
+                Files.createDirectories(root);
+                try (FileChannel channel = FileChannel.open(lockPath(session.getId()),
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                     FileLock ignored = channel.lock()) {
+                    Optional<AgentSession> current = find(session.getId());
+                    if (current.isEmpty()
+                            || !Objects.equals(current.get().getUpdatedAt(), expectedUpdatedAt)) {
+                        return false;
+                    }
+                    saveUnlocked(session);
+                    return true;
+                }
+            } catch (IOException e) {
+                throw new IllegalStateException("cannot lock session " + session.getId()
+                        + " for compare-and-set: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    private Path lockPath(String sessionId) {
+        return path(sessionId).resolveSibling(sessionId + ".lock");
+    }
+
+    private AgentSession saveUnlocked(AgentSession session) {
         try {
             validateCurrent(session, session.getId(), path(session.getId()));
             Files.createDirectories(root);
+            Optional<AgentSession> current = Files.isRegularFile(path(session.getId()))
+                    ? Optional.of(readCurrent(path(session.getId()), session.getId())) : Optional.empty();
+            if (current.isPresent() && session.getUpdatedAt() != null
+                    && current.get().getUpdatedAt() != null
+                    && current.get().getUpdatedAt().isAfter(session.getUpdatedAt())) {
+                throw new IllegalStateException("cannot overwrite a newer Session state");
+            }
             session.setUpdatedAt(Instant.now());
             if (session.getCreatedAt() == null) {
                 session.setCreatedAt(session.getUpdatedAt());
@@ -158,9 +219,18 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
 
     @Override
     public void delete(String sessionId) {
-        try {
-            Files.deleteIfExists(path(sessionId));
-        } catch (IOException ignored) {
+        Object lock = SESSION_LOCKS.computeIfAbsent(path(sessionId).toAbsolutePath().normalize(),
+                ignored -> new Object());
+        synchronized (lock) {
+            try {
+                Files.createDirectories(root);
+                try (FileChannel channel = FileChannel.open(lockPath(sessionId),
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                     FileLock ignored = channel.lock()) {
+                    Files.deleteIfExists(path(sessionId));
+                }
+            } catch (IOException ignored) {
+            }
         }
     }
 }

@@ -1,0 +1,496 @@
+package cn.lunalhx.ai.cli;
+
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionResult;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
+import cn.lunalhx.ai.domain.agent.model.entity.Plan;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmissionTransaction;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.lang3.StringUtils;
+
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Runtime-owned Plan Submission transaction for the file-backed Session.
+ * The Session write-ahead record is persisted first; the visible Plan
+ * aggregate is committed only after the terminal Run is durable. Recovery
+ * completes or rolls back a pending transaction after an interruption.
+ */
+public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
+
+    private static final String NEW_TARGET = "NEW";
+    private static final Map<String, Object> SESSION_LOCKS = new ConcurrentHashMap<>();
+
+    private final AgentSessionRepository sessionRepository;
+    private final AgentRunRepository runRepository;
+    private final ObjectMapper mapper;
+    private final Map<String, HeldSessionLock> preparedLocks = new ConcurrentHashMap<>();
+
+    public FilePlanSubmissionHandler(AgentSessionRepository sessionRepository,
+                                     AgentRunRepository runRepository,
+                                     ObjectMapper mapper) {
+        this.sessionRepository = Objects.requireNonNull(sessionRepository,
+                "sessionRepository must not be null");
+        this.runRepository = Objects.requireNonNull(runRepository,
+                "runRepository must not be null");
+        this.mapper = Objects.requireNonNull(mapper, "mapper must not be null");
+    }
+
+    @Override
+    public PlanSubmissionResult prepare(AgentContext context) {
+        PlanSubmissionResult authorization = validateAuthorization(context);
+        if (authorization != null) {
+            return authorization;
+        }
+        String lockKey = sessionLockKey(context.getSessionId(), context.getResolvedWorkspace());
+        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        synchronized (lock) {
+            HeldSessionLock lease = null;
+            try {
+                lease = acquireSubmissionLock(context.getSessionId(), context.getResolvedWorkspace());
+                PlanSubmissionResult result = prepareUnderSessionLock(context);
+                if (result.outcome() == PlanSubmissionResult.Outcome.PREPARED) {
+                    if (preparedLocks.putIfAbsent(context.getRunId(), lease) != null) {
+                        return PlanSubmissionResult.conflict(
+                                "Plan Conflict: this Run already has a prepared submission");
+                    }
+                    lease = null;
+                }
+                return result;
+            } catch (Exception e) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: persistence or validation failed: " + e.getMessage());
+            } finally {
+                closeQuietly(lease);
+            }
+        }
+    }
+
+    @Override
+    public PlanSubmissionResult commit(AgentContext context) {
+        PlanSubmissionResult authorization = validateAuthorization(context);
+        if (authorization != null) {
+            return authorization;
+        }
+        String lockKey = sessionLockKey(context.getSessionId(), context.getResolvedWorkspace());
+        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        synchronized (lock) {
+            HeldSessionLock lease = preparedLocks.remove(context.getRunId());
+            try {
+                if (lease == null) {
+                    lease = acquireSubmissionLock(context.getSessionId(), context.getResolvedWorkspace());
+                }
+                AgentRun run = runRepository.find(context.getRunId()).orElse(null);
+                if (run == null || run.getStatus() != AgentRunStatus.COMPLETED
+                        || !"PLAN_SUBMITTED".equals(run.getStopReason())) {
+                    return PlanSubmissionResult.conflict(
+                            "Plan Conflict: terminal Run outcome is not durable");
+                }
+                return commitPendingUnderSessionLock(context.getSessionId(), context.getRunId(),
+                        context.getResolvedWorkspace(), context.isEvidenceDrift(), context.getRootRunId());
+            } catch (Exception e) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: terminal persistence failed: " + e.getMessage());
+            } finally {
+                closeQuietly(lease);
+            }
+        }
+    }
+
+    /** Recover pending transactions before exposing a Session through the CLI. */
+    public AgentSession recoverPending(String sessionId) {
+        if (StringUtils.isBlank(sessionId)) {
+            return null;
+        }
+        AgentSession initial = readSession(sessionId);
+        if (initial == null) {
+            return null;
+        }
+        Path workspaceRoot = workspaceRoot(initial);
+        String lockKey = sessionLockKey(sessionId, workspaceRoot);
+        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        synchronized (lock) {
+            HeldSessionLock lease = null;
+            try {
+                // A live runtime holds this OS lock from prepare through commit
+                // or abort. If recovery acquires it and the Run is still RUNNING,
+                // the pending transaction was abandoned by a crashed process.
+                lease = acquireSubmissionLock(sessionId, workspaceRoot);
+                AgentSession current = readSession(sessionId);
+                if (current == null || current.getPendingPlanSubmission() == null) {
+                    return current;
+                }
+                PlanSubmissionTransaction transaction = current.getPendingPlanSubmission();
+                AgentRun run = runRepository.find(transaction.getRunId()).orElse(null);
+                if (run != null && run.getStatus() == AgentRunStatus.COMPLETED
+                        && "PLAN_SUBMITTED".equals(run.getStopReason())) {
+                    PlanSubmissionResult result = commitPendingUnderSessionLock(sessionId, transaction.getRunId(),
+                            workspaceRoot, Boolean.TRUE.equals(run.getEvidenceDrift()), run.getRootRunId());
+                    if (result.outcome() != PlanSubmissionResult.Outcome.SUBMITTED) {
+                        markPlanConflictRun(run);
+                    }
+                } else {
+                    rollbackPendingUnderSessionLock(current);
+                    markPlanConflictRun(run);
+                }
+                return readSession(sessionId);
+            } catch (Exception e) {
+                return readSession(sessionId);
+            } finally {
+                closeQuietly(lease);
+            }
+        }
+    }
+
+    @Override
+    public void abort(AgentContext context) {
+        if (context == null || StringUtils.isBlank(context.getSessionId())
+                || StringUtils.isBlank(context.getRunId())) {
+            return;
+        }
+        Path workspaceRoot = context.getResolvedWorkspace();
+        String lockKey = sessionLockKey(context.getSessionId(), workspaceRoot);
+        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        synchronized (lock) {
+            HeldSessionLock lease = preparedLocks.remove(context.getRunId());
+            try {
+                if (lease == null) {
+                    lease = acquireSubmissionLock(context.getSessionId(), workspaceRoot);
+                }
+                AgentSession current = readSession(context.getSessionId());
+                if (current != null && current.getPendingPlanSubmission() != null
+                        && Objects.equals(context.getRunId(),
+                        current.getPendingPlanSubmission().getRunId())) {
+                    rollbackPendingUnderSessionLock(current);
+                }
+            } catch (Exception ignored) {
+                // The terminal Plan Conflict remains the visible outcome.
+            } finally {
+                closeQuietly(lease);
+            }
+        }
+    }
+
+    private PlanSubmissionResult validateAuthorization(AgentContext context) {
+        if (context == null || context.getDecision() == null
+                || context.getDecision().getPlanSubmission() == null) {
+            return PlanSubmissionResult.rejected("Plan Submission payload is missing");
+        }
+        if (context.getCollaborationMode() != CollaborationMode.PLAN
+                || StringUtils.isNotBlank(context.getParentRunId())
+                || StringUtils.isBlank(context.getRunId())
+                || StringUtils.isBlank(context.getRootRunId())
+                || !Objects.equals(context.getRunId(), context.getRootRunId())) {
+            return PlanSubmissionResult.rejected(
+                    "Plan Submission is allowed only for a root PLAN Run");
+        }
+        if (!NEW_TARGET.equals(context.getPlanTarget())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: the Run target is not the fixed NEW target");
+        }
+        if (StringUtils.isBlank(context.getSessionId())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: the Run has no Session identity");
+        }
+        return null;
+    }
+
+    private PlanSubmissionResult prepareUnderSessionLock(AgentContext context) {
+        AgentSession current = readSession(context.getSessionId());
+        if (current == null) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: current Session does not exist");
+        }
+        if (current.getPendingPlanSubmission() != null) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: another Plan Submission is already pending");
+        }
+        if (current.getPlanStateVersion() != context.getPlanStateVersion()) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Plan state version changed during the Run");
+        }
+        if (StringUtils.isNotBlank(current.getCurrentPlanId())
+                || (current.getPlans() != null && !current.getPlans().isEmpty())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: the Session already has a current Plan");
+        }
+        if (context.isEvidenceDrift()) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Plan Evidence drifted during the Run");
+        }
+        if (!freshEvidence(context)) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: relied-on repository evidence is stale");
+        }
+
+        PlanSubmission submission = context.getDecision().getPlanSubmission();
+        if (StringUtils.isBlank(submission.getTitle())
+                || StringUtils.isBlank(submission.getBody())
+                || submission.getDependencies() == null) {
+            return PlanSubmissionResult.rejected("Plan Submission payload is invalid");
+        }
+
+        AgentSession candidate;
+        try {
+            candidate = mapper.convertValue(current, AgentSession.class);
+        } catch (IllegalArgumentException e) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Session aggregate could not be copied: " + e.getMessage());
+        }
+
+        Instant now = Instant.now();
+        String planId = "plan_" + UUID.randomUUID();
+        String digest;
+        try {
+            digest = contentDigest(submission);
+        } catch (Exception e) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Plan content digest could not be computed: " + e.getMessage());
+        }
+        PlanRevision revision = PlanRevision.builder()
+                .revision(1)
+                .title(submission.getTitle())
+                .body(submission.getBody())
+                .dependencies(List.copyOf(submission.getDependencies()))
+                .createdAt(now)
+                .updatedAt(now)
+                .contentDigest(digest)
+                .planBasis(List.copyOf(context.getEvidenceReceipts()))
+                .build();
+        Plan plan = Plan.builder()
+                .planId(planId)
+                .createdAt(now)
+                .updatedAt(now)
+                .revisions(List.of(revision))
+                .build();
+        candidate.setPendingPlanSubmission(PlanSubmissionTransaction.builder()
+                .transactionId("plan_tx_" + UUID.randomUUID())
+                .runId(context.getRunId())
+                .expectedPlanStateVersion(current.getPlanStateVersion())
+                .plan(plan)
+                .build());
+        if (!saveIfCurrent(candidate, current.getUpdatedAt())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Session changed before Plan preparation");
+        }
+        return PlanSubmissionResult.prepared(planId, 1);
+    }
+
+    private PlanSubmissionResult commitPendingUnderSessionLock(String sessionId, String runId,
+                                                               Path workspaceRoot,
+                                                               boolean evidenceDrift,
+                                                               String rootRunId) {
+        AgentSession current = readSession(sessionId);
+        if (current == null || current.getPendingPlanSubmission() == null) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: pending Plan Submission is missing");
+        }
+        PlanSubmissionTransaction transaction = current.getPendingPlanSubmission();
+        if (!Objects.equals(runId, transaction.getRunId())
+                || transaction.getPlan() == null) {
+            return PlanSubmissionResult.conflict(
+                "Plan Conflict: pending Plan Submission belongs to another Run");
+        }
+        Plan plan = transaction.getPlan();
+        if (current.getPlans() != null && current.getPlans().stream()
+                .anyMatch(existing -> existing != null && Objects.equals(existing.getPlanId(), plan.getPlanId()))) {
+            AgentSession clear = copy(current);
+            clear.setPendingPlanSubmission(null);
+            if (!saveIfCurrent(clear, current.getUpdatedAt())) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: Session changed while finalizing Plan");
+            }
+            return PlanSubmissionResult.submitted(plan.getPlanId(), 1);
+        }
+        if (current.getPlanStateVersion() != transaction.getExpectedPlanStateVersion()
+                || StringUtils.isNotBlank(current.getCurrentPlanId())
+                || (current.getPlans() != null && !current.getPlans().isEmpty())) {
+            rollbackPendingUnderSessionLock(current);
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Plan target or state changed before commit");
+        }
+        if (evidenceDrift || !freshPlanEvidence(workspaceRoot, plan, rootRunId)) {
+            rollbackPendingUnderSessionLock(current);
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: relied-on repository evidence is stale at commit");
+        }
+        AgentSession candidate = copy(current);
+        List<Plan> plans = new ArrayList<>();
+        if (candidate.getPlans() != null) {
+            plans.addAll(candidate.getPlans());
+        }
+        plans.add(plan);
+        candidate.setPlans(List.copyOf(plans));
+        candidate.setCurrentPlanId(plan.getPlanId());
+        candidate.setPlanStateVersion(current.getPlanStateVersion() + 1);
+        candidate.setPendingPlanSubmission(null);
+        if (!saveIfCurrent(candidate, current.getUpdatedAt())) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: Session changed while finalizing Plan");
+        }
+        return PlanSubmissionResult.submitted(plan.getPlanId(), 1);
+    }
+
+    private void rollbackPendingUnderSessionLock(AgentSession current) {
+        AgentSession candidate = copy(current);
+        candidate.setPendingPlanSubmission(null);
+        saveIfCurrent(candidate, current.getUpdatedAt());
+    }
+
+    private void markPlanConflictRun(AgentRun run) {
+        if (run == null || run.getStatus() == AgentRunStatus.FAILED) {
+            return;
+        }
+        run.setStatus(AgentRunStatus.FAILED);
+        run.setStopReason("PLAN_CONFLICT");
+        run.setFinalAnswer("Plan Conflict: pending Plan Submission was abandoned");
+        try {
+            runRepository.save(run);
+        } catch (Exception ignored) {
+            // Session recovery still removes the invisible pending aggregate.
+        }
+    }
+
+    private boolean freshPlanEvidence(Path workspaceRoot, Plan plan, String rootRunId) {
+        if (plan == null || plan.currentRevision() == null) {
+            return false;
+        }
+        return freshEvidence(workspaceRoot, plan.currentRevision().getPlanBasis(), rootRunId);
+    }
+
+    private AgentSession copy(AgentSession session) {
+        return mapper.convertValue(session, AgentSession.class);
+    }
+
+    private AgentSession readSession(String sessionId) {
+        try {
+            return sessionRepository.find(sessionId).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean saveIfCurrent(AgentSession candidate, Instant expectedUpdatedAt) {
+        try {
+            return sessionRepository.saveIfUnchanged(candidate, expectedUpdatedAt);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean freshEvidence(AgentContext context) {
+        return freshEvidence(context.getResolvedWorkspace(), context.getEvidenceReceipts(),
+                context.getRootRunId());
+    }
+
+    private boolean freshEvidence(Path workspaceRoot, List<EvidenceReceipt> receipts,
+                                  String rootRunId) {
+        if (receipts == null || receipts.isEmpty()) {
+            return true;
+        }
+        for (EvidenceReceipt receipt : receipts) {
+            if (receipt == null
+                    || StringUtils.isBlank(receipt.getSourceRunId())
+                    || StringUtils.isBlank(rootRunId)
+                    || !Objects.equals(receipt.getRootRunId(), rootRunId)
+                    || !PlanEvidenceVerifier.matches(workspaceRoot, receipt)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String sessionLockKey(String sessionId, Path workspaceRoot) {
+        Path root = workspaceRoot == null
+                ? Path.of(".").toAbsolutePath().normalize()
+                : workspaceRoot.toAbsolutePath().normalize();
+        return root + "::" + sessionId;
+    }
+
+    private Path workspaceRoot(AgentSession session) {
+        if (session == null || StringUtils.isBlank(session.getWorkspaceRoot())) {
+            return Path.of(".").toAbsolutePath().normalize();
+        }
+        return Path.of(session.getWorkspaceRoot()).toAbsolutePath().normalize();
+    }
+
+    private HeldSessionLock acquireSubmissionLock(String sessionId, Path workspaceRoot)
+            throws IOException {
+        Path root = workspaceRoot == null
+                ? Path.of(".").toAbsolutePath().normalize()
+                : workspaceRoot.toAbsolutePath().normalize();
+        Path lockPath = root.resolve(".loom-code").resolve("sessions")
+                .resolve(sessionId + ".plan.lock");
+        Files.createDirectories(lockPath.getParent());
+        FileChannel channel = FileChannel.open(lockPath,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        try {
+            FileLock lock = channel.lock();
+            return new HeldSessionLock(channel, lock);
+        } catch (IOException | RuntimeException e) {
+            channel.close();
+            throw e;
+        }
+    }
+
+    private void closeQuietly(HeldSessionLock lease) {
+        if (lease == null) {
+            return;
+        }
+        try {
+            lease.close();
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static final class HeldSessionLock implements AutoCloseable {
+
+        private final FileChannel channel;
+        private final FileLock lock;
+
+        private HeldSessionLock(FileChannel channel, FileLock lock) {
+            this.channel = channel;
+            this.lock = lock;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                lock.release();
+            } finally {
+                channel.close();
+            }
+        }
+    }
+
+    private String contentDigest(PlanSubmission submission) throws Exception {
+        Map<String, Object> canonical = new LinkedHashMap<>();
+        canonical.put("title", submission.getTitle());
+        canonical.put("body", submission.getBody());
+        canonical.put("dependencies", submission.getDependencies());
+        return DigestUtils.sha256Hex(mapper.writeValueAsBytes(canonical));
+    }
+}

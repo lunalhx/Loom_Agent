@@ -65,6 +65,22 @@ public class DecisionNodeTest {
     }
 
     @Test
+    public void planMarkerInsideToolJsonRemainsToolPayloadData() {
+        String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
+        AgentTool t = tool("msg_tool", schema);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool>{\"name\":\"msg_tool\",\"args\":{\"msg\":\"literal <plan_submission> marker\"}}</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertEquals("msg_tool", ctx.getDecision().getTool());
+    }
+
+    @Test
     public void jsonToolMissingArgsDefaultsToEmptyObject() {
         AgentTool t = tool("empty_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
@@ -257,6 +273,87 @@ public class DecisionNodeTest {
 
         assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
         assertEquals(0, ctx.getToolSteps());
+    }
+
+    // ---- plan submission ----
+
+    @Test
+    public void exactPlanSubmissionCompletesWithStructuredPayload() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_submission>{\"title\":\"Ship the first slice\",\"body\":\"Read the repository and implement the slice.\",\"dependencies\":[\"JDK 21\"]}</plan_submission>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.COMPLETE, result.getPhase());
+        assertEquals("plan_submission", ctx.getDecision().getType());
+        assertNotNull(ctx.getDecision().getPlanSubmission());
+        assertEquals("Ship the first slice", ctx.getDecision().getPlanSubmission().getTitle());
+        assertEquals("Read the repository and implement the slice.",
+                ctx.getDecision().getPlanSubmission().getBody());
+        assertEquals(List.of("JDK 21"), ctx.getDecision().getPlanSubmission().getDependencies());
+    }
+
+    @Test
+    public void planSubmissionWithUnknownFieldReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[],\"target\":\"NEW\"}</plan_submission>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void planSubmissionMarkerCannotFallBackToFinal() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]}</plan_submission><final>fallback</final>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void closingPlanSubmissionMarkerCannotFallBackToBareText() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context("ordinary text </plan_submission>", List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void planSubmissionRejectsTrailingOrDuplicateJson() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext trailing = context(
+                "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]} {}</plan_submission>",
+                List.of(t.spec()));
+        AgentContext duplicate = context(
+                "<plan_submission>{\"title\":\"A\",\"title\":\"B\",\"body\":\"C\",\"dependencies\":[]}</plan_submission>",
+                List.of(t.spec()));
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(trailing).getPhase());
+        assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(duplicate).getPhase());
     }
 
     // ---- Tool visibility / validation moved to the input gate ----

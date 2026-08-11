@@ -5,6 +5,8 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionResult;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopFactory;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopRuntimeDependencies;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopStateDependencies;
@@ -182,7 +184,23 @@ public final class AgentRuntimeTestFixture {
                 testModelRuntimeProperties(props));
         ConversationHistoryAppendService ledgerAppendService = new ConversationHistoryAppendService();
         return new AgentLoopFactory(modelGateway, state, runtime,
-                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard());
+                ledgerAppendService, new ContextManager(props), effectiveExecutionGuard(), null,
+                new PlanSubmissionHandler() {
+                    @Override
+                    public PlanSubmissionResult prepare(cn.lunalhx.ai.domain.agent.model.entity.AgentContext context) {
+                        return PlanSubmissionResult.rejected("test fixture has no Session Plan store");
+                    }
+
+                    @Override
+                    public PlanSubmissionResult commit(cn.lunalhx.ai.domain.agent.model.entity.AgentContext context) {
+                        return PlanSubmissionResult.rejected("test fixture has no Session Plan store");
+                    }
+
+                    @Override
+                    public void abort(cn.lunalhx.ai.domain.agent.model.entity.AgentContext context) {
+                        // no-op test handler
+                    }
+                });
     }
 
     public DefaultAgentLoopService buildAgentLoop() {

@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionResult;
 import cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
@@ -230,6 +232,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private void finishComplete(AgentContext context, List<AgentEvent> nodeEvents, FluxSink<AgentEvent> sink) {
         emit(sink, nodeEvents);
+        if (context.getDecision() != null
+                && "plan_submission".equals(context.getDecision().getType())) {
+            finishPlanSubmission(context, sink);
+            return;
+        }
         String answer = StringUtils.defaultIfBlank(
                 context.getDecision() == null ? null : context.getDecision().getAnswer(),
                 StringUtils.defaultIfBlank(context.getFinalAnswer(), "未能生成最终回答"));
@@ -245,6 +252,70 @@ public class DefaultAgentLoopService implements AgentLoopService {
         emit(sink, List.of(components.eventFactory().done(context, AgentStopReason.FINAL_ANSWER_RETURNED)));
         components.nodeLifecycle().recordStop(context);
         lifecycle.complete(context);
+        sink.complete();
+    }
+
+    private void finishPlanSubmission(AgentContext context, FluxSink<AgentEvent> sink) {
+        PlanSubmissionHandler handler = components.planSubmissionHandler();
+        PlanSubmissionResult result;
+        try {
+            result = handler.prepare(context);
+        } catch (Exception e) {
+            result = PlanSubmissionResult.conflict(
+                    "Plan Conflict: persistence or validation failed: " + e.getMessage());
+        }
+
+        if (result != null && result.outcome() == PlanSubmissionResult.Outcome.PREPARED) {
+            String message = "Plan submitted: " + result.planId()
+                    + " revision " + result.revision();
+            context.runtime().complete(message);
+            context.setStopReason(AgentStopReason.PLAN_SUBMITTED);
+            context.setFinalAnswer(message);
+            updateTaskSummary(context, message);
+            components.nodeLifecycle().recordStop(context);
+            boolean terminalRunDurable = false;
+            try {
+                // The Run outcome is durable before the visible Plan
+                // aggregate is committed. A pending Session transaction lets
+                // recovery finish the second phase after interruption.
+                lifecycle.complete(context);
+                terminalRunDurable = true;
+                PlanSubmissionResult committed = handler.commit(context);
+                if (committed.outcome() == PlanSubmissionResult.Outcome.SUBMITTED) {
+                    emit(sink, List.of(components.eventFactory().answer(context, message)));
+                    emit(sink, List.of(components.eventFactory().done(
+                            context, AgentStopReason.PLAN_SUBMITTED)));
+                    sink.complete();
+                    return;
+                }
+                result = committed;
+            } catch (Exception e) {
+                if (!terminalRunDurable) {
+                    try {
+                        handler.abort(context);
+                    } catch (Exception ignored) {
+                        // Preserve the terminal Plan Conflict below.
+                    }
+                }
+                result = PlanSubmissionResult.conflict(
+                        "Plan Conflict: terminal persistence failed: " + e.getMessage());
+            }
+        }
+
+        PlanSubmissionResult safeResult = result == null
+                ? PlanSubmissionResult.conflict("Plan Conflict: empty runtime result") : result;
+        AgentStopReason reason = safeResult.outcome() == PlanSubmissionResult.Outcome.CONFLICT
+                ? AgentStopReason.PLAN_CONFLICT : AgentStopReason.PLAN_SUBMISSION_REJECTED;
+        String code = reason == AgentStopReason.PLAN_CONFLICT
+                ? "plan_conflict" : "plan_submission_rejected";
+        String message = safeResult.message();
+        context.runtime().fail(reason, code, message);
+        context.setFinalAnswer(message);
+        updateTaskSummary(context, message);
+        emit(sink, List.of(components.eventFactory().agentError(context)));
+        emit(sink, List.of(components.eventFactory().done(context, reason)));
+        components.nodeLifecycle().recordStop(context);
+        lifecycle.failed(context);
         sink.complete();
     }
 

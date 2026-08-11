@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -28,15 +29,7 @@ public class AgentLoopFactory {
     private final ContextManager contextManager;
     private final ConversationExecutionGuard executionGuard;
     private final ToolExecutor.ApprovalPrompt approvalPrompt;
-
-    public AgentLoopFactory(ModelGateway modelGateway,
-                            AgentLoopStateDependencies state,
-                            AgentLoopRuntimeDependencies runtime,
-                            ConversationHistoryAppendService ledgerAppendService,
-                            ContextManager contextManager,
-                            ConversationExecutionGuard executionGuard) {
-        this(modelGateway, state, runtime, ledgerAppendService, contextManager, executionGuard, null);
-    }
+    private final PlanSubmissionHandler planSubmissionHandler;
 
     public AgentLoopFactory(ModelGateway modelGateway,
                             AgentLoopStateDependencies state,
@@ -44,7 +37,8 @@ public class AgentLoopFactory {
                             ConversationHistoryAppendService ledgerAppendService,
                             ContextManager contextManager,
                             ConversationExecutionGuard executionGuard,
-                            ToolExecutor.ApprovalPrompt approvalPrompt) {
+                            ToolExecutor.ApprovalPrompt approvalPrompt,
+                            PlanSubmissionHandler planSubmissionHandler) {
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.ledgerAppendService = Objects.requireNonNull(
@@ -52,6 +46,8 @@ public class AgentLoopFactory {
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
         this.executionGuard = Objects.requireNonNull(executionGuard, "executionGuard must not be null");
         this.approvalPrompt = approvalPrompt;
+        this.planSubmissionHandler = Objects.requireNonNull(
+                planSubmissionHandler, "planSubmissionHandler must not be null");
         LedgerBootstrapService bs = new LedgerBootstrapService(
                 ledgerAppendService, new ConversationHistoryInitializer());
 
@@ -85,6 +81,6 @@ public class AgentLoopFactory {
                 state.runRepository(), state.checkpointRepository());
         return new AgentLoopComponents(contextFactory, nodeLifecycle, eventFactory,
                 state.runRepository(), state.checkpointRepository(),
-                lifecycle, ledgerAppendService);
+                lifecycle, ledgerAppendService, planSubmissionHandler);
     }
 }

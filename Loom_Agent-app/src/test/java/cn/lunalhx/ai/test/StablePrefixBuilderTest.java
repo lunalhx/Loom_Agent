@@ -98,6 +98,16 @@ public class StablePrefixBuilderTest {
     }
 
     @Test
+    public void planSubmissionIsRootOnlyInProtocolRules() {
+        String root = StablePrefixBuilder.buildRoleProtocolText(false, true, null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.PLAN);
+        String delegate = StablePrefixBuilder.buildRoleProtocolText(true, false, null,
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.PLAN);
+        assertTrue(root.contains("<plan_submission>"));
+        assertFalse(delegate.contains("<plan_submission>"));
+    }
+
+    @Test
     public void buildCarriesSignatures() {
         List<ToolSpec> specs = List.of(tool("read_file", "Read"), tool("write_file", "Write"));
         StablePrefix p = builder.build(false, true, "/scope", specs, "Workspace:", "ws-fp",

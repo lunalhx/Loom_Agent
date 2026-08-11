@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.Plan;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
@@ -70,6 +72,7 @@ public class CliSessionService implements AutoCloseable {
     private final ObjectMapper mapper;
     private final CliOptions options;
     private final SecretRedactor redactor;
+    private final FilePlanSubmissionHandler planSubmissionHandler;
 
     private AgentSession session;
 
@@ -119,6 +122,7 @@ public class CliSessionService implements AutoCloseable {
                 new java.util.LinkedHashSet<>(options.secretValues),
                 options.apiKey == null || options.apiKey.isBlank()
                         ? Set.of() : Set.of(options.apiKey));
+        this.planSubmissionHandler = new FilePlanSubmissionHandler(sessionStore, runStore, mapper);
         this.session = openOrCreateSession();
         this.loopService = loopService;
     }
@@ -135,15 +139,23 @@ public class CliSessionService implements AutoCloseable {
             if (result.getKind() == ResumeResult.Kind.NO_CHECKPOINT) {
                 System.out.println("(resume: session found, no semantic checkpoint)");
             }
-            AgentSession resumed = result.getSession();
+            AgentSession resumed = recoverPendingPlan(result.getSession());
             if (options.startupMode != null) {
+                Instant expectedUpdatedAt = resumed.getUpdatedAt();
                 resumed.setCollaborationMode(options.startupMode);
-                sessionStore.save(resumed);
+                if (!sessionStore.saveIfUnchanged(resumed, expectedUpdatedAt)) {
+                    throw new OptionsException("session changed while applying startup mode");
+                }
             }
             return resumed;
         }
-        return createFreshSession(sessionId,
-                options.startupMode == null ? CollaborationMode.BUILD : options.startupMode);
+        return recoverPendingPlan(createFreshSession(sessionId,
+                options.startupMode == null ? CollaborationMode.BUILD : options.startupMode));
+    }
+
+    private AgentSession recoverPendingPlan(AgentSession current) {
+        AgentSession recovered = planSubmissionHandler.recoverPending(current.getId());
+        return recovered == null ? current : recovered;
     }
 
     private AgentSession createFreshSession(String id, CollaborationMode mode) {
@@ -269,6 +281,8 @@ public class CliSessionService implements AutoCloseable {
                 .maxSteps(options.maxSteps)
                 .approvalPolicy(options.approvalPolicy)
                 .collaborationMode(session.getCollaborationMode())
+                .planTarget("NEW")
+                .planStateVersion(session.getPlanStateVersion())
                 .seedSnapshot(seed)
                 .build();
 
@@ -390,20 +404,20 @@ public class CliSessionService implements AutoCloseable {
      *  checkpoint of the newest root run is the single source of truth for
      *  history, working memory and the task anchor. */
     public synchronized void persistSession() {
+        recoverPendingIfPresent();
         // Re-read the durable Session before applying loop-derived state. A
         // service instance may have been resumed before another process or
         // CLI instance persisted a newer Session; its stale object must not
         // replace that newer state on close.
         Instant knownUpdatedAt = session.getUpdatedAt();
-        boolean durableStateAdvanced = sessionStore.find(sessionId)
-                .map(current -> {
-                    boolean advanced = current.getUpdatedAt() != null
-                            && (knownUpdatedAt == null
-                            || current.getUpdatedAt().isAfter(knownUpdatedAt));
-                    session = current;
-                    return advanced;
-                })
+        Optional<AgentSession> durable = sessionStore.find(sessionId);
+        Instant durableUpdatedAt = durable.map(AgentSession::getUpdatedAt).orElse(null);
+        boolean durableStateAdvanced = durable
+                .map(current -> current.getUpdatedAt() != null
+                        && (knownUpdatedAt == null
+                        || current.getUpdatedAt().isAfter(knownUpdatedAt)))
                 .orElse(false);
+        durable.ifPresent(current -> session = current);
         Optional<AgentRun> latestRoot = runStore.findLatestRootByConversationId(sessionId);
         if (latestRoot.isPresent() && !durableStateAdvanced) {
             AgentRun run = latestRoot.get();
@@ -413,7 +427,9 @@ public class CliSessionService implements AutoCloseable {
             session.setCheckpoint(taskCheckpoint(run));
         }
         redactSessionInPlace();
-        sessionStore.save(session);
+        if (!sessionStore.saveIfUnchanged(session, durableUpdatedAt)) {
+            sessionStore.find(sessionId).ifPresent(current -> session = current);
+        }
     }
 
     /** Redact every persisted text field in the session before it hits disk. */
@@ -543,9 +559,85 @@ public class CliSessionService implements AutoCloseable {
         if (mode == null) {
             throw new OptionsException("mode must be build or plan");
         }
-        session.setCollaborationMode(mode);
-        sessionStore.save(session);
+        AgentSession current = sessionStore.find(sessionId).orElse(session);
+        Instant expectedUpdatedAt = current.getUpdatedAt();
+        current.setCollaborationMode(mode);
+        if (!sessionStore.saveIfUnchanged(current, expectedUpdatedAt)) {
+            throw new OptionsException("session changed while updating collaboration mode");
+        }
+        session = current;
         return mode;
+    }
+
+    /** Read-only Plan index; it never starts a model Run. */
+    public synchronized String planListView() {
+        List<Plan> plans = session.getPlans();
+        if (plans == null || plans.isEmpty()) {
+            return "plans:\n  (none)";
+        }
+        StringBuilder view = new StringBuilder("plans:\n");
+        for (Plan plan : plans) {
+            PlanRevision revision = plan == null ? null : plan.currentRevision();
+            boolean current = plan != null && Objects.equals(plan.getPlanId(), session.getCurrentPlanId());
+            boolean fresh = revision != null && PlanFreshness.isFresh(Path.of(workspace), revision);
+            view.append("  - ")
+                    .append(plan == null ? "(invalid)" : plan.getPlanId())
+                    .append(" revision ")
+                    .append(revision == null ? "(none)" : revision.getRevision())
+                    .append(current ? " [current]" : "")
+                    .append(" freshness: ")
+                    .append(fresh ? "fresh" : "stale")
+                    .append(" title: ")
+                    .append(revision == null ? "(none)" : revision.getTitle())
+                    .append('\n');
+        }
+        return view.toString().stripTrailing();
+    }
+
+    /** Read-only current Plan detail; it never starts a model Run. */
+    public synchronized String planShowView() {
+        Plan plan = currentPlan();
+        if (plan == null) {
+            return "plan: (none)";
+        }
+        PlanRevision revision = plan.currentRevision();
+        if (revision == null) {
+            return "plan_id: " + plan.getPlanId() + "\nrevision: (none)";
+        }
+        boolean fresh = PlanFreshness.isFresh(Path.of(workspace), revision);
+        String dependencies = revision.getDependencies() == null
+                ? "[]" : revision.getDependencies().toString();
+        int basisSize = revision.getPlanBasis() == null ? 0 : revision.getPlanBasis().size();
+        return "plan_id: " + plan.getPlanId()
+                + "\nrevision: " + revision.getRevision()
+                + "\ncurrent: " + Objects.equals(plan.getPlanId(), session.getCurrentPlanId())
+                + "\ntitle: " + revision.getTitle()
+                + "\nbody:\n" + revision.getBody()
+                + "\ndependencies: " + dependencies
+                + "\ncontent_digest: " + revision.getContentDigest()
+                + "\ncreated_at: " + revision.getCreatedAt()
+                + "\nupdated_at: " + revision.getUpdatedAt()
+                + "\nfreshness: " + (fresh ? "fresh" : "stale")
+                + "\nplan_basis_receipts: " + basisSize;
+    }
+
+    private Plan currentPlan() {
+        if (session.getPlans() == null || StringUtils.isBlank(session.getCurrentPlanId())) {
+            return null;
+        }
+        for (Plan plan : session.getPlans()) {
+            if (plan != null && Objects.equals(plan.getPlanId(), session.getCurrentPlanId())) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
+    private void recoverPendingIfPresent() {
+        Optional<AgentSession> durable = sessionStore.find(sessionId);
+        if (durable.isPresent() && durable.get().getPendingPlanSubmission() != null) {
+            session = recoverPendingPlan(durable.get());
+        }
     }
 
     /** Current in-memory session state (tests). */
