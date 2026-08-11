@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolEvidenceCandidate;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
@@ -77,31 +78,23 @@ public class ReadFileTool implements AgentTool {
             }
             String result = out.toString().stripTrailing();
             ToolResult toolResult = ToolResult.success(result, false, elapsed(startedAt));
-            if (start <= last) {
-                String relativePath = LoomToolSupport.relative(root, file);
-                String normalizedScope = relativePath + "#lines=" + start + "-" + last;
-                String semantics = "read_file:utf8-lines:v1";
-                toolResult.setEvidenceCandidate(ToolEvidenceCandidate.builder()
-                        .evidenceKey("read_file|" + normalizedScope)
-                        .observationType("read_file")
-                        .toolSemantics(semantics)
-                        .normalizedScope(normalizedScope)
-                        .repositoryRelativePath(relativePath)
-                        .observedStartLine(start)
-                        .observedEndLine(last)
-                        .digestAlgorithm("SHA-256")
-                        .stateDigest(ReadFileEvidenceSupport.digest(lines, start, last))
-                        .complete(true)
-                        .revalidation(EvidenceRevalidation.builder()
-                                .digestAlgorithm("SHA-256")
-                                .observationType("read_file")
-                                .toolSemantics(semantics)
-                                .repositoryRelativePath(relativePath)
-                                .startLine(start)
-                                .endLine(last)
-                                .build())
-                        .build());
-            }
+            String relativePath = LoomToolSupport.relative(root, file);
+            String normalizedScope = relativePath + "#lines=" + start + "-" + end;
+            String semantics = "read_file:utf8-lines:v2";
+            toolResult.setEvidenceCandidate(ToolEvidenceCandidate.builder()
+                    .evidenceKey("read_file|" + normalizedScope)
+                    .normalizedScope(normalizedScope)
+                    .stateDigest(ReadFileEvidenceSupport.digest(lines, start, end))
+                    .complete(true)
+                    .revalidation(EvidenceRevalidation.builder()
+                            .digestAlgorithm("SHA-256")
+                            .observationType(EvidenceObservationType.READ_FILE)
+                            .toolSemantics(semantics)
+                            .repositoryRelativePath(relativePath)
+                            .startLine(start)
+                            .endLine(end)
+                            .build())
+                    .build());
             return toolResult;
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);

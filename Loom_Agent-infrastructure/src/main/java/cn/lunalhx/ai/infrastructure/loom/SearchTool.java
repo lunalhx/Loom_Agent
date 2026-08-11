@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.loom;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
@@ -63,19 +64,12 @@ public class SearchTool implements AgentTool {
             result.setEvidenceCandidate(ToolEvidenceCandidate.builder()
                     .evidenceKey("search|" + normalizedScope + "|query="
                             + observation.normalizedQuery() + "|engine=" + observation.engineVersion())
-                    .observationType(SearchObservationService.OBSERVATION_TYPE)
-                    .toolSemantics(observation.toolSemantics())
                     .normalizedScope(normalizedScope)
-                    .repositoryRelativePath(normalizedScope)
-                    .normalizedQuery(observation.normalizedQuery())
-                    .searchScope(observation.searchScope())
-                    .engineVersion(observation.engineVersion())
-                    .digestAlgorithm("SHA-256")
                     .stateDigest(observation.stateDigest())
                     .complete(true)
                     .revalidation(EvidenceRevalidation.builder()
                             .digestAlgorithm("SHA-256")
-                            .observationType(SearchObservationService.OBSERVATION_TYPE)
+                            .observationType(EvidenceObservationType.SEARCH)
                             .toolSemantics(observation.toolSemantics())
                             .repositoryRelativePath(normalizedScope)
                             .normalizedQuery(observation.normalizedQuery())

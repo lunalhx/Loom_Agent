@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,30 +18,26 @@ public final class SearchEvidenceVerifier {
     }
 
     public static boolean matches(Path workspaceRoot, EvidenceReceipt receipt) {
+        EvidenceRevalidation rule = receipt == null ? null : receipt.getRevalidation();
         if (workspaceRoot == null || receipt == null || !receipt.isRevalidatable()
-                || !SearchObservationService.OBSERVATION_TYPE.equals(receipt.getObservationType())
-                || receipt.getToolSemantics() == null
-                || !receipt.getToolSemantics().startsWith("search:rg:")) {
+                || rule.getObservationType() != EvidenceObservationType.SEARCH
+                || !rule.getToolSemantics().startsWith("search:rg:")) {
             return false;
         }
         try {
             Path root = workspaceRoot.toRealPath();
-            Path scope = root.resolve(receipt.getSearchScope()).normalize().toRealPath();
+            Path scope = root.resolve(rule.getSearchScope()).normalize().toRealPath();
             if (!scope.startsWith(root)
                     || (!Files.isDirectory(scope) && !Files.isRegularFile(scope))) {
                 return false;
             }
             SearchObservationService.Observation observation = OBSERVATIONS.observe(
-                    root, scope, receipt.getNormalizedQuery());
+                    root, scope, rule.getNormalizedQuery());
             return receipt.getNormalizedScope().equals(observation.normalizedScope())
-                    && receipt.getSearchScope().equals(observation.searchScope())
-                    && receipt.getEngineVersion().equals(observation.engineVersion())
-                    && receipt.getToolSemantics().equals(observation.toolSemantics())
-                    && receipt.getStateDigest().equals(observation.stateDigest())
-                    && receipt.getRevalidation().matches(
-                    SearchObservationService.OBSERVATION_TYPE,
-                    observation.toolSemantics(), receipt.getRepositoryRelativePath(), null, null,
-                    receipt.getNormalizedQuery(), receipt.getSearchScope(), receipt.getEngineVersion());
+                    && rule.getSearchScope().equals(observation.searchScope())
+                    && rule.getEngineVersion().equals(observation.engineVersion())
+                    && rule.getToolSemantics().equals(observation.toolSemantics())
+                    && receipt.getStateDigest().equals(observation.stateDigest());
         } catch (IOException | RuntimeException e) {
             return false;
         }

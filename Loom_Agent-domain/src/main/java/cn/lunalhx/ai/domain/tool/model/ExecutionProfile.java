@@ -21,9 +21,11 @@ public record ExecutionProfile(CollaborationMode mode, boolean delegateRun) {
         if (profile == null || !profile.complete()) {
             return false;
         }
-        if (profile.outboundDisclosure() == OutboundDisclosure.UNKNOWN
-                || profile.outboundDisclosure() == OutboundDisclosure.PRESENT) {
+        if (profile.outboundDisclosure() == OutboundDisclosure.UNKNOWN) {
             return mode == CollaborationMode.BUILD && !delegateRun;
+        }
+        if (profile.outboundDisclosure() == OutboundDisclosure.PRESENT && delegateRun) {
+            return false;
         }
         Set<ToolEffect> effects = profile.effects();
         if (delegateRun && (effects.contains(ToolEffect.DISPOSABLE_WRITE)

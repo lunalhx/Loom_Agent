@@ -38,10 +38,15 @@ final class ReadFileEvidenceSupport {
     }
 
     static String digest(List<String> lines, int startLine, int endLine) {
-        if (startLine < 1 || endLine < startLine || endLine > lines.size()) {
+        if (startLine < 1 || endLine < startLine) {
             return null;
         }
-        return DigestUtils.sha256Hex(String.join("\n",
-                lines.subList(startLine - 1, endLine)));
+        int lastLine = Math.min(endLine, lines.size());
+        List<String> visibleLines = startLine <= lastLine
+                ? lines.subList(startLine - 1, lastLine)
+                : List.of();
+        String canonicalObservation = visibleLines.size() + "\n"
+                + String.join("\n", visibleLines);
+        return DigestUtils.sha256Hex(canonicalObservation);
     }
 }

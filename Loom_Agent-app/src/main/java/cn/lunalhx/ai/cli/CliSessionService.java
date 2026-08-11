@@ -446,7 +446,8 @@ public class CliSessionService implements AutoCloseable {
                 .orElse(false);
         durable.ifPresent(current -> session = current);
         Optional<AgentRun> latestRoot = runStore.findLatestRootByConversationId(sessionId);
-        if (latestRoot.isPresent() && !durableStateAdvanced) {
+        if (latestRoot.isPresent() && (!durableStateAdvanced
+                || committedPlanSubmission(latestRoot.get(), session))) {
             AgentRun run = latestRoot.get();
             session.setId(run.getSessionId() == null ? sessionId : run.getSessionId());
             session.setUpdatedAt(Instant.now());
@@ -457,6 +458,13 @@ public class CliSessionService implements AutoCloseable {
         if (!sessionStore.saveIfUnchanged(session, durableUpdatedAt)) {
             sessionStore.find(sessionId).ifPresent(current -> session = current);
         }
+    }
+
+    private boolean committedPlanSubmission(AgentRun run, AgentSession durableSession) {
+        return run != null
+                && durableSession != null
+                && "PLAN_SUBMITTED".equals(run.getStopReason())
+                && durableSession.getPlanStateVersion() == run.getPlanStateVersion() + 1;
     }
 
     /** Redact every persisted text field in the session before it hits disk. */

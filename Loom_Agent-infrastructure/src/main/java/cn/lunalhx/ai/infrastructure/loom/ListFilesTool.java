@@ -3,6 +3,7 @@ package cn.lunalhx.ai.infrastructure.loom;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
@@ -61,16 +62,12 @@ public class ListFilesTool implements AgentTool {
             ToolResult result = ToolResult.success(observation.render(), false, elapsed(startedAt));
             result.setEvidenceCandidate(ToolEvidenceCandidate.builder()
                     .evidenceKey("list_files|" + scope)
-                    .observationType(ListFilesObservationService.OBSERVATION_TYPE)
-                    .toolSemantics(ListFilesObservationService.TOOL_SEMANTICS)
                     .normalizedScope(scope)
-                    .repositoryRelativePath(scope)
-                    .digestAlgorithm("SHA-256")
                     .stateDigest(observation.stateDigest())
                     .complete(true)
                     .revalidation(EvidenceRevalidation.builder()
                             .digestAlgorithm("SHA-256")
-                            .observationType(ListFilesObservationService.OBSERVATION_TYPE)
+                            .observationType(EvidenceObservationType.LIST_FILES)
                             .toolSemantics(ListFilesObservationService.TOOL_SEMANTICS)
                             .repositoryRelativePath(scope)
                             .build())

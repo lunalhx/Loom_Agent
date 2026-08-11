@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.EffectProfile;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
@@ -252,37 +253,18 @@ public class ToolExecutor {
 
     private boolean authorizedReceipt(AgentContext context, DelegateProvenance provenance,
                                      EvidenceReceipt receipt) {
+        EvidenceRevalidation rule = receipt == null ? null : receipt.getRevalidation();
         if (receipt == null || !receipt.isRevalidatable()
                 || !Objects.equals(provenance.getRunId(), receipt.getSourceRunId())
                 || !Objects.equals(rootRunId(context), receipt.getRootRunId())
-                || !withinWorkspace(context.getResolvedWorkspace(), receipt.getRepositoryRelativePath())) {
+                || !withinWorkspace(context.getResolvedWorkspace(), rule.getRepositoryRelativePath())) {
             return false;
         }
-        String toolName = evidenceToolName(receipt);
-        if (toolName == null || !Objects.equals(toolName, receipt.getObservationType())) {
-            return false;
-        }
+        String toolName = rule.getObservationType().toolName();
         if (context.getAllowedTools() != null && !context.getAllowedTools().contains(toolName)) {
             return false;
         }
         return registry.isPlanVisible(toolName, context.getAllowedTools());
-    }
-
-    private String evidenceToolName(EvidenceReceipt receipt) {
-        String semantics = receipt.getToolSemantics();
-        if (semantics == null) {
-            return null;
-        }
-        if (semantics.startsWith("read_file:")) {
-            return "read_file";
-        }
-        if (semantics.startsWith("list_files:")) {
-            return "list_files";
-        }
-        if (semantics.startsWith("search:")) {
-            return "search";
-        }
-        return null;
     }
 
     private boolean withinWorkspace(Path root, String relativePath) {

@@ -17,11 +17,10 @@ public final class PlanEvidenceVerifier {
         if (receipt == null || !receipt.isRevalidatable()) {
             return false;
         }
-        return switch (receipt.getObservationType()) {
-            case "read_file" -> ReadFileEvidenceVerifier.matches(workspaceRoot, receipt);
-            case "list_files" -> ListFilesEvidenceVerifier.matches(workspaceRoot, receipt);
-            case "search" -> SearchEvidenceVerifier.matches(workspaceRoot, receipt);
-            default -> false;
+        return switch (receipt.getRevalidation().getObservationType()) {
+            case READ_FILE -> ReadFileEvidenceVerifier.matches(workspaceRoot, receipt);
+            case LIST_FILES -> ListFilesEvidenceVerifier.matches(workspaceRoot, receipt);
+            case SEARCH -> SearchEvidenceVerifier.matches(workspaceRoot, receipt);
         };
     }
 }

@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
@@ -58,11 +59,12 @@ public class ReadFileEvidenceTest {
         assertFalse(result.getObservation().contains(HIDDEN_ORIGINAL));
         assertEquals(1, context.getEvidenceReceipts().size());
         EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
-        assertEquals("read_file:utf8-lines:v1", receipt.getToolSemantics());
+        EvidenceRevalidation rule = receipt.getRevalidation();
+        assertEquals("read_file:utf8-lines:v2", rule.getToolSemantics());
         assertEquals("long.txt#lines=1-300", receipt.getNormalizedScope());
-        assertEquals("long.txt", receipt.getRepositoryRelativePath());
-        assertEquals(1, (int) receipt.getObservedStartLine());
-        assertEquals(300, (int) receipt.getObservedEndLine());
+        assertEquals("long.txt", rule.getRepositoryRelativePath());
+        assertEquals(1, (int) rule.getStartLine());
+        assertEquals(300, (int) rule.getEndLine());
         assertEquals("run-evidence", receipt.getSourceRunId());
         assertTrue(receipt.isComplete());
         assertTrue(receipt.isRevalidatable());
@@ -110,6 +112,39 @@ public class ReadFileEvidenceTest {
         assertTrue(ReadFileEvidenceVerifier.matches(workspace, receipt));
 
         writeLongFile(file, HIDDEN_CHANGED);
+        assertFalse(ReadFileEvidenceVerifier.matches(workspace, receipt));
+    }
+
+    @Test
+    public void appendWithinOriginallyRequestedRangeInvalidatesShortReadReceipt() throws Exception {
+        Path workspace = Files.createTempDirectory("read-eof-revalidate");
+        Path file = workspace.resolve("long.txt");
+        Files.writeString(file, "first\n");
+        AgentContext context = planContext(workspace, "run-eof-revalidate");
+
+        executor().execute(context, readCall(workspace, 1, 200));
+        EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
+        assertTrue(ReadFileEvidenceVerifier.matches(workspace, receipt));
+
+        Files.writeString(file, "first\nappended\n");
+        assertFalse(ReadFileEvidenceVerifier.matches(workspace, receipt));
+    }
+
+    @Test
+    public void emptyFileReadProducesRevalidatableEvidence() throws Exception {
+        Path workspace = Files.createTempDirectory("read-empty-revalidate");
+        Path file = workspace.resolve("long.txt");
+        Files.writeString(file, "");
+        AgentContext context = planContext(workspace, "run-empty-revalidate");
+
+        ToolResult result = executor().execute(context, readCall(workspace, 1, 200));
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, context.getEvidenceReceipts().size());
+        EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
+        assertTrue(ReadFileEvidenceVerifier.matches(workspace, receipt));
+
+        Files.writeString(file, "now visible\n");
         assertFalse(ReadFileEvidenceVerifier.matches(workspace, receipt));
     }
 

@@ -12,6 +12,8 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelChatResult;
 import cn.lunalhx.ai.domain.model.valobj.TokenUsage;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
@@ -66,9 +68,10 @@ public class DirectoryAndSearchEvidenceTest {
         assertFalse(result.getObservation().contains("entry-259.txt"));
         assertEquals(1, context.getEvidenceReceipts().size());
         EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
-        assertEquals("list_files:directory-entries:v1", receipt.getToolSemantics());
+        EvidenceRevalidation rule = receipt.getRevalidation();
+        assertEquals("list_files:directory-entries:v1", rule.getToolSemantics());
         assertEquals(".", receipt.getNormalizedScope());
-        assertEquals(".", receipt.getRepositoryRelativePath());
+        assertEquals(".", rule.getRepositoryRelativePath());
         assertTrue(receipt.isComplete());
         assertTrue(receipt.isRevalidatable());
         assertTrue(ListFilesEvidenceVerifier.matches(workspace, receipt));
@@ -105,11 +108,12 @@ public class DirectoryAndSearchEvidenceTest {
         assertFalse(result.getObservation().contains(HIDDEN_SEARCH_ORIGINAL));
         assertEquals(1, context.getEvidenceReceipts().size());
         EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
-        assertEquals("search", receipt.getObservationType());
-        assertEquals(SEARCH_QUERY, receipt.getNormalizedQuery());
-        assertEquals(".", receipt.getSearchScope());
-        assertTrue(receipt.getToolSemantics().startsWith("search:rg:"));
-        assertNotNull(receipt.getEngineVersion());
+        EvidenceRevalidation rule = receipt.getRevalidation();
+        assertEquals(EvidenceObservationType.SEARCH, rule.getObservationType());
+        assertEquals(SEARCH_QUERY, rule.getNormalizedQuery());
+        assertEquals(".", rule.getSearchScope());
+        assertTrue(rule.getToolSemantics().startsWith("search:rg:"));
+        assertNotNull(rule.getEngineVersion());
         assertTrue(receipt.isComplete());
         assertTrue(receipt.isRevalidatable());
         assertTrue(SearchEvidenceVerifier.matches(workspace, receipt));
@@ -133,7 +137,8 @@ public class DirectoryAndSearchEvidenceTest {
         assertEquals("(no matches)", noMatch.getObservation());
         assertEquals(1, context.getEvidenceReceipts().size());
         EvidenceReceipt receipt = context.getEvidenceReceipts().get(0);
-        assertEquals("ABSENT_TICKET4_PATTERN", receipt.getNormalizedQuery());
+        assertEquals("ABSENT_TICKET4_PATTERN",
+                receipt.getRevalidation().getNormalizedQuery());
         assertTrue(SearchEvidenceVerifier.matches(workspace, receipt));
 
         Files.writeString(workspace.resolve("new-match.txt"), "ABSENT_TICKET4_PATTERN\n");

@@ -95,6 +95,49 @@ public class PlanModeBoundaryTest {
     }
 
     @Test
+    public void planAllowsBaseAuthorizedExternalReadWithDisclosureAndApproval() {
+        AtomicInteger approvals = new AtomicInteger();
+        AgentTool externalRead = new AgentTool() {
+            @Override
+            public ToolSpec spec() {
+                return ToolSpec.builder()
+                        .name("external_read")
+                        .description("trusted structured external read")
+                        .inputSchema(SCHEMA)
+                        .capabilityEnvelope(ToolCapabilityEnvelope.trusted(
+                                Set.of(ToolEffect.EXTERNAL_READ), OutboundDisclosure.PRESENT))
+                        .approvalRequirement(ApprovalRequirement.SESSION_POLICY)
+                        .build();
+            }
+
+            @Override
+            public ToolResult call(ToolCall call) {
+                return ToolResult.success("ok", false, 0L);
+            }
+        };
+        ToolRegistry registry = new ToolRegistry(List.of(externalRead),
+                new ToolSchemaValidator(mapper));
+        ToolInputGate gate = new ToolInputGate(registry, (name, args) -> {
+            approvals.incrementAndGet();
+            return true;
+        });
+        AgentContext context = new AgentContext();
+        context.setCollaborationMode(CollaborationMode.PLAN);
+        context.setHistory(new ArrayList<>());
+
+        assertEquals(List.of("external_read"), registry.effectiveSpecs(CollaborationMode.PLAN)
+                .stream().map(ToolSpec::getName).toList());
+        ToolResult rejection = gate.evaluate(context,
+                ToolCall.builder().name("external_read")
+                        .input(mapper.createObjectNode()).build(),
+                ToolExecutor.ToolRuntimePolicy.root(Set.of("external_read"),
+                        CollaborationMode.PLAN, ToolExecutor.ApprovalPolicy.ASK));
+
+        assertNull(rejection);
+        assertEquals(1, approvals.get());
+    }
+
+    @Test
     public void planDeniesMutationBeforeApprovalAndExecution() {
         AtomicInteger calls = new AtomicInteger();
         ToolRegistry registry = registry(calls);

@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
@@ -106,8 +107,8 @@ public class PlanSubmissionTransactionTest {
 
         FilePlanSubmissionHandler handler = new FilePlanSubmissionHandler(sessions, runs, mapper);
         assertEquals("PREPARED", handler.prepare(context).outcome().name());
-        // This releases the live submission lease without making the Run
-        // terminal, simulating a process that died before lifecycle.complete.
+        // Leave the prepared transaction without a durable terminal Run,
+        // simulating a process that died before lifecycle.complete.
         assertEquals("CONFLICT", handler.commit(context).outcome().name());
         runs.save(AgentRun.builder()
                 .runId(runId)
@@ -211,7 +212,8 @@ public class PlanSubmissionTransactionTest {
         assertEquals(2, persistedPlan.getRevisions().size());
         assertEquals(2, persistedPlan.currentRevision().getPlanBasis().size());
         assertEquals("run-revision-second", persistedPlan.currentRevision().getPlanBasis().stream()
-                .filter(receipt -> "observed.txt".equals(receipt.getRepositoryRelativePath()))
+                .filter(receipt -> "observed.txt".equals(
+                        receipt.getRevalidation().getRepositoryRelativePath()))
                 .findFirst().orElseThrow().getSourceRunId());
         assertEquals("run-revision-first", persistedPlan.getRevisions().get(0)
                 .getPlanBasis().get(0).getSourceRunId());
@@ -308,23 +310,17 @@ public class PlanSubmissionTransactionTest {
 
     private EvidenceReceipt readReceipt(String runId, String evidenceKey,
                                         String path, String content) {
-        String semantics = "read_file:utf8-lines:v1";
+        String semantics = "read_file:utf8-lines:v2";
         return EvidenceReceipt.builder()
                 .evidenceKey(evidenceKey)
-                .observationType("read_file")
-                .toolSemantics(semantics)
-                .normalizedScope(path + ":1-1")
-                .repositoryRelativePath(path)
-                .observedStartLine(1)
-                .observedEndLine(1)
-                .digestAlgorithm("SHA-256")
-                .stateDigest(DigestUtils.sha256Hex(content))
+                .normalizedScope(path + "#lines=1-1")
+                .stateDigest(DigestUtils.sha256Hex("1\n" + content))
                 .complete(true)
                 .sourceRunId(runId)
                 .rootRunId(runId)
                 .revalidation(EvidenceRevalidation.builder()
                         .digestAlgorithm("SHA-256")
-                        .observationType("read_file")
+                        .observationType(EvidenceObservationType.READ_FILE)
                         .toolSemantics(semantics)
                         .repositoryRelativePath(path)
                         .startLine(1)

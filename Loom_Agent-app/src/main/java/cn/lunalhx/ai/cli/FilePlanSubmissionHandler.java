@@ -18,12 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Runtime-owned Plan Submission transaction for the file-backed Session.
@@ -42,12 +36,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
 
     private static final String NEW_TARGET = "NEW";
-    private static final Map<String, Object> SESSION_LOCKS = new ConcurrentHashMap<>();
 
     private final AgentSessionRepository sessionRepository;
     private final AgentRunRepository runRepository;
     private final ObjectMapper mapper;
-    private final Map<String, HeldSessionLock> preparedLocks = new ConcurrentHashMap<>();
 
     public FilePlanSubmissionHandler(AgentSessionRepository sessionRepository,
                                      AgentRunRepository runRepository,
@@ -65,27 +57,11 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         if (authorization != null) {
             return authorization;
         }
-        String lockKey = sessionLockKey(context.getSessionId(), context.getResolvedWorkspace());
-        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
-        synchronized (lock) {
-            HeldSessionLock lease = null;
-            try {
-                lease = acquireSubmissionLock(context.getSessionId(), context.getResolvedWorkspace());
-                PlanSubmissionResult result = prepareUnderSessionLock(context);
-                if (result.outcome() == PlanSubmissionResult.Outcome.PREPARED) {
-                    if (preparedLocks.putIfAbsent(context.getRunId(), lease) != null) {
-                        return PlanSubmissionResult.conflict(
-                                "Plan Conflict: this Run already has a prepared submission");
-                    }
-                    lease = null;
-                }
-                return result;
-            } catch (Exception e) {
-                return PlanSubmissionResult.conflict(
-                        "Plan Conflict: persistence or validation failed: " + e.getMessage());
-            } finally {
-                closeQuietly(lease);
-            }
+        try {
+            return prepareCurrent(context);
+        } catch (Exception e) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: persistence or validation failed: " + e.getMessage());
         }
     }
 
@@ -95,28 +71,18 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         if (authorization != null) {
             return authorization;
         }
-        String lockKey = sessionLockKey(context.getSessionId(), context.getResolvedWorkspace());
-        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
-        synchronized (lock) {
-            HeldSessionLock lease = preparedLocks.remove(context.getRunId());
-            try {
-                if (lease == null) {
-                    lease = acquireSubmissionLock(context.getSessionId(), context.getResolvedWorkspace());
-                }
-                AgentRun run = runRepository.find(context.getRunId()).orElse(null);
-                if (run == null || run.getStatus() != AgentRunStatus.COMPLETED
-                        || !"PLAN_SUBMITTED".equals(run.getStopReason())) {
-                    return PlanSubmissionResult.conflict(
-                            "Plan Conflict: terminal Run outcome is not durable");
-                }
-                return commitPendingUnderSessionLock(context.getSessionId(), context.getRunId(),
-                        context.getResolvedWorkspace(), context.isEvidenceDrift());
-            } catch (Exception e) {
+        try {
+            AgentRun run = runRepository.find(context.getRunId()).orElse(null);
+            if (run == null || run.getStatus() != AgentRunStatus.COMPLETED
+                    || !"PLAN_SUBMITTED".equals(run.getStopReason())) {
                 return PlanSubmissionResult.conflict(
-                        "Plan Conflict: terminal persistence failed: " + e.getMessage());
-            } finally {
-                closeQuietly(lease);
+                        "Plan Conflict: terminal Run outcome is not durable");
             }
+            return commitPending(context.getSessionId(), context.getRunId(),
+                    context.getResolvedWorkspace(), context.isEvidenceDrift());
+        } catch (Exception e) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: terminal persistence failed: " + e.getMessage());
         }
     }
 
@@ -130,38 +96,27 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return null;
         }
         Path workspaceRoot = workspaceRoot(initial);
-        String lockKey = sessionLockKey(sessionId, workspaceRoot);
-        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
-        synchronized (lock) {
-            HeldSessionLock lease = null;
-            try {
-                // A live runtime holds this OS lock from prepare through commit
-                // or abort. If recovery acquires it and the Run is still RUNNING,
-                // the pending transaction was abandoned by a crashed process.
-                lease = acquireSubmissionLock(sessionId, workspaceRoot);
-                AgentSession current = readSession(sessionId);
-                if (current == null || current.getPendingPlanSubmission() == null) {
-                    return current;
-                }
-                PlanSubmissionTransaction transaction = current.getPendingPlanSubmission();
-                AgentRun run = runRepository.find(transaction.getRunId()).orElse(null);
-                if (run != null && run.getStatus() == AgentRunStatus.COMPLETED
-                        && "PLAN_SUBMITTED".equals(run.getStopReason())) {
-                    PlanSubmissionResult result = commitPendingUnderSessionLock(sessionId, transaction.getRunId(),
-                            workspaceRoot, Boolean.TRUE.equals(run.getEvidenceDrift()));
-                    if (result.outcome() != PlanSubmissionResult.Outcome.SUBMITTED) {
-                        markPlanConflictRun(run);
-                    }
-                } else {
-                    rollbackPendingUnderSessionLock(current);
+        try {
+            AgentSession current = readSession(sessionId);
+            if (current == null || current.getPendingPlanSubmission() == null) {
+                return current;
+            }
+            PlanSubmissionTransaction transaction = current.getPendingPlanSubmission();
+            AgentRun run = runRepository.find(transaction.getRunId()).orElse(null);
+            if (run != null && run.getStatus() == AgentRunStatus.COMPLETED
+                    && "PLAN_SUBMITTED".equals(run.getStopReason())) {
+                PlanSubmissionResult result = commitPending(sessionId, transaction.getRunId(),
+                        workspaceRoot, Boolean.TRUE.equals(run.getEvidenceDrift()));
+                if (result.outcome() != PlanSubmissionResult.Outcome.SUBMITTED) {
                     markPlanConflictRun(run);
                 }
-                return readSession(sessionId);
-            } catch (Exception e) {
-                return readSession(sessionId);
-            } finally {
-                closeQuietly(lease);
+            } else {
+                rollbackPending(current);
+                markPlanConflictRun(run);
             }
+            return readSession(sessionId);
+        } catch (Exception e) {
+            return readSession(sessionId);
         }
     }
 
@@ -171,26 +126,15 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
                 || StringUtils.isBlank(context.getRunId())) {
             return;
         }
-        Path workspaceRoot = context.getResolvedWorkspace();
-        String lockKey = sessionLockKey(context.getSessionId(), workspaceRoot);
-        Object lock = SESSION_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
-        synchronized (lock) {
-            HeldSessionLock lease = preparedLocks.remove(context.getRunId());
-            try {
-                if (lease == null) {
-                    lease = acquireSubmissionLock(context.getSessionId(), workspaceRoot);
-                }
-                AgentSession current = readSession(context.getSessionId());
-                if (current != null && current.getPendingPlanSubmission() != null
-                        && Objects.equals(context.getRunId(),
-                        current.getPendingPlanSubmission().getRunId())) {
-                    rollbackPendingUnderSessionLock(current);
-                }
-            } catch (Exception ignored) {
-                // The terminal Plan Conflict remains the visible outcome.
-            } finally {
-                closeQuietly(lease);
+        try {
+            AgentSession current = readSession(context.getSessionId());
+            if (current != null && current.getPendingPlanSubmission() != null
+                    && Objects.equals(context.getRunId(),
+                    current.getPendingPlanSubmission().getRunId())) {
+                rollbackPending(current);
             }
+        } catch (Exception ignored) {
+            // The terminal Plan Conflict remains the visible outcome.
         }
     }
 
@@ -218,7 +162,7 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         return null;
     }
 
-    private PlanSubmissionResult prepareUnderSessionLock(AgentContext context) {
+    private PlanSubmissionResult prepareCurrent(AgentContext context) {
         AgentSession current = readSession(context.getSessionId());
         if (current == null) {
             return PlanSubmissionResult.conflict(
@@ -335,9 +279,9 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         return PlanSubmissionResult.prepared(plan.getPlanId(), nextRevision);
     }
 
-    private PlanSubmissionResult commitPendingUnderSessionLock(String sessionId, String runId,
-                                                               Path workspaceRoot,
-                                                               boolean evidenceDrift) {
+    private PlanSubmissionResult commitPending(String sessionId, String runId,
+                                               Path workspaceRoot,
+                                               boolean evidenceDrift) {
         AgentSession current = readSession(sessionId);
         if (current == null || current.getPendingPlanSubmission() == null) {
             return PlanSubmissionResult.conflict(
@@ -377,12 +321,12 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         if (submittedRevision == null
                 || current.getPlanStateVersion() != transaction.getExpectedPlanStateVersion()
                 || !targetMatches) {
-            rollbackPendingUnderSessionLock(current);
+            rollbackPending(current);
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan target or state changed before commit");
         }
         if (evidenceDrift || !freshPlanEvidence(workspaceRoot, plan)) {
-            rollbackPendingUnderSessionLock(current);
+            rollbackPending(current);
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: relied-on repository evidence is stale at commit");
         }
@@ -412,7 +356,7 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         return PlanSubmissionResult.submitted(plan.getPlanId(), submittedRevision.getRevision());
     }
 
-    private void rollbackPendingUnderSessionLock(AgentSession current) {
+    private void rollbackPending(AgentSession current) {
         AgentSession candidate = copy(current);
         candidate.setPendingPlanSubmission(null);
         saveIfCurrent(candidate, current.getUpdatedAt());
@@ -512,67 +456,11 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         return true;
     }
 
-    private String sessionLockKey(String sessionId, Path workspaceRoot) {
-        Path root = workspaceRoot == null
-                ? Path.of(".").toAbsolutePath().normalize()
-                : workspaceRoot.toAbsolutePath().normalize();
-        return root + "::" + sessionId;
-    }
-
     private Path workspaceRoot(AgentSession session) {
         if (session == null || StringUtils.isBlank(session.getWorkspaceRoot())) {
             return Path.of(".").toAbsolutePath().normalize();
         }
         return Path.of(session.getWorkspaceRoot()).toAbsolutePath().normalize();
-    }
-
-    private HeldSessionLock acquireSubmissionLock(String sessionId, Path workspaceRoot)
-            throws IOException {
-        Path root = workspaceRoot == null
-                ? Path.of(".").toAbsolutePath().normalize()
-                : workspaceRoot.toAbsolutePath().normalize();
-        Path lockPath = root.resolve(".loom-code").resolve("sessions")
-                .resolve(sessionId + ".plan.lock");
-        Files.createDirectories(lockPath.getParent());
-        FileChannel channel = FileChannel.open(lockPath,
-                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-        try {
-            FileLock lock = channel.lock();
-            return new HeldSessionLock(channel, lock);
-        } catch (IOException | RuntimeException e) {
-            channel.close();
-            throw e;
-        }
-    }
-
-    private void closeQuietly(HeldSessionLock lease) {
-        if (lease == null) {
-            return;
-        }
-        try {
-            lease.close();
-        } catch (IOException ignored) {
-        }
-    }
-
-    private static final class HeldSessionLock implements AutoCloseable {
-
-        private final FileChannel channel;
-        private final FileLock lock;
-
-        private HeldSessionLock(FileChannel channel, FileLock lock) {
-            this.channel = channel;
-            this.lock = lock;
-        }
-
-        @Override
-        public void close() throws IOException {
-            try {
-                lock.release();
-            } finally {
-                channel.close();
-            }
-        }
     }
 
     private String contentDigest(PlanSubmission submission) throws Exception {

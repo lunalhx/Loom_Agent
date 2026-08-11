@@ -162,6 +162,9 @@ public class CliSessionServiceE2ETest {
         assertEquals(persisted.getCurrentPlanId(), persisted.getPlans().get(0).getPlanId());
         assertEquals(1, persisted.getPlans().get(0).currentRevision().getRevision().intValue());
         assertFalse(persisted.getPlans().get(0).currentRevision().getContentDigest().isBlank());
+        assertTrue(persisted.getHistory().stream()
+                .anyMatch(entry -> entry.content().contains("research and submit the first plan")));
+        assertNotNull(persisted.getCheckpoint());
 
         ByteArrayOutputStream listOutput = new ByteArrayOutputStream();
         assertTrue(CliMain.handleControl(session, "/plan list",

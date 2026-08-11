@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,25 +18,22 @@ public final class ListFilesEvidenceVerifier {
     }
 
     public static boolean matches(Path workspaceRoot, EvidenceReceipt receipt) {
+        EvidenceRevalidation rule = receipt == null ? null : receipt.getRevalidation();
         if (workspaceRoot == null || receipt == null || !receipt.isRevalidatable()
-                || !ListFilesObservationService.OBSERVATION_TYPE.equals(receipt.getObservationType())
-                || !ListFilesObservationService.TOOL_SEMANTICS.equals(receipt.getToolSemantics())) {
+                || rule.getObservationType() != EvidenceObservationType.LIST_FILES
+                || !ListFilesObservationService.TOOL_SEMANTICS.equals(rule.getToolSemantics())) {
             return false;
         }
         try {
             Path root = workspaceRoot.toRealPath();
-            Path directory = root.resolve(receipt.getRepositoryRelativePath())
+            Path directory = root.resolve(rule.getRepositoryRelativePath())
                     .normalize().toRealPath();
             if (!directory.startsWith(root) || !Files.isDirectory(directory)) {
                 return false;
             }
             ListFilesObservationService.Observation observation = OBSERVATIONS.observe(root, directory);
             return receipt.getNormalizedScope().equals(observation.normalizedScope())
-                    && receipt.getStateDigest().equals(observation.stateDigest())
-                    && receipt.getRevalidation().matches(
-                    ListFilesObservationService.OBSERVATION_TYPE,
-                    ListFilesObservationService.TOOL_SEMANTICS,
-                    receipt.getRepositoryRelativePath(), null, null, null, null, null);
+                    && receipt.getStateDigest().equals(observation.stateDigest());
         } catch (IOException | RuntimeException e) {
             return false;
         }
