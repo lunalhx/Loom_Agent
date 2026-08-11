@@ -34,6 +34,7 @@ public class AgentQuestion {
     private CollaborationMode collaborationMode;
     private String checkpointId;
     private String planTarget;
+    private Integer planRevision;
     private Long planStateVersion;
     private AgentContextSnapshot seedSnapshot;
 

@@ -26,6 +26,8 @@ public final class CliMain {
             /memory  Show the agent's distilled working memory.
             /session Show the session id.
             /mode plan|build  Show or change the collaboration mode.
+            /plan new  Start an independent Plan.
+            /plan select <plan-id>  Select a Plan's latest revision.
             /plan list  List persisted Plans and computed freshness.
             /plan show  Show the current Plan and computed freshness.
             /new     Create a new independent session.
@@ -170,8 +172,27 @@ public final class CliMain {
             output.println(session.planShowView());
             return true;
         }
+        if (input.equals("/plan new")) {
+            try {
+                session.newPlan();
+                output.println("plan target: NEW");
+            } catch (CliSessionService.OptionsException e) {
+                output.println("error: " + e.getMessage());
+            }
+            return true;
+        }
+        if (input.startsWith("/plan select ")) {
+            String planId = input.substring("/plan select ".length()).strip();
+            try {
+                session.selectPlan(planId);
+                output.println("plan selected: " + planId);
+            } catch (CliSessionService.OptionsException e) {
+                output.println("error: " + e.getMessage());
+            }
+            return true;
+        }
         if (input.equals("/plan") || input.startsWith("/plan ")) {
-            output.println("error: use /plan list or /plan show");
+            output.println("error: use /plan new, /plan select <plan-id>, /plan list, or /plan show");
             return true;
         }
         if (input.equals("/mode")) {

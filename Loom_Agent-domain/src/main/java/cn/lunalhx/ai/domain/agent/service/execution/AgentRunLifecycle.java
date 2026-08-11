@@ -176,6 +176,7 @@ public final class AgentRunLifecycle {
                 .question(context.runDefinition().question())
                 .workspace(context.environment().workspaceDisplayName())
                 .planTarget(def.planTarget())
+                .planRevision(def.planRevision())
                 .planStateVersion(def.planStateVersion())
                 .status(status)
                 .currentNode(currentNode)

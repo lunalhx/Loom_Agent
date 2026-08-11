@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
+import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
@@ -163,6 +164,90 @@ public class PlanSubmissionTransactionTest {
         assertEquals(0L, persisted.getPlanStateVersion());
     }
 
+    @Test
+    public void revisionBasisRefreshesSameKeyAppendsNewKeyAndRetainsHistory() throws Exception {
+        Path workspace = Files.createTempDirectory("plan-revision-basis");
+        Files.writeString(workspace.resolve("observed.txt"), "before\n");
+        Files.writeString(workspace.resolve("new.txt"), "new evidence\n");
+        AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        String sessionId = "session-revision-basis";
+        savePlanSession(sessions, workspace, sessionId);
+
+        FilePlanSubmissionHandler handler = new FilePlanSubmissionHandler(sessions, runs, mapper);
+        AgentContext first = planContext(workspace, sessionId, "run-revision-first");
+        first.setEvidenceReceipts(List.of(readReceipt("run-revision-first")));
+        assertEquals("PREPARED", handler.prepare(first).outcome().name());
+        saveCompletedPlanRun(runs, first);
+        assertEquals("SUBMITTED", handler.commit(first).outcome().name());
+
+        AgentSession afterFirst = sessions.find(sessionId).orElseThrow();
+        Plan firstPlan = afterFirst.getPlans().get(0);
+        String planId = firstPlan.getPlanId();
+        Files.writeString(workspace.resolve("observed.txt"), "after\n");
+
+        AgentContext revision = planContext(workspace, sessionId, "run-revision-second");
+        revision.setPlanTarget(planId);
+        revision.setPlanRevision(1);
+        revision.setPlanStateVersion(1L);
+        revision.setDecision(AgentDecision.builder()
+                .type("plan_submission")
+                .planSubmission(PlanSubmission.builder()
+                        .title("Revision two")
+                        .body("Refresh the observed state and add another dependency.")
+                        .dependencies(List.of("new.txt"))
+                        .build())
+                .build());
+        revision.setEvidenceReceipts(List.of(
+                readReceipt("run-revision-second", "read-observed", "observed.txt", "after"),
+                readReceipt("run-revision-second", "read-new", "new.txt", "new evidence")));
+
+        assertEquals("PREPARED", handler.prepare(revision).outcome().name());
+        saveCompletedPlanRun(runs, revision);
+        assertEquals("SUBMITTED", handler.commit(revision).outcome().name());
+
+        AgentSession persisted = sessions.find(sessionId).orElseThrow();
+        Plan persistedPlan = persisted.getPlans().get(0);
+        assertEquals(2, persistedPlan.getRevisions().size());
+        assertEquals(2, persistedPlan.currentRevision().getPlanBasis().size());
+        assertEquals("run-revision-second", persistedPlan.currentRevision().getPlanBasis().stream()
+                .filter(receipt -> "observed.txt".equals(receipt.getRepositoryRelativePath()))
+                .findFirst().orElseThrow().getSourceRunId());
+        assertEquals("run-revision-first", persistedPlan.getRevisions().get(0)
+                .getPlanBasis().get(0).getSourceRunId());
+        assertTrue(PlanFreshness.isFresh(workspace, persistedPlan.currentRevision()));
+    }
+
+    @Test
+    public void staleInheritedBasisBlocksRevisionUntilItIsRefreshed() throws Exception {
+        Path workspace = Files.createTempDirectory("plan-stale-revision");
+        Files.writeString(workspace.resolve("observed.txt"), "before\n");
+        AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        String sessionId = "session-stale-revision";
+        savePlanSession(sessions, workspace, sessionId);
+
+        FilePlanSubmissionHandler handler = new FilePlanSubmissionHandler(sessions, runs, mapper);
+        AgentContext first = planContext(workspace, sessionId, "run-stale-first");
+        first.setEvidenceReceipts(List.of(readReceipt("run-stale-first")));
+        assertEquals("PREPARED", handler.prepare(first).outcome().name());
+        saveCompletedPlanRun(runs, first);
+        assertEquals("SUBMITTED", handler.commit(first).outcome().name());
+        Plan plan = sessions.find(sessionId).orElseThrow().getPlans().get(0);
+
+        Files.writeString(workspace.resolve("observed.txt"), "changed\n");
+        AgentContext revision = planContext(workspace, sessionId, "run-stale-second");
+        revision.setPlanTarget(plan.getPlanId());
+        revision.setPlanRevision(1);
+        revision.setPlanStateVersion(1L);
+
+        assertEquals("CONFLICT", handler.prepare(revision).outcome().name());
+        AgentSession persisted = sessions.find(sessionId).orElseThrow();
+        assertEquals(1, persisted.getPlans().get(0).getRevisions().size());
+        assertEquals(1L, persisted.getPlanStateVersion());
+        assertNull(persisted.getPendingPlanSubmission());
+    }
+
     private void savePlanSession(AgentSessionRepository sessions, Path workspace,
                                  String sessionId) {
         sessions.save(AgentSession.builder()
@@ -197,18 +282,22 @@ public class PlanSubmissionTransactionTest {
     }
 
     private EvidenceReceipt readReceipt(String runId) {
+        return readReceipt(runId, "read-observed", "observed.txt", "before");
+    }
+
+    private EvidenceReceipt readReceipt(String runId, String evidenceKey,
+                                        String path, String content) {
         String semantics = "read_file:utf8-lines:v1";
-        String path = "observed.txt";
         return EvidenceReceipt.builder()
-                .evidenceKey("read-observed")
+                .evidenceKey(evidenceKey)
                 .observationType("read_file")
                 .toolSemantics(semantics)
-                .normalizedScope("observed.txt:1-1")
+                .normalizedScope(path + ":1-1")
                 .repositoryRelativePath(path)
                 .observedStartLine(1)
                 .observedEndLine(1)
                 .digestAlgorithm("SHA-256")
-                .stateDigest(DigestUtils.sha256Hex("before"))
+                .stateDigest(DigestUtils.sha256Hex(content))
                 .complete(true)
                 .sourceRunId(runId)
                 .rootRunId(runId)
@@ -221,5 +310,22 @@ public class PlanSubmissionTransactionTest {
                         .endLine(1)
                         .build())
                 .build();
+    }
+
+    private void saveCompletedPlanRun(FileAgentRunRepository runs, AgentContext context) {
+        runs.save(AgentRun.builder()
+                .runId(context.getRunId())
+                .sessionId(context.getSessionId())
+                .rootRunId(context.getRootRunId())
+                .runKind(AgentRunKind.ROOT)
+                .runModeSnapshot(CollaborationMode.PLAN)
+                .planTarget(context.getPlanTarget())
+                .planRevision(context.getPlanRevision())
+                .planStateVersion(context.getPlanStateVersion())
+                .status(AgentRunStatus.COMPLETED)
+                .stopReason("PLAN_SUBMITTED")
+                .evidenceReceipts(context.getEvidenceReceipts())
+                .evidenceDrift(context.isEvidenceDrift())
+                .build());
     }
 }

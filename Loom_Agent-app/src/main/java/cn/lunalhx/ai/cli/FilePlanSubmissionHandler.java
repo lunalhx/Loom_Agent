@@ -110,7 +110,7 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
                             "Plan Conflict: terminal Run outcome is not durable");
                 }
                 return commitPendingUnderSessionLock(context.getSessionId(), context.getRunId(),
-                        context.getResolvedWorkspace(), context.isEvidenceDrift(), context.getRootRunId());
+                        context.getResolvedWorkspace(), context.isEvidenceDrift());
             } catch (Exception e) {
                 return PlanSubmissionResult.conflict(
                         "Plan Conflict: terminal persistence failed: " + e.getMessage());
@@ -148,7 +148,7 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
                 if (run != null && run.getStatus() == AgentRunStatus.COMPLETED
                         && "PLAN_SUBMITTED".equals(run.getStopReason())) {
                     PlanSubmissionResult result = commitPendingUnderSessionLock(sessionId, transaction.getRunId(),
-                            workspaceRoot, Boolean.TRUE.equals(run.getEvidenceDrift()), run.getRootRunId());
+                            workspaceRoot, Boolean.TRUE.equals(run.getEvidenceDrift()));
                     if (result.outcome() != PlanSubmissionResult.Outcome.SUBMITTED) {
                         markPlanConflictRun(run);
                     }
@@ -207,9 +207,9 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.rejected(
                     "Plan Submission is allowed only for a root PLAN Run");
         }
-        if (!NEW_TARGET.equals(context.getPlanTarget())) {
+        if (StringUtils.isBlank(context.getPlanTarget())) {
             return PlanSubmissionResult.conflict(
-                    "Plan Conflict: the Run target is not the fixed NEW target");
+                    "Plan Conflict: the Run has no fixed Plan target");
         }
         if (StringUtils.isBlank(context.getSessionId())) {
             return PlanSubmissionResult.conflict(
@@ -232,18 +232,9 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan state version changed during the Run");
         }
-        if (StringUtils.isNotBlank(current.getCurrentPlanId())
-                || (current.getPlans() != null && !current.getPlans().isEmpty())) {
-            return PlanSubmissionResult.conflict(
-                    "Plan Conflict: the Session already has a current Plan");
-        }
         if (context.isEvidenceDrift()) {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan Evidence drifted during the Run");
-        }
-        if (!freshEvidence(context)) {
-            return PlanSubmissionResult.conflict(
-                    "Plan Conflict: relied-on repository evidence is stale");
         }
 
         PlanSubmission submission = context.getDecision().getPlanSubmission();
@@ -262,7 +253,6 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         }
 
         Instant now = Instant.now();
-        String planId = "plan_" + UUID.randomUUID();
         String digest;
         try {
             digest = contentDigest(submission);
@@ -270,22 +260,63 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan content digest could not be computed: " + e.getMessage());
         }
+
+        boolean newTarget = NEW_TARGET.equals(context.getPlanTarget());
+        Plan plan;
+        int nextRevision;
+        List<EvidenceReceipt> candidateBasis;
+        if (newTarget) {
+            if (StringUtils.isNotBlank(current.getCurrentPlanId())) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: the NEW target requires no Current Plan selection");
+            }
+            plan = Plan.builder()
+                    .planId("plan_" + UUID.randomUUID())
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+            nextRevision = 1;
+            candidateBasis = List.copyOf(context.getEvidenceReceipts());
+        } else {
+            if (StringUtils.isBlank(context.getPlanTarget())
+                    || !Objects.equals(current.getCurrentPlanId(), context.getPlanTarget())) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: selected Plan changed during the Run");
+            }
+            Plan selected = findPlan(candidate, context.getPlanTarget());
+            PlanRevision previous = selected == null ? null : selected.currentRevision();
+            if (previous == null || context.getPlanRevision() == null
+                    || !Objects.equals(context.getPlanRevision(), previous.getRevision())) {
+                return PlanSubmissionResult.conflict(
+                        "Plan Conflict: the selected Plan head changed during the Run");
+            }
+            plan = mapper.convertValue(selected, Plan.class);
+            nextRevision = previous.getRevision() + 1;
+            candidateBasis = mergeBasis(previous.getPlanBasis(), context.getEvidenceReceipts());
+        }
+
         PlanRevision revision = PlanRevision.builder()
-                .revision(1)
+                .revision(nextRevision)
                 .title(submission.getTitle())
                 .body(submission.getBody())
                 .dependencies(List.copyOf(submission.getDependencies()))
                 .createdAt(now)
                 .updatedAt(now)
                 .contentDigest(digest)
-                .planBasis(List.copyOf(context.getEvidenceReceipts()))
+                .planBasis(candidateBasis)
                 .build();
-        Plan plan = Plan.builder()
-                .planId(planId)
-                .createdAt(now)
-                .updatedAt(now)
-                .revisions(List.of(revision))
-                .build();
+        if (newTarget) {
+            plan.setRevisions(List.of(revision));
+        } else {
+            List<PlanRevision> revisions = new ArrayList<>(plan.getRevisions());
+            revisions.add(revision);
+            plan.setRevisions(List.copyOf(revisions));
+            plan.setUpdatedAt(now);
+        }
+        if (!freshPlanEvidence(context.getResolvedWorkspace(), plan)) {
+            return PlanSubmissionResult.conflict(
+                    "Plan Conflict: relied-on repository evidence is stale");
+        }
         candidate.setPendingPlanSubmission(PlanSubmissionTransaction.builder()
                 .transactionId("plan_tx_" + UUID.randomUUID())
                 .runId(context.getRunId())
@@ -296,13 +327,12 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Session changed before Plan preparation");
         }
-        return PlanSubmissionResult.prepared(planId, 1);
+        return PlanSubmissionResult.prepared(plan.getPlanId(), nextRevision);
     }
 
     private PlanSubmissionResult commitPendingUnderSessionLock(String sessionId, String runId,
                                                                Path workspaceRoot,
-                                                               boolean evidenceDrift,
-                                                               String rootRunId) {
+                                                               boolean evidenceDrift) {
         AgentSession current = readSession(sessionId);
         if (current == null || current.getPendingPlanSubmission() == null) {
             return PlanSubmissionResult.conflict(
@@ -315,24 +345,38 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
                 "Plan Conflict: pending Plan Submission belongs to another Run");
         }
         Plan plan = transaction.getPlan();
-        if (current.getPlans() != null && current.getPlans().stream()
-                .anyMatch(existing -> existing != null && Objects.equals(existing.getPlanId(), plan.getPlanId()))) {
+        PlanRevision submittedRevision = plan.currentRevision();
+        Plan existing = findPlan(current, plan.getPlanId());
+        if (submittedRevision != null && existing != null
+                && existing.currentRevision() != null
+                && Objects.equals(existing.currentRevision().getRevision(), submittedRevision.getRevision())
+                && Objects.equals(existing.currentRevision().getContentDigest(), submittedRevision.getContentDigest())
+                && Objects.equals(current.getCurrentPlanId(), plan.getPlanId())
+                && current.getPlanStateVersion() == transaction.getExpectedPlanStateVersion() + 1) {
             AgentSession clear = copy(current);
             clear.setPendingPlanSubmission(null);
             if (!saveIfCurrent(clear, current.getUpdatedAt())) {
                 return PlanSubmissionResult.conflict(
                         "Plan Conflict: Session changed while finalizing Plan");
             }
-            return PlanSubmissionResult.submitted(plan.getPlanId(), 1);
+            return PlanSubmissionResult.submitted(plan.getPlanId(), submittedRevision.getRevision());
         }
-        if (current.getPlanStateVersion() != transaction.getExpectedPlanStateVersion()
-                || StringUtils.isNotBlank(current.getCurrentPlanId())
-                || (current.getPlans() != null && !current.getPlans().isEmpty())) {
+        boolean newTarget = submittedRevision != null && submittedRevision.getRevision() == 1;
+        boolean targetMatches = newTarget
+                ? StringUtils.isBlank(current.getCurrentPlanId()) && existing == null
+                : StringUtils.isNotBlank(current.getCurrentPlanId())
+                && Objects.equals(current.getCurrentPlanId(), plan.getPlanId())
+                && existing != null
+                && existing.currentRevision() != null
+                && existing.currentRevision().getRevision() == submittedRevision.getRevision() - 1;
+        if (submittedRevision == null
+                || current.getPlanStateVersion() != transaction.getExpectedPlanStateVersion()
+                || !targetMatches) {
             rollbackPendingUnderSessionLock(current);
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Plan target or state changed before commit");
         }
-        if (evidenceDrift || !freshPlanEvidence(workspaceRoot, plan, rootRunId)) {
+        if (evidenceDrift || !freshPlanEvidence(workspaceRoot, plan)) {
             rollbackPendingUnderSessionLock(current);
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: relied-on repository evidence is stale at commit");
@@ -342,7 +386,16 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         if (candidate.getPlans() != null) {
             plans.addAll(candidate.getPlans());
         }
-        plans.add(plan);
+        if (newTarget) {
+            plans.add(plan);
+        } else {
+            for (int i = 0; i < plans.size(); i++) {
+                if (plans.get(i) != null && Objects.equals(plans.get(i).getPlanId(), plan.getPlanId())) {
+                    plans.set(i, plan);
+                    break;
+                }
+            }
+        }
         candidate.setPlans(List.copyOf(plans));
         candidate.setCurrentPlanId(plan.getPlanId());
         candidate.setPlanStateVersion(current.getPlanStateVersion() + 1);
@@ -351,7 +404,7 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
             return PlanSubmissionResult.conflict(
                     "Plan Conflict: Session changed while finalizing Plan");
         }
-        return PlanSubmissionResult.submitted(plan.getPlanId(), 1);
+        return PlanSubmissionResult.submitted(plan.getPlanId(), submittedRevision.getRevision());
     }
 
     private void rollbackPendingUnderSessionLock(AgentSession current) {
@@ -374,11 +427,43 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         }
     }
 
-    private boolean freshPlanEvidence(Path workspaceRoot, Plan plan, String rootRunId) {
+    private boolean freshPlanEvidence(Path workspaceRoot, Plan plan) {
         if (plan == null || plan.currentRevision() == null) {
             return false;
         }
-        return freshEvidence(workspaceRoot, plan.currentRevision().getPlanBasis(), rootRunId);
+        return freshEvidence(workspaceRoot, plan.currentRevision().getPlanBasis());
+    }
+
+    private Plan findPlan(AgentSession session, String planId) {
+        if (session == null || session.getPlans() == null || StringUtils.isBlank(planId)) {
+            return null;
+        }
+        for (Plan plan : session.getPlans()) {
+            if (plan != null && Objects.equals(planId, plan.getPlanId())) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
+    private List<EvidenceReceipt> mergeBasis(List<EvidenceReceipt> inherited,
+                                             List<EvidenceReceipt> currentRun) {
+        Map<String, EvidenceReceipt> merged = new LinkedHashMap<>();
+        if (inherited != null) {
+            for (EvidenceReceipt receipt : inherited) {
+                if (receipt != null) {
+                    merged.put(receipt.getEvidenceKey(), receipt);
+                }
+            }
+        }
+        if (currentRun != null) {
+            for (EvidenceReceipt receipt : currentRun) {
+                if (receipt != null) {
+                    merged.put(receipt.getEvidenceKey(), receipt);
+                }
+            }
+        }
+        return List.copyOf(merged.values());
     }
 
     private AgentSession copy(AgentSession session) {
@@ -401,21 +486,13 @@ public final class FilePlanSubmissionHandler implements PlanSubmissionHandler {
         }
     }
 
-    private boolean freshEvidence(AgentContext context) {
-        return freshEvidence(context.getResolvedWorkspace(), context.getEvidenceReceipts(),
-                context.getRootRunId());
-    }
-
-    private boolean freshEvidence(Path workspaceRoot, List<EvidenceReceipt> receipts,
-                                  String rootRunId) {
+    private boolean freshEvidence(Path workspaceRoot, List<EvidenceReceipt> receipts) {
         if (receipts == null || receipts.isEmpty()) {
             return true;
         }
         for (EvidenceReceipt receipt : receipts) {
             if (receipt == null
                     || StringUtils.isBlank(receipt.getSourceRunId())
-                    || StringUtils.isBlank(rootRunId)
-                    || !Objects.equals(receipt.getRootRunId(), rootRunId)
                     || !PlanEvidenceVerifier.matches(workspaceRoot, receipt)) {
                 return false;
             }

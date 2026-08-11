@@ -8,12 +8,16 @@ import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
+import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmissionTransaction;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
@@ -45,6 +49,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 
@@ -170,6 +179,206 @@ public class CliSessionServiceE2ETest {
         assertTrue(shown.contains("First plan"));
         assertEquals(1, modelCalls.get());
         session.close();
+    }
+
+    @Test
+    public void planNewClearsSelectionKeepsHistoryAndTargetsNextRunAsNew() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-new");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace, planSubmissionGateway(modelCalls));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        session.runTurn("submit the first plan");
+        AgentSession first = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        String firstPlanId = first.getCurrentPlanId();
+        long firstVersion = first.getPlanStateVersion();
+        int runsBeforeControl = session.runRepository()
+                .findByConversationId(session.sessionId()).size();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(session, "/plan new",
+                new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+
+        AgentSession afterNew = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertEquals(1, modelCalls.get());
+        assertEquals(runsBeforeControl, session.runRepository()
+                .findByConversationId(session.sessionId()).size());
+        assertNull(afterNew.getCurrentPlanId());
+        assertEquals(firstVersion + 1, afterNew.getPlanStateVersion());
+        assertEquals(1, afterNew.getPlans().size());
+        assertEquals(firstPlanId, afterNew.getPlans().get(0).getPlanId());
+
+        assertTrue(session.runTurn("submit an unrelated plan").contains("Plan submitted:"));
+        AgentSession afterSecond = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertEquals(2, afterSecond.getPlans().size());
+        assertNotEquals(firstPlanId, afterSecond.getCurrentPlanId());
+        assertEquals("NEW", session.runRepository()
+                .findLatestRootByConversationId(session.sessionId()).orElseThrow().getPlanTarget());
+        assertEquals(2, modelCalls.get());
+        session.close();
+    }
+
+    @Test
+    public void planSelectChangesCurrentPlanWithoutStartingRun() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-select");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace, sequencedPlanGateway(modelCalls,
+                "First plan", "Second plan", "Revision two"));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        session.runTurn("submit first plan");
+        String firstPlanId = session.sessionRepository().find(session.sessionId()).orElseThrow()
+                .getCurrentPlanId();
+        session.newPlan();
+        session.runTurn("submit second plan");
+        AgentSession beforeSelect = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        String secondPlanId = beforeSelect.getCurrentPlanId();
+        long versionBeforeSelect = beforeSelect.getPlanStateVersion();
+        int runsBeforeSelect = session.runRepository().findByConversationId(session.sessionId()).size();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(session, "/plan select " + firstPlanId,
+                new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+
+        AgentSession afterSelect = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        assertEquals(firstPlanId, afterSelect.getCurrentPlanId());
+        assertEquals(versionBeforeSelect + 1, afterSelect.getPlanStateVersion());
+        assertEquals(2, afterSelect.getPlans().size());
+        assertEquals("Second plan", afterSelect.getPlans().stream()
+                .filter(plan -> secondPlanId.equals(plan.getPlanId()))
+                .findFirst().orElseThrow().currentRevision().getTitle());
+        assertEquals(runsBeforeSelect,
+                session.runRepository().findByConversationId(session.sessionId()).size());
+        assertEquals(2, modelCalls.get());
+        assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("plan selected: " + firstPlanId));
+        session.close();
+    }
+
+    @Test
+    public void selectedPlanSubmissionAppendsRevisionAndKeepsExactHeadHistory() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-revision");
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService session = service(workspace, sequencedPlanGateway(modelCalls,
+                "First plan", "Second plan", "Revision two"));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+
+        session.runTurn("submit first plan");
+        String firstPlanId = session.sessionRepository().find(session.sessionId()).orElseThrow()
+                .getCurrentPlanId();
+        session.newPlan();
+        session.runTurn("submit second plan");
+        session.selectPlan(firstPlanId);
+        AgentSession selected = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        long selectedVersion = selected.getPlanStateVersion();
+        int runsBeforeRevision = session.runRepository().findByConversationId(session.sessionId()).size();
+
+        String revisionAnswer = session.runTurn("revise the first plan");
+        assertTrue("unexpected revision answer: " + revisionAnswer,
+                revisionAnswer.contains("revision 2"));
+
+        AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        Plan first = persisted.getPlans().stream()
+                .filter(plan -> firstPlanId.equals(plan.getPlanId())).findFirst().orElseThrow();
+        assertEquals(firstPlanId, persisted.getCurrentPlanId());
+        assertEquals(selectedVersion + 1, persisted.getPlanStateVersion());
+        assertEquals(2, first.getRevisions().size());
+        assertEquals(Integer.valueOf(1), first.getRevisions().get(0).getRevision());
+        assertEquals("First plan", first.getRevisions().get(0).getTitle());
+        assertEquals(Integer.valueOf(2), first.currentRevision().getRevision());
+        assertEquals("Revision two", first.currentRevision().getTitle());
+        assertEquals("Second plan", persisted.getPlans().stream()
+                .filter(plan -> !firstPlanId.equals(plan.getPlanId()))
+                .findFirst().orElseThrow().currentRevision().getTitle());
+
+        AgentRun revisionRun = session.runRepository()
+                .findLatestRootByConversationId(session.sessionId()).orElseThrow();
+        assertEquals(firstPlanId, revisionRun.getPlanTarget());
+        assertEquals(Integer.valueOf(1), revisionRun.getPlanRevision());
+        assertEquals(selectedVersion, (long) revisionRun.getPlanStateVersion());
+        assertEquals(runsBeforeRevision + 1,
+                session.runRepository().findByConversationId(session.sessionId()).size());
+
+        String shown = session.planShowView();
+        assertTrue(shown.contains("revision: 2"));
+        assertTrue(shown.contains("First plan"));
+        assertTrue(shown.contains("body:\n    Body for First plan"));
+
+        ByteArrayOutputStream oldRevisionOutput = new ByteArrayOutputStream();
+        assertTrue(CliMain.handleControl(session, "/plan select " + firstPlanId + "@1",
+                new PrintStream(oldRevisionOutput, true, java.nio.charset.StandardCharsets.UTF_8)));
+        assertTrue(oldRevisionOutput.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("error:"));
+        AgentSession afterOldRevisionAttempt = session.sessionRepository()
+                .find(session.sessionId()).orElseThrow();
+        assertEquals(firstPlanId, afterOldRevisionAttempt.getCurrentPlanId());
+        assertEquals(2, afterOldRevisionAttempt.getPlans().stream()
+                .filter(plan -> firstPlanId.equals(plan.getPlanId()))
+                .findFirst().orElseThrow().currentRevision().getRevision().intValue());
+        session.close();
+    }
+
+    @Test
+    public void concurrentHeadChangeMakesLateRevisionTerminalPlanConflict() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-plan-head-conflict");
+        CountDownLatch modelStarted = new CountDownLatch(1);
+        CountDownLatch releaseModel = new CountDownLatch(1);
+        CliSessionService session = service(workspace,
+                blockingSequencedPlanGateway(new AtomicInteger(), "First plan", "Late revision",
+                        modelStarted, releaseModel));
+        session.setCollaborationMode(CollaborationMode.PLAN);
+        session.runTurn("submit first plan");
+
+        AgentSession selected = session.sessionRepository().find(session.sessionId()).orElseThrow();
+        String planId = selected.getCurrentPlanId();
+        assertEquals(1L, selected.getPlanStateVersion());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<String> lateSubmission = executor.submit(() -> session.runTurn("revise the plan"));
+            assertTrue(modelStarted.await(10, TimeUnit.SECONDS));
+
+            FileAgentSessionRepository externalSessions = new FileAgentSessionRepository(workspace, mapper);
+            FileAgentRunRepository externalRuns = new FileAgentRunRepository(workspace, mapper);
+            FilePlanSubmissionHandler externalHandler = new FilePlanSubmissionHandler(
+                    externalSessions, externalRuns, mapper);
+            AgentContext concurrent = revisionPlanContext(workspace, session.sessionId(),
+                    "concurrent-run", planId, 1, 1L, "Concurrent revision");
+            assertEquals("PREPARED", externalHandler.prepare(concurrent).outcome().name());
+            externalRuns.save(AgentRun.builder()
+                    .runId(concurrent.getRunId())
+                    .sessionId(concurrent.getSessionId())
+                    .rootRunId(concurrent.getRootRunId())
+                    .runKind(AgentRunKind.ROOT)
+                    .runModeSnapshot(CollaborationMode.PLAN)
+                    .planTarget(planId)
+                    .planRevision(1)
+                    .planStateVersion(1L)
+                    .status(AgentRunStatus.COMPLETED)
+                    .stopReason("PLAN_SUBMITTED")
+                    .build());
+            assertEquals("SUBMITTED", externalHandler.commit(concurrent).outcome().name());
+
+            releaseModel.countDown();
+            String answer = lateSubmission.get(30, TimeUnit.SECONDS);
+            assertTrue(answer.toLowerCase().contains("plan conflict"));
+
+            AgentSession persisted = externalSessions.find(session.sessionId()).orElseThrow();
+            Plan persistedPlan = persisted.getPlans().stream()
+                    .filter(plan -> planId.equals(plan.getPlanId())).findFirst().orElseThrow();
+            assertEquals(planId, persisted.getCurrentPlanId());
+            assertEquals(2L, persisted.getPlanStateVersion());
+            assertEquals(2, persistedPlan.getRevisions().size());
+            assertEquals("Concurrent revision", persistedPlan.currentRevision().getTitle());
+            AgentRun lateRun = session.runRepository().findByConversationId(session.sessionId()).stream()
+                    .filter(run -> "PLAN_CONFLICT".equals(run.getStopReason()))
+                    .findFirst().orElseThrow();
+            assertEquals("PLAN_CONFLICT", lateRun.getStopReason());
+        } finally {
+            releaseModel.countDown();
+            executor.shutdownNow();
+            session.close();
+        }
     }
 
     @Test
@@ -731,6 +940,87 @@ public class CliSessionServiceE2ETest {
                         .build());
             }
         };
+    }
+
+    private ModelGateway sequencedPlanGateway(AtomicInteger calls, String... titles) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                int index = calls.getAndIncrement();
+                String title = titles[Math.min(index, titles.length - 1)];
+                return Mono.just(ModelChatResult.builder()
+                        .content("<plan_submission>{\"title\":\"" + title
+                                + "\",\"body\":\"Body for " + title
+                                + "\",\"dependencies\":[]}</plan_submission>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private ModelGateway blockingSequencedPlanGateway(AtomicInteger calls, String firstTitle,
+                                                      String secondTitle,
+                                                      CountDownLatch modelStarted,
+                                                      CountDownLatch releaseModel) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                int index = calls.getAndIncrement();
+                if (index == 1) {
+                    modelStarted.countDown();
+                    try {
+                        if (!releaseModel.await(30, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("timed out waiting to release model");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("model wait interrupted", e);
+                    }
+                }
+                String title = index == 0 ? firstTitle : secondTitle;
+                return Mono.just(ModelChatResult.builder()
+                        .content("<plan_submission>{\"title\":\"" + title
+                                + "\",\"body\":\"Body for " + title
+                                + "\",\"dependencies\":[]}</plan_submission>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private AgentContext revisionPlanContext(Path workspace, String sessionId, String runId,
+                                             String planId, int planRevision,
+                                             long planStateVersion, String title) {
+        AgentContext context = new AgentContext();
+        context.setRunId(runId);
+        context.setRootRunId(runId);
+        context.setSessionId(sessionId);
+        context.setCollaborationMode(CollaborationMode.PLAN);
+        context.setPlanTarget(planId);
+        context.setPlanRevision(planRevision);
+        context.setPlanStateVersion(planStateVersion);
+        context.setResolvedWorkspace(workspace);
+        context.setDecision(AgentDecision.builder()
+                .type("plan_submission")
+                .planSubmission(PlanSubmission.builder()
+                        .title(title)
+                        .body("Body for " + title)
+                        .dependencies(List.of())
+                        .build())
+                .build());
+        return context;
     }
 
     private ModelGateway readThenPlanWithMutationGateway(Path observed) {

@@ -31,6 +31,7 @@ public class AgentRun {
     private String question;
     private String workspace;
     private String planTarget;
+    private Integer planRevision;
     private Long planStateVersion;
     private AgentRunStatus status;
     private String currentNode;

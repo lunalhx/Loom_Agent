@@ -269,7 +269,18 @@ public class CliSessionService implements AutoCloseable {
         // configured via --secret-env-name ever reaches the ledger, checkpoint,
         // run.json, trace or report on disk.
         String safePrompt = redactor.redact(prompt);
-        AgentContextSnapshot seed = seedSnapshot();
+        AgentContextSnapshot seed;
+        CollaborationMode runMode;
+        String planTarget;
+        Integer planRevision;
+        long planStateVersion;
+        synchronized (this) {
+            seed = seedSnapshot();
+            runMode = session.getCollaborationMode();
+            planTarget = planTargetForRun();
+            planRevision = planRevisionForRun();
+            planStateVersion = session.getPlanStateVersion();
+        }
         String runId = "run_" + currentStamp() + "-" + UUID.randomUUID().toString().substring(0, 6);
 
         AgentQuestion question = AgentQuestion.builder()
@@ -280,9 +291,10 @@ public class CliSessionService implements AutoCloseable {
                 .workspace(workspace)
                 .maxSteps(options.maxSteps)
                 .approvalPolicy(options.approvalPolicy)
-                .collaborationMode(session.getCollaborationMode())
-                .planTarget("NEW")
-                .planStateVersion(session.getPlanStateVersion())
+                .collaborationMode(runMode)
+                .planTarget(planTarget)
+                .planRevision(planRevision)
+                .planStateVersion(planStateVersion)
                 .seedSnapshot(seed)
                 .build();
 
@@ -569,6 +581,46 @@ public class CliSessionService implements AutoCloseable {
         return mode;
     }
 
+    /** Explicitly start an independent Plan without invoking the model. */
+    public synchronized void newPlan() {
+        AgentSession current = currentDurableSession();
+        Instant expectedUpdatedAt = current.getUpdatedAt();
+        current.setCurrentPlanId(null);
+        current.setPlanStateVersion(current.getPlanStateVersion() + 1);
+        if (!sessionStore.saveIfUnchanged(current, expectedUpdatedAt)) {
+            throw new OptionsException("session changed while starting a new Plan");
+        }
+        session = current;
+    }
+
+    /** Select the latest revision of one existing Plan without invoking the model. */
+    public synchronized void selectPlan(String planId) {
+        if (StringUtils.isBlank(planId)) {
+            throw new OptionsException("Plan id must not be blank");
+        }
+        AgentSession current = currentDurableSession();
+        Plan selected = null;
+        if (current.getPlans() != null) {
+            for (Plan plan : current.getPlans()) {
+                if (plan != null && Objects.equals(planId, plan.getPlanId())
+                        && plan.currentRevision() != null) {
+                    selected = plan;
+                    break;
+                }
+            }
+        }
+        if (selected == null) {
+            throw new OptionsException("unknown Plan: " + planId);
+        }
+        Instant expectedUpdatedAt = current.getUpdatedAt();
+        current.setCurrentPlanId(selected.getPlanId());
+        current.setPlanStateVersion(current.getPlanStateVersion() + 1);
+        if (!sessionStore.saveIfUnchanged(current, expectedUpdatedAt)) {
+            throw new OptionsException("session changed while selecting Plan");
+        }
+        session = current;
+    }
+
     /** Read-only Plan index; it never starts a model Run. */
     public synchronized String planListView() {
         List<Plan> plans = session.getPlans();
@@ -608,7 +660,7 @@ public class CliSessionService implements AutoCloseable {
         String dependencies = revision.getDependencies() == null
                 ? "[]" : revision.getDependencies().toString();
         int basisSize = revision.getPlanBasis() == null ? 0 : revision.getPlanBasis().size();
-        return "plan_id: " + plan.getPlanId()
+        StringBuilder view = new StringBuilder("plan_id: " + plan.getPlanId()
                 + "\nrevision: " + revision.getRevision()
                 + "\ncurrent: " + Objects.equals(plan.getPlanId(), session.getCurrentPlanId())
                 + "\ntitle: " + revision.getTitle()
@@ -618,7 +670,17 @@ public class CliSessionService implements AutoCloseable {
                 + "\ncreated_at: " + revision.getCreatedAt()
                 + "\nupdated_at: " + revision.getUpdatedAt()
                 + "\nfreshness: " + (fresh ? "fresh" : "stale")
-                + "\nplan_basis_receipts: " + basisSize;
+                + "\nplan_basis_receipts: " + basisSize);
+        view.append("\nrevision_history:");
+        if (plan.getRevisions() != null) {
+            for (PlanRevision historical : plan.getRevisions()) {
+                view.append("\n  - revision: ").append(historical.getRevision())
+                        .append(" title: ").append(historical.getTitle())
+                        .append("\n    body:\n    ")
+                        .append(StringUtils.defaultString(historical.getBody()).replace("\n", "\n    "));
+            }
+        }
+        return view.toString();
     }
 
     private Plan currentPlan() {
@@ -638,6 +700,20 @@ public class CliSessionService implements AutoCloseable {
         if (durable.isPresent() && durable.get().getPendingPlanSubmission() != null) {
             session = recoverPendingPlan(durable.get());
         }
+    }
+
+    private AgentSession currentDurableSession() {
+        return sessionStore.find(sessionId).orElse(session);
+    }
+
+    private String planTargetForRun() {
+        return StringUtils.defaultIfBlank(session.getCurrentPlanId(), "NEW");
+    }
+
+    private Integer planRevisionForRun() {
+        Plan plan = currentPlan();
+        PlanRevision revision = plan == null ? null : plan.currentRevision();
+        return revision == null ? null : revision.getRevision();
     }
 
     /** Current in-memory session state (tests). */

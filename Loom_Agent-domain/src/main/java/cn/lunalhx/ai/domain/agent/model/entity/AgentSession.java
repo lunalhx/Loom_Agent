@@ -59,7 +59,7 @@ public class AgentSession {
     @Builder.Default
     private List<Plan> plans = new ArrayList<>();
 
-    /** The selected Plan identity; ticket 6 creates the first and only one. */
+    /** The selected Plan identity; controls may clear it or select another Plan. */
     private String currentPlanId;
 
     /** Monotonic Plan aggregate state version used by root-run CAS. */
