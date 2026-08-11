@@ -1,3 +1,0 @@
-# Replace reset with New Session
-
-The CLI removes `/reset` and exposes `/new` as a control event that creates a distinct Session identity with empty conversation, memory, checkpoint, Plan history, and Current Plan while inheriting the current collaboration mode. The prior Session remains unchanged and resumable, and `/reset` is not retained as an alias because clearing state in place is ambiguous once Plans and modes are durable Session state. This gives “new conversation” an identity boundary without silently widening Plan Mode permissions or selectively erasing fields from an existing Session.
