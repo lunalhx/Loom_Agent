@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolEvidenceCandidate;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -31,6 +32,7 @@ public class EvidenceReceipt {
     private String engineVersion;
     private String digestAlgorithm;
     private String stateDigest;
+    @JsonProperty("complete")
     private Boolean complete;
     private String sourceRunId;
     private String rootRunId;
@@ -63,7 +65,6 @@ public class EvidenceReceipt {
         return receipt.isRevalidatable() ? receipt : null;
     }
 
-    @JsonIgnore
     public boolean isComplete() {
         return Boolean.TRUE.equals(complete);
     }

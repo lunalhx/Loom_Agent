@@ -1,12 +1,17 @@
 package cn.lunalhx.ai.cli;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateProvenance;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
@@ -20,6 +25,9 @@ import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
+import cn.lunalhx.ai.infrastructure.loom.DelegateTool;
+import cn.lunalhx.ai.infrastructure.loom.ReadFileTool;
+import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import cn.lunalhx.ai.test.CliLoopTestFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
@@ -588,11 +596,68 @@ public class CliSessionServiceE2ETest {
         assertEquals(3, (int) child.getMaxSteps());
     }
 
+    @Test
+    public void planDelegateFoldsChildEvidenceAndMarksRootDriftWithoutWideningAuthority()
+            throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-delegate-evidence");
+        Path file = workspace.resolve("observed.txt");
+        Files.writeString(file, "before\n");
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        AtomicInteger parentCalls = new AtomicInteger();
+        TestDelegateRunner delegateRunner = new TestDelegateRunner(workspace, mapper, agent);
+        ModelGateway gateway = delegateReadTwiceGateway(file, parentCalls);
+
+        CliSessionService.CliOptions opts = options(workspace, gateway);
+        opts.startupMode = CollaborationMode.PLAN;
+        AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
+        FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper);
+        AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent,
+                java.util.List.of(), java.util.List.of(
+                        new ReadFileTool(new LocalWorkspacePort()),
+                        new DelegateTool(delegateRunner)));
+        CliSessionService session = new CliSessionService(opts, mapper, agent,
+                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+
+        assertEquals("done", session.runTurn("delegate the file read twice"));
+        session.close();
+
+        AgentRun root = runs.findLatestRootByConversationId(session.sessionId()).orElseThrow();
+        assertEquals("PLAN", root.getRunModeSnapshot().name());
+        assertTrue(Boolean.TRUE.equals(root.getEvidenceDrift()));
+        assertEquals(2, root.getEvidenceReceipts().size());
+        assertNotEquals(root.getEvidenceReceipts().get(0).getStateDigest(),
+                root.getEvidenceReceipts().get(1).getStateDigest());
+        assertEquals(root.getRunId(), root.getEvidenceReceipts().get(0).getRootRunId());
+        assertEquals(root.getRunId(), root.getEvidenceReceipts().get(1).getRootRunId());
+        assertEquals(2, delegateRunner.results.size());
+        assertEquals(AgentRunStatus.COMPLETED, delegateRunner.results.get(1).getStatus());
+        assertEquals(delegateRunner.results.get(1).getProvenance().getRunId(),
+                root.getEvidenceReceipts().get(1).getSourceRunId());
+        assertEquals(java.util.List.of("read_file"), delegateRunner.lastAllowedTools);
+
+        java.util.List<AgentRun> children = runs.findChildren(root.getRunId());
+        assertEquals(2, children.size());
+        for (AgentRun child : children) {
+            assertEquals(CollaborationMode.PLAN, child.getRunModeSnapshot());
+            assertEquals(1, (int) child.getDepth());
+            assertEquals(3, (int) child.getMaxSteps());
+        }
+        var checkpoint = checkpoints.latest(root.getRunId()).orElseThrow();
+        assertNotNull(checkpoint.getContextSnapshot().getToolResult());
+        assertNotNull(checkpoint.getContextSnapshot().getToolResult().getDelegateResult());
+        assertEquals(AgentRunStatus.COMPLETED,
+                checkpoint.getContextSnapshot().getToolResult().getDelegateResult().getStatus());
+    }
+
     /** Test-local DelegateRunner: spawns a real read-only child loop with true lineage. */
-    private static final class TestDelegateRunner implements cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner {
+    private static final class TestDelegateRunner implements DelegateRunner {
         private final Path workspace;
         private final ObjectMapper mapper;
         private final AgentRuntimeProperties agent;
+        private final java.util.List<DelegateResult> results = new java.util.ArrayList<>();
+        private java.util.List<String> lastAllowedTools = java.util.List.of();
 
         TestDelegateRunner(Path workspace, ObjectMapper mapper, AgentRuntimeProperties agent) {
             this.workspace = workspace;
@@ -601,10 +666,12 @@ public class CliSessionServiceE2ETest {
         }
 
         @Override
-        public String delegate(String task, int maxSteps, String parentRunId, String rootRunId,
-                               String sessionId, String workspacePath, String parentSummary,
-                               CollaborationMode collaborationMode) {
+        public DelegateResult delegate(DelegateRequest request) {
+            lastAllowedTools = request.getAllowedTools();
+            String childRunId = "child-" + java.util.UUID.randomUUID();
             ModelGateway childGateway = new ModelGateway() {
+                private final AtomicInteger calls = new AtomicInteger();
+
                 @Override
                 public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
                     return Flux.empty();
@@ -612,8 +679,17 @@ public class CliSessionServiceE2ETest {
 
                 @Override
                 public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                    if (calls.getAndIncrement() == 0
+                            && request.getAllowedTools() != null
+                            && request.getAllowedTools().contains("read_file")) {
+                        return Mono.just(ModelChatResult.builder()
+                                .content("<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"observed.txt\",\"start\":1,\"end\":1}}</tool>")
+                                .finishReason("stop")
+                                .actualModel("deepseek-v4-flash")
+                                .build());
+                    }
                     return Mono.just(ModelChatResult.builder()
-                            .content("<final>child found nothing</final>")
+                            .content("<final>child read complete</final>")
                             .finishReason("stop")
                             .actualModel("deepseek-v4-flash")
                             .build());
@@ -625,17 +701,19 @@ public class CliSessionServiceE2ETest {
                             new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())));
             AtomicReference<String> answer = new AtomicReference<>("");
             childLoop.ask(cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion.builder()
-                            .question(task)
-                            .parentRunId(parentRunId)
-                            .rootRunId(rootRunId)
-                            .sessionId(sessionId)
-                            .conversationId(sessionId)
-                            .workspace(workspacePath)
-                            .agentDepth(1)
-                            .maxSteps(Math.min(3, maxSteps))
+                            .runId(childRunId)
+                            .question(request.getTask())
+                            .parentRunId(request.getParentRunId())
+                            .rootRunId(request.getRootRunId())
+                            .sessionId(request.getSessionId())
+                            .conversationId(request.getConversationId())
+                            .workspace(request.getWorkspaceRoot())
+                            .agentDepth(request.getParentDepth() + 1)
+                            .maxSteps(request.getChildMaxSteps())
+                            .maxAttempts(request.getChildMaxAttempts())
                             .approvalPolicy("never")
-                            .collaborationMode(collaborationMode)
-                            .allowedTools(java.util.List.of("list_files", "read_file", "search"))
+                            .collaborationMode(request.getModeSnapshot())
+                            .allowedTools(request.getAllowedTools())
                             .build())
                     .doOnNext(e -> {
                         if (e.getAnswer() != null && !e.getAnswer().isBlank()) {
@@ -643,8 +721,65 @@ public class CliSessionServiceE2ETest {
                         }
                     })
                     .blockLast();
-            return "delegate_result:\n" + (answer.get().isBlank() ? "(empty)" : answer.get());
+            AgentRun child = new FileAgentRunRepository(workspace, mapper).find(childRunId).orElseThrow();
+            DelegateResult result = DelegateResult.builder()
+                    .safeOutcome(answer.get().isBlank() ? "(empty)" : answer.get())
+                    .status(child.getStatus())
+                    .provenance(DelegateProvenance.builder()
+                            .runId(child.getRunId())
+                            .parentRunId(child.getParentRunId())
+                            .rootRunId(child.getRootRunId())
+                            .sessionId(child.getSessionId())
+                            .workspaceRoot(realWorkspace())
+                            .modeSnapshot(child.getRunModeSnapshot())
+                            .depth(child.getDepth())
+                            .build())
+                    .evidenceReceipts(child.getEvidenceReceipts())
+                    .build();
+            results.add(result);
+            return result;
         }
+
+        private String realWorkspace() {
+            try {
+                return workspace.toRealPath().toString();
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    private ModelGateway delegateReadTwiceGateway(Path file, AtomicInteger calls) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                int call = calls.getAndIncrement();
+                if (call == 0 || call == 1) {
+                    if (call == 1) {
+                        try {
+                            Files.writeString(file, "after\n");
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                    }
+                    return Mono.just(ModelChatResult.builder()
+                            .content("<tool>{\"name\":\"delegate\",\"args\":{\"task\":\"read observed.txt\",\"max_steps\":3}}</tool>")
+                            .finishReason("stop")
+                            .actualModel("deepseek-v4-flash")
+                            .build());
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<final>done</final>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
     }
 
     /** Gateway: parent calls delegate once, then finalizes; the child runs in

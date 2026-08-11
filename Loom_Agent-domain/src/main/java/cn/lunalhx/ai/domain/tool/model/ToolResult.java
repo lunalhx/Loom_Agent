@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.tool.model;
 
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,6 +36,7 @@ public class ToolResult {
     private String workspaceFingerprint;
     private List<String> diffSummary;
     private Map<String, Object> details;
+    private DelegateResult delegateResult;
 
     /** Adapter metadata used before sanitization/clipping; never persisted. */
     @JsonIgnore

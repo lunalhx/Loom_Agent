@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.tool.model;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
@@ -31,6 +32,7 @@ public class ToolCall {
     private CollaborationMode collaborationMode;
     private EffectProfile effectProfile;
     private boolean approvalRequired;
+    private DelegateRequest delegateRequest;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

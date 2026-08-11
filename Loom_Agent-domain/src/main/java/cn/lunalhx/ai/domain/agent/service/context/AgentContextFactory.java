@@ -104,7 +104,9 @@ public final class AgentContextFactory {
         AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         int maxSteps = question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps();
         context.setMaxSteps(maxSteps);
-        context.setMaxAttempts(Math.max(maxSteps * 3, maxSteps + 4));
+        context.setMaxAttempts(question.getMaxAttempts() == null
+                ? Math.max(maxSteps * 3, maxSteps + 4)
+                : Math.max(1, question.getMaxAttempts()));
         context.setStartedAt(Instant.now());
         context.setToolSteps(0);
         context.setModelAttempts(0);
@@ -158,7 +160,9 @@ public final class AgentContextFactory {
         AgentRuntimeProperties runProperties = context.runtimeProperties(properties);
         int maxSteps = question.getMaxSteps() == null ? runProperties.getMaxSteps() : question.getMaxSteps();
         context.setMaxSteps(maxSteps);
-        context.setMaxAttempts(Math.max(maxSteps * 3, maxSteps + 4));
+        context.setMaxAttempts(question.getMaxAttempts() == null
+                ? Math.max(maxSteps * 3, maxSteps + 4)
+                : Math.max(1, question.getMaxAttempts()));
         context.setStartedAt(Instant.now());
         context.setToolSteps(0);
         context.setModelAttempts(0);

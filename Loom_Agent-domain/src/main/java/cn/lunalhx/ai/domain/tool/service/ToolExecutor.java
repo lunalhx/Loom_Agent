@@ -1,7 +1,10 @@
 package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateProvenance;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
@@ -198,14 +201,124 @@ public class ToolExecutor {
     }
 
     private void capturePlanEvidence(AgentContext context, ToolResult result) {
-        if (context.getCollaborationMode() != CollaborationMode.PLAN
-                || result == null || !result.isSuccess()
-                || result.getEvidenceCandidate() == null) {
+        if (context.getCollaborationMode() != CollaborationMode.PLAN || result == null) {
             return;
         }
-        EvidenceReceipt receipt = EvidenceReceipt.from(
-                result.getEvidenceCandidate(), context.getRunId(), context.getRootRunId());
-        context.recordEvidence(receipt);
+        if (result.isSuccess() && result.getEvidenceCandidate() != null) {
+            EvidenceReceipt receipt = EvidenceReceipt.from(
+                    result.getEvidenceCandidate(), context.getRunId(), context.getRootRunId());
+            if (receipt != null) {
+                context.recordEvidence(receipt);
+            }
+        }
+        DelegateResult delegateResult = result.getDelegateResult();
+        if (delegateResult == null || !delegateResult.isSuccessful()) {
+            return;
+        }
+        foldDelegateEvidence(context, delegateResult);
+    }
+
+    /** Fold only receipts that the root can prove came from its bounded child. */
+    private void foldDelegateEvidence(AgentContext context, DelegateResult result) {
+        DelegateProvenance provenance = result.getProvenance();
+        if (!authorizedChild(context, provenance)) {
+            return;
+        }
+        for (EvidenceReceipt receipt : result.safeEvidenceReceipts()) {
+            if (authorizedReceipt(context, provenance, receipt)) {
+                context.recordEvidence(receipt);
+            }
+        }
+    }
+
+    private boolean authorizedChild(AgentContext context, DelegateProvenance provenance) {
+        if (provenance == null || provenance.getRunId() == null
+                || provenance.getParentRunId() == null
+                || !Objects.equals(context.getRunId(), provenance.getParentRunId())
+                || !Objects.equals(rootRunId(context), provenance.getRootRunId())
+                || !Objects.equals(context.getSessionId(), provenance.getSessionId())
+                || provenance.getModeSnapshot() != context.getCollaborationMode()
+                || !sameWorkspace(context.getResolvedWorkspace(), provenance.getWorkspaceRoot())) {
+            return false;
+        }
+        AgentRuntimeProperties properties =
+                context.runtimeProperties(new AgentRuntimeProperties());
+        int maxDepth = properties.getSubAgentMaxDepth() == null
+                ? 1 : properties.getSubAgentMaxDepth();
+        return provenance.getDepth() != null
+                && provenance.getDepth() == context.getAgentDepth() + 1
+                && provenance.getDepth() <= maxDepth;
+    }
+
+    private boolean authorizedReceipt(AgentContext context, DelegateProvenance provenance,
+                                     EvidenceReceipt receipt) {
+        if (receipt == null || !receipt.isRevalidatable()
+                || !Objects.equals(provenance.getRunId(), receipt.getSourceRunId())
+                || !Objects.equals(rootRunId(context), receipt.getRootRunId())
+                || !withinWorkspace(context.getResolvedWorkspace(), receipt.getRepositoryRelativePath())) {
+            return false;
+        }
+        String toolName = evidenceToolName(receipt);
+        if (toolName == null || !Objects.equals(toolName, receipt.getObservationType())) {
+            return false;
+        }
+        if (context.getAllowedTools() != null && !context.getAllowedTools().contains(toolName)) {
+            return false;
+        }
+        return registry.isPlanVisible(toolName, context.getAllowedTools());
+    }
+
+    private String evidenceToolName(EvidenceReceipt receipt) {
+        String semantics = receipt.getToolSemantics();
+        if (semantics == null) {
+            return null;
+        }
+        if (semantics.startsWith("read_file:")) {
+            return "read_file";
+        }
+        if (semantics.startsWith("list_files:")) {
+            return "list_files";
+        }
+        if (semantics.startsWith("search:")) {
+            return "search";
+        }
+        return null;
+    }
+
+    private boolean withinWorkspace(Path root, String relativePath) {
+        if (root == null || relativePath == null || relativePath.isBlank()) {
+            return false;
+        }
+        try {
+            Path relative = Path.of(relativePath);
+            if (relative.isAbsolute()) {
+                return false;
+            }
+            Path realRoot = root.toRealPath();
+            Path candidate = realRoot.resolve(relative).normalize();
+            if (!candidate.startsWith(realRoot)) {
+                return false;
+            }
+            return candidate.toRealPath().startsWith(realRoot);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean sameWorkspace(Path root, String childRoot) {
+        if (root == null || childRoot == null || childRoot.isBlank()) {
+            return false;
+        }
+        try {
+            return root.toRealPath().equals(Path.of(childRoot).toRealPath());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String rootRunId(AgentContext context) {
+        return context.getRootRunId() == null || context.getRootRunId().isBlank()
+                ? context.getRunId() : context.getRootRunId();
     }
 
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,

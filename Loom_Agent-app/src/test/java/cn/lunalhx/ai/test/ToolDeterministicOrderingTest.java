@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
@@ -39,8 +41,10 @@ public class ToolDeterministicOrderingTest {
                 new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.PatchFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
-                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary, mode) ->
-                                "delegate_result:\nDone")),
+                        request -> DelegateResult.builder()
+                                .safeOutcome("Done")
+                                .status(AgentRunStatus.COMPLETED)
+                                .build())),
                 new ToolSchemaValidator(objectMapper));
 
         List<ToolSpec> specs = registry.specs();
@@ -59,8 +63,10 @@ public class ToolDeterministicOrderingTest {
         ToolRegistry registry = new ToolRegistry(List.of(
                 new cn.lunalhx.ai.infrastructure.loom.ReadFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
-                        (task, maxSteps, parentRunId, rootRunId, sessionId, workspace, summary, mode) ->
-                                "delegate_result:\nDone")),
+                        request -> DelegateResult.builder()
+                                .safeOutcome("Done")
+                                .status(AgentRunStatus.COMPLETED)
+                                .build())),
                 new ToolSchemaValidator(objectMapper));
 
         List<ToolSpec> base = registry.baseSpecs();

@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
@@ -95,6 +96,14 @@ public class ToolDispatchNode extends AbstractAgentNode {
         if (rejection != null) {
             context.setToolResult(rejection);
             return NodeResult.nextNode(AgentNodeNames.TOOL_OUTPUT, events);
+        }
+        if ("delegate".equals(toolCall.getName())) {
+            cn.lunalhx.ai.domain.tool.model.OutboundDisclosure disclosure =
+                    toolCall.getEffectProfile() == null
+                            ? cn.lunalhx.ai.domain.tool.model.OutboundDisclosure.NONE
+                            : toolCall.getEffectProfile().outboundDisclosure();
+            toolCall.setDelegateRequest(DelegateRequest.fromParent(
+                    context, context.runtimeProperties(properties), disclosure));
         }
         context.setToolCall(toolCall);
         return NodeResult.nextNode(AgentNodeNames.TOOL_EXECUTE, events);

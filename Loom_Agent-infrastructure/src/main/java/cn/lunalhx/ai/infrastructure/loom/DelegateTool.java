@@ -1,11 +1,12 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
-import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.springframework.stereotype.Component;
@@ -15,7 +16,7 @@ import java.util.Objects;
 /**
  * loom-code {@code delegate}: ask a bounded read-only child agent to
  * investigate. The actual child spawn is delegated to a {@link DelegateRunner};
- * the child inherits real lineage (parentRunId/rootRunId/sessionId/workspace).
+ * the child inherits the Runtime-created lineage and authority boundary.
  */
 @Component
 public class DelegateTool implements AgentTool {
@@ -56,17 +57,23 @@ public class DelegateTool implements AgentTool {
             return failure("task must not be empty", startedAt);
         }
         try {
-            String parentSummary = call.getRecentSummary() == null
-                    ? "" : abbreviate(call.getRecentSummary(), MAX_PARENT_SUMMARY_CHARS);
-            CollaborationMode mode = Objects.requireNonNull(call.getCollaborationMode(),
-                    "delegate call is missing its immutable collaboration mode");
-            String result = delegateRunner.delegate(task, maxSteps,
-                    call.getRunId(),
-                    call.getRootRunId() == null ? call.getRunId() : call.getRootRunId(),
-                    call.getConversationId(),
-                    call.getWorkspaceRoot() == null ? null : call.getWorkspaceRoot().toString(),
-                    parentSummary, mode);
-            return ToolResult.success(result, false, elapsed(startedAt));
+            DelegateRequest request = Objects.requireNonNull(call.getDelegateRequest(),
+                    "delegate call is missing its Runtime-created request");
+            request.setTask(task);
+            request.setRequestedMaxSteps(maxSteps);
+            request.setParentSummary(call.getRecentSummary() == null
+                    ? "" : abbreviate(call.getRecentSummary(), MAX_PARENT_SUMMARY_CHARS));
+            DelegateResult result = delegateRunner.delegate(request);
+            if (result == null) {
+                return failure("delegate returned no structured result", startedAt);
+            }
+            String outcome = result.getSafeOutcome() == null || result.getSafeOutcome().isBlank()
+                    ? "(empty)" : result.getSafeOutcome();
+            ToolResult toolResult = result.isSuccessful()
+                    ? ToolResult.success(outcome, false, elapsed(startedAt))
+                    : ToolResult.failure("delegate_failed", outcome, elapsed(startedAt));
+            toolResult.setDelegateResult(result);
+            return toolResult;
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);
         }
