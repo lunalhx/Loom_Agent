@@ -275,6 +275,60 @@ public class CliSessionService implements AutoCloseable {
         return runTurn(prompt, null, null, null);
     }
 
+    /**
+     * Continue an unfinished root Run from its durable checkpoint after process
+     * restart. Reuses the existing run identity and resumes at {@code prompt_build}.
+     */
+    public String continueInterruptedRun() {
+        AgentRun interrupted = runStore.findLatestRootByConversationId(sessionId)
+                .orElseThrow(() -> new OptionsException("no root run to continue"));
+        if (interrupted.getStatus().terminal()) {
+            throw new OptionsException("Run is already terminal and cannot be resumed");
+        }
+        return continueRun(interrupted.getRunId());
+    }
+
+    private String continueRun(String runId) {
+        AgentQuestion question = AgentQuestion.builder()
+                .question("")
+                .runId(runId)
+                .sessionId(sessionId)
+                .conversationId(sessionId)
+                .workspace(workspace)
+                .maxSteps(options.maxSteps)
+                .approvalPolicy(options.approvalPolicy)
+                .collaborationMode(session.getCollaborationMode())
+                .inheritedSessionExecutionGrants(session.getExecutionGrants())
+                .fullAccess(false)
+                .build();
+        String finalAnswer = collectAskAnswer(question);
+        persistSession();
+        return finalAnswer;
+    }
+
+    private String collectAskAnswer(AgentQuestion question) {
+        StringBuilder answer = new StringBuilder();
+        StringBuilder error = new StringBuilder();
+        List<AgentEvent> events = loopService.ask(question)
+                .collectList()
+                .block(Duration.ofMinutes(30));
+        if (events != null) {
+            for (AgentEvent event : events) {
+                if (event.getAnswer() != null && !event.getAnswer().isBlank()) {
+                    answer.setLength(0);
+                    answer.append(event.getAnswer());
+                }
+                if (event.getType() == AgentEventType.ERROR && event.getMessage() != null) {
+                    error.append(event.getMessage()).append('\n');
+                }
+            }
+        }
+        if (answer.length() == 0 && error.length() > 0) {
+            return "error: " + error.toString().strip();
+        }
+        return answer.length() == 0 ? "(empty answer)" : answer.toString();
+    }
+
     private String runTurn(String prompt, PlanBinding planBinding,
                            CollaborationMode modeOverride,
                            AgentRunStartGuard runStartGuard) {

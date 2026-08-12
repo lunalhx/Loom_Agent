@@ -25,6 +25,10 @@ public final class SkillRunBootstrap {
             // Skill Inheritance: keep parent-frozen catalog and active snapshots.
             return;
         }
+        if (context.getSkillCatalogSnapshot() != null) {
+            // Durable continuation already restored the frozen catalog/active skills.
+            return;
+        }
         Path workspace = context.getResolvedWorkspace();
         if (workspace == null) {
             throw new SkillActivationException("workspace is required for skill discovery");

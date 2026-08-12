@@ -91,7 +91,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         throw new IllegalStateException("Run start authorization failed", e);
                     }
                 }
-                AgentContext context = resolveContext(question);
+                AgentContext context;
+                boolean continuing = false;
+                if (canContinueFromCheckpoint(question)) {
+                    context = components.contextFactory().restoreFromCheckpoint(
+                            question,
+                            components.checkpointRepository().latest(question.getRunId())
+                                    .orElseThrow().getContextSnapshot());
+                    continuing = true;
+                } else {
+                    context = components.contextFactory().create(question);
+                }
                 capture.accept(context);
                 try {
                     skillRunBootstrap.prepareRun(context, null);
@@ -119,12 +129,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
                 try {
                     emit(sink, List.of(components.eventFactory().runStarted(context)));
-                    emit(sink, lifecycle.initializeRun(context));
+                    if (continuing) {
+                        context.setCurrentNode(AgentNodeNames.PROMPT_BUILD);
+                        emit(sink, lifecycle.resumeRunning(context));
+                    } else {
+                        emit(sink, lifecycle.initializeRun(context));
+                    }
                     emit(sink, List.of(components.eventFactory().meta(context)));
                     emitSecretRedactionState(context);
                     closeQuietly(startLease);
                     startLease = null;
-                    runLoop(context, sink);
+                    runLoop(context, AgentNodeNames.PROMPT_BUILD, sink);
                 } finally {
                     if (token != null) {
                         executionGuard.release(lockKey, token);
@@ -148,6 +163,17 @@ public class DefaultAgentLoopService implements AgentLoopService {
 
     private AgentContext resolveContext(AgentQuestion question) {
         return components.contextFactory().create(question);
+    }
+
+    private boolean canContinueFromCheckpoint(AgentQuestion question) {
+        if (question == null || StringUtils.isBlank(question.getRunId())) {
+            return false;
+        }
+        return components.runRepository().find(question.getRunId())
+                .filter(run -> !run.getStatus().terminal())
+                .flatMap(run -> components.checkpointRepository().latest(run.getRunId()))
+                .map(checkpoint -> checkpoint.getContextSnapshot() != null)
+                .orElse(false);
     }
 
     private boolean isTerminalRun(AgentQuestion question) {

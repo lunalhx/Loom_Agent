@@ -22,9 +22,9 @@ public final class AgentPromptState {
     // ---- working context memory ----
     private WorkingContextMemory workingMemory;
 
-    // ---- run-scoped skills (not Session state; durable resume is a later ticket) ----
-    private transient cn.lunalhx.ai.domain.skill.model.SkillCatalog skillCatalogSnapshot;
-    private transient List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills = List.of();
+    // ---- run-scoped skills (durable within Run checkpoints; not Session state) ----
+    private cn.lunalhx.ai.domain.skill.model.SkillCatalog skillCatalogSnapshot;
+    private List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills = List.of();
 
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;

@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.skill.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.nio.file.Path;
 import java.util.List;
 
@@ -14,5 +16,5 @@ public record SkillCatalogEntry(
         String compatibility,
         String metadata,
         List<String> compatibilityDiagnostics,
-        Path packageRoot) {
+        @JsonIgnore Path packageRoot) {
 }

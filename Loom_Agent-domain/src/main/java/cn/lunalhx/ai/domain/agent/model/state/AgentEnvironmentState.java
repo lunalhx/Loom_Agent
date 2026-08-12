@@ -47,6 +47,11 @@ public final class AgentEnvironmentState {
         all.addAll(sessionExecutionGrants);
         return List.copyOf(all);
     }
+
+    /** Run-local execution grants only; excludes Session overlay. */
+    public List<ExecutionGrant> runExecutionGrants() {
+        return List.copyOf(executionGrants);
+    }
     public RootRunSecurityScope securityScope() { return securityScope; }
 
     public void setResolvedWorkspace(Path v) { this.resolvedWorkspace = v; }

@@ -10,11 +10,14 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
+import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind;
+import cn.lunalhx.ai.domain.tool.model.FrozenAuthorizationSnapshot;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,24 +26,19 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v13 — only durable state needed for recovery.
+ * Checkpoint snapshot v14 — durable state needed for recovery of an unfinished Run,
+ * including frozen Skill Catalog / Active Skill bodies and a rehydratable authorization
+ * snapshot. Host-absolute Skill package paths are never persisted.
  *
- * <p>Excluded from persistence: modelOutput, current span,
- * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
- * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
- *
- * <p>v13 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
- * and stores safe Plan Evidence receipts without raw observations.
- * {@code toolSteps}/{@code modelAttempts} counters
- * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
- * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
- * It also stores only non-sensitive authorization audit metadata; policy rules,
- * grants, disposable roots and Full Access host paths remain transient. Only v13
- * snapshots are recoverable; earlier shapes are rejected at restore time.
+ * <p>v14 continues loom-code loop semantics and safe Plan Evidence receipts.
+ * Policy rules, grants and capability profile are restored from
+ * {@link FrozenAuthorizationSnapshot} rather than recompiled from host config.
+ * Disposable security-scope roots and Full Access host paths remain non-durable;
+ * Full Access Runs refuse restore after process restart. Only v14 snapshots are
+ * recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -48,7 +46,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    public static final int CURRENT_SCHEMA_VERSION = 13;
+    public static final int CURRENT_SCHEMA_VERSION = 14;
 
     private Integer schemaVersion;
 
@@ -76,7 +74,7 @@ public class AgentContextSnapshot {
     // -- environment (only workspace ref; resolved path re-injected) --
     private WorkspaceRef workspace;
 
-    // -- authorization audit (safe summary only; profile and rules are re-frozen) --
+    // -- authorization audit (safe summary) + frozen rehydratable auth --
     private PermissionAction permissionDefaultAction;
     private String permissionSnapshotDigest;
     private List<String> permissionSourceDigests;
@@ -84,6 +82,11 @@ public class AgentContextSnapshot {
     private String executionCapabilityFingerprint;
     private Boolean fullAccess;
     private List<String> authorizationGrantSummary;
+    private FrozenAuthorizationSnapshot frozenAuthorization;
+
+    // -- run-scoped skills (frozen; no host-absolute package roots) --
+    private SkillCatalog skillCatalogSnapshot;
+    private List<ActiveSkillSnapshot> activeSkills;
 
     // -- runtime (durable) --
     private Integer toolSteps;
@@ -160,6 +163,16 @@ public class AgentContextSnapshot {
         AgentRecoveryState recovery = context.recovery();
         AgentTraceState trace = context.trace();
 
+        FrozenAuthorizationSnapshot frozenAuth = null;
+        if (context.getPermissionPolicySnapshot() != null && context.getExecutionProfile() != null) {
+            frozenAuth = FrozenAuthorizationSnapshot.capture(
+                    context.getPermissionPolicySnapshot(),
+                    context.getExecutionProfile(),
+                    context.getPermissionGrants(),
+                    context.environment().runExecutionGrants(),
+                    context.getApprovalPolicy());
+        }
+
         return AgentContextSnapshot.builder()
                 .schemaVersion(CURRENT_SCHEMA_VERSION)
                 // identity
@@ -195,6 +208,11 @@ public class AgentContextSnapshot {
                 .fullAccess(context.getExecutionProfile() != null
                         && context.getExecutionProfile().kind() == ExecutionProfileKind.DANGER_FULL_ACCESS)
                 .authorizationGrantSummary(grantSummary(context))
+                .frozenAuthorization(frozenAuth)
+                // skills
+                .skillCatalogSnapshot(context.getSkillCatalogSnapshot())
+                .activeSkills(context.getActiveSkills() == null ? List.of()
+                        : List.copyOf(context.getActiveSkills()))
                 // runtime
                 .toolSteps(runtime.toolSteps())
                 .modelAttempts(runtime.modelAttempts())
@@ -244,6 +262,13 @@ public class AgentContextSnapshot {
 
     public AgentContext restore() {
         ensureCurrentShape();
+        if (Boolean.TRUE.equals(fullAccess)
+                || (frozenAuthorization != null
+                && frozenAuthorization.profileKind() == ExecutionProfileKind.DANGER_FULL_ACCESS)
+                || executionProfileKind == ExecutionProfileKind.DANGER_FULL_ACCESS) {
+            throw new IllegalArgumentException(
+                    "Full Access runs are not recoverable after process restart");
+        }
         AgentContext context = new AgentContext();
 
         // identity
@@ -269,6 +294,10 @@ public class AgentContextSnapshot {
 
         // environment — workspace ref only; resolved path and toolSpecs re-injected by factory
         context.setWorkspace(workspace);
+
+        // skills (package roots rebound by factory)
+        context.setSkillCatalogSnapshot(skillCatalogSnapshot);
+        context.setActiveSkills(activeSkills == null ? List.of() : List.copyOf(activeSkills));
 
         // runtime
         context.setToolSteps(toolSteps == null ? 0 : toolSteps);

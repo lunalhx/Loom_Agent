@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.skill.service.SkillPackageRootBinder;
 import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.service.RunAuthorizationSource;
 import org.apache.commons.lang3.StringUtils;
@@ -160,6 +161,65 @@ public final class AgentContextFactory {
             context.setCurrentModel(question.getModel());
         }
         return context;
+    }
+
+    /**
+     * Continue an unfinished Run from its durable checkpoint. Creates a new
+     * disposable security scope, rehydrates frozen mode/policy/grants/capability
+     * profile and Skill state, and rebinds Skill package roots without
+     * rediscovering catalog content from disk.
+     */
+    public AgentContext restoreFromCheckpoint(AgentQuestion question, AgentContextSnapshot checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        checkpoint.ensureCurrentShape();
+        AgentWorkspace workspace = workspaceResolver.resolve(
+                StringUtils.defaultIfBlank(question.getWorkspace(),
+                        checkpoint.getWorkspace() == null ? null : checkpoint.getWorkspace().getLocation()));
+        AgentContext context = checkpoint.restore();
+        context.setRunConfig(runtimeConfigSource.captureRunConfig());
+        context.setResolvedWorkspace(workspace.getRoot());
+        context.setWorkspace(workspace.getWorkspace());
+        context.setWorkspaceDisplayName(workspace.getDisplayName());
+        if (StringUtils.isNotBlank(question.getSessionId())) {
+            context.setSessionId(question.getSessionId());
+        }
+        context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
+        RootRunSecurityScope scope = RootRunSecurityScope.create();
+        context.setSecurityScope(scope);
+        rehydrateFrozenAuthorization(context, checkpoint, workspace.getRoot(), scope);
+        Path userHome = Path.of(System.getProperty("user.home"));
+        SkillPackageRootBinder binder = new SkillPackageRootBinder();
+        context.setSkillCatalogSnapshot(binder.rebindCatalog(
+                context.getSkillCatalogSnapshot(), workspace.getRoot(), userHome));
+        context.setActiveSkills(binder.rebindActive(
+                context.getActiveSkills(), workspace.getRoot(), userHome));
+        context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools() != null
+                ? question.getAllowedTools() : context.getAllowedTools()));
+        context.setToolSpecs(toolRegistry.effectiveSpecs(
+                context.getCollaborationMode(), context.getAllowedTools()));
+        context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
+        if (StringUtils.isNotBlank(question.getModel())) {
+            context.setCurrentModel(question.getModel());
+        }
+        return context;
+    }
+
+    private void rehydrateFrozenAuthorization(AgentContext context,
+                                              AgentContextSnapshot checkpoint,
+                                              Path workspace,
+                                              RootRunSecurityScope scope) {
+        cn.lunalhx.ai.domain.tool.model.FrozenAuthorizationSnapshot frozen =
+                checkpoint.getFrozenAuthorization();
+        if (frozen == null) {
+            throw new IllegalArgumentException(
+                    "checkpoint lacks frozen authorization; refusing restore");
+        }
+        context.setApprovalPolicy(frozen.approvalPolicy());
+        context.setPermissionPolicySnapshot(frozen.toPolicy());
+        context.setPermissionGrants(frozen.permissionGrants());
+        context.setExecutionGrants(frozen.executionGrants());
+        context.setExecutionProfile(frozen.toExecutionProfile(
+                workspace, scope.homeRoot(), scope.temporaryRoot()));
     }
 
     private void applyCommonFields(AgentContext context, AgentQuestion question, AgentWorkspace workspace, String runId) {

@@ -60,6 +60,12 @@ public final class AgentRunLifecycle {
                 .build());
     }
 
+    /** Mark a restored unfinished Run as running again at {@code prompt_build}. */
+    public List<AgentEvent> resumeRunning(AgentContext context) {
+        saveRun(context, AgentNodeNames.PROMPT_BUILD, AgentRunStatus.RUNNING);
+        return List.of();
+    }
+
     public void recordModelAttempt(AgentContext context) {
         saveRun(context, AgentNodeNames.MODEL_CALL, AgentRunStatus.RUNNING);
     }
