@@ -2,6 +2,8 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
+import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
@@ -10,9 +12,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -28,9 +30,12 @@ import java.util.Set;
 public class DelegateRequest {
     private transient PermissionPolicySnapshot permissionPolicySnapshot;
     private transient RootRunSecurityScope securityScope;
+    private transient SkillCatalog skillCatalogSnapshot;
+    private transient List<ActiveSkillSnapshot> activeSkills;
 
     private static final int MAX_CHILD_STEPS = 3;
-    private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search", "run_shell");
+    private static final Set<String> READ_ONLY_TOOLS = Set.of(
+            "list_files", "read_file", "search", "run_shell", "read_skill_resource");
 
     private String task;
     private int requestedMaxSteps;
@@ -72,12 +77,15 @@ public class DelegateRequest {
                 ? context.getToolSpecs().stream()
                 .map(spec -> spec.getName())
                 .filter(name -> name != null && !name.isBlank())
-                .collect(java.util.stream.Collectors.toSet())
-                : Set.copyOf(context.getAllowedTools());
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
+                : new LinkedHashSet<>(context.getAllowedTools());
         List<String> allowedTools = parentTools.stream()
                 .filter(READ_ONLY_TOOLS::contains)
                 .sorted()
                 .toList();
+
+        List<ActiveSkillSnapshot> inheritedActive = context.getActiveSkills() == null
+                ? List.of() : List.copyOf(context.getActiveSkills());
 
         return DelegateRequest.builder()
                 .requestedMaxSteps(MAX_CHILD_STEPS)
@@ -102,6 +110,32 @@ public class DelegateRequest {
                 .remainingTokenBudget(remainingTokenBudget)
                 .permissionPolicySnapshot(context.getPermissionPolicySnapshot())
                 .securityScope(context.getSecurityScope())
+                .skillCatalogSnapshot(context.getSkillCatalogSnapshot())
+                .activeSkills(inheritedActive)
+                .build();
+    }
+
+    /** Build the child AgentQuestion from this already-validated boundary. */
+    public AgentQuestion toChildQuestion(String childRunId) {
+        return AgentQuestion.builder()
+                .runId(childRunId)
+                .question(task)
+                .parentRunId(parentRunId)
+                .rootRunId(rootRunId)
+                .sessionId(sessionId)
+                .conversationId(conversationId)
+                .workspace(workspaceRoot)
+                .agentDepth(parentDepth + 1)
+                .maxSteps(getChildMaxSteps())
+                .maxAttempts(getChildMaxAttempts())
+                .approvalPolicy("never")
+                .inheritedPermissionPolicySnapshot(permissionPolicySnapshot)
+                .inheritedSecurityScope(securityScope)
+                .collaborationMode(modeSnapshot)
+                .planBinding(planBinding)
+                .allowedTools(allowedTools)
+                .inheritedSkillCatalogSnapshot(skillCatalogSnapshot)
+                .inheritedActiveSkills(activeSkills == null ? List.of() : List.copyOf(activeSkills))
                 .build();
     }
 

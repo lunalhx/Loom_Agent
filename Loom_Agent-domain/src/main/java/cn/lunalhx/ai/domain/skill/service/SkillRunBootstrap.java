@@ -10,17 +10,19 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Root-run Skill bootstrap: freeze catalog, resolve explicit {@code $skill-name} selectors,
- * activate snapshots, and rewrite the task text before the first model call.
+ * Run-scoped Skill bootstrap: freeze catalog and explicit selectors on root Runs;
+ * Delegate Runs inherit frozen catalog/active snapshots and must not rediscover.
  */
 public final class SkillRunBootstrap {
     private final SkillDiscoveryService discovery = new SkillDiscoveryService();
     private final SkillSelectorParser selectorParser = new SkillSelectorParser();
     private final SkillActivationService activation = new SkillActivationService();
 
-    public void prepareRootRun(AgentContext context, Path userHome) {
+    /** Prepare Skill state for a Run. Root Runs discover and activate; Delegates keep inheritance. */
+    public void prepareRun(AgentContext context, Path userHome) {
         Objects.requireNonNull(context, "context");
         if (context.getParentRunId() != null || context.getAgentDepth() > 0) {
+            // Skill Inheritance: keep parent-frozen catalog and active snapshots.
             return;
         }
         Path workspace = context.getResolvedWorkspace();

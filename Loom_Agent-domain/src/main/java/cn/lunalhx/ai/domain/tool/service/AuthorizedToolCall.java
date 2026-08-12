@@ -62,6 +62,7 @@ public final class AuthorizedToolCall {
                 .collaborationMode(source.getCollaborationMode()).effectProfile(source.getEffectProfile())
                 .executionProfile(source.getExecutionProfile())
                 .securityScope(source.getSecurityScope())
+                .activeSkills(source.getActiveSkills())
                 .delegateRequest(source.getDelegateRequest()).build();
         return copy;
     }

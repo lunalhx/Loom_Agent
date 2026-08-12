@@ -94,7 +94,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 AgentContext context = resolveContext(question);
                 capture.accept(context);
                 try {
-                    skillRunBootstrap.prepareRootRun(context, null);
+                    skillRunBootstrap.prepareRun(context, null);
                     context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
                 } catch (SkillActivationException e) {
                     context.runtime().fail(AgentStopReason.MODEL_ERROR, "skill_activation_failed",

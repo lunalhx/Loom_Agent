@@ -42,7 +42,7 @@ public class SkillRunBootstrapResourceTest {
         context.setResolvedWorkspace(workspace);
         context.setCollaborationMode(CollaborationMode.BUILD);
 
-        new SkillRunBootstrap().prepareRootRun(context, home);
+        new SkillRunBootstrap().prepareRun(context, home);
 
         ActiveSkillSnapshot active = context.getActiveSkills().get(0);
         assertFalse(active.resources().isEmpty());

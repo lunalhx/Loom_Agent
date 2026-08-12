@@ -134,6 +134,7 @@ public final class AgentContextFactory {
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
+        applyInheritedSkills(context, question);
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
@@ -200,9 +201,19 @@ public final class AgentContextFactory {
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
+        applyInheritedSkills(context, question);
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
+        }
+    }
+
+    private void applyInheritedSkills(AgentContext context, AgentQuestion question) {
+        if (question.getInheritedSkillCatalogSnapshot() != null) {
+            context.setSkillCatalogSnapshot(question.getInheritedSkillCatalogSnapshot());
+        }
+        if (question.getInheritedActiveSkills() != null) {
+            context.setActiveSkills(question.getInheritedActiveSkills());
         }
     }
 

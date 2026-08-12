@@ -2,6 +2,8 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
+import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 import lombok.AllArgsConstructor;
@@ -49,5 +51,9 @@ public class AgentQuestion {
     /** Launch-scoped Full Access selection; never written to a session or checkpoint. */
     private transient boolean fullAccess;
     private transient RootRunSecurityScope inheritedSecurityScope;
+    /** Parent-frozen Skill Catalog for Delegate Runs; never rediscovered from disk. */
+    private transient SkillCatalog inheritedSkillCatalogSnapshot;
+    /** Parent Active Skill Snapshots at Delegate creation; child-local copies only. */
+    private transient List<ActiveSkillSnapshot> inheritedActiveSkills;
 
 }

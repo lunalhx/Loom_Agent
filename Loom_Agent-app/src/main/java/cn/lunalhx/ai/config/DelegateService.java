@@ -36,7 +36,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class DelegateService implements DelegateRunner {
 
     private static final int MAX_SAFE_OUTCOME_CHARS = 4000;
-    private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search");
+    private static final Set<String> READ_ONLY_TOOLS = Set.of(
+            "list_files", "read_file", "search", "read_skill_resource");
 
     private final AgentLoopFactory loopFactory;
     private final ObjectProvider<ToolRegistry> toolRegistryProvider;
@@ -60,24 +61,7 @@ public class DelegateService implements DelegateRunner {
         }
 
         String childRunId = "delegate_" + UUID.randomUUID();
-        AgentQuestion question = AgentQuestion.builder()
-                .runId(childRunId)
-                .question(request.getTask())
-                .parentRunId(request.getParentRunId())
-                .rootRunId(request.getRootRunId())
-                .sessionId(request.getSessionId())
-                .conversationId(request.getConversationId())
-                .workspace(request.getWorkspaceRoot())
-                .agentDepth(request.getParentDepth() + 1)
-                .maxSteps(request.getChildMaxSteps())
-                .maxAttempts(request.getChildMaxAttempts())
-                .approvalPolicy("never")
-                .inheritedPermissionPolicySnapshot(request.getPermissionPolicySnapshot())
-                .inheritedSecurityScope(request.getSecurityScope())
-                .collaborationMode(request.getModeSnapshot())
-                .planBinding(request.getPlanBinding())
-                .allowedTools(request.getAllowedTools())
-                .build();
+        AgentQuestion question = request.toChildQuestion(childRunId);
 
         AtomicReference<String> answer = new AtomicReference<>("");
         AtomicReference<String> error = new AtomicReference<>("");
