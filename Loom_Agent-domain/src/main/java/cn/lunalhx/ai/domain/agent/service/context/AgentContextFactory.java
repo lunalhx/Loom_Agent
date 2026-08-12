@@ -14,6 +14,7 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.tool.service.RunAuthorizationSource;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -241,18 +242,7 @@ public final class AgentContextFactory {
             case "never" -> PermissionAction.DENY;
             default -> PermissionAction.ASK;
         };
-        // The safety floor may silently allow only trusted structured repository reads.
-        // All mutation and unknown tools remain governed by the selected default/rules.
-        List<PermissionRule> builtIn = List.of(
-                new PermissionRule("builtin-read-file", "builtin", "read_file",
-                        PermissionRule.MatcherKind.TOOL, "read_file", PermissionAction.ALLOW),
-                new PermissionRule("builtin-list-files", "builtin", "list_files",
-                        PermissionRule.MatcherKind.TOOL, "list_files", PermissionAction.ALLOW),
-                new PermissionRule("builtin-search", "builtin", "search",
-                        PermissionRule.MatcherKind.TOOL, "search", PermissionAction.ALLOW),
-                new PermissionRule("builtin-delegate", "builtin", "delegate",
-                        PermissionRule.MatcherKind.TOOL, "delegate", PermissionAction.ALLOW));
-        context.setPermissionPolicySnapshot(new PermissionPolicySnapshot(defaultAction, builtIn, List.of("builtin")));
+        context.setPermissionPolicySnapshot(new RunAuthorizationSource().load(workspace, defaultAction));
     }
 
     private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {
