@@ -51,6 +51,10 @@ public final class RunAuthorizationSource {
         return workspaceGrants.load(workspace);
     }
 
+    public List<cn.lunalhx.ai.domain.tool.model.ExecutionGrant> loadWorkspaceExecutionGrants(Path workspace) {
+        return workspaceGrants.loadExecution(workspace);
+    }
+
     private void loadRules(Path source, String sourceId, boolean allowsAllow,
                            List<PermissionRule> rules, List<String> digests, Set<String> ids) throws Exception {
         if (!Files.exists(source)) return;

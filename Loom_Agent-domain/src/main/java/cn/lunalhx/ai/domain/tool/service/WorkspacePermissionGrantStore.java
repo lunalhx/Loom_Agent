@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.tool.model.GrantLifetime;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -38,7 +39,7 @@ public final class WorkspacePermissionGrantStore {
         if (!Files.exists(file)) return List.of();
         try {
             if (Files.isSymbolicLink(file)) throw new IllegalArgumentException("workspace grants must not be a symlink");
-            return parse(Files.readAllBytes(file), file);
+            return parse(Files.readAllBytes(file), file).permissionGrants();
         } catch (IOException e) {
             throw new IllegalArgumentException("cannot read workspace grants " + file + ": " + e.getMessage(), e);
         }
@@ -57,21 +58,42 @@ public final class WorkspacePermissionGrantStore {
             try (FileChannel channel = FileChannel.open(lockPath,
                     java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
                  FileLock ignored = channel.lock()) {
-                List<PermissionGrant> grants = new ArrayList<>(load(canonicalWorkspace));
+                GrantDocument current = readDocument(file);
+                List<PermissionGrant> grants = new ArrayList<>(current.permissionGrants());
                 grants.add(grant);
-                byte[] data = mapper.writeValueAsBytes(new GrantDocument(VERSION, grants));
-                Path temporary = Files.createTempFile(parent, "grants-", ".tmp");
-                try {
-                    Files.write(temporary, data);
-                    try {
-                        Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE,
-                                StandardCopyOption.REPLACE_EXISTING);
-                    } catch (AtomicMoveNotSupportedException unsupported) {
-                        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-                    }
-                } finally {
-                    Files.deleteIfExists(temporary);
-                }
+                writeDocument(file, new GrantDocument(VERSION, grants, current.executionGrants()));
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("cannot persist workspace grant " + file + ": " + e.getMessage(), e);
+        }
+    }
+
+    public List<ExecutionGrant> loadExecution(Path canonicalWorkspace) {
+        Path file = grantsFile(canonicalWorkspace);
+        if (!Files.exists(file)) return List.of();
+        try {
+            if (Files.isSymbolicLink(file)) throw new IllegalArgumentException("workspace grants must not be a symlink");
+            return parse(Files.readAllBytes(file), file).executionGrants();
+        } catch (IOException e) {
+            throw new IllegalArgumentException("cannot read workspace grants " + file + ": " + e.getMessage(), e);
+        }
+    }
+
+    public void appendExecution(Path canonicalWorkspace, ExecutionGrant grant) {
+        if (grant.lifetime() != GrantLifetime.WORKSPACE) {
+            throw new IllegalArgumentException("only workspace grants may be persisted");
+        }
+        Path file = grantsFile(canonicalWorkspace);
+        Path parent = file.getParent();
+        try {
+            Files.createDirectories(parent);
+            try (FileChannel channel = FileChannel.open(parent.resolve("grants.lock"),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
+                 FileLock ignored = channel.lock()) {
+                GrantDocument current = readDocument(file);
+                List<ExecutionGrant> grants = new ArrayList<>(current.executionGrants());
+                grants.add(grant);
+                writeDocument(file, new GrantDocument(VERSION, current.permissionGrants(), grants));
             }
         } catch (IOException e) {
             throw new IllegalArgumentException("cannot persist workspace grant " + file + ": " + e.getMessage(), e);
@@ -90,22 +112,44 @@ public final class WorkspacePermissionGrantStore {
         return workspaceDirectory(canonicalWorkspace).resolve("grants.json");
     }
 
-    private List<PermissionGrant> parse(byte[] data, Path file) {
+    private GrantDocument readDocument(Path file) throws IOException {
+        return Files.exists(file) ? parse(Files.readAllBytes(file), file)
+                : new GrantDocument(VERSION, List.of(), List.of());
+    }
+
+    private void writeDocument(Path file, GrantDocument document) throws IOException {
+        Path temporary = Files.createTempFile(file.getParent(), "grants-", ".tmp");
+        try {
+            Files.write(temporary, mapper.writeValueAsBytes(document));
+            try { Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+            catch (AtomicMoveNotSupportedException unsupported) { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING); }
+        } finally { Files.deleteIfExists(temporary); }
+    }
+
+    private GrantDocument parse(byte[] data, Path file) {
         try {
             JsonNode root = mapper.readTree(data);
             if (root == null || !root.isObject() || root.path("version").asInt(-1) != VERSION
-                    || !root.path("grants").isArray()) {
-                throw new IllegalArgumentException("workspace grants require version: 1 and grants array");
+                    || !root.path("permission_grants").isArray() || !root.path("execution_grants").isArray()) {
+                throw new IllegalArgumentException("workspace grants require version: 1, permission_grants and execution_grants arrays");
             }
-            List<PermissionGrant> result = new ArrayList<>();
-            for (JsonNode item : root.path("grants")) {
+            List<PermissionGrant> permissions = new ArrayList<>();
+            for (JsonNode item : root.path("permission_grants")) {
                 PermissionGrant grant = mapper.treeToValue(item, PermissionGrant.class);
                 if (grant.lifetime() != GrantLifetime.WORKSPACE) {
                     throw new IllegalArgumentException("workspace grant has invalid lifetime");
                 }
-                result.add(grant);
+                permissions.add(grant);
             }
-            return List.copyOf(result);
+            List<ExecutionGrant> executions = new ArrayList<>();
+            for (JsonNode item : root.path("execution_grants")) {
+                ExecutionGrant grant = mapper.treeToValue(item, ExecutionGrant.class);
+                if (grant.lifetime() != GrantLifetime.WORKSPACE) {
+                    throw new IllegalArgumentException("workspace execution grant has invalid lifetime");
+                }
+                executions.add(grant);
+            }
+            return new GrantDocument(VERSION, List.copyOf(permissions), List.copyOf(executions));
         } catch (Exception e) {
             throw new IllegalArgumentException("invalid workspace grants " + file + ": " + e.getMessage(), e);
         }
@@ -126,5 +170,9 @@ public final class WorkspacePermissionGrantStore {
         }
     }
 
-    private record GrantDocument(int version, List<PermissionGrant> grants) { }
+    private record GrantDocument(int version, List<PermissionGrant> permission_grants,
+                                 List<ExecutionGrant> execution_grants) {
+        List<PermissionGrant> permissionGrants() { return permission_grants; }
+        List<ExecutionGrant> executionGrants() { return execution_grants; }
+    }
 }

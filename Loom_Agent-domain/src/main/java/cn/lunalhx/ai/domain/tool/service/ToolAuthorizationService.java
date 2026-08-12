@@ -161,7 +161,14 @@ public final class ToolAuthorizationService {
             if (lifetime == null) throw new IllegalArgumentException("execution grant denied");
             ExecutionGrant grant = new ExecutionGrant(request.canonicalPath(), request.access(), lifetime);
             available.add(grant);
-            if (lifetime != GrantLifetime.ONCE) context.addExecutionGrant(grant);
+            if (lifetime != GrantLifetime.ONCE) {
+                if (lifetime == GrantLifetime.WORKSPACE) {
+                    Path workspace = context.getResolvedWorkspace();
+                    if (workspace == null) throw new IllegalArgumentException("workspace grant cannot be persisted");
+                    new WorkspacePermissionGrantStore().appendExecution(workspace, grant);
+                }
+                context.addExecutionGrant(grant);
+            }
         }
     }
 }

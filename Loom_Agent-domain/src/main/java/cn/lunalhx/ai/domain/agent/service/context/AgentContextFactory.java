@@ -245,6 +245,7 @@ public final class AgentContextFactory {
         RunAuthorizationSource authorizationSource = new RunAuthorizationSource();
         context.setPermissionPolicySnapshot(authorizationSource.load(workspace, defaultAction));
         context.setPermissionGrants(authorizationSource.loadWorkspaceGrants(workspace));
+        context.setExecutionGrants(authorizationSource.loadWorkspaceExecutionGrants(workspace));
     }
 
     private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {

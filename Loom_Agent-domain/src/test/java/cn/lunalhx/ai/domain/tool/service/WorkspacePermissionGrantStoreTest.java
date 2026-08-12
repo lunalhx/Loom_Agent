@@ -4,6 +4,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.GrantLifetime;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
+import cn.lunalhx.ai.domain.tool.model.FilesystemAccess;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
@@ -30,5 +32,9 @@ public class WorkspacePermissionGrantStoreTest {
         assertEquals(GrantLifetime.WORKSPACE, restored.lifetime());
         assertTrue(Files.readString(store.workspaceDirectory(workspace).resolve("grants.json"))
                 .contains(grant.saltedCallDigest()));
+
+        ExecutionGrant execution = new ExecutionGrant(workspace, FilesystemAccess.READ, GrantLifetime.WORKSPACE);
+        store.appendExecution(workspace, execution);
+        assertEquals(execution, store.loadExecution(workspace).getFirst());
     }
 }
