@@ -26,6 +26,11 @@ public interface AgentTool {
         return assessEffect(call);
     }
 
+    /** Whether the native execution backend required by this tool is ready for this profile. */
+    default boolean isAvailable(ExecutionProfile executionProfile) {
+        return true;
+    }
+
     ToolResult call(ToolCall call);
 
 }

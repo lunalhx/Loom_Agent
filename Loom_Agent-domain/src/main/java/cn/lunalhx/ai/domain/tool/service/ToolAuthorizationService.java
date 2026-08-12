@@ -60,6 +60,10 @@ public final class ToolAuthorizationService {
         }
         call.setInput(normalized.canonicalInput());
         ExecutionProfile profile = runtimePolicy.executionProfile();
+        if (!registry.isAvailable(name, profile)) {
+            return reject(call, "execution_backend_unavailable", "execution_backend_unavailable", EffectProfile.unknown());
+        }
+        call.setExecutionProfile(profile);
         CallEffectAssessment effect = registry.assessEffect(name, call, profile);
         if (!effect.trusted() || !profile.allows(effect.profile())) {
             return reject(call, "execution_profile_denied", "execution_profile_denied", effect.profile());

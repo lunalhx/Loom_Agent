@@ -102,6 +102,7 @@ public class ToolRegistry {
                         || allowedTools.contains(tool.spec().getName()))
                 .filter(tool -> effectiveMode != CollaborationMode.PLAN
                         || isPlanVisible(tool))
+                .filter(tool -> tool.isAvailable(ExecutionProfile.forRun(effectiveMode, false)))
                 .map(AgentTool::spec)
                 .collect(Collectors.toList());
     }
@@ -137,6 +138,11 @@ public class ToolRegistry {
         AgentTool tool = tools.get().get(name);
         return tool == null ? CallEffectAssessment.untrusted()
                 : tool.assessEffect(call, executionProfile);
+    }
+
+    public boolean isAvailable(String name, ExecutionProfile executionProfile) {
+        AgentTool tool = tools.get().get(name);
+        return tool != null && tool.isAvailable(executionProfile);
     }
 
     public boolean isPlanVisible(String name) {

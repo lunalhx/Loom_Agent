@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,6 +37,12 @@ public final class ShellRunner {
     }
 
     public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames) {
+        return run(command, cwd, timeoutSeconds, secretEnvNames, null);
+    }
+
+    /** Executes the command inside Seatbelt when an ordinary profile is supplied. */
+    public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames,
+                                  ExecutionProfile profile) {
         Map<String, String> env = new LinkedHashMap<>();
         for (String key : ALLOWED_ENV_KEYS) {
             String value = System.getenv(key);
@@ -44,7 +51,9 @@ public final class ShellRunner {
             }
         }
 
-        ProcessBuilder builder = new ProcessBuilder("/bin/sh", "-c", command)
+        List<String> argv = profile == null ? List.of("/bin/sh", "-c", command)
+                : List.of("/usr/bin/sandbox-exec", "-p", SeatbeltSandboxBackend.policy(profile), "/bin/sh", "-c", command);
+        ProcessBuilder builder = new ProcessBuilder(argv)
                 .directory(cwd.toFile());
         Map<String, String> builderEnv = builder.environment();
         builderEnv.clear();

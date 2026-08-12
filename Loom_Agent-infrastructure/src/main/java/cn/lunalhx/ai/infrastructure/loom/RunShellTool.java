@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind;
 
 /**
  * loom-code {@code run_shell}: run a shell command in the repo root via
@@ -44,6 +46,12 @@ public class RunShellTool implements AgentTool {
     }
 
     @Override
+    public boolean isAvailable(ExecutionProfile executionProfile) {
+        return executionProfile != null && executionProfile.kind() == ExecutionProfileKind.BUILD_SANDBOX
+                && SeatbeltSandboxBackend.supported();
+    }
+
+    @Override
     public ToolResult call(ToolCall call) {
         long startedAt = System.currentTimeMillis();
         String command = text(call, "command", null);
@@ -56,9 +64,13 @@ public class RunShellTool implements AgentTool {
         }
         try {
             Path root = LoomToolSupport.root(workspacePort, call);
+            ExecutionProfile profile = call.getExecutionProfile();
+            if (!isAvailable(profile)) {
+                return ToolResult.failure("sandbox_unavailable", "ordinary shell sandbox is unavailable", elapsed(startedAt));
+            }
             Set<String> secretEnvNames = call.getSecretEnvNames() == null
                     ? java.util.Set.of() : call.getSecretEnvNames();
-            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames);
+            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames, profile);
             String stdout = result.stdout().isBlank() ? "(empty)" : result.stdout().stripTrailing();
             String stderr = result.stderr().isBlank() ? "(empty)" : result.stderr().stripTrailing();
             String observation = "exit_code: " + result.execution().exitCode() + "\nstdout:\n" + stdout + "\nstderr:\n" + stderr;
