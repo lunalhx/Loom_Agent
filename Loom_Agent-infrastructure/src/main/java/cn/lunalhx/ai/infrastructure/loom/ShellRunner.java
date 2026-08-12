@@ -51,9 +51,10 @@ public final class ShellRunner {
             }
         }
 
-        List<String> argv = profile == null || profile.kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
+        List<String> target = profile == null || profile.kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
                 ? List.of("/bin/sh", "-c", command)
                 : List.of("/usr/bin/sandbox-exec", "-p", SeatbeltSandboxBackend.policy(profile), "/bin/sh", "-c", command);
+        List<String> argv = profile == null ? target : NativeLauncher.wrap(target);
         ProcessBuilder builder = new ProcessBuilder(argv)
                 .directory(cwd.toFile());
         Map<String, String> builderEnv = builder.environment();
@@ -69,6 +70,12 @@ public final class ShellRunner {
 
         try {
             Process process = builder.start();
+            PosixProcessSupervisor supervisor = new PosixProcessSupervisor();
+            if (profile != null && !NativeLauncher.awaitReadyAndRelease(process, supervisor)) {
+                supervisor.terminate(process);
+                return new ShellResult("", "error: native launcher initialization failed", new ShellExecutionResult(-1,
+                        ShellExecutionResult.TerminationReason.LAUNCH_FAILED, false, false, false));
+            }
             List<Thread> readers = new ArrayList<>();
             BoundedOutput stdout = new BoundedOutput();
             BoundedOutput stderr = new BoundedOutput();
@@ -77,8 +84,13 @@ public final class ShellRunner {
             boolean completed = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
             boolean cleanedBackground = false;
             if (!completed) {
-                terminateTree(process);
-                process.waitFor(2, TimeUnit.SECONDS);
+                if (profile != null) supervisor.terminate(process);
+                else {
+                    terminateTree(process);
+                    process.waitFor(2, TimeUnit.SECONDS);
+                }
+            } else if (profile != null) {
+                cleanedBackground = supervisor.terminateRemainingGroup(process);
             } else {
                 cleanedBackground = terminateLiveDescendants(process);
             }

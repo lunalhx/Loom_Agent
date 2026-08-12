@@ -1,0 +1,13 @@
+# Progress
+
+- 2026-08-12: Created completion plan. Current phase: native process supervision.
+- Prior completed commits: authorization/policy/grants (`51f2a99` through `0e490f4`) and Full Access launch controls (`be4ca7d`, `fab323d`).
+- 2026-08-12: Inspected current ShellRunner. It needs replacement of direct ProcessBuilder lifecycle with a supervisor seam before sandbox/evidence work.
+- 2026-08-12: Native supervision attempt 1 failed: post-start `setpgid` returned failure because the child had already exec'd. Production profile launches remain fail-closed; direct no-profile runner tests intentionally bypass this incomplete supervisor seam.
+- 2026-08-12: Native supervision attempt 2 failed: JVM child reaper races JNA `waitpid(WUNTRACED)` even with a fixed stopped-child wrapper. Reverted the uncommitted integration to avoid breaking Full Access Shell; next implementation must use an independent native launcher process.
+- 2026-08-12: Confirmed local C toolchain availability for a potential fixed native launcher. No native source exists in the repository yet.
+- 2026-08-12: User authorized the fixed native launcher implementation. Starting its C source, build integration, and Java handshake seam.
+- 2026-08-12: Added a C launcher built during `generate-resources`. It blocks `SIGUSR1`, sets its group, reports readiness, and only then execs after Java releases it. Full Access handshake test passes.
+- 2026-08-12: Native timeout test initially missed a `TimeUnit` import; corrected before rerun.
+- 2026-08-12: Added process-group cleanup for ordinary background descendants after direct Shell completion; result records `backgroundProcessTerminated`.
+- 2026-08-12: Phase 1 verified with native handshake, timeout, background cleanup, bounded output tests and full Maven suite (263 tests). Moving to sandbox backends.
