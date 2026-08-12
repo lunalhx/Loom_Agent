@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
 import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,6 +30,7 @@ public final class AgentEnvironmentState {
     private List<PermissionGrant> permissionGrants = new ArrayList<>();
     private List<ExecutionGrant> executionGrants = new ArrayList<>();
     private List<ExecutionGrant> sessionExecutionGrants = new ArrayList<>();
+    private RootRunSecurityScope securityScope;
 
     public Path resolvedWorkspace() { return resolvedWorkspace; }
     public WorkspaceRef workspace() { return workspace; }
@@ -45,6 +47,7 @@ public final class AgentEnvironmentState {
         all.addAll(sessionExecutionGrants);
         return List.copyOf(all);
     }
+    public RootRunSecurityScope securityScope() { return securityScope; }
 
     public void setResolvedWorkspace(Path v) { this.resolvedWorkspace = v; }
     public void setWorkspace(WorkspaceRef v) { this.workspace = v; }
@@ -67,4 +70,5 @@ public final class AgentEnvironmentState {
         this.sessionExecutionGrants = v == null ? new ArrayList<>() : v;
     }
     public void addSessionExecutionGrant(ExecutionGrant v) { this.sessionExecutionGrants.add(v); }
+    public void setSecurityScope(RootRunSecurityScope v) { this.securityScope = v; }
 }

@@ -5,8 +5,10 @@ import org.junit.Test;
 
 import java.nio.file.Files;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -34,6 +36,18 @@ public class ShellRunnerTest {
         ShellRunner.ShellResult background = ShellRunner.run("sleep 5 &", Files.createTempDirectory("shell-background"),
                 2, Set.of(), ExecutionProfile.fullAccess(Files.createTempDirectory("shell-background-full")));
         assertTrue(background.execution().backgroundProcessTerminated());
+
+        RootRunSecurityScope scope = RootRunSecurityScope.create();
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var future = executor.submit(() -> ShellRunner.run("sleep 5", Files.createTempDirectory("shell-cancel"),
+                    10, Set.of(), ExecutionProfile.fullAccess(Files.createTempDirectory("shell-cancel-full")), scope));
+            Thread.sleep(150);
+            scope.cancel();
+            assertEquals(ShellExecutionResult.TerminationReason.CANCELLED,
+                    future.get(3, TimeUnit.SECONDS).execution().terminationReason());
+        } finally {
+            scope.close();
+        }
 
         ShellRunner.ShellResult noisy = ShellRunner.run("yes x | head -c 1100000", Files.createTempDirectory("shell-noisy"), 2, Set.of());
         assertTrue(noisy.execution().stdoutTruncated());

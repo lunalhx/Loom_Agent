@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
@@ -129,6 +130,8 @@ public final class AgentContextFactory {
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
+        context.setSecurityScope(question.getInheritedSecurityScope() == null
+                ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
         context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
                 context.getExecutionProfile()));
@@ -194,6 +197,8 @@ public final class AgentContextFactory {
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
+        context.setSecurityScope(question.getInheritedSecurityScope() == null
+                ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
         context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
                 context.getExecutionProfile()));
@@ -236,9 +241,14 @@ public final class AgentContextFactory {
         } catch (java.io.IOException e) {
             throw new IllegalArgumentException("workspace cannot be canonicalized for authorization", e);
         }
-        context.setExecutionProfile(fullAccessRequested && context.getCollaborationMode() == CollaborationMode.BUILD && !delegate
+        ExecutionProfile baseProfile = fullAccessRequested && context.getCollaborationMode() == CollaborationMode.BUILD && !delegate
                 ? ExecutionProfile.fullAccess(workspace)
-                : ExecutionProfile.forRun(context.getCollaborationMode(), delegate).withWorkspace(workspace));
+                : ExecutionProfile.forRun(context.getCollaborationMode(), delegate).withWorkspace(workspace);
+        RootRunSecurityScope scope = context.getSecurityScope();
+        context.setExecutionProfile(baseProfile.kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
+                ? baseProfile : new ExecutionProfile(baseProfile.kind(), baseProfile.workspace(), baseProfile.workspaceAccess(),
+                scope.homeRoot(), scope.temporaryRoot(), baseProfile.networkAllowed(), baseProfile.hostPrivateVisible(),
+                baseProfile.externalGrants(), baseProfile.sandboxBackend()));
         // A delegate inherits the root's already validated snapshot; it never
         // re-reads policy sources or applies a child default.
         if (context.getParentRunId() != null && context.getPermissionPolicySnapshot() != null) {

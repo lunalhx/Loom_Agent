@@ -27,6 +27,7 @@ import java.util.Set;
 @AllArgsConstructor
 public class DelegateRequest {
     private transient PermissionPolicySnapshot permissionPolicySnapshot;
+    private transient RootRunSecurityScope securityScope;
 
     private static final int MAX_CHILD_STEPS = 3;
     private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search");
@@ -100,6 +101,7 @@ public class DelegateRequest {
                 .remainingTimeoutMs(remainingTimeoutMs)
                 .remainingTokenBudget(remainingTokenBudget)
                 .permissionPolicySnapshot(context.getPermissionPolicySnapshot())
+                .securityScope(context.getSecurityScope())
                 .build();
     }
 

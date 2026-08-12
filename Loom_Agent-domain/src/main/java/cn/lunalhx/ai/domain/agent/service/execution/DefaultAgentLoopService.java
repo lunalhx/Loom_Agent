@@ -201,6 +201,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
         AtomicBoolean cancellation = new AtomicBoolean(false);
         AtomicBoolean existing = cancellationRequests.putIfAbsent(context.identity().runId(), cancellation);
         AtomicBoolean activeCancellation = existing == null ? cancellation : existing;
+        if (context.getSecurityScope() != null) {
+            sink.onCancel(context.getSecurityScope()::cancel);
+        }
         String convId = context.identity().conversationId();
         if (convId != null) {
             conversationRuns.computeIfAbsent(convId, k -> ConcurrentHashMap.newKeySet()).add(context.identity().runId());
@@ -268,6 +271,9 @@ public class DefaultAgentLoopService implements AgentLoopService {
             lifecycle.cancelled(context);
             sink.complete();
         } finally {
+            if (context.getParentRunId() == null && context.getSecurityScope() != null) {
+                context.getSecurityScope().close();
+            }
             if (existing == null) {
                 cancellationRequests.remove(context.identity().runId(), cancellation);
             }

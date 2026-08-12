@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,6 +44,11 @@ public final class ShellRunner {
     /** Executes the command through the selected native sandbox when a profile is supplied. */
     public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames,
                                   ExecutionProfile profile) {
+        return run(command, cwd, timeoutSeconds, secretEnvNames, profile, null);
+    }
+
+    public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames,
+                                  ExecutionProfile profile, RootRunSecurityScope scope) {
         Map<String, String> env = new LinkedHashMap<>();
         for (String key : ALLOWED_ENV_KEYS) {
             String value = System.getenv(key);
@@ -67,9 +73,14 @@ public final class ShellRunner {
         }
         builderEnv.put("PWD", cwd.toString());
 
+        RootRunSecurityScope.ShellLease lease = null;
+        Runnable canceller = null;
         try {
+            if (scope != null) lease = scope.acquireShell();
             Process process = builder.start();
             PosixProcessSupervisor supervisor = new PosixProcessSupervisor();
+            canceller = () -> supervisor.terminate(process);
+            if (scope != null) scope.registerShellCanceller(canceller);
             if (profile != null && !NativeLauncher.awaitReadyAndRelease(process, supervisor)) {
                 supervisor.terminate(process);
                 return new ShellResult("", "error: native launcher initialization failed", new ShellExecutionResult(-1,
@@ -98,7 +109,8 @@ public final class ShellRunner {
             }
             int code = completed && !process.isAlive() ? process.exitValue() : -1;
             return new ShellResult(stdout.value(), stderr.value(), new ShellExecutionResult(code,
-                    completed ? ShellExecutionResult.TerminationReason.EXITED
+                    scope != null && scope.isCancelled() ? ShellExecutionResult.TerminationReason.CANCELLED
+                            : completed ? ShellExecutionResult.TerminationReason.EXITED
                             : ShellExecutionResult.TerminationReason.TIMED_OUT,
                     stdout.truncated(), stderr.truncated(), cleanedBackground));
         } catch (IOException e) {
@@ -108,6 +120,9 @@ public final class ShellRunner {
             Thread.currentThread().interrupt();
             return new ShellResult("", "error: interrupted", new ShellExecutionResult(-1,
                     ShellExecutionResult.TerminationReason.INTERRUPTED, false, false, false));
+        } finally {
+            if (scope != null && canceller != null) scope.unregisterShellCanceller(canceller);
+            if (lease != null) lease.close();
         }
     }
 

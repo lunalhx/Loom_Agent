@@ -13,3 +13,4 @@
 - 2026-08-12: Phase 1 verified with native handshake, timeout, background cleanup, bounded output tests and full Maven suite (263 tests). Moving to sandbox backends.
 - 2026-08-12: Added backend selector and Bubblewrap command construction (empty root, network/PID/IPC namespaces, only runtime/workspace/declared grant mounts). Backend availability remains fail-closed.
 - 2026-08-12: Phase 2 contract tests passed for Seatbelt policy, Bubblewrap command construction, and native Shell lifecycle. Moving to root-run security scope.
+- 2026-08-12: Added shared root security scope with disposable HOME/TMP, a fair one-Shell semaphore, registered process cancellation, and Reactor sink cancellation propagation. Root terminal loop closes the scope; delegates inherit it transiently.

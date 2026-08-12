@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 
 import java.nio.file.Path;
 import java.util.List;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 
 @Data
 @Builder
@@ -32,6 +33,7 @@ public class ToolCall {
     private CollaborationMode collaborationMode;
     private EffectProfile effectProfile;
     private ExecutionProfile executionProfile;
+    private transient RootRunSecurityScope securityScope;
     private DelegateRequest delegateRequest;
 
     public WorkspaceRef workspaceRef() {

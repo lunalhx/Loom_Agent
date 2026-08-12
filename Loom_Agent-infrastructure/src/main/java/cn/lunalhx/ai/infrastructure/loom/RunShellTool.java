@@ -70,7 +70,8 @@ public class RunShellTool implements AgentTool {
             }
             Set<String> secretEnvNames = call.getSecretEnvNames() == null
                     ? java.util.Set.of() : call.getSecretEnvNames();
-            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames, profile);
+            ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames, profile,
+                    call.getSecurityScope());
             String stdout = result.stdout().isBlank() ? "(empty)" : result.stdout().stripTrailing();
             String stderr = result.stderr().isBlank() ? "(empty)" : result.stderr().stripTrailing();
             String observation = "exit_code: " + result.execution().exitCode() + "\nstdout:\n" + stdout + "\nstderr:\n" + stderr;
