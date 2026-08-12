@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
+import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -18,13 +20,16 @@ import java.util.regex.Pattern;
  */
 public final class ShellRunner {
 
+    private static final int OUTPUT_LIMIT = 1024 * 1024;
+    private static final int OUTPUT_EDGE = OUTPUT_LIMIT / 2;
+
     private static final Set<String> ALLOWED_ENV_KEYS = Set.of(
             "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD",
             "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER");
 
     private static final Pattern SENSITIVE_SUFFIX = Pattern.compile("(API_KEY|TOKEN|SECRET|PASSWORD)$");
 
-    public record ShellResult(int exitCode, String stdout, String stderr) {
+    public record ShellResult(String stdout, String stderr, ShellExecutionResult execution) {
     }
 
     private ShellRunner() {
@@ -55,25 +60,33 @@ public final class ShellRunner {
         try {
             Process process = builder.start();
             List<Thread> readers = new ArrayList<>();
-            StringBuilderOut stdout = new StringBuilderOut();
-            StringBuilderOut stderr = new StringBuilderOut();
+            BoundedOutput stdout = new BoundedOutput();
+            BoundedOutput stderr = new BoundedOutput();
             readers.add(startReader(process.getInputStream(), stdout));
             readers.add(startReader(process.getErrorStream(), stderr));
             boolean completed = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+            boolean cleanedBackground = false;
             if (!completed) {
-                process.destroyForcibly();
-                process.waitFor(1, TimeUnit.SECONDS);
+                terminateTree(process);
+                process.waitFor(2, TimeUnit.SECONDS);
+            } else {
+                cleanedBackground = terminateLiveDescendants(process);
             }
             for (Thread t : readers) {
                 t.join(1000);
             }
-            int code = completed ? process.exitValue() : -1;
-            return new ShellResult(code, stdout.value(), stderr.value());
+            int code = completed && !process.isAlive() ? process.exitValue() : -1;
+            return new ShellResult(stdout.value(), stderr.value(), new ShellExecutionResult(code,
+                    completed ? ShellExecutionResult.TerminationReason.EXITED
+                            : ShellExecutionResult.TerminationReason.TIMED_OUT,
+                    stdout.truncated(), stderr.truncated(), cleanedBackground));
         } catch (IOException e) {
-            return new ShellResult(-1, "", "error: " + e.getMessage());
+            return new ShellResult("", "error: " + e.getMessage(), new ShellExecutionResult(-1,
+                    ShellExecutionResult.TerminationReason.LAUNCH_FAILED, false, false, false));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new ShellResult(-1, "", "error: interrupted");
+            return new ShellResult("", "error: interrupted", new ShellExecutionResult(-1,
+                    ShellExecutionResult.TerminationReason.INTERRUPTED, false, false, false));
         }
     }
 
@@ -85,13 +98,36 @@ public final class ShellRunner {
         return SENSITIVE_SUFFIX.matcher(upper).find();
     }
 
-    private static Thread startReader(InputStream in, StringBuilderOut out) {
+    private static void terminateTree(Process process) {
+        terminateLiveDescendants(process);
+        process.destroy();
+        try { process.waitFor(500, TimeUnit.MILLISECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        if (process.isAlive()) process.destroyForcibly();
+    }
+
+    private static boolean terminateLiveDescendants(Process process) {
+        List<ProcessHandle> descendants;
+        try {
+            descendants = process.toHandle().descendants().toList();
+        } catch (RuntimeException unavailable) {
+            // Some host sandboxes deny process enumeration.  The shell result remains
+            // truthful; the native supervisor added by the sandbox layer owns cleanup.
+            return false;
+        }
+        boolean found = descendants.stream().anyMatch(ProcessHandle::isAlive);
+        descendants.forEach(handle -> { if (handle.isAlive()) handle.destroy(); });
+        try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        descendants.forEach(handle -> { if (handle.isAlive()) handle.destroyForcibly(); });
+        return found;
+    }
+
+    private static Thread startReader(InputStream in, BoundedOutput out) {
         Thread t = new Thread(() -> {
             try (InputStream is = in) {
                 byte[] buffer = new byte[4096];
                 int len;
                 while ((len = is.read(buffer)) >= 0) {
-                    out.append(new String(buffer, 0, len, StandardCharsets.UTF_8));
+                    out.append(buffer, len);
                 }
             } catch (Exception ignored) {
             }
@@ -101,15 +137,33 @@ public final class ShellRunner {
         return t;
     }
 
-    private static final class StringBuilderOut {
-        private final StringBuilder sb = new StringBuilder();
+    private static final class BoundedOutput {
+        private final java.io.ByteArrayOutputStream head = new java.io.ByteArrayOutputStream(OUTPUT_EDGE);
+        private final java.io.ByteArrayOutputStream complete = new java.io.ByteArrayOutputStream(OUTPUT_LIMIT);
+        private final byte[] tail = new byte[OUTPUT_EDGE];
+        private long total;
 
-        synchronized void append(String chunk) {
-            sb.append(chunk);
+        synchronized void append(byte[] bytes, int length) {
+            for (int i = 0; i < length; i++) {
+                if (total < OUTPUT_EDGE) head.write(bytes[i]);
+                if (total < OUTPUT_LIMIT) complete.write(bytes[i]);
+                else tail[(int) (total % OUTPUT_EDGE)] = bytes[i];
+                total++;
+            }
         }
 
         synchronized String value() {
-            return sb.toString();
+            if (!truncated()) return complete.toString(StandardCharsets.UTF_8);
+            byte[] orderedTail = new byte[OUTPUT_EDGE];
+            int start = (int) (total % OUTPUT_EDGE);
+            System.arraycopy(tail, start, orderedTail, 0, OUTPUT_EDGE - start);
+            System.arraycopy(tail, 0, orderedTail, OUTPUT_EDGE - start, start);
+            return head.toString(StandardCharsets.UTF_8) + "\n[output truncated]\n"
+                    + new String(orderedTail, StandardCharsets.UTF_8);
+        }
+
+        synchronized boolean truncated() {
+            return total > OUTPUT_LIMIT;
         }
     }
 }

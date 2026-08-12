@@ -12,6 +12,7 @@ import cn.lunalhx.ai.domain.tool.model.NormalizedToolCall;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionDecision;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
+import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -21,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.nio.file.Path;
 
 /** The single pre-execution authorization pipeline. */
 public final class ToolAuthorizationService {
@@ -67,12 +69,23 @@ public final class ToolAuthorizationService {
         if (decision.action() == PermissionAction.DENY) {
             return reject(call, "permission_denied", decision.reasonCode(), effect.profile());
         }
-        if (decision.action() == PermissionAction.ASK) {
+        if (decision.action() == PermissionAction.ASK && !hasReusableGrant(context, normalized, profile, decision)) {
             if (prompt == null) return reject(call, "approval_denied", "approval_unavailable", effect.profile());
             GrantLifetime lifetime = prompt.ask(display(call, normalized, profile), decision);
             if (lifetime == null) return reject(call, "approval_denied", "approval_denied", effect.profile());
-            // Grant persistence is handled by the run's grant overlay; ONCE is represented
-            // by the minted authorization and has no reusable policy effect.
+            if (lifetime != GrantLifetime.ONCE) {
+                PermissionGrant grant = PermissionGrant.issue(normalized.permissionSubject().exactKey(), profile, lifetime);
+                try {
+                    if (lifetime == GrantLifetime.WORKSPACE) {
+                        Path workspace = context.getResolvedWorkspace();
+                        if (workspace == null) return reject(call, "grant_persistence_failed", "grant_persistence_failed", effect.profile());
+                        new WorkspacePermissionGrantStore().append(workspace, grant);
+                    }
+                    context.addPermissionGrant(grant);
+                } catch (RuntimeException e) {
+                    return reject(call, "grant_persistence_failed", "grant_persistence_failed", effect.profile());
+                }
+            }
         }
         return ToolAuthorizationResult.authorized(new AuthorizedToolCall(call, normalized,
                 effect.profile(), profile, decision, context.getRunId(), policy.snapshotDigest()));
@@ -107,5 +120,12 @@ public final class ToolAuthorizationService {
         if (history == null || history.size() < 2) return false;
         return history.subList(history.size() - 2, history.size()).stream().allMatch(step ->
                 name.equals(step.getTool()) && Objects.equals(input, step.getInput()));
+    }
+
+    private boolean hasReusableGrant(AgentContext context, NormalizedToolCall normalized,
+                                     ExecutionProfile profile, PermissionDecision decision) {
+        if (decision.perCallOnly() || decision.sourceIds().contains("builtin")) return false;
+        return context.getPermissionGrants().stream().anyMatch(grant ->
+                grant.matches(normalized.permissionSubject().exactKey(), profile));
     }
 }

@@ -242,7 +242,9 @@ public final class AgentContextFactory {
             case "never" -> PermissionAction.DENY;
             default -> PermissionAction.ASK;
         };
-        context.setPermissionPolicySnapshot(new RunAuthorizationSource().load(workspace, defaultAction));
+        RunAuthorizationSource authorizationSource = new RunAuthorizationSource();
+        context.setPermissionPolicySnapshot(authorizationSource.load(workspace, defaultAction));
+        context.setPermissionGrants(authorizationSource.loadWorkspaceGrants(workspace));
     }
 
     private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {

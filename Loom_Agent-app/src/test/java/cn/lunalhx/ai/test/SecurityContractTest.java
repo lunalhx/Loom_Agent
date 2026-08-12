@@ -214,6 +214,65 @@ public class SecurityContractTest {
     }
 
     @Test
+    public void sessionGrantSuppressesOnlyTheMatchingFuturePrompt() {
+        cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry registry = new cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry(
+                List.of(simpleShellTool()), new cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator(
+                new com.fasterxml.jackson.databind.ObjectMapper()));
+        java.util.concurrent.atomic.AtomicInteger prompts = new java.util.concurrent.atomic.AtomicInteger();
+        cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService gate =
+                new cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService(registry,
+                        new com.fasterxml.jackson.databind.ObjectMapper(), (display, decision) -> {
+                    prompts.incrementAndGet();
+                    return cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
+                });
+        AgentContext ctx = authorizationContext();
+
+        assertTrue(authoriseShell(gate, ctx, "echo first").authorized());
+        assertTrue(authoriseShell(gate, ctx, "echo first").authorized());
+        assertTrue(authoriseShell(gate, ctx, "echo second").authorized());
+        assertEquals(2, prompts.get());
+    }
+
+    private cn.lunalhx.ai.domain.tool.adapter.port.AgentTool simpleShellTool() {
+        return new cn.lunalhx.ai.domain.tool.adapter.port.AgentTool() {
+            @Override
+            public cn.lunalhx.ai.domain.tool.model.ToolSpec spec() {
+                return cn.lunalhx.ai.domain.tool.model.ToolSpec.builder().name("run_shell")
+                        .description("shell")
+                        .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
+                        .capabilityEnvelope(cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope.shell()).build();
+            }
+
+            @Override
+            public cn.lunalhx.ai.domain.tool.model.ToolResult call(cn.lunalhx.ai.domain.tool.model.ToolCall call) {
+                return cn.lunalhx.ai.domain.tool.model.ToolResult.success("ok", false, 0L);
+            }
+        };
+    }
+
+    private AgentContext authorizationContext() {
+        AgentContext ctx = new AgentContext();
+        ctx.setRunId("grant-run");
+        ctx.setHistory(new java.util.ArrayList<>());
+        ctx.setCollaborationMode(cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        ctx.setExecutionProfile(cn.lunalhx.ai.domain.tool.model.ExecutionProfile.forRun(
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, false));
+        ctx.setPermissionPolicySnapshot(new cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot(
+                cn.lunalhx.ai.domain.tool.model.PermissionAction.ASK, List.of(), List.of()));
+        return ctx;
+    }
+
+    private cn.lunalhx.ai.domain.tool.service.ToolAuthorizationResult authoriseShell(
+            cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService gate, AgentContext ctx, String command) {
+        cn.lunalhx.ai.domain.tool.model.ToolCall call = cn.lunalhx.ai.domain.tool.model.ToolCall.builder()
+                .name("run_shell").input(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                        .put("command", command)).build();
+        return gate.authorize(ctx, call, new cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy(
+                java.util.Set.of("run_shell"), cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD,
+                0, 1, ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
+    }
+
+    @Test
     public void sanitizerFailClosedNeverReturnsRawOutput() {
         // The fail-closed guarantee lives in the callers (ToolExecutor /
         // ObservationNode): a throwing sanitizer must never let raw output

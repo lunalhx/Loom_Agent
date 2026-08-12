@@ -48,6 +48,11 @@
             <groupId>cn.lunalhx.ai</groupId>
             <artifactId>Loom_Agent-types</artifactId>
         </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

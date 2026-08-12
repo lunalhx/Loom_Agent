@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
 import cn.lunalhx.ai.domain.tool.model.ToolEffect;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -103,7 +104,8 @@ public class ToolExecutor {
             String toolStatus = "ok";
             String toolErrorCode = "";
             if ("run_shell".equals(name)) {
-                int exitCode = parseExitCode(result.getObservation());
+                ShellExecutionResult shell = result.getShellExecutionResult();
+                int exitCode = shell == null ? -1 : shell.exitCode();
                 if (exitCode != 0 && workspaceChanged) {
                     toolStatus = "partial_success";
                     toolErrorCode = "tool_partial_success";
@@ -295,20 +297,6 @@ public class ToolExecutor {
     private void applyEffectMetadata(ToolResult result, EffectProfile effectProfile) {
         result.setEffectProfile(effectProfile);
         result.setReadOnly(effectProfile != null && effectProfile.isReadOnly());
-    }
-
-    private int parseExitCode(String content) {
-        if (content == null) {
-            return 0;
-        }
-        try {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("exit_code:\\s*(-?\\d+)").matcher(content);
-            if (m.find()) {
-                return Integer.parseInt(m.group(1));
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        return 0;
     }
 
     private String clip(String text) {

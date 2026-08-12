@@ -41,6 +41,10 @@ public class ToolResult {
     @JsonIgnore
     private transient ToolEvidenceCandidate evidenceCandidate;
 
+    /** Process outcome used by the executor before the observation is rendered or clipped. */
+    @JsonIgnore
+    private transient ShellExecutionResult shellExecutionResult;
+
     public static ToolResult success(String observation, boolean truncated, long elapsedMs) {
         return ToolResult.builder()
                 .success(true)

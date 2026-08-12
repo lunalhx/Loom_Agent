@@ -21,47 +21,72 @@ import java.util.Set;
 public final class RunAuthorizationSource {
     private static final Set<String> RULE_FIELDS = Set.of("id", "tool", "action", "match");
     private final ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
+    private final WorkspacePermissionGrantStore workspaceGrants;
+
+    public RunAuthorizationSource() {
+        this(new WorkspacePermissionGrantStore());
+    }
+
+    RunAuthorizationSource(WorkspacePermissionGrantStore workspaceGrants) {
+        this.workspaceGrants = workspaceGrants;
+    }
 
     public PermissionPolicySnapshot load(Path workspace, PermissionAction defaultAction) {
         Path source = workspace.resolve(".loom").resolve("permissions.yml");
-        if (!Files.exists(source)) return new PermissionPolicySnapshot(defaultAction, builtIns(), List.of("builtin"));
+        Path userSource = workspaceGrants.policyFile(workspace);
         try {
-            if (Files.isSymbolicLink(source)) throw new IllegalArgumentException("project permission source must not be a symlink");
-            byte[] bytes = Files.readAllBytes(source);
-            JsonNode root = yaml.readTree(bytes);
-            if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
-                throw new IllegalArgumentException("project permissions.yml requires version: 1");
-            }
-            rejectUnknown(root, Set.of("version", "rules"), source);
-            JsonNode rulesNode = root.path("rules");
-            if (!rulesNode.isArray()) throw new IllegalArgumentException("project permissions.yml requires rules array");
             List<PermissionRule> rules = new ArrayList<>(builtIns());
+            List<String> digests = new ArrayList<>(List.of("builtin"));
             Set<String> ids = new java.util.HashSet<>();
-            for (JsonNode rule : rulesNode) {
-                rejectUnknown(rule, RULE_FIELDS, source);
-                String id = required(rule, "id", source);
-                if (!ids.add(id)) throw new IllegalArgumentException("duplicate permission rule id " + id);
-                PermissionAction action = PermissionAction.valueOf(required(rule, "action", source).toUpperCase());
-                if (action == PermissionAction.ALLOW) throw new IllegalArgumentException("project rules may only ASK or DENY");
-                JsonNode match = rule.path("match");
-                if (!match.isObject() || match.size() != 1) throw new IllegalArgumentException("rule " + id + " requires one matcher");
-                Iterator<String> names = match.fieldNames();
-                String kind = names.next();
-                PermissionRule.MatcherKind matcher = switch (kind) {
-                    case "tool" -> PermissionRule.MatcherKind.TOOL;
-                    case "exact_call" -> PermissionRule.MatcherKind.EXACT_CALL;
-                    case "shell_prefix" -> PermissionRule.MatcherKind.SHELL_PREFIX;
-                    case "path_prefix" -> PermissionRule.MatcherKind.PATH_PREFIX;
-                    case "domain" -> PermissionRule.MatcherKind.DOMAIN;
-                    default -> throw new IllegalArgumentException("unknown matcher " + kind);
-                };
-                rules.add(new PermissionRule(id, "project", rule.path("tool").asText(""), matcher,
-                        match.path(kind).asText(), action));
-            }
-            return new PermissionPolicySnapshot(defaultAction, rules, List.of("builtin", digest(bytes)));
+            builtIns().forEach(rule -> ids.add(rule.id()));
+            loadRules(source, "project", false, rules, digests, ids);
+            loadRules(userSource, "user", true, rules, digests, ids);
+            return new PermissionPolicySnapshot(defaultAction, rules, digests);
         } catch (Exception e) {
-            throw new IllegalArgumentException("invalid project permission source " + source + ": " + e.getMessage(), e);
+            throw new IllegalArgumentException("invalid permission source: " + e.getMessage(), e);
         }
+    }
+
+    public List<cn.lunalhx.ai.domain.tool.model.PermissionGrant> loadWorkspaceGrants(Path workspace) {
+        return workspaceGrants.load(workspace);
+    }
+
+    private void loadRules(Path source, String sourceId, boolean allowsAllow,
+                           List<PermissionRule> rules, List<String> digests, Set<String> ids) throws Exception {
+        if (!Files.exists(source)) return;
+        if (Files.isSymbolicLink(source)) throw new IllegalArgumentException(sourceId + " permission source must not be a symlink");
+        byte[] bytes = Files.readAllBytes(source);
+        JsonNode root = yaml.readTree(bytes);
+        if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
+            throw new IllegalArgumentException(source + " requires version: 1");
+        }
+        rejectUnknown(root, Set.of("version", "rules"), source);
+        JsonNode rulesNode = root.path("rules");
+        if (!rulesNode.isArray()) throw new IllegalArgumentException(source + " requires rules array");
+        for (JsonNode rule : rulesNode) {
+            rejectUnknown(rule, RULE_FIELDS, source);
+            String id = required(rule, "id", source);
+            if (!ids.add(id)) throw new IllegalArgumentException("duplicate permission rule id " + id);
+            PermissionAction action = PermissionAction.valueOf(required(rule, "action", source).toUpperCase());
+            if (!allowsAllow && action == PermissionAction.ALLOW) {
+                throw new IllegalArgumentException("project rules may only ASK or DENY");
+            }
+            JsonNode match = rule.path("match");
+            if (!match.isObject() || match.size() != 1) throw new IllegalArgumentException("rule " + id + " requires one matcher");
+            Iterator<String> names = match.fieldNames();
+            String kind = names.next();
+            PermissionRule.MatcherKind matcher = switch (kind) {
+                case "tool" -> PermissionRule.MatcherKind.TOOL;
+                case "exact_call" -> PermissionRule.MatcherKind.EXACT_CALL;
+                case "shell_prefix" -> PermissionRule.MatcherKind.SHELL_PREFIX;
+                case "path_prefix" -> PermissionRule.MatcherKind.PATH_PREFIX;
+                case "domain" -> PermissionRule.MatcherKind.DOMAIN;
+                default -> throw new IllegalArgumentException("unknown matcher " + kind);
+            };
+            rules.add(new PermissionRule(id, sourceId, rule.path("tool").asText(""), matcher,
+                    match.path(kind).asText(), action));
+        }
+        digests.add(sourceId + ":" + digest(bytes));
     }
 
     private List<PermissionRule> builtIns() {

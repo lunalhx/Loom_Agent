@@ -61,8 +61,11 @@ public class RunShellTool implements AgentTool {
             ShellRunner.ShellResult result = ShellRunner.run(command, root, timeout, secretEnvNames);
             String stdout = result.stdout().isBlank() ? "(empty)" : result.stdout().stripTrailing();
             String stderr = result.stderr().isBlank() ? "(empty)" : result.stderr().stripTrailing();
-            String observation = "exit_code: " + result.exitCode() + "\nstdout:\n" + stdout + "\nstderr:\n" + stderr;
-            return ToolResult.success(LoomToolSupport.clip(observation), false, elapsed(startedAt));
+            String observation = "exit_code: " + result.execution().exitCode() + "\nstdout:\n" + stdout + "\nstderr:\n" + stderr;
+            ToolResult toolResult = ToolResult.success(LoomToolSupport.clip(observation),
+                    result.execution().stdoutTruncated() || result.execution().stderrTruncated(), elapsed(startedAt));
+            toolResult.setShellExecutionResult(result.execution());
+            return toolResult;
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);
         }
