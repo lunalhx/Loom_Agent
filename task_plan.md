@@ -13,7 +13,7 @@ Complete the remaining Shell Permissions plan in the agreed order while preservi
 5. **Complete — Plan/Delegate shell**: profile intersection, explicitly configured read-only Maven cache for Plan, disposable HOME/TMP, and conditional catalog exposure.
 6. **Complete — Shell evidence**: transient receipt lists, real repository-state fallback observations, and registry-based revalidation.
 7. **Complete — Normalizer/classifier**: conservative compound parsing, non-opaque unit policy composition, built-in safety floor, and sensitive-resource rules.
-8. **In progress — Full Access controls**: complete REPL sandbox selection; host-credential per-call-only behavior is implemented with the classifier.
+8. **Complete — Full Access controls**: launch-only confirmation, active/inactive REPL state, root-Build-only binding, and host-credential per-call-only behavior.
 9. **Pending — Schema cutover and cleanup**: context/checkpoint snapshots, obsolete code removal, final contract suites and review.
 
 ## Acceptance checks

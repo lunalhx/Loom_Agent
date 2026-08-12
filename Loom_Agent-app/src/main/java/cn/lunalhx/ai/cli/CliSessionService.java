@@ -313,7 +313,7 @@ public class CliSessionService implements AutoCloseable {
                 .runStartGuard(runStartGuard)
                 .seedSnapshot(seed)
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
-                .fullAccess(options.fullAccess)
+                .fullAccess(options.fullAccess && runMode == CollaborationMode.BUILD)
                 .build();
 
         Map<String, Object> taskState = newTaskState(runId, safePrompt);
@@ -598,6 +598,11 @@ public class CliSessionService implements AutoCloseable {
 
     public synchronized CollaborationMode collaborationMode() {
         return session.getCollaborationMode();
+    }
+
+    /** Full Access is a confirmed process-launch option and never active for Plan Runs. */
+    public synchronized boolean fullAccessActive() {
+        return options.fullAccess && session.getCollaborationMode() == CollaborationMode.BUILD;
     }
 
     /** Explicit user mode transition; it only changes the durable Session. */
