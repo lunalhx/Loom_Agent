@@ -171,11 +171,10 @@ public class ToolExecutor {
         if (context.getCollaborationMode() != CollaborationMode.PLAN || result == null) {
             return;
         }
-        if (result.isSuccess() && result.getEvidenceCandidate() != null) {
-            EvidenceReceipt receipt = EvidenceReceipt.from(
-                    result.getEvidenceCandidate(), context.getRunId(), context.getRootRunId());
-            if (receipt != null) {
-                context.recordEvidence(receipt);
+        if (result.isSuccess()) {
+            for (var candidate : result.evidenceCandidatesSafe()) {
+                EvidenceReceipt receipt = EvidenceReceipt.from(candidate, context.getRunId(), context.getRootRunId());
+                if (receipt != null) context.recordEvidence(receipt);
             }
         }
         DelegateResult delegateResult = result.getDelegateResult();

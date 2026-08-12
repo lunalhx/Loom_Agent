@@ -17,6 +17,10 @@ import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.EffectProfile;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
 import cn.lunalhx.ai.domain.tool.model.ToolEffect;
+import cn.lunalhx.ai.domain.tool.model.ToolEvidenceCandidate;
+import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
+import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
+import cn.lunalhx.ai.domain.tool.service.RepositoryStateTracker;
 
 /**
  * loom-code {@code run_shell}: run a shell command in the repo root via
@@ -99,6 +103,21 @@ public class RunShellTool implements AgentTool {
             ToolResult toolResult = ToolResult.success(LoomToolSupport.clip(observation),
                     result.execution().stdoutTruncated() || result.execution().stderrTruncated(), elapsed(startedAt));
             toolResult.setShellExecutionResult(result.execution());
+            if (profile != null && profile.kind() == ExecutionProfileKind.PLAN_SANDBOX
+                    && result.execution().exitCode() == 0) {
+                toolResult.setEvidenceCandidates(List.of(ToolEvidenceCandidate.builder()
+                        .evidenceKey("run_shell|repository")
+                        .normalizedScope("repository:.")
+                        .stateDigest(RepositoryStateTracker.stableFingerprint(root))
+                        .complete(true)
+                        .revalidation(EvidenceRevalidation.builder()
+                                .digestAlgorithm("SHA-256")
+                                .observationType(EvidenceObservationType.REPOSITORY)
+                                .toolSemantics("shell:repository:v1")
+                                .repositoryRelativePath(".")
+                                .build())
+                        .build()));
+            }
             return toolResult;
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);

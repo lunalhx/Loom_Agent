@@ -7,7 +7,9 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum EvidenceObservationType {
     READ_FILE("read_file"),
     LIST_FILES("list_files"),
-    SEARCH("search");
+    SEARCH("search"),
+    GIT("git"),
+    REPOSITORY("repository");
 
     private final String toolName;
 

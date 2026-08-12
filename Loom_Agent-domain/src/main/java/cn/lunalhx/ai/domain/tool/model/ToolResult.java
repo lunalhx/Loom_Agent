@@ -39,7 +39,7 @@ public class ToolResult {
 
     /** Adapter metadata used before sanitization/clipping; never persisted. */
     @JsonIgnore
-    private transient ToolEvidenceCandidate evidenceCandidate;
+    private transient List<ToolEvidenceCandidate> evidenceCandidates;
 
     /** Process outcome used by the executor before the observation is rendered or clipped. */
     @JsonIgnore
@@ -72,6 +72,10 @@ public class ToolResult {
     }
 
     public void clearTransientEvidence() {
-        evidenceCandidate = null;
+        evidenceCandidates = null;
+    }
+
+    public List<ToolEvidenceCandidate> evidenceCandidatesSafe() {
+        return evidenceCandidates == null ? List.of() : List.copyOf(evidenceCandidates);
     }
 }

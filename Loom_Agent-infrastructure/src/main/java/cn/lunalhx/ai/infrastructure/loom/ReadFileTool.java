@@ -79,7 +79,7 @@ public class ReadFileTool implements AgentTool {
             String relativePath = LoomToolSupport.relative(root, file);
             String normalizedScope = relativePath + "#lines=" + start + "-" + end;
             String semantics = "read_file:utf8-lines:v2";
-            toolResult.setEvidenceCandidate(ToolEvidenceCandidate.builder()
+            toolResult.setEvidenceCandidates(List.of(ToolEvidenceCandidate.builder()
                     .evidenceKey("read_file|" + normalizedScope)
                     .normalizedScope(normalizedScope)
                     .stateDigest(ReadFileEvidenceSupport.digest(lines, start, end))
@@ -92,7 +92,7 @@ public class ReadFileTool implements AgentTool {
                             .startLine(start)
                             .endLine(end)
                             .build())
-                    .build());
+                    .build()));
             return toolResult;
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);

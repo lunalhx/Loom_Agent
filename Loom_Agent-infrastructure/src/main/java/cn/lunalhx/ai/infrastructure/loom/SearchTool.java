@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 
 /** loom-code {@code search}: complete deterministic ripgrep observations. */
 @Component
@@ -59,7 +60,7 @@ public class SearchTool implements AgentTool {
                     observationService.observe(root, scope, pattern);
             String normalizedScope = observation.searchScope();
             ToolResult result = ToolResult.success(observation.render(), false, elapsed(startedAt));
-            result.setEvidenceCandidate(ToolEvidenceCandidate.builder()
+            result.setEvidenceCandidates(List.of(ToolEvidenceCandidate.builder()
                     .evidenceKey("search|" + normalizedScope + "|query="
                             + observation.normalizedQuery() + "|engine=" + observation.engineVersion())
                     .normalizedScope(normalizedScope)
@@ -74,7 +75,7 @@ public class SearchTool implements AgentTool {
                             .searchScope(observation.searchScope())
                             .engineVersion(observation.engineVersion())
                             .build())
-                    .build());
+                    .build()));
             return result;
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);

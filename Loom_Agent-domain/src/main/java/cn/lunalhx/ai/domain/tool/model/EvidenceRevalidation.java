@@ -39,6 +39,9 @@ public class EvidenceRevalidation {
                     && normalizedQuery == null && searchScope == null && engineVersion == null;
             case SEARCH -> startLine == null && endLine == null
                     && StringUtils.isNoneBlank(normalizedQuery, searchScope, engineVersion);
+            case GIT, REPOSITORY -> startLine == null && endLine == null
+                    && normalizedQuery == null && searchScope == null && engineVersion == null
+                    && ".".equals(repositoryRelativePath);
         };
     }
 }

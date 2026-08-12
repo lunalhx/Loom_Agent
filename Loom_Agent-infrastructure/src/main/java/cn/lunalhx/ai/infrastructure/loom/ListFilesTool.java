@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /** loom-code {@code list_files}: list one complete directory level. */
 @Component
@@ -58,7 +59,7 @@ public class ListFilesTool implements AgentTool {
                     observationService.observe(root, dir);
             String scope = observation.normalizedScope();
             ToolResult result = ToolResult.success(observation.render(), false, elapsed(startedAt));
-            result.setEvidenceCandidate(ToolEvidenceCandidate.builder()
+            result.setEvidenceCandidates(List.of(ToolEvidenceCandidate.builder()
                     .evidenceKey("list_files|" + scope)
                     .normalizedScope(scope)
                     .stateDigest(observation.stateDigest())
@@ -69,7 +70,7 @@ public class ListFilesTool implements AgentTool {
                             .toolSemantics(ListFilesObservationService.TOOL_SEMANTICS)
                             .repositoryRelativePath(scope)
                             .build())
-                    .build());
+                    .build()));
             return result;
         } catch (IOException e) {
             return failure(e.getMessage(), startedAt);

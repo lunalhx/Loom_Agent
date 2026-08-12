@@ -5,13 +5,22 @@ import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.infrastructure.loom.ListFilesEvidenceVerifier;
 import cn.lunalhx.ai.infrastructure.loom.ReadFileEvidenceVerifier;
 import cn.lunalhx.ai.infrastructure.loom.SearchEvidenceVerifier;
+import cn.lunalhx.ai.infrastructure.loom.RepositoryEvidenceVerifier;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /** Trusted adapter for recomputing the freshness of persisted Plan Basis. */
 public final class PlanEvidenceVerifier {
+
+    private static final EvidenceVerifierRegistry DEFAULT = new EvidenceVerifierRegistry(Map.of(
+            cn.lunalhx.ai.domain.tool.model.EvidenceObservationType.READ_FILE, ReadFileEvidenceVerifier::matches,
+            cn.lunalhx.ai.domain.tool.model.EvidenceObservationType.LIST_FILES, ListFilesEvidenceVerifier::matches,
+            cn.lunalhx.ai.domain.tool.model.EvidenceObservationType.SEARCH, SearchEvidenceVerifier::matches,
+            cn.lunalhx.ai.domain.tool.model.EvidenceObservationType.GIT, RepositoryEvidenceVerifier::matches,
+            cn.lunalhx.ai.domain.tool.model.EvidenceObservationType.REPOSITORY, RepositoryEvidenceVerifier::matches));
 
     private PlanEvidenceVerifier() {
     }
@@ -20,11 +29,7 @@ public final class PlanEvidenceVerifier {
         if (receipt == null || !receipt.isRevalidatable()) {
             return false;
         }
-        return switch (receipt.getRevalidation().getObservationType()) {
-            case READ_FILE -> ReadFileEvidenceVerifier.matches(workspaceRoot, receipt);
-            case LIST_FILES -> ListFilesEvidenceVerifier.matches(workspaceRoot, receipt);
-            case SEARCH -> SearchEvidenceVerifier.matches(workspaceRoot, receipt);
-        };
+        return DEFAULT.matches(workspaceRoot, receipt);
     }
 
     public static boolean matchesAll(Path workspaceRoot, List<EvidenceReceipt> receipts,
