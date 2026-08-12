@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** Shared semantic read and digest rules for capture and revalidation. */
-final class ReadFileEvidenceSupport {
+public final class ReadFileEvidenceSupport {
 
     private static final java.nio.charset.CharsetDecoder UTF8_DECODER = StandardCharsets.UTF_8
             .newDecoder()
@@ -22,7 +22,7 @@ final class ReadFileEvidenceSupport {
     private ReadFileEvidenceSupport() {
     }
 
-    static List<String> readLines(Path file) throws IOException {
+    public static List<String> readLines(Path file) throws IOException {
         String content = UTF8_DECODER.decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file))).toString();
         String normalizedContent = content.replace("\r\n", "\n").replace('\r', '\n');
         List<String> lines = new ArrayList<>(Arrays.asList(normalizedContent.split("\n", -1)));
@@ -32,12 +32,12 @@ final class ReadFileEvidenceSupport {
         return lines;
     }
 
-    static String digest(Path file, int startLine, int endLine) throws IOException {
+    public static String digest(Path file, int startLine, int endLine) throws IOException {
         List<String> lines = readLines(file);
         return digest(lines, startLine, endLine);
     }
 
-    static String digest(List<String> lines, int startLine, int endLine) {
+    public static String digest(List<String> lines, int startLine, int endLine) {
         if (startLine < 1 || endLine < startLine) {
             return null;
         }

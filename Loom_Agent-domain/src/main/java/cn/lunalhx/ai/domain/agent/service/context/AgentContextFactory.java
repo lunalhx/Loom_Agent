@@ -262,13 +262,14 @@ public final class AgentContextFactory {
             default -> PermissionAction.ASK;
         };
         RunAuthorizationSource authorizationSource = new RunAuthorizationSource();
-        context.setPermissionPolicySnapshot(authorizationSource.load(workspace, defaultAction));
+        RunAuthorizationSource.AuthorizationSources authorization = authorizationSource.loadRoot(workspace, defaultAction);
+        context.setPermissionPolicySnapshot(authorization.policy());
         context.setPermissionGrants(authorizationSource.loadWorkspaceGrants(workspace));
         context.setExecutionGrants(authorizationSource.loadWorkspaceExecutionGrants(workspace));
         if (context.getExecutionProfile().kind()
                 == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.PLAN_SANDBOX) {
             context.setExecutionProfile(context.getExecutionProfile().withExternalGrants(
-                    authorizationSource.loadMavenRepositoryGrants(workspace)));
+                    authorization.mavenRepositoryGrants()));
         }
     }
 

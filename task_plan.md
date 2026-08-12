@@ -14,7 +14,7 @@ Complete the remaining Shell Permissions plan in the agreed order while preservi
 6. **Complete — Shell evidence**: transient receipt lists, real repository-state fallback observations, and registry-based revalidation.
 7. **Complete — Normalizer/classifier**: conservative compound parsing, non-opaque unit policy composition, built-in safety floor, and sensitive-resource rules.
 8. **Complete — Full Access controls**: launch-only confirmation, active/inactive REPL state, root-Build-only binding, and host-credential per-call-only behavior.
-9. **In progress — Schema cutover and cleanup**: context/checkpoint snapshots, obsolete code removal, final contract suites and review.
+9. **Complete — Schema cutover and cleanup**: checkpoint schema v13 carries safe authorization audit metadata; obsolete workspace fingerprints and unsandboxed Shell paths are removed; source compilation, review, and full verification are complete.
 
 ## Acceptance checks
 

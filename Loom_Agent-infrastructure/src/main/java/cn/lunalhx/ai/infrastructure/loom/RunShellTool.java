@@ -17,10 +17,6 @@ import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.EffectProfile;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
 import cn.lunalhx.ai.domain.tool.model.ToolEffect;
-import cn.lunalhx.ai.domain.tool.model.ToolEvidenceCandidate;
-import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
-import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
-import cn.lunalhx.ai.domain.tool.service.RepositoryStateTracker;
 
 /**
  * loom-code {@code run_shell}: run a shell command in the repo root via
@@ -30,6 +26,7 @@ import cn.lunalhx.ai.domain.tool.service.RepositoryStateTracker;
 public class RunShellTool implements AgentTool {
 
     private final WorkspacePort workspacePort;
+    private final ShellEvidenceObservationService evidence = new ShellEvidenceObservationService();
 
     public RunShellTool(WorkspacePort workspacePort) {
         this.workspacePort = workspacePort;
@@ -105,18 +102,7 @@ public class RunShellTool implements AgentTool {
             toolResult.setShellExecutionResult(result.execution());
             if (profile != null && profile.kind() == ExecutionProfileKind.PLAN_SANDBOX
                     && result.execution().exitCode() == 0) {
-                toolResult.setEvidenceCandidates(List.of(ToolEvidenceCandidate.builder()
-                        .evidenceKey("run_shell|repository")
-                        .normalizedScope("repository:.")
-                        .stateDigest(RepositoryStateTracker.stableFingerprint(root))
-                        .complete(true)
-                        .revalidation(EvidenceRevalidation.builder()
-                                .digestAlgorithm("SHA-256")
-                                .observationType(EvidenceObservationType.REPOSITORY)
-                                .toolSemantics("shell:repository:v1")
-                                .repositoryRelativePath(".")
-                                .build())
-                        .build()));
+                toolResult.setEvidenceCandidates(evidence.observe(root, command));
             }
             return toolResult;
         } catch (Exception e) {

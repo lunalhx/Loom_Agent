@@ -37,6 +37,11 @@ public final class RunAuthorizationSource {
     }
 
     public PermissionPolicySnapshot load(Path workspace, PermissionAction defaultAction) {
+        return loadRoot(workspace, defaultAction).policy();
+    }
+
+    /** One immutable root-run read of policy rules and Plan-only Maven capability. */
+    public AuthorizationSources loadRoot(Path workspace, PermissionAction defaultAction) {
         Path source = workspace.resolve(".loom").resolve("permissions.yml");
         Path userSource = workspaceGrants.policyFile(workspace);
         try {
@@ -45,8 +50,8 @@ public final class RunAuthorizationSource {
             Set<String> ids = new java.util.HashSet<>();
             builtIns().forEach(rule -> ids.add(rule.id()));
             loadRules(source, "project", false, rules, digests, ids);
-            loadRules(userSource, "user", true, rules, digests, ids);
-            return new PermissionPolicySnapshot(defaultAction, rules, digests);
+            List<ExecutionGrant> maven = loadUserRulesAndMaven(userSource, rules, digests, ids);
+            return new AuthorizationSources(new PermissionPolicySnapshot(defaultAction, rules, digests), maven);
         } catch (Exception e) {
             throw new IllegalArgumentException("invalid permission source: " + e.getMessage(), e);
         }
@@ -65,34 +70,31 @@ public final class RunAuthorizationSource {
      * read-only input for Plan shells.  It is deliberately not an execution
      * request: Plan cannot ask for arbitrary host paths at tool-call time.
      */
-    public List<ExecutionGrant> loadMavenRepositoryGrants(Path workspace) {
-        Path source = workspaceGrants.policyFile(workspace);
+    private List<ExecutionGrant> loadUserRulesAndMaven(Path source, List<PermissionRule> rules,
+                                                        List<String> digests, Set<String> ids) throws Exception {
         if (!Files.exists(source)) return List.of();
-        try {
-            if (Files.isSymbolicLink(source)) {
-                throw new IllegalArgumentException("user permission source must not be a symlink");
-            }
-            JsonNode root = yaml.readTree(Files.readAllBytes(source));
-            if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
-                throw new IllegalArgumentException(source + " requires version: 1");
-            }
-            rejectUnknown(root, USER_FIELDS, source);
-            if (!root.has("maven_repository")) return List.of();
-            JsonNode value = root.path("maven_repository");
-            if (!value.isTextual() || value.asText().isBlank()) {
-                throw new IllegalArgumentException(source + " maven_repository must be a non-empty path");
-            }
-            Path repository = Path.of(value.asText()).toRealPath();
-            if (!Files.isDirectory(repository) || repository.getFileName() == null
-                    || !"repository".equals(repository.getFileName().toString())
-                    || repository.getParent() == null || repository.getParent().getFileName() == null
-                    || !".m2".equals(repository.getParent().getFileName().toString())) {
-                throw new IllegalArgumentException(source + " maven_repository must resolve to a .m2/repository directory");
-            }
-            return List.of(new ExecutionGrant(repository, FilesystemAccess.READ, GrantLifetime.WORKSPACE));
-        } catch (Exception e) {
-            throw new IllegalArgumentException("invalid permission source: " + e.getMessage(), e);
+        if (Files.isSymbolicLink(source)) throw new IllegalArgumentException("user permission source must not be a symlink");
+        byte[] bytes = Files.readAllBytes(source);
+        JsonNode root = yaml.readTree(bytes);
+        if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
+            throw new IllegalArgumentException(source + " requires version: 1");
         }
+        rejectUnknown(root, USER_FIELDS, source);
+        loadRules(root, source, "user", true, rules, ids);
+        digests.add("user:" + digest(bytes));
+        if (!root.has("maven_repository")) return List.of();
+        JsonNode value = root.path("maven_repository");
+        if (!value.isTextual() || value.asText().isBlank()) {
+            throw new IllegalArgumentException(source + " maven_repository must be a non-empty path");
+        }
+        Path repository = Path.of(value.asText()).toRealPath();
+        if (!Files.isDirectory(repository) || repository.getFileName() == null
+                || !"repository".equals(repository.getFileName().toString())
+                || repository.getParent() == null || repository.getParent().getFileName() == null
+                || !".m2".equals(repository.getParent().getFileName().toString())) {
+            throw new IllegalArgumentException(source + " maven_repository must resolve to a .m2/repository directory");
+        }
+        return List.of(new ExecutionGrant(repository, FilesystemAccess.READ, GrantLifetime.WORKSPACE));
     }
 
     private void loadRules(Path source, String sourceId, boolean allowsAllow,
@@ -105,6 +107,12 @@ public final class RunAuthorizationSource {
             throw new IllegalArgumentException(source + " requires version: 1");
         }
         rejectUnknown(root, allowsAllow ? USER_FIELDS : PROJECT_FIELDS, source);
+        loadRules(root, source, sourceId, allowsAllow, rules, ids);
+        digests.add(sourceId + ":" + digest(bytes));
+    }
+
+    private void loadRules(JsonNode root, Path source, String sourceId, boolean allowsAllow,
+                           List<PermissionRule> rules, Set<String> ids) {
         JsonNode rulesNode = root.path("rules");
         if (!rulesNode.isArray()) throw new IllegalArgumentException(source + " requires rules array");
         for (JsonNode rule : rulesNode) {
@@ -130,7 +138,6 @@ public final class RunAuthorizationSource {
             rules.add(new PermissionRule(id, sourceId, rule.path("tool").asText(""), matcher,
                     match.path(kind).asText(), action));
         }
-        digests.add(sourceId + ":" + digest(bytes));
     }
 
     private List<PermissionRule> builtIns() {
@@ -149,4 +156,7 @@ public final class RunAuthorizationSource {
         node.fieldNames().forEachRemaining(field -> { if (!allowed.contains(field)) throw new IllegalArgumentException(source + " has unknown field " + field); });
     }
     private static String digest(byte[] data) throws Exception { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data)); }
+
+    public record AuthorizationSources(PermissionPolicySnapshot policy,
+                                       List<ExecutionGrant> mavenRepositoryGrants) { }
 }

@@ -68,7 +68,7 @@ public class RunAuthorizationSourceTest {
                 maven_repository: '%s'
                 """.formatted(repository));
 
-        var grants = new RunAuthorizationSource(store).loadMavenRepositoryGrants(workspace);
+        var grants = new RunAuthorizationSource(store).loadRoot(workspace, PermissionAction.ASK).mavenRepositoryGrants();
 
         assertEquals(1, grants.size());
         assertEquals(repository, grants.getFirst().canonicalPath());
@@ -89,7 +89,7 @@ public class RunAuthorizationSourceTest {
                 """.formatted(sensitive));
 
         try {
-            new RunAuthorizationSource(store).loadMavenRepositoryGrants(workspace);
+            new RunAuthorizationSource(store).loadRoot(workspace, PermissionAction.ASK);
             throw new AssertionError("only the Maven artifact cache may be granted to Plan");
         } catch (IllegalArgumentException expected) {
             assertEquals(true, expected.getMessage().contains(".m2/repository"));
