@@ -167,7 +167,8 @@ public final class ToolAuthorizationService {
                     if (workspace == null) throw new IllegalArgumentException("workspace grant cannot be persisted");
                     new WorkspacePermissionGrantStore().appendExecution(workspace, grant);
                 }
-                context.addExecutionGrant(grant);
+                if (lifetime == GrantLifetime.SESSION) context.addSessionExecutionGrant(grant);
+                else context.addExecutionGrant(grant);
             }
         }
     }

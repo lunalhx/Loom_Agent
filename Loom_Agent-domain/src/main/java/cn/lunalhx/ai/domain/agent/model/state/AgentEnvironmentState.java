@@ -28,6 +28,7 @@ public final class AgentEnvironmentState {
     private PermissionPolicySnapshot permissionPolicySnapshot;
     private List<PermissionGrant> permissionGrants = new ArrayList<>();
     private List<ExecutionGrant> executionGrants = new ArrayList<>();
+    private List<ExecutionGrant> sessionExecutionGrants = new ArrayList<>();
 
     public Path resolvedWorkspace() { return resolvedWorkspace; }
     public WorkspaceRef workspace() { return workspace; }
@@ -39,7 +40,11 @@ public final class AgentEnvironmentState {
     public ExecutionProfile executionProfile() { return executionProfile; }
     public PermissionPolicySnapshot permissionPolicySnapshot() { return permissionPolicySnapshot; }
     public List<PermissionGrant> permissionGrants() { return List.copyOf(permissionGrants); }
-    public List<ExecutionGrant> executionGrants() { return List.copyOf(executionGrants); }
+    public List<ExecutionGrant> executionGrants() {
+        List<ExecutionGrant> all = new ArrayList<>(executionGrants);
+        all.addAll(sessionExecutionGrants);
+        return List.copyOf(all);
+    }
 
     public void setResolvedWorkspace(Path v) { this.resolvedWorkspace = v; }
     public void setWorkspace(WorkspaceRef v) { this.workspace = v; }
@@ -58,4 +63,8 @@ public final class AgentEnvironmentState {
         this.executionGrants = v == null ? new ArrayList<>() : new ArrayList<>(v);
     }
     public void addExecutionGrant(ExecutionGrant v) { this.executionGrants.add(v); }
+    public void setSessionExecutionGrants(List<ExecutionGrant> v) {
+        this.sessionExecutionGrants = v == null ? new ArrayList<>() : v;
+    }
+    public void addSessionExecutionGrant(ExecutionGrant v) { this.sessionExecutionGrants.add(v); }
 }

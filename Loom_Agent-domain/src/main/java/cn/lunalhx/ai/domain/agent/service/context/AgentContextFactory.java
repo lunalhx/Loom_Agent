@@ -128,6 +128,7 @@ public final class AgentContextFactory {
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
+        context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
         freezeAuthorization(context);
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
@@ -190,6 +191,7 @@ public final class AgentContextFactory {
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
+        context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
         freezeAuthorization(context);
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());

@@ -311,6 +311,7 @@ public class CliSessionService implements AutoCloseable {
                 .planBinding(planBinding)
                 .runStartGuard(runStartGuard)
                 .seedSnapshot(seed)
+                .inheritedSessionExecutionGrants(session.getExecutionGrants())
                 .build();
 
         Map<String, Object> taskState = newTaskState(runId, safePrompt);
@@ -437,6 +438,8 @@ public class CliSessionService implements AutoCloseable {
         // CLI instance persisted a newer Session; its stale object must not
         // replace that newer state on close.
         Instant knownUpdatedAt = session.getUpdatedAt();
+        List<cn.lunalhx.ai.domain.tool.model.ExecutionGrant> pendingSessionExecutionGrants =
+                session.getExecutionGrants() == null ? List.of() : List.copyOf(session.getExecutionGrants());
         Optional<AgentSession> durable = sessionStore.find(sessionId);
         Instant durableUpdatedAt = durable.map(AgentSession::getUpdatedAt).orElse(null);
         boolean durableStateAdvanced = durable
@@ -445,6 +448,12 @@ public class CliSessionService implements AutoCloseable {
                         || current.getUpdatedAt().isAfter(knownUpdatedAt)))
                 .orElse(false);
         durable.ifPresent(current -> session = current);
+        if (!pendingSessionExecutionGrants.isEmpty()) {
+            List<cn.lunalhx.ai.domain.tool.model.ExecutionGrant> merged = new ArrayList<>(
+                    session.getExecutionGrants() == null ? List.of() : session.getExecutionGrants());
+            pendingSessionExecutionGrants.forEach(grant -> { if (!merged.contains(grant)) merged.add(grant); });
+            session.setExecutionGrants(merged);
+        }
         Optional<AgentRun> latestRoot = runStore.findLatestRootByConversationId(sessionId);
         if (latestRoot.isPresent() && (!durableStateAdvanced
                 || committedPlanSubmission(latestRoot.get(), session))) {

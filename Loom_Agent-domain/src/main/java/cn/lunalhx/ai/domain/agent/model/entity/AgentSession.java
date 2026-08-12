@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 
 /**
  * Durable, resumable session state. Replaces the CLI's loose
@@ -28,7 +29,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class AgentSession {
 
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    public static final int CURRENT_SCHEMA_VERSION = 4;
 
     private String id;
     private Integer schemaVersion;
@@ -64,6 +65,10 @@ public class AgentSession {
 
     /** Monotonic Plan aggregate state version used by root-run CAS. */
     private long planStateVersion;
+
+    /** Reusable external filesystem capabilities selected for this session only. */
+    @Builder.Default
+    private List<ExecutionGrant> executionGrants = new ArrayList<>();
 
     /** Pending write-ahead record; visible Plan state is unchanged until commit. */
     private PlanSubmissionTransaction pendingPlanSubmission;

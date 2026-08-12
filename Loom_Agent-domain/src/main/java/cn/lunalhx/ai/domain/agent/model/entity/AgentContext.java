@@ -152,6 +152,8 @@ public class AgentContext {
     public List<ExecutionGrant> getExecutionGrants() { return environment.executionGrants(); }
     public void setExecutionGrants(List<ExecutionGrant> v) { environment.setExecutionGrants(v); }
     public void addExecutionGrant(ExecutionGrant v) { environment.addExecutionGrant(v); }
+    public void setSessionExecutionGrants(List<ExecutionGrant> v) { environment.setSessionExecutionGrants(v); }
+    public void addSessionExecutionGrant(ExecutionGrant v) { environment.addSessionExecutionGrant(v); }
     public AgentRuntimeProperties runtimeProperties(AgentRuntimeProperties fallback) {
         return environment.runConfig() == null ? fallback : environment.runConfig().agent();
     }
