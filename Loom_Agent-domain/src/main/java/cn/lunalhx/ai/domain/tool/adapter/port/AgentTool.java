@@ -31,6 +31,11 @@ public interface AgentTool {
         return true;
     }
 
+    /** A capability-specific catalog gate for Plan mode.  Shell defaults closed. */
+    default boolean isPlanCatalogVisible(ExecutionProfile executionProfile) {
+        return !"run_shell".equals(spec().getName()) && isAvailable(executionProfile);
+    }
+
     ToolResult call(ToolCall call);
 
 }

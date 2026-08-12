@@ -30,7 +30,7 @@ public class DelegateRequest {
     private transient RootRunSecurityScope securityScope;
 
     private static final int MAX_CHILD_STEPS = 3;
-    private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search");
+    private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search", "run_shell");
 
     private String task;
     private int requestedMaxSteps;

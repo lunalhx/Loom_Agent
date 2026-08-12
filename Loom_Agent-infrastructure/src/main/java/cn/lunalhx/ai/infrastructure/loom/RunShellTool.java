@@ -13,6 +13,10 @@ import java.util.List;
 import java.util.Set;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind;
+import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
+import cn.lunalhx.ai.domain.tool.model.EffectProfile;
+import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
+import cn.lunalhx.ai.domain.tool.model.ToolEffect;
 
 /**
  * loom-code {@code run_shell}: run a shell command in the repo root via
@@ -49,6 +53,23 @@ public class RunShellTool implements AgentTool {
     @Override
     public boolean isAvailable(ExecutionProfile executionProfile) {
         return NativeSandboxBackend.supported(executionProfile);
+    }
+
+    @Override
+    public boolean isPlanCatalogVisible(ExecutionProfile executionProfile) {
+        return NativeSandboxBackend.supported(executionProfile);
+    }
+
+    @Override
+    public CallEffectAssessment assessEffect(ToolCall call, ExecutionProfile profile) {
+        if (profile != null && (profile.kind() == ExecutionProfileKind.PLAN_SANDBOX
+                || profile.kind() == ExecutionProfileKind.DELEGATE_SANDBOX)) {
+            String command = text(call, "command", "");
+            if (!readOnlyCommand(command)) return CallEffectAssessment.untrusted();
+            return CallEffectAssessment.trusted(new EffectProfile(Set.of(ToolEffect.REPOSITORY_READ),
+                    OutboundDisclosure.NONE, true));
+        }
+        return AgentTool.super.assessEffect(call, profile);
     }
 
     @Override
@@ -96,6 +117,18 @@ public class RunShellTool implements AgentTool {
             return def;
         }
         return call.getInput().path(key).asInt(def);
+    }
+
+    private boolean readOnlyCommand(String command) {
+        if (command == null || command.isBlank() || command.contains("$") || command.contains("`")
+                || command.matches(".*[><*?{}()&].*")) return false;
+        for (String unit : command.split(";|\\n|\\|\\||\\|")) {
+            String normalized = unit.trim().replaceAll("\\s+", " ");
+            if (normalized.isEmpty()) return false;
+            if (!(normalized.matches("(pwd|ls|cat|head|tail|wc|stat|file|rg|grep)( .*)?")
+                    || normalized.matches("git (status|diff|log|show|rev-parse)( .*)?"))) return false;
+        }
+        return true;
     }
 
     private ToolResult failure(String message, long startedAt) {

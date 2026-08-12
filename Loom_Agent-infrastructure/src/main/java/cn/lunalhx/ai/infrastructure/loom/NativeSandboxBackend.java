@@ -12,6 +12,9 @@ final class NativeSandboxBackend {
     static boolean supported(ExecutionProfile profile) {
         if (profile == null) return false;
         if (profile.kind() == ExecutionProfileKind.DANGER_FULL_ACCESS) return true;
+        if (profile.kind() != ExecutionProfileKind.BUILD_SANDBOX
+                && profile.kind() != ExecutionProfileKind.PLAN_SANDBOX
+                && profile.kind() != ExecutionProfileKind.DELEGATE_SANDBOX) return false;
         return SeatbeltSandboxBackend.supported() || BubblewrapSandboxBackend.supported();
     }
 

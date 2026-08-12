@@ -163,10 +163,8 @@ public class ToolRegistry {
 
     private boolean isPlanVisible(AgentTool tool) {
         ToolSpec spec = tool.spec();
-        if ("run_shell".equals(spec.getName())) {
-            return false;
-        }
         ExecutionProfile planProfile = ExecutionProfile.forRun(CollaborationMode.PLAN, false);
+        if ("run_shell".equals(spec.getName())) return tool.isPlanCatalogVisible(planProfile);
         ToolCall probe = ToolCall.builder()
                 .name(spec.getName())
                 .input(JsonNodeFactory.instance.objectNode())

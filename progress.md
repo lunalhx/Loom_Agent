@@ -15,3 +15,4 @@
 - 2026-08-12: Phase 2 contract tests passed for Seatbelt policy, Bubblewrap command construction, and native Shell lifecycle. Moving to root-run security scope.
 - 2026-08-12: Added shared root security scope with disposable HOME/TMP, a fair one-Shell semaphore, registered process cancellation, and Reactor sink cancellation propagation. Root terminal loop closes the scope; delegates inherit it transiently.
 - 2026-08-12: Replaced WorkspaceFingerprint with RepositoryStateTracker: regular files and symlink entries are digested without following links; `.loom-code` is excluded; Git HEAD/index/refs/packed-refs become logical paths.
+- 2026-08-12: Plan/Delegate Shell vertical slice now conditionally exposes only when native backend is ready and classifies conservative read-only command forms as repository reads; all other shell forms stay untrusted and profile-denied.
