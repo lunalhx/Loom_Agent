@@ -12,6 +12,9 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
+import cn.lunalhx.ai.domain.tool.model.PermissionAction;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,18 +27,20 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Checkpoint snapshot v12 — only durable state needed for recovery.
+ * Checkpoint snapshot v13 — only durable state needed for recovery.
  *
  * <p>Excluded from persistence: modelOutput, current span,
  * toolSpecs, skill catalog, resolved workspace path, display name, and deleted legacy fields.
  * These are re-injected at restore time by {@code AgentContextFactory} from current configuration.
  *
- * <p>v12 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
+ * <p>v13 adopts loom-code loop semantics, persists the immutable Run mode snapshot,
  * and stores safe Plan Evidence receipts without raw observations.
  * {@code toolSteps}/{@code modelAttempts} counters
  * replace the old {@code step} semantics, {@code lastTool}/{@code stopReason}/{@code finalAnswer}
  * are durable, and all legacy progress-guard / segment / stop-hook state is removed.
- * Only v12 snapshots are recoverable; earlier shapes are rejected at restore time.
+ * It also stores only non-sensitive authorization audit metadata; policy rules,
+ * grants, disposable roots and Full Access host paths remain transient. Only v13
+ * snapshots are recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -43,7 +48,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    public static final int CURRENT_SCHEMA_VERSION = 12;
+    public static final int CURRENT_SCHEMA_VERSION = 13;
 
     private Integer schemaVersion;
 
@@ -70,6 +75,15 @@ public class AgentContextSnapshot {
 
     // -- environment (only workspace ref; resolved path re-injected) --
     private WorkspaceRef workspace;
+
+    // -- authorization audit (safe summary only; profile and rules are re-frozen) --
+    private PermissionAction permissionDefaultAction;
+    private String permissionSnapshotDigest;
+    private List<String> permissionSourceDigests;
+    private ExecutionProfileKind executionProfileKind;
+    private String executionCapabilityFingerprint;
+    private Boolean fullAccess;
+    private List<String> authorizationGrantSummary;
 
     // -- runtime (durable) --
     private Integer toolSteps;
@@ -169,6 +183,18 @@ public class AgentContextSnapshot {
                 .planBinding(def.planBinding())
                 // environment
                 .workspace(context.environment().workspace())
+                // authorization audit
+                .permissionDefaultAction(context.getPermissionPolicySnapshot() == null ? null
+                        : context.getPermissionPolicySnapshot().defaultAction())
+                .permissionSnapshotDigest(context.getPermissionPolicySnapshot() == null ? null
+                        : context.getPermissionPolicySnapshot().snapshotDigest())
+                .permissionSourceDigests(context.getPermissionPolicySnapshot() == null ? List.of()
+                        : context.getPermissionPolicySnapshot().sourceDigests())
+                .executionProfileKind(profileKind(context.getExecutionProfile()))
+                .executionCapabilityFingerprint(profileFingerprint(context.getExecutionProfile()))
+                .fullAccess(context.getExecutionProfile() != null
+                        && context.getExecutionProfile().kind() == ExecutionProfileKind.DANGER_FULL_ACCESS)
+                .authorizationGrantSummary(grantSummary(context))
                 // runtime
                 .toolSteps(runtime.toolSteps())
                 .modelAttempts(runtime.modelAttempts())
@@ -304,5 +330,25 @@ public class AgentContextSnapshot {
                     "checkpoint snapshot uses an incompatible schema; "
                             + "no automatic migration is performed");
         }
+    }
+
+    private static ExecutionProfileKind profileKind(ExecutionProfile profile) {
+        return profile == null ? null : profile.kind();
+    }
+
+    private static String profileFingerprint(ExecutionProfile profile) {
+        if (profile == null) return null;
+        String descriptor = profile.kind() + "|" + profile.workspaceAccess() + "|"
+                + profile.networkAllowed() + "|" + profile.hostPrivateVisible() + "|"
+                + profile.externalGrants().stream().map(grant -> grant.access().name()).sorted().toList();
+        return org.apache.commons.codec.digest.DigestUtils.sha256Hex(descriptor);
+    }
+
+    private static List<String> grantSummary(AgentContext context) {
+        List<String> summary = new ArrayList<>();
+        context.getPermissionGrants().forEach(grant -> summary.add("permission:" + grant.lifetime()));
+        context.getExecutionGrants().forEach(grant -> summary.add("execution:" + grant.access()
+                + ":" + grant.lifetime()));
+        return List.copyOf(summary);
     }
 }
