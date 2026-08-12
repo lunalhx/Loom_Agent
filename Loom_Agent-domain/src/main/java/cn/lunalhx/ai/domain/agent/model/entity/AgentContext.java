@@ -18,8 +18,11 @@ import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.service.AuthorizedToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.math.BigDecimal;
@@ -137,6 +140,10 @@ public class AgentContext {
     public void setApprovalPolicy(String v) { environment.setApprovalPolicy(v); }
     public AgentRunConfig getRunConfig() { return environment.runConfig(); }
     public void setRunConfig(AgentRunConfig v) { environment.setRunConfig(v); }
+    public ExecutionProfile getExecutionProfile() { return environment.executionProfile(); }
+    public void setExecutionProfile(ExecutionProfile v) { environment.setExecutionProfile(v); }
+    public PermissionPolicySnapshot getPermissionPolicySnapshot() { return environment.permissionPolicySnapshot(); }
+    public void setPermissionPolicySnapshot(PermissionPolicySnapshot v) { environment.setPermissionPolicySnapshot(v); }
     public AgentRuntimeProperties runtimeProperties(AgentRuntimeProperties fallback) {
         return environment.runConfig() == null ? fallback : environment.runConfig().agent();
     }
@@ -220,6 +227,8 @@ public class AgentContext {
     public void setDecision(AgentDecision v) { action.setDecision(v); }
     public ToolCall getToolCall() { return action.toolCall(); }
     public void setToolCall(ToolCall v) { action.setToolCall(v); }
+    public AuthorizedToolCall getAuthorizedToolCall() { return action.authorizedToolCall(); }
+    public void setAuthorizedToolCall(AuthorizedToolCall v) { action.setAuthorizedToolCall(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
 

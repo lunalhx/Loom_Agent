@@ -920,7 +920,7 @@ public class CliSessionService implements AutoCloseable {
     }
 
     /** Interactive approval prompt; non-interactive environments reject by default. */
-    public static final class InteractiveApprovalPrompt implements ToolExecutor.ApprovalPrompt {
+    public static final class InteractiveApprovalPrompt implements cn.lunalhx.ai.domain.tool.service.PermissionPrompt {
         private final BufferedReader reader = new BufferedReader(
                 new InputStreamReader(System.in, StandardCharsets.UTF_8));
         private final boolean interactive;
@@ -930,20 +930,27 @@ public class CliSessionService implements AutoCloseable {
         }
 
         @Override
-        public boolean ask(String toolName, JsonNode args) {
+        public cn.lunalhx.ai.domain.tool.model.GrantLifetime ask(
+                cn.lunalhx.ai.domain.tool.service.AuthorizationDisplay display,
+                cn.lunalhx.ai.domain.tool.model.PermissionDecision decision) {
             if (!interactive) {
-                return false;
+                return null;
             }
             System.out.println();
-            System.out.println("approval required: " + toolName
-                    + (args == null ? "" : " " + args));
-            System.out.print("allow? [y/N] ");
+            System.out.println("permission required: " + display.toolName() + " " + display.normalizedSummary());
+            System.out.print("allow once/session/workspace? [o/s/w/N] ");
             System.out.flush();
             try {
                 String line = reader.readLine();
-                return line != null && line.strip().equalsIgnoreCase("y");
+                if (line == null) return null;
+                return switch (line.strip().toLowerCase()) {
+                    case "o", "once" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE;
+                    case "s", "session" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
+                    case "w", "workspace" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.WORKSPACE;
+                    default -> null;
+                };
             } catch (IOException e) {
-                return false;
+                return null;
             }
         }
     }
@@ -1005,7 +1012,7 @@ public class CliSessionService implements AutoCloseable {
         public String resumeSessionId;
         public final List<String> secretEnvNames = new ArrayList<>();
         public final List<String> secretValues = new ArrayList<>();
-        public ToolExecutor.ApprovalPrompt approvalPrompt;
+        public cn.lunalhx.ai.domain.tool.service.PermissionPrompt approvalPrompt;
         public ModelGateway modelGateway;
     }
 }

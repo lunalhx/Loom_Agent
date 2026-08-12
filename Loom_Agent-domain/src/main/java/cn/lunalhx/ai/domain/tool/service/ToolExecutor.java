@@ -8,13 +8,10 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
-import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.EffectProfile;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
-import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolEffect;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -26,8 +23,8 @@ import java.util.Set;
 
 /**
  * Execution service of the tool chain. Input governance lives in
- * {@link ToolInputGate}; this class repeats the immutable Plan boundary as a
- * last pre-execution check so direct callers cannot bypass it.
+ * {@link ToolAuthorizationService}; it accepts only a Runtime-minted
+ * {@link AuthorizedToolCall} and does not re-evaluate authorization.
  */
 public class ToolExecutor {
 
@@ -36,42 +33,30 @@ public class ToolExecutor {
     /** Runtime policy for one call, including the frozen collaboration mode. */
     public record ToolRuntimePolicy(Set<String> allowedTools,
                                     CollaborationMode mode,
-                                    ApprovalPolicy approvalPolicy,
                                     int depth,
                                     int maxDepth,
                                     ExecutionProfile executionProfile) {
         public ToolRuntimePolicy {
             mode = Objects.requireNonNull(mode, "collaboration mode must not be null");
-            approvalPolicy = Objects.requireNonNull(approvalPolicy,
-                    "approval policy must not be null");
-            executionProfile = ExecutionProfile.forRun(mode, depth > 0);
+            executionProfile = Objects.requireNonNull(executionProfile,
+                    "executionProfile must not be null");
         }
 
         public static ToolRuntimePolicy root(Set<String> allowedTools,
-                                             CollaborationMode mode,
-                                             ApprovalPolicy policy) {
-            return new ToolRuntimePolicy(allowedTools, mode, policy, 0, 1,
+                                             CollaborationMode mode) {
+            return new ToolRuntimePolicy(allowedTools, mode, 0, 1,
                     ExecutionProfile.forRun(mode, false));
         }
 
         public static ToolRuntimePolicy delegateChild(Set<String> allowedTools,
                                                       CollaborationMode mode) {
-            return new ToolRuntimePolicy(allowedTools, mode, ApprovalPolicy.NEVER, 1, 1,
+            return new ToolRuntimePolicy(allowedTools, mode, 1, 1,
                     ExecutionProfile.forRun(mode, true));
         }
     }
 
-    /** CLI-facing approval prompt. Receives only redacted/summarized args. */
-    public interface ApprovalPrompt {
-        boolean ask(String toolName, com.fasterxml.jackson.databind.JsonNode args);
-    }
-
-    public enum ApprovalPolicy { ASK, AUTO, NEVER }
-
     private static final String SANITIZE_FAILED_OBSERVATION =
             "tool_error: sanitization_failed - output withheld";
-    private static final String PLAN_DENIED_MESSAGE =
-            "error: tool call is not authorized by Plan Mode";
 
     private final ToolRegistry registry;
     private final ToolOutputSanitizer sanitizer;
@@ -89,37 +74,17 @@ public class ToolExecutor {
         return registry;
     }
 
-    /** Execute one accepted tool call; rejected calls never reach here. */
-    public ToolResult execute(AgentContext context, ToolCall call) {
-        String name = call.getName();
-        CollaborationMode mode = context.getCollaborationMode();
-        boolean delegateRun = context.getParentRunId() != null;
-        ExecutionProfile executionProfile = ExecutionProfile.forRun(mode, delegateRun);
-        CallEffectAssessment assessment = registry.assessEffect(name, call, executionProfile);
-        EffectProfile effectProfile = assessment.profile();
-
-        boolean planDenied = mode == CollaborationMode.PLAN
-                && (!assessment.trusted()
-                || !registry.isPlanVisible(name, context.getAllowedTools())
-                || !executionProfile.allows(effectProfile));
-        boolean delegateDenied = delegateRun
-                && (!assessment.trusted() || !executionProfile.allows(effectProfile));
-        if (planDenied || delegateDenied) {
-            ToolResult result = ToolResult.failure("plan_mode_denied", PLAN_DENIED_MESSAGE, 0L);
-            result.setToolStatus("rejected");
-            result.setToolErrorCode("plan_mode_denied");
-            result.setSecurityEventType("plan_mode_denied");
-            applyEffectMetadata(result, effectProfile, registry.approvalRequirement(name));
-            result.setAffectedPaths(java.util.List.of());
-            result.setWorkspaceChanged(false);
-            result.setDiffSummary(java.util.List.of());
-            result.setObservation(PLAN_DENIED_MESSAGE);
-            context.setToolResult(result);
-            return result;
+    /** Execute one accepted call after verifying its frozen run and snapshot binding. */
+    public ToolResult execute(AgentContext context, AuthorizedToolCall authorized) {
+        if (authorized == null || !Objects.equals(context.getRunId(), authorized.runId())
+                || context.getPermissionPolicySnapshot() == null
+                || !Objects.equals(context.getPermissionPolicySnapshot().snapshotDigest(), authorized.snapshotDigest())
+                || !Objects.equals(context.getExecutionProfile(), authorized.executionProfile())) {
+            return unauthorized(context);
         }
-
-        call.setEffectProfile(effectProfile);
-        call.setApprovalRequired(registry.approvalRequirement(name).required());
+        var call = authorized.rawCall();
+        String name = call.getName();
+        EffectProfile effectProfile = authorized.effectProfile();
         Path root = call.getWorkspaceRoot();
         boolean inspectWorkspace = requiresWorkspaceInspection(effectProfile);
         Map<String, String> before = inspectWorkspace
@@ -147,8 +112,7 @@ public class ToolExecutor {
                     toolErrorCode = "tool_failed";
                 }
             }
-            applyMetadata(result, toolStatus, toolErrorCode, effectProfile,
-                    registry.approvalRequirement(name), diff, workspaceChanged, root);
+            applyMetadata(result, toolStatus, toolErrorCode, effectProfile, diff, workspaceChanged, root);
             context.setToolResult(result);
             return result;
         } catch (Exception e) {
@@ -163,7 +127,7 @@ public class ToolExecutor {
             result.setToolStatus(workspaceChanged ? "partial_success" : "error");
             result.setToolErrorCode(workspaceChanged ? "tool_partial_success" : "tool_failed");
             result.setSecurityEventType(securityEvent);
-            applyEffectMetadata(result, effectProfile, registry.approvalRequirement(name));
+            applyEffectMetadata(result, effectProfile);
             result.setAffectedPaths(diff.affectedPaths());
             result.setWorkspaceChanged(workspaceChanged);
             result.setDiffSummary(diff.diffSummary());
@@ -303,13 +267,23 @@ public class ToolExecutor {
                 ? context.getRunId() : context.getRootRunId();
     }
 
+    private ToolResult unauthorized(AgentContext context) {
+        ToolResult result = ToolResult.failure("unauthorized_tool_call",
+                "error: executor requires an authorized tool call", 0L);
+        result.setToolStatus("rejected");
+        result.setToolErrorCode("unauthorized_tool_call");
+        result.setSecurityEventType("unauthorized_tool_call");
+        context.setToolResult(result);
+        return result;
+    }
+
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,
-                               EffectProfile effectProfile, ApprovalRequirement approvalRequirement,
+                               EffectProfile effectProfile,
                                WorkspaceFingerprint.DiffResult diff,
                                boolean workspaceChanged, Path root) {
         result.setToolStatus(toolStatus);
         result.setToolErrorCode(toolErrorCode);
-        applyEffectMetadata(result, effectProfile, approvalRequirement);
+        applyEffectMetadata(result, effectProfile);
         result.setAffectedPaths(diff.affectedPaths());
         result.setWorkspaceChanged(workspaceChanged);
         result.setDiffSummary(diff.diffSummary());
@@ -318,10 +292,8 @@ public class ToolExecutor {
         }
     }
 
-    private void applyEffectMetadata(ToolResult result, EffectProfile effectProfile,
-                                     ApprovalRequirement approvalRequirement) {
+    private void applyEffectMetadata(ToolResult result, EffectProfile effectProfile) {
         result.setEffectProfile(effectProfile);
-        result.setApprovalRequired(approvalRequirement.required());
         result.setReadOnly(effectProfile != null && effectProfile.isReadOnly());
     }
 

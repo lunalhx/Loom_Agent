@@ -24,7 +24,8 @@ import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
-import cn.lunalhx.ai.domain.tool.service.ToolInputGate;
+import cn.lunalhx.ai.domain.tool.service.PermissionPrompt;
+import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -47,7 +48,7 @@ public class AgentFlowFactory {
     private final ConversationHistoryAppendService ledgerAppendService;
     private final LedgerBootstrapService bootstrapService;
     private final ContextManager contextManager;
-    private final ToolExecutor.ApprovalPrompt approvalPrompt;
+    private final PermissionPrompt permissionPrompt;
 
     public AgentFlowFactory(ModelGateway modelGateway,
                             AgentLoopStateDependencies state,
@@ -64,7 +65,7 @@ public class AgentFlowFactory {
                             ConversationHistoryAppendService ledgerAppendService,
                             LedgerBootstrapService bootstrapService,
                             ContextManager contextManager,
-                            ToolExecutor.ApprovalPrompt approvalPrompt) {
+                            PermissionPrompt permissionPrompt) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.state = Objects.requireNonNull(state, "state must not be null");
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
@@ -72,7 +73,7 @@ public class AgentFlowFactory {
         this.ledgerAppendService = Objects.requireNonNull(ledgerAppendService, "ledgerAppendService must not be null");
         this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService must not be null");
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
-        this.approvalPrompt = approvalPrompt;
+        this.permissionPrompt = permissionPrompt;
     }
 
     public AgentFlowDefinition create(ToolRegistry toolRegistry) {
@@ -97,13 +98,10 @@ public class AgentFlowFactory {
                 new ModelCallMiddlewareAssembler(errorRecoveryMiddleware, budgetMiddleware);
 
         ToolExecutor executor = new ToolExecutor(toolRegistry, runtime.toolOutputSanitizer());
-        ToolInputGate inputGate = new ToolInputGate(toolRegistry, approvalPrompt);
+        ToolAuthorizationService authorizationService = new ToolAuthorizationService(
+                toolRegistry, objectMapper, permissionPrompt);
         if (traceRecorder != null) {
-            inputGate.withAuditSink((context, audit) -> traceRecorder.recordSecurityEvent(
-                    context, audit.eventType(), AgentNodeNames.TOOL_INPUT, "approval",
-                    java.util.Map.of(
-                            "tool", audit.toolName(),
-                            "argSummary", audit.argSummary())));
+            // Authorization decisions are already reflected in the safe ToolResult.
         }
 
         List<AgentNode> nodeList = new ArrayList<>(List.of(
@@ -114,7 +112,7 @@ public class AgentFlowFactory {
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder, runtime.agentMetrics())),
                 new DecisionNode(objectMapper, properties, ledgerAppendService),
-                new ToolDispatchNode(inputGate, runtime.toolOutputSanitizer(), properties),
+                new ToolDispatchNode(authorizationService, runtime.toolOutputSanitizer(), properties),
                 new ToolExecuteNode(executor),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService)

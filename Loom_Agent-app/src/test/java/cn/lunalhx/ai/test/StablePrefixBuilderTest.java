@@ -4,7 +4,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import org.junit.Test;
 
@@ -25,7 +24,6 @@ public class StablePrefixBuilderTest {
                 .description(desc)
                 .inputSchema("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}")
                 .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
-                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 

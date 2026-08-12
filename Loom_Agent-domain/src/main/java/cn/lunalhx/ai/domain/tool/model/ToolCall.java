@@ -31,7 +31,6 @@ public class ToolCall {
     private String recentSummary;
     private CollaborationMode collaborationMode;
     private EffectProfile effectProfile;
-    private boolean approvalRequired;
     private DelegateRequest delegateRequest;
 
     public WorkspaceRef workspaceRef() {

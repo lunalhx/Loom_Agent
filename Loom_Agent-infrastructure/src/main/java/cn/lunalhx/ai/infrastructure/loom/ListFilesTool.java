@@ -2,7 +2,6 @@ package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.EvidenceObservationType;
 import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -40,7 +39,6 @@ public class ListFilesTool implements AgentTool {
                         "\"additionalProperties\":false" +
                         "}")
                 .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
-                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 

@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.domain.tool.adapter.port;
 
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -131,12 +130,6 @@ public class ToolRegistry {
             return ToolResult.failure("unknown_tool", "未知工具：" + call.getName(), 0L);
         }
         return tool.call(call);
-    }
-
-    public ApprovalRequirement approvalRequirement(String name) {
-        AgentTool tool = tools.get().get(name);
-        return tool == null || tool.spec().getApprovalRequirement() == null
-                ? ApprovalRequirement.NONE : tool.spec().getApprovalRequirement();
     }
 
     public CallEffectAssessment assessEffect(String name, ToolCall call,

@@ -30,7 +30,6 @@ public class ToolResult {
     private String securityEventType;
     private Boolean readOnly;
     private EffectProfile effectProfile;
-    private Boolean approvalRequired;
     private List<String> affectedPaths;
     private Boolean workspaceChanged;
     private String workspaceFingerprint;

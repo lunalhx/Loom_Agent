@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.Test;
@@ -30,7 +29,7 @@ public class McpToolCatalogTest {
     }
 
     @Test
-    public void catalogPrefixesAllToolsAndCarriesApprovalRequirement() {
+    public void catalogPrefixesAllTools() {
         McpSyncClient auto = client("safe", tool("read"));
         McpSyncClient writes = client("db", tool("query"), tool("delete"));
 
@@ -42,11 +41,8 @@ public class McpToolCatalogTest {
         List<AgentTool> tools = catalog.catalog();
         assertEquals(3, tools.size());
         assertEquals("safe_read", tools.get(0).spec().getName());
-        assertEquals(ApprovalRequirement.NONE, tools.get(0).spec().getApprovalRequirement());
         assertEquals("db_query", tools.get(1).spec().getName());
-        assertEquals(ApprovalRequirement.SESSION_POLICY, tools.get(1).spec().getApprovalRequirement());
         assertEquals("db_delete", tools.get(2).spec().getName());
-        assertEquals(ApprovalRequirement.SESSION_POLICY, tools.get(2).spec().getApprovalRequirement());
     }
 
     @Test
@@ -82,8 +78,7 @@ public class McpToolCatalogTest {
         McpSyncClient client = client("reported-name", tool("read"));
         McpToolCatalog catalog = new McpToolCatalog(List.of(client),
                 Map.of("reported-name", new McpServerConfig(McpApprovalMode.AUTO, List.of(), List.of())));
-        assertEquals(ApprovalRequirement.NONE,
-                catalog.catalog().get(0).spec().getApprovalRequirement());
+        assertEquals("reported-name_read", catalog.catalog().get(0).spec().getName());
     }
 
     @Test

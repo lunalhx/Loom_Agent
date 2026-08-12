@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
@@ -35,15 +34,10 @@ public class McpAgentTool implements AgentTool {
     private final McpSyncClient client;
     private final String serverName;
     private final McpSchema.Tool tool;
-    private final ApprovalRequirement approvalRequirement;
-
-    public McpAgentTool(McpSyncClient client, String serverName, McpSchema.Tool tool,
-                        ApprovalRequirement approvalRequirement) {
+    public McpAgentTool(McpSyncClient client, String serverName, McpSchema.Tool tool) {
         this.client = client;
         this.serverName = serverName;
         this.tool = tool;
-        this.approvalRequirement = approvalRequirement == null
-                ? ApprovalRequirement.SESSION_POLICY : approvalRequirement;
     }
 
     public static String prefixedName(String serverName, String toolName) {
@@ -66,7 +60,6 @@ public class McpAgentTool implements AgentTool {
                 .description(tool.description() == null ? "" : tool.description())
                 .inputSchema(toJsonSchema(tool.inputSchema()))
                 .capabilityEnvelope(ToolCapabilityEnvelope.untrustedUnknown())
-                .approvalRequirement(approvalRequirement)
                 .build();
     }
 

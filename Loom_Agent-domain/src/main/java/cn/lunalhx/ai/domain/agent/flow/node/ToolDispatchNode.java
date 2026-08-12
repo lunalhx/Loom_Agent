@@ -15,7 +15,8 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
-import cn.lunalhx.ai.domain.tool.service.ToolInputGate;
+import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationResult;
+import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -27,7 +28,7 @@ import java.util.Set;
 
 /**
  * Tool input governance node ({@code tool_input}). Constructs the normalized
- * {@link ToolCall} and runs the {@link ToolInputGate} — allowlist, existence,
+ * {@link ToolCall} and runs the {@link ToolAuthorizationService} — allowlist, existence,
  * schema validation, repeated-call, read-only and approval. Rejected calls
  * produce a unified safe {@link ToolResult} and route to {@code tool_output};
  * accepted calls route to {@code tool_execute}.
@@ -42,15 +43,15 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
     private static final ObjectMapper REDACTION_MAPPER = new ObjectMapper();
 
-    private final ToolInputGate inputGate;
+    private final ToolAuthorizationService authorizationService;
     private final ToolOutputSanitizer sanitizer;
     private final AgentRuntimeProperties properties;
 
-    public ToolDispatchNode(ToolInputGate inputGate,
+    public ToolDispatchNode(ToolAuthorizationService authorizationService,
                             ToolOutputSanitizer sanitizer,
                             AgentRuntimeProperties properties) {
         super(AgentNodeNames.TOOL_INPUT, List.of("decision.tool", "decision.input"));
-        this.inputGate = Objects.requireNonNull(inputGate, "inputGate must not be null");
+        this.authorizationService = Objects.requireNonNull(authorizationService, "authorizationService must not be null");
         this.sanitizer = sanitizer;
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
     }
@@ -76,7 +77,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .build();
 
         ToolExecutor.ToolRuntimePolicy policy = resolvePolicy(context);
-        ToolResult rejection = inputGate.evaluate(context, toolCall, policy);
+        ToolAuthorizationResult authorization = authorizationService.authorize(context, toolCall, policy,
+                context.getPermissionPolicySnapshot());
 
         // Only the redacted display value enters events/state/checkpoint;
         // the raw value lives solely in the transient ToolCall.
@@ -93,8 +95,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .input(decision.getInputView())
                 .workspace(context.getWorkspaceDisplayName())
                 .build());
-        if (rejection != null) {
-            context.setToolResult(rejection);
+        if (!authorization.authorized()) {
+            context.setToolResult(authorization.rejection());
             return NodeResult.nextNode(AgentNodeNames.TOOL_OUTPUT, events);
         }
         if ("delegate".equals(toolCall.getName())) {
@@ -106,6 +108,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                     context, context.runtimeProperties(properties), disclosure));
         }
         context.setToolCall(toolCall);
+        context.setAuthorizedToolCall(authorization.authorizedCall());
         return NodeResult.nextNode(AgentNodeNames.TOOL_EXECUTE, events);
     }
 
@@ -149,20 +152,12 @@ public class ToolDispatchNode extends AbstractAgentNode {
                     : new java.util.HashSet<>(allowedTools);
             allowedTools.remove("delegate");
         }
-        ToolExecutor.ApprovalPolicy approvalPolicy = switch (context.getApprovalPolicy() == null
-                ? "ask" : context.getApprovalPolicy().toLowerCase()) {
-            case "auto" -> ToolExecutor.ApprovalPolicy.AUTO;
-            case "never" -> ToolExecutor.ApprovalPolicy.NEVER;
-            default -> ToolExecutor.ApprovalPolicy.ASK;
-        };
         return new ToolExecutor.ToolRuntimePolicy(
                 allowedTools,
                 context.getCollaborationMode(),
-                approvalPolicy,
                 depth,
                 maxDepth,
-                ExecutionProfile.forRun(context.getCollaborationMode(),
-                        context.getParentRunId() != null));
+                context.getExecutionProfile());
     }
 
     private String toolCallId(AgentContext context, AgentDecision decision, String rawInput) {

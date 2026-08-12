@@ -5,7 +5,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -44,7 +43,6 @@ public class DelegateTool implements AgentTool {
                         "\"additionalProperties\":false" +
                         "}")
                 .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
-                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 

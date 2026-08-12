@@ -5,7 +5,6 @@ import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
-import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 
@@ -14,7 +13,7 @@ import java.util.Objects;
 
 /**
  * Tool execution node ({@code tool_execute}). Only runs the accepted
- * {@link ToolCall} through {@link ToolExecutor} — the single boundary where
+ * authorized call through {@link ToolExecutor} — the single boundary where
  * raw output is sanitized before it can reach any Agent state. Tool step
  * counting happens here, exactly once per accepted call.
  *
@@ -32,10 +31,10 @@ public class ToolExecuteNode extends AbstractAgentNode {
 
     @Override
     protected NodeResult doApply(AgentContext context) {
-        ToolCall toolCall = context.getToolCall();
-        String tool = toolCall == null ? null : toolCall.getName();
+        var authorized = context.getAuthorizedToolCall();
+        String tool = authorized == null ? null : authorized.rawCall().getName();
         context.runtime().advanceToolStep(tool);
-        ToolResult result = toolExecutor.execute(context, toolCall);
+        ToolResult result = toolExecutor.execute(context, authorized);
         context.setToolResult(result);
         List<AgentEvent> events = List.of(event(context, cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType.THOUGHT)
                 .thought(context.getDecision() == null ? null : context.getDecision().getReason())

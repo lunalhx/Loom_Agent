@@ -3,7 +3,6 @@ package cn.lunalhx.ai.test;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
@@ -25,16 +24,14 @@ public class ToolRegistryTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    private static AgentTool makeTool(String name, String description, String schema,
-                                      ApprovalRequirement approvalRequirement) {
+    private static AgentTool makeTool(String name, String description, String schema) {
         return new AgentTool() {
             @Override
             public ToolSpec spec() {
                 ToolCapabilityEnvelope envelope = "run_shell".equals(name)
                         ? ToolCapabilityEnvelope.shell() : ToolCapabilityEnvelope.repositoryRead();
                 return ToolSpec.builder().name(name).description(description).inputSchema(schema)
-                        .capabilityEnvelope(envelope)
-                        .approvalRequirement(approvalRequirement).build();
+                        .capabilityEnvelope(envelope).build();
             }
 
             @Override
@@ -45,7 +42,7 @@ public class ToolRegistryTest {
     }
 
     private static AgentTool makeTool(String name) {
-        return makeTool(name, "tool " + name, VALID_SCHEMA, ApprovalRequirement.NONE);
+        return makeTool(name, "tool " + name, VALID_SCHEMA);
     }
 
     @Test
@@ -97,12 +94,9 @@ public class ToolRegistryTest {
     }
 
     @Test
-    public void approvalRequirementIsReportedSeparatelyFromEffects() {
+    public void effectAssessmentIsReportedSeparatelyFromPermissionPolicy() {
         ToolRegistry registry = new ToolRegistry(
-                List.of(makeTool("run_shell", "d", VALID_SCHEMA,
-                        ApprovalRequirement.SESSION_POLICY)), new ToolSchemaValidator(mapper));
-        assertEquals(ApprovalRequirement.SESSION_POLICY, registry.approvalRequirement("run_shell"));
-        assertEquals(ApprovalRequirement.NONE, registry.approvalRequirement("nope"));
+                List.of(makeTool("run_shell", "d", VALID_SCHEMA)), new ToolSchemaValidator(mapper));
         assertEquals(ToolCapabilityEnvelope.shell().toEffectProfile(),
                 registry.assessEffect("run_shell",
                         ToolCall.builder().name("run_shell").build(),

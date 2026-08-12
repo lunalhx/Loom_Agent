@@ -1,7 +1,6 @@
 package cn.lunalhx.ai.infrastructure.mcp;
 
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,15 +37,13 @@ public class McpAgentToolTest {
     }
 
     @Test
-    public void specCarriesPrefixedNameDescriptionSchemaAndApprovalRequirement() {
+    public void specCarriesPrefixedNameDescriptionSchema() {
         McpSyncClient client = mock(McpSyncClient.class);
-        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"),
-                ApprovalRequirement.SESSION_POLICY);
+        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"));
 
         ToolSpec spec = tool.spec();
         assertEquals("github_get_issue", spec.getName());
         assertEquals("remote get_issue description", spec.getDescription());
-        assertEquals(ApprovalRequirement.SESSION_POLICY, spec.getApprovalRequirement());
         assertFalse(spec.getCapabilityEnvelope().complete());
         assertTrue(spec.getInputSchema().contains("\"path\""));
         assertTrue(spec.getInputSchema().contains("\"type\":\"object\""));
@@ -59,8 +56,7 @@ public class McpAgentToolTest {
                 .thenReturn(new McpSchema.CallToolResult(
                         List.of(new McpSchema.TextContent("line one"),
                                 new McpSchema.TextContent("line two")), false));
-        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"),
-                ApprovalRequirement.NONE);
+        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"));
 
         ObjectNode input = MAPPER.createObjectNode();
         input.put("path", "README.md");
@@ -76,8 +72,7 @@ public class McpAgentToolTest {
         McpSyncClient client = mock(McpSyncClient.class);
         when(client.callTool(any(McpSchema.CallToolRequest.class)))
                 .thenReturn(new McpSchema.CallToolResult(List.of(new McpSchema.TextContent("boom")), true));
-        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"),
-                ApprovalRequirement.NONE);
+        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"));
 
         ToolResult result = tool.call(ToolCall.builder().name("github_get_issue").input(MAPPER.createObjectNode()).build());
         assertFalse(result.isSuccess());
@@ -89,8 +84,7 @@ public class McpAgentToolTest {
         McpSyncClient client = mock(McpSyncClient.class);
         when(client.callTool(any(McpSchema.CallToolRequest.class)))
                 .thenThrow(new RuntimeException("connection lost"));
-        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"),
-                ApprovalRequirement.NONE);
+        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"));
 
         ToolResult result = tool.call(ToolCall.builder().name("github_get_issue").input(MAPPER.createObjectNode()).build());
         assertFalse(result.isSuccess());
@@ -102,8 +96,7 @@ public class McpAgentToolTest {
         McpSyncClient client = mock(McpSyncClient.class);
         when(client.callTool(any(McpSchema.CallToolRequest.class)))
                 .thenReturn(new McpSchema.CallToolResult(List.of(new McpSchema.TextContent("ok")), false));
-        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"),
-                ApprovalRequirement.NONE);
+        McpAgentTool tool = new McpAgentTool(client, "github", remoteTool("get_issue"));
 
         ToolCall call = ToolCall.builder().name("github_get_issue").input(null).build();
         ToolResult result = tool.call(call);

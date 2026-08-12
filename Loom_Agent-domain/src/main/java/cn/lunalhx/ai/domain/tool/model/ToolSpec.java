@@ -17,12 +17,9 @@ public class ToolSpec {
     private String inputSchema;
     @Builder.Default
     private ToolCapabilityEnvelope capabilityEnvelope = ToolCapabilityEnvelope.untrustedUnknown();
-    @Builder.Default
-    private ApprovalRequirement approvalRequirement = ApprovalRequirement.NONE;
 
     public ToolSpec(String name, String description, String inputSchema) {
-        this(name, description, inputSchema,
-                ToolCapabilityEnvelope.untrustedUnknown(), ApprovalRequirement.NONE);
+        this(name, description, inputSchema, ToolCapabilityEnvelope.untrustedUnknown());
     }
 
 }

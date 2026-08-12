@@ -48,14 +48,14 @@ public final class CliLoopTestFixture {
     public static AgentLoopService build(Path workspace, ObjectMapper mapper,
                                          ModelGateway gateway,
                                          AgentRuntimeProperties agent,
-                                         List<ToolExecutor.ApprovalPrompt> ignored) {
+                                         List<cn.lunalhx.ai.domain.tool.service.PermissionPrompt> ignored) {
         return build(workspace, mapper, gateway, agent, ignored, List.of());
     }
 
     public static AgentLoopService build(Path workspace, ObjectMapper mapper,
                                          ModelGateway gateway,
                                          AgentRuntimeProperties agent,
-                                         List<ToolExecutor.ApprovalPrompt> ignored,
+                                         List<cn.lunalhx.ai.domain.tool.service.PermissionPrompt> ignored,
                                          List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools) {
         return build(workspace, mapper, gateway, agent, ignored, tools,
                 cn.lunalhx.ai.domain.agent.service.context.SecretRedactor.none());
@@ -66,7 +66,7 @@ public final class CliLoopTestFixture {
     public static AgentLoopService build(Path workspace, ObjectMapper mapper,
                                          ModelGateway gateway,
                                          AgentRuntimeProperties agent,
-                                         List<ToolExecutor.ApprovalPrompt> ignored,
+                                         List<cn.lunalhx.ai.domain.tool.service.PermissionPrompt> ignored,
                                          List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools,
                                          cn.lunalhx.ai.domain.agent.service.context.SecretRedactor redactor) {
         Path root = workspace.toAbsolutePath().normalize();

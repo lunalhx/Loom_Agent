@@ -10,6 +10,10 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.PermissionAction;
+import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
+import cn.lunalhx.ai.domain.tool.model.PermissionRule;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -121,6 +125,7 @@ public final class AgentContextFactory {
         context.setToolSpecs(toolRegistry.effectiveSpecs(
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
+        freezeAuthorization(context);
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         if (previous != null) {
@@ -181,6 +186,7 @@ public final class AgentContextFactory {
         context.setToolSpecs(toolRegistry.effectiveSpecs(
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
+        freezeAuthorization(context);
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }
@@ -210,6 +216,28 @@ public final class AgentContextFactory {
             }
         }
         return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
+    }
+
+    private void freezeAuthorization(AgentContext context) {
+        boolean delegate = context.getParentRunId() != null || context.getAgentDepth() > 0;
+        context.setExecutionProfile(ExecutionProfile.forRun(context.getCollaborationMode(), delegate));
+        PermissionAction defaultAction = switch (context.getApprovalPolicy()) {
+            case "auto" -> PermissionAction.ALLOW;
+            case "never" -> PermissionAction.DENY;
+            default -> PermissionAction.ASK;
+        };
+        // The safety floor may silently allow only trusted structured repository reads.
+        // All mutation and unknown tools remain governed by the selected default/rules.
+        List<PermissionRule> builtIn = List.of(
+                new PermissionRule("builtin-read-file", "builtin", "read_file",
+                        PermissionRule.MatcherKind.TOOL, "read_file", PermissionAction.ALLOW),
+                new PermissionRule("builtin-list-files", "builtin", "list_files",
+                        PermissionRule.MatcherKind.TOOL, "list_files", PermissionAction.ALLOW),
+                new PermissionRule("builtin-search", "builtin", "search",
+                        PermissionRule.MatcherKind.TOOL, "search", PermissionAction.ALLOW),
+                new PermissionRule("builtin-delegate", "builtin", "delegate",
+                        PermissionRule.MatcherKind.TOOL, "delegate", PermissionAction.ALLOW));
+        context.setPermissionPolicySnapshot(new PermissionPolicySnapshot(defaultAction, builtIn, List.of("builtin")));
     }
 
     private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {

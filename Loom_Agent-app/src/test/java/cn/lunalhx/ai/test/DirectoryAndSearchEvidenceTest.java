@@ -99,7 +99,7 @@ public class DirectoryAndSearchEvidenceTest {
                     marker + "\n");
         }
         AgentContext context = planContext(workspace, "search-run", "search");
-        ToolExecutor executor = executor(new SearchTool(new LocalWorkspacePort()));
+        AuthorizedTestExecutor executor = executor(new SearchTool(new LocalWorkspacePort()));
 
         ToolResult result = executor.execute(context, searchCall(workspace, SEARCH_QUERY));
 
@@ -129,7 +129,7 @@ public class DirectoryAndSearchEvidenceTest {
         Path workspace = Files.createTempDirectory("negative-search-evidence");
         Files.writeString(workspace.resolve("plain.txt"), "nothing relevant\n");
         AgentContext context = planContext(workspace, "negative-search-run", "search");
-        ToolExecutor executor = executor(new SearchTool(new LocalWorkspacePort()));
+        AuthorizedTestExecutor executor = executor(new SearchTool(new LocalWorkspacePort()));
 
         ToolResult noMatch = executor.execute(context, searchCall(workspace, "ABSENT_TICKET4_PATTERN"));
 
@@ -220,9 +220,9 @@ public class DirectoryAndSearchEvidenceTest {
         }
     }
 
-    private ToolExecutor executor(cn.lunalhx.ai.domain.tool.adapter.port.AgentTool tool) {
+    private AuthorizedTestExecutor executor(cn.lunalhx.ai.domain.tool.adapter.port.AgentTool tool) {
         ToolRegistry registry = new ToolRegistry(List.of(tool), new ToolSchemaValidator(mapper));
-        return new ToolExecutor(registry, new NoopToolOutputSanitizer());
+        return new AuthorizedTestExecutor(new ToolExecutor(registry, new NoopToolOutputSanitizer()), registry, mapper);
     }
 
     private AgentContext planContext(Path workspace, String runId, String toolName) {

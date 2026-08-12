@@ -162,7 +162,7 @@ public class SecurityContractTest {
     }
 
     @Test
-    public void approvalPromptReceivesSummarizedArgsNotRawValues() {
+    public void permissionPromptReceivesSummarizedArgsNotRawValues() {
         cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry registry = new cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry(
                 List.of(new cn.lunalhx.ai.domain.tool.adapter.port.AgentTool() {
                     @Override
@@ -172,7 +172,6 @@ public class SecurityContractTest {
                                 .description("shell")
                                 .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"],\"additionalProperties\":false}")
                                 .capabilityEnvelope(cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope.shell())
-                                .approvalRequirement(cn.lunalhx.ai.domain.tool.model.ApprovalRequirement.SESSION_POLICY)
                                 .build();
                     }
 
@@ -185,25 +184,31 @@ public class SecurityContractTest {
                         new com.fasterxml.jackson.databind.ObjectMapper()));
 
         java.util.concurrent.atomic.AtomicReference<String> shown = new java.util.concurrent.atomic.AtomicReference<>();
-        cn.lunalhx.ai.domain.tool.service.ToolInputGate gate = new cn.lunalhx.ai.domain.tool.service.ToolInputGate(
-                registry, (toolName, args) -> {
-            shown.set(args == null ? "" : args.toString());
-            return true;
-        });
+        cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService gate =
+                new cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService(registry,
+                        new com.fasterxml.jackson.databind.ObjectMapper(), (display, decision) -> {
+                    shown.set(display.normalizedSummary());
+                    return cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE;
+                });
         AgentContext ctx = new AgentContext();
         ctx.setRunId("run-x");
         ctx.setHistory(new java.util.ArrayList<>());
+        ctx.setCollaborationMode(cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
+        ctx.setExecutionProfile(cn.lunalhx.ai.domain.tool.model.ExecutionProfile.forRun(
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, false));
+        ctx.setPermissionPolicySnapshot(new cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot(
+                cn.lunalhx.ai.domain.tool.model.PermissionAction.ASK, List.of(), List.of()));
         cn.lunalhx.ai.domain.tool.model.ToolCall call = cn.lunalhx.ai.domain.tool.model.ToolCall.builder()
                 .name("run_shell")
                 .input(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
                         .put("command", "echo R4W_SECRET_123"))
                 .build();
-        cn.lunalhx.ai.domain.tool.model.ToolResult result = gate.evaluate(ctx, call,
-                cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy.root(
+        var result = gate.authorize(ctx, call,
+                new cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy(
                         java.util.Set.of("run_shell"),
-                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD,
-                        cn.lunalhx.ai.domain.tool.service.ToolExecutor.ApprovalPolicy.ASK));
-        assertNull(result);
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, 0, 1,
+                        ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
+        assertTrue(result.authorized());
         assertFalse(shown.get().contains("R4W_SECRET_123"));
         assertTrue(shown.get().contains("sha256") || shown.get().contains("length"));
     }

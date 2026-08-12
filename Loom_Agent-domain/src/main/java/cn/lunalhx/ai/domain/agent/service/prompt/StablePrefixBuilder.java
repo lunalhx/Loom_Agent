@@ -4,7 +4,6 @@ import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.common.UntrustedContentSanitizer;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -130,8 +129,7 @@ public final class StablePrefixBuilder {
             sb.append(spec.getName()).append('\n')
                     .append(spec.getDescription()).append('\n')
                     .append(normalizeSchema(spec.getInputSchema())).append('\n')
-                    .append(spec.getCapabilityEnvelope()).append('\n')
-                    .append(spec.getApprovalRequirement()).append('\n');
+                    .append(spec.getCapabilityEnvelope()).append('\n');
         }
         return DigestUtils.sha256Hex(sb.toString());
     }
@@ -157,12 +155,9 @@ public final class StablePrefixBuilder {
             List<ToolSpec> ordered = new ArrayList<>(toolSpecs);
             ordered.sort(Comparator.comparing(ToolSpec::getName));
             for (ToolSpec spec : ordered) {
-                ApprovalRequirement approval = spec.getApprovalRequirement() == null
-                        ? ApprovalRequirement.NONE : spec.getApprovalRequirement();
-                String approvalText = approval.required() ? "approval required" : "no approval";
                 sb.append("- ").append(spec.getName())
                         .append("(").append(schemaFields(spec.getInputSchema())).append(")")
-                        .append(" [").append(approvalText).append("] ")
+                        .append(" ")
                         .append(spec.getDescription())
                         .append('\n');
             }

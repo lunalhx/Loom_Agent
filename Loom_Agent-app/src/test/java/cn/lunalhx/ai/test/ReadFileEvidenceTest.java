@@ -77,7 +77,7 @@ public class ReadFileEvidenceTest {
         Path file = workspace.resolve("long.txt");
         writeLongFile(file, HIDDEN_ORIGINAL);
         AgentContext context = planContext(workspace, "run-drift");
-        ToolExecutor executor = executor();
+        AuthorizedTestExecutor executor = executor();
         ToolCall call = readCall(workspace, 1, 300);
 
         executor.execute(context, call);
@@ -155,7 +155,7 @@ public class ReadFileEvidenceTest {
 
         AgentContext build = planContext(workspace, "build-run");
         build.setCollaborationMode(CollaborationMode.BUILD);
-        ToolExecutor executor = executor();
+        AuthorizedTestExecutor executor = executor();
         assertTrue(executor.execute(build, readCall(workspace, 1, 300)).isSuccess());
         assertTrue(build.getEvidenceReceipts().isEmpty());
 
@@ -236,11 +236,11 @@ public class ReadFileEvidenceTest {
         }
     }
 
-    private ToolExecutor executor() {
+    private AuthorizedTestExecutor executor() {
         ToolRegistry registry = new ToolRegistry(
                 List.of(new ReadFileTool(new LocalWorkspacePort())),
                 new ToolSchemaValidator(mapper));
-        return new ToolExecutor(registry, new NoopToolOutputSanitizer());
+        return new AuthorizedTestExecutor(new ToolExecutor(registry, new NoopToolOutputSanitizer()), registry, mapper);
     }
 
     private AgentContext planContext(Path workspace, String runId) {

@@ -4,7 +4,6 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
-import cn.lunalhx.ai.domain.tool.model.ApprovalRequirement;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +26,6 @@ public class ToolDeterministicOrderingTest {
                 .description("desc " + name)
                 .inputSchema("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}")
                 .capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead())
-                .approvalRequirement(ApprovalRequirement.NONE)
                 .build();
     }
 
