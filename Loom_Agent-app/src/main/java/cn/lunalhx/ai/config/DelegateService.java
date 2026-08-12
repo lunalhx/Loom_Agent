@@ -72,6 +72,7 @@ public class DelegateService implements DelegateRunner {
                 .maxSteps(request.getChildMaxSteps())
                 .maxAttempts(request.getChildMaxAttempts())
                 .approvalPolicy("never")
+                .inheritedPermissionPolicySnapshot(request.getPermissionPolicySnapshot())
                 .collaborationMode(request.getModeSnapshot())
                 .planBinding(request.getPlanBinding())
                 .allowedTools(request.getAllowedTools())

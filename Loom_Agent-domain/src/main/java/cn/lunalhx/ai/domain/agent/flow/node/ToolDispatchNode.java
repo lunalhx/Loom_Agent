@@ -106,6 +106,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
                             : toolCall.getEffectProfile().outboundDisclosure();
             toolCall.setDelegateRequest(DelegateRequest.fromParent(
                     context, context.runtimeProperties(properties), disclosure));
+            authorization = new ToolAuthorizationResult(
+                    authorization.authorizedCall().withDelegateRequest(toolCall.getDelegateRequest()), null);
         }
         context.setToolCall(toolCall);
         context.setAuthorizedToolCall(authorization.authorizedCall());

@@ -37,4 +37,13 @@ public class PermissionPolicySnapshotTest {
         assertEquals(PermissionAction.ASK, policy.evaluate(new PermissionSubject("run_shell", "opaque-key",
                 List.of(), true, List.of(), List.of())).action());
     }
+
+    @Test
+    public void compoundShellUsesDefaultForEveryUnmatchedUnit() {
+        PermissionPolicySnapshot policy = new PermissionPolicySnapshot(PermissionAction.ASK, List.of(
+                new PermissionRule("allow-rg", "builtin", "run_shell",
+                        PermissionRule.MatcherKind.SHELL_PREFIX, "rg", PermissionAction.ALLOW)), List.of());
+        assertEquals(PermissionAction.ASK, policy.evaluate(new PermissionSubject("run_shell", "key",
+                List.of("rg needle", "unknown-command"), false, List.of(), List.of())).action());
+    }
 }

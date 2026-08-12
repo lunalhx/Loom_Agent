@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
+import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,6 +26,7 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DelegateRequest {
+    private transient PermissionPolicySnapshot permissionPolicySnapshot;
 
     private static final int MAX_CHILD_STEPS = 3;
     private static final Set<String> READ_ONLY_TOOLS = Set.of("list_files", "read_file", "search");
@@ -97,6 +99,7 @@ public class DelegateRequest {
                 .remainingModelAttempts(remainingModelAttempts)
                 .remainingTimeoutMs(remainingTimeoutMs)
                 .remainingTokenBudget(remainingTokenBudget)
+                .permissionPolicySnapshot(context.getPermissionPolicySnapshot())
                 .build();
     }
 

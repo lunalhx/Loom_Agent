@@ -32,7 +32,7 @@ public class ToolExecuteNode extends AbstractAgentNode {
     @Override
     protected NodeResult doApply(AgentContext context) {
         var authorized = context.getAuthorizedToolCall();
-        String tool = authorized == null ? null : authorized.rawCall().getName();
+        String tool = authorized == null ? null : authorized.toolName();
         context.runtime().advanceToolStep(tool);
         ToolResult result = toolExecutor.execute(context, authorized);
         context.setToolResult(result);

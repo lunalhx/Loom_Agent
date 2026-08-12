@@ -38,6 +38,11 @@ public record ExecutionProfile(ExecutionProfileKind kind, Path workspace,
                 FilesystemAccess.WRITE, null, null, false, false, List.of(), "unresolved");
     }
 
+    public ExecutionProfile withWorkspace(Path canonicalWorkspace) {
+        return new ExecutionProfile(kind, canonicalWorkspace, workspaceAccess, homeRoot, temporaryRoot,
+                networkAllowed, hostPrivateVisible, externalGrants, sandboxBackend);
+    }
+
     public boolean allows(EffectProfile profile) {
         if (profile == null) return false;
         if (!profile.complete()) return kind == ExecutionProfileKind.BUILD_SANDBOX

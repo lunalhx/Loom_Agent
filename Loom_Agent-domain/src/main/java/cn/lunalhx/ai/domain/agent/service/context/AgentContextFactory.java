@@ -17,6 +17,7 @@ import cn.lunalhx.ai.domain.tool.model.PermissionRule;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -125,6 +126,7 @@ public final class AgentContextFactory {
         context.setToolSpecs(toolRegistry.effectiveSpecs(
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
+        context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         freezeAuthorization(context);
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
@@ -186,6 +188,7 @@ public final class AgentContextFactory {
         context.setToolSpecs(toolRegistry.effectiveSpecs(
                 context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
+        context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         freezeAuthorization(context);
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
@@ -220,7 +223,19 @@ public final class AgentContextFactory {
 
     private void freezeAuthorization(AgentContext context) {
         boolean delegate = context.getParentRunId() != null || context.getAgentDepth() > 0;
-        context.setExecutionProfile(ExecutionProfile.forRun(context.getCollaborationMode(), delegate));
+        Path workspace = context.getResolvedWorkspace();
+        try {
+            workspace = workspace == null ? null : workspace.toRealPath();
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("workspace cannot be canonicalized for authorization", e);
+        }
+        context.setExecutionProfile(ExecutionProfile.forRun(context.getCollaborationMode(), delegate)
+                .withWorkspace(workspace));
+        // A delegate inherits the root's already validated snapshot; it never
+        // re-reads policy sources or applies a child default.
+        if (context.getParentRunId() != null && context.getPermissionPolicySnapshot() != null) {
+            return;
+        }
         PermissionAction defaultAction = switch (context.getApprovalPolicy()) {
             case "auto" -> PermissionAction.ALLOW;
             case "never" -> PermissionAction.DENY;

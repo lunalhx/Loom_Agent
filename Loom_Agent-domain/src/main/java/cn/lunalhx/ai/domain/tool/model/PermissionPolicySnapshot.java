@@ -28,6 +28,23 @@ public final class PermissionPolicySnapshot {
     public String snapshotDigest() { return snapshotDigest; }
 
     public PermissionDecision evaluate(PermissionSubject subject) {
+        if (!subject.shellUnits().isEmpty() && !subject.opaque()) {
+            return evaluateShellUnits(subject);
+        }
+        return evaluateOne(subject);
+    }
+
+    private PermissionDecision evaluateShellUnits(PermissionSubject subject) {
+        PermissionDecision strictest = null;
+        for (String unit : subject.shellUnits()) {
+            PermissionDecision decision = evaluateOne(new PermissionSubject(subject.toolName(),
+                    subject.exactKey(), List.of(unit), false, subject.paths(), subject.domains()));
+            if (strictest == null || rank(decision.action()) > rank(strictest.action())) strictest = decision;
+        }
+        return strictest == null ? evaluateOne(subject) : strictest;
+    }
+
+    private PermissionDecision evaluateOne(PermissionSubject subject) {
         List<PermissionRule> matches = new ArrayList<>();
         for (PermissionRule rule : compiledRules) {
             if (matches(rule, subject)) {
@@ -46,6 +63,10 @@ public final class PermissionPolicySnapshot {
                 matches.isEmpty() ? "default_" + defaultAction.name().toLowerCase() : "matched_rule",
                 matches.stream().map(PermissionRule::id).toList(),
                 matches.stream().map(PermissionRule::sourceId).distinct().toList(), false);
+    }
+
+    private static int rank(PermissionAction action) {
+        return switch (action) { case ALLOW -> 0; case ASK -> 1; case DENY -> 2; };
     }
 
     private boolean matches(PermissionRule rule, PermissionSubject subject) {

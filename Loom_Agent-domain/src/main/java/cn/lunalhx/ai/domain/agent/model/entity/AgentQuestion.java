@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -40,5 +41,7 @@ public class AgentQuestion {
     private PlanBinding planBinding;
     private AgentContextSnapshot seedSnapshot;
     private AgentRunStartGuard runStartGuard;
+    /** Trusted parent-to-child handoff; never user-provided or persisted. */
+    private transient PermissionPolicySnapshot inheritedPermissionPolicySnapshot;
 
 }

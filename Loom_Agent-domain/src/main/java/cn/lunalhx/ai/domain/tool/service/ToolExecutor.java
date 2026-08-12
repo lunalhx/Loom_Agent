@@ -82,7 +82,7 @@ public class ToolExecutor {
                 || !Objects.equals(context.getExecutionProfile(), authorized.executionProfile())) {
             return unauthorized(context);
         }
-        var call = authorized.rawCall();
+        var call = authorized.executionCall();
         String name = call.getName();
         EffectProfile effectProfile = authorized.effectProfile();
         Path root = call.getWorkspaceRoot();

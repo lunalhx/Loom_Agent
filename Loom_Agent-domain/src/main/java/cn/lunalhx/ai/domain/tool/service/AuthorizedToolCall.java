@@ -5,10 +5,11 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.NormalizedToolCall;
 import cn.lunalhx.ai.domain.tool.model.PermissionDecision;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
 
 /** Opaque executor input minted only by {@link ToolAuthorizationService}. */
 public final class AuthorizedToolCall {
-    private final ToolCall rawCall;
+    private final ToolCall executionCall;
     private final NormalizedToolCall normalizedCall;
     private final EffectProfile effectProfile;
     private final ExecutionProfile executionProfile;
@@ -19,7 +20,7 @@ public final class AuthorizedToolCall {
     AuthorizedToolCall(ToolCall rawCall, NormalizedToolCall normalizedCall,
                        EffectProfile effectProfile, ExecutionProfile executionProfile,
                        PermissionDecision permissionDecision, String runId, String snapshotDigest) {
-        this.rawCall = rawCall;
+        this.executionCall = immutableExecutionCopy(rawCall);
         this.normalizedCall = normalizedCall;
         this.effectProfile = effectProfile;
         this.executionProfile = executionProfile;
@@ -28,11 +29,34 @@ public final class AuthorizedToolCall {
         this.snapshotDigest = snapshotDigest;
     }
 
-    public ToolCall rawCall() { return rawCall; }
+    /** The executor is the only consumer of this mutable adapter type. */
+    ToolCall executionCall() { return executionCall; }
+    public String toolName() { return executionCall.getName(); }
     public NormalizedToolCall normalizedCall() { return normalizedCall; }
     public EffectProfile effectProfile() { return effectProfile; }
     public ExecutionProfile executionProfile() { return executionProfile; }
     public PermissionDecision permissionDecision() { return permissionDecision; }
     public String runId() { return runId; }
     public String snapshotDigest() { return snapshotDigest; }
+
+    /** Attach the Runtime-created delegate request without exposing the call payload. */
+    public AuthorizedToolCall withDelegateRequest(DelegateRequest request) {
+        ToolCall copy = immutableExecutionCopy(executionCall);
+        copy.setDelegateRequest(request);
+        return new AuthorizedToolCall(copy, normalizedCall, effectProfile, executionProfile,
+                permissionDecision, runId, snapshotDigest);
+    }
+
+    private static ToolCall immutableExecutionCopy(ToolCall source) {
+        ToolCall copy = ToolCall.builder()
+                .name(source.getName()).toolCallId(source.getToolCallId())
+                .input(source.getInput() == null ? null : source.getInput().deepCopy())
+                .workspace(source.getWorkspace()).workspaceRoot(source.getWorkspaceRoot())
+                .runId(source.getRunId()).rootRunId(source.getRootRunId())
+                .conversationId(source.getConversationId()).runtimeProperties(source.getRuntimeProperties())
+                .secretEnvNames(source.getSecretEnvNames()).recentSummary(source.getRecentSummary())
+                .collaborationMode(source.getCollaborationMode()).effectProfile(source.getEffectProfile())
+                .delegateRequest(source.getDelegateRequest()).build();
+        return copy;
+    }
 }
