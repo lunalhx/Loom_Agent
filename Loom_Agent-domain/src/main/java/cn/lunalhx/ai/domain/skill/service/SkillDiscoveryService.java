@@ -139,7 +139,8 @@ public final class SkillDiscoveryService {
                     frontmatter.license(),
                     frontmatter.compatibility(),
                     frontmatter.metadata(),
-                    frontmatter.compatibilityDiagnostics());
+                    frontmatter.compatibilityDiagnostics(),
+                    pkg.packageDir());
         }
     }
 

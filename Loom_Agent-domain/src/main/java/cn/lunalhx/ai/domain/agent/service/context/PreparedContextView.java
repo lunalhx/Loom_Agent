@@ -27,6 +27,10 @@ public final class PreparedContextView {
         return new PreparedContextView(result.systemPrefix(), result.messages(), result.metadata());
     }
 
+    public static PreparedContextView withSystemPrefix(PreparedContextView base, String systemPrefix) {
+        return new PreparedContextView(systemPrefix, base.messages(), base.metadata());
+    }
+
     public String systemPrefix() { return systemPrefix; }
     public List<ChatMessage> messages() { return messages; }
     public ContextBuildResult.ContextRenderMetadata metadata() { return metadata; }

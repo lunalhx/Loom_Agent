@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.domain.skill.model;
 
+import java.nio.file.Path;
 import java.util.List;
 
 public record SkillCatalogEntry(
@@ -12,5 +13,6 @@ public record SkillCatalogEntry(
         String license,
         String compatibility,
         String metadata,
-        List<String> compatibilityDiagnostics) {
+        List<String> compatibilityDiagnostics,
+        Path packageRoot) {
 }

@@ -219,6 +219,18 @@ public class AgentContext {
     public void setWorkingMemory(cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory v) {
         prompt.setWorkingMemory(v);
     }
+    public cn.lunalhx.ai.domain.skill.model.SkillCatalog getSkillCatalogSnapshot() {
+        return prompt.skillCatalogSnapshot();
+    }
+    public void setSkillCatalogSnapshot(cn.lunalhx.ai.domain.skill.model.SkillCatalog v) {
+        prompt.setSkillCatalogSnapshot(v);
+    }
+    public List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> getActiveSkills() {
+        return prompt.activeSkills();
+    }
+    public void setActiveSkills(List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> v) {
+        prompt.setActiveSkills(v);
+    }
     public cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory workingMemoryOrCreate() {
         if (prompt.workingMemory() == null) {
             prompt.setWorkingMemory(new cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory());

@@ -92,6 +92,23 @@ final class SkillFrontmatterParser {
                 List.of());
     }
 
+    /** Returns the instruction body after closed YAML frontmatter, never executing content. */
+    public String extractBody(byte[] skillMdBytes) {
+        String text = new String(skillMdBytes, StandardCharsets.UTF_8);
+        if (!text.startsWith("---")) {
+            throw new IllegalArgumentException("SKILL.md missing YAML frontmatter");
+        }
+        int end = text.indexOf("\n---", 3);
+        if (end < 0) {
+            throw new IllegalArgumentException("SKILL.md frontmatter is not closed");
+        }
+        int bodyStart = end + "\n---".length();
+        if (bodyStart < text.length() && text.charAt(bodyStart) == '\n') {
+            bodyStart++;
+        }
+        return text.substring(bodyStart).strip();
+    }
+
     private static ParsedFrontmatter invalid(String directoryName, List<String> validationErrors,
                                              List<String> compatibilityDiagnostics) {
         return new ParsedFrontmatter(false, directoryName, null, null, null, null,

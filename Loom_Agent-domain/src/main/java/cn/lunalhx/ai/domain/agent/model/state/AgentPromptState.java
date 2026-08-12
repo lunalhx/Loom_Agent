@@ -22,6 +22,10 @@ public final class AgentPromptState {
     // ---- working context memory ----
     private WorkingContextMemory workingMemory;
 
+    // ---- run-scoped skills (not Session state; durable resume is a later ticket) ----
+    private transient cn.lunalhx.ai.domain.skill.model.SkillCatalog skillCatalogSnapshot;
+    private transient List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills = List.of();
+
     // ---- bootstrap state (C9R, transient) ----
     private transient boolean ledgerReady;
     private transient String pendingContinuation;
@@ -41,6 +45,14 @@ public final class AgentPromptState {
 
     /** Working context memory (task summary, recent files, file summaries, notes). */
     public WorkingContextMemory workingMemory() { return workingMemory; }
+
+    public cn.lunalhx.ai.domain.skill.model.SkillCatalog skillCatalogSnapshot() {
+        return skillCatalogSnapshot;
+    }
+
+    public List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills() {
+        return activeSkills == null ? List.of() : activeSkills;
+    }
 
     /** Whether bootstrap has completed and the ledger is ready for model input. */
     public boolean ledgerReady() { return ledgerReady; }
@@ -70,6 +82,12 @@ public final class AgentPromptState {
     public void setLastLedgerPlanVersion(int v) { this.lastLedgerPlanVersion = v; }
     public void setConfigFingerprint(String v) { this.configFingerprint = v; }
     public void setWorkingMemory(WorkingContextMemory v) { this.workingMemory = v; }
+    public void setSkillCatalogSnapshot(cn.lunalhx.ai.domain.skill.model.SkillCatalog v) {
+        this.skillCatalogSnapshot = v;
+    }
+    public void setActiveSkills(List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> v) {
+        this.activeSkills = v == null ? List.of() : List.copyOf(v);
+    }
     public void setLedgerReady(boolean v) { this.ledgerReady = v; }
     public void setPendingContinuation(String v) { this.pendingContinuation = v; }
     public void setPreparedView(cn.lunalhx.ai.domain.agent.service.context.PreparedContextView v) { this.preparedView = v; }

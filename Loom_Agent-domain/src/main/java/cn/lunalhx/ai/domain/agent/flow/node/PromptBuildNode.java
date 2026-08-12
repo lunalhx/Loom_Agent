@@ -19,6 +19,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.workspace.WorkspaceFacts;
+import cn.lunalhx.ai.domain.skill.service.SkillPromptRenderer;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -84,6 +85,11 @@ public class PromptBuildNode extends AbstractAgentNode {
         }
 
         PreparedContextView view = PreparedContextView.from(result);
+        // Append admitted active skills after ContextManager trimming so bodies are
+        // never silently clipped, and so budgetText matches the model system prompt.
+        String systemPrompt = new SkillPromptRenderer()
+                .appendToSystemPrompt(view.systemPrefix(), context.getActiveSkills());
+        view = PreparedContextView.withSystemPrefix(view, systemPrompt);
         context.setPreparedView(view);
 
         List<AgentEvent> events = new ArrayList<>();

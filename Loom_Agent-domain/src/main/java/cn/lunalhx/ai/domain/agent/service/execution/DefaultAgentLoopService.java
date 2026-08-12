@@ -23,6 +23,8 @@ import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
+import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
+import cn.lunalhx.ai.domain.skill.service.SkillRunBootstrap;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -51,6 +53,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
+    private final SkillRunBootstrap skillRunBootstrap = new SkillRunBootstrap();
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
                             AgentRunLifecycle lifecycle,
@@ -84,6 +87,15 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
                 AgentContext context = resolveContext(question);
                 capture.accept(context);
+                try {
+                    skillRunBootstrap.prepareRootRun(context, null);
+                } catch (SkillActivationException e) {
+                    context.runtime().fail(AgentStopReason.MODEL_ERROR, "skill_activation_failed",
+                            e.getMessage());
+                    emit(sink, List.of(components.eventFactory().agentError(context)));
+                    sink.complete();
+                    return;
+                }
                 String lockKey = StringUtils.isBlank(context.getParentRunId())
                         ? ConversationExecutionGuard.effectiveLockKey(
                                 context.getConversationId(), context.getRunId())
