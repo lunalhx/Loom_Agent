@@ -1,0 +1,5 @@
+# Sandbox Shells by default and make Full Access explicit
+
+Status: Accepted.
+
+All ordinary `run_shell` invocations use the shared native sandbox: Plan receives a repository-read, disposable-write, offline profile; Build receives a workspace-write, disposable-home, offline profile; and Delegates inherit a stricter intersection. A user may explicitly select Full Access for a root Build Run, combining `DANGER_FULL_ACCESS` with an `ALLOW` default so normal commands execute silently under the host user's authority. Full Access continues to evaluate the unified Permission Policy, explicit `ASK` or `DENY` rules, the tool allowlist, and the Built-in Safety Floor, but those checks cannot constrain equivalent behavior hidden inside arbitrary code. Its activation warning states that scripts, plugins, interpreters, and binaries have the current host user's authority and that no host safety guarantee remains. Full Access is unavailable to Plan Mode, Delegate Runs, Agents, Tool Approval, and project configuration.

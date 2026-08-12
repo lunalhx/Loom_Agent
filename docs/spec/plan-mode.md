@@ -1,3 +1,5 @@
+> Shell availability and static Approval Requirement sections in this Plan v1 Spec are superseded by the accepted Input-aware Shell permissions and lightweight sandboxing Spec. All other Plan Artifact, revision, evidence freshness, and handoff semantics remain in force.
+
 ## Problem Statement
 
 Loom Agent currently has one collaboration behavior: each user request starts a Run that may inspect and modify the workspace according to the Session's base tool and approval policy. A user who wants the Agent to investigate first has no durable, explicit Plan Mode, no first-class Plan history, and no reliable boundary preventing analysis from becoming implementation. Tool Approval and the current static `risky` flag also cannot express the difference between approval policy and the concrete effects of one invocation.

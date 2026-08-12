@@ -1,5 +1,5 @@
 # Separate Plan shell policy from general sandboxing
 
-Status: Accepted as the long-term layering decision; its Plan v1 Shell availability is superseded by ADR 0037.
+Status: Accepted as the long-term layering decision; its Plan v1 Shell availability is superseded by ADR 0040 through ADR 0037.
 
 Plan v1 exposes Shell only for invocations that Runtime positively recognizes as read-only; generic, unclassified, or potentially writing Shell invocations are denied, and Tool Approval cannot override that denial. Plan Mode does not create a Disposable Workspace or implement a Plan-specific OS Sandbox. If stronger Shell execution is added later, its filesystem, process, and network isolation will be shared execution infrastructure usable by every collaboration mode, while Plan Mode remains a restrictive policy layered on top. This follows Claude Code's separation between Plan permissions and optional native sandboxing, keeps repository exploration available, and removes repository-copy lifecycle and platform-backend complexity from the initial Plan design. The exact read-only Shell recognition rules are intentionally deferred to the Shell capability design. This supersedes ADRs 0003, 0016, and 0017.

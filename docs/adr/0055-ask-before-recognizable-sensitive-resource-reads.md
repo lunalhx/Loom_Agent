@@ -1,0 +1,5 @@
+# Ask before recognizable sensitive resource reads
+
+Status: Accepted.
+
+Runtime applies one best-effort Sensitive Resource classifier to structured file tools and Shell so that directly recognizable reads of a repository `.env`, private key, credential file, or equivalent sensitive target request approval with a warning that content may enter model context. An explicit Session or Workspace Permission Grant may suppress later prompts only for the same normalized call and compatible Execution Profile, while Project Source rules cannot grant access; clearly identified examples such as `.env.example` are exempt. Ordinary sandboxed profiles continue to hide host credentials, but the initial capability does not add per-file sandbox policy, syscall observation, or automatic predeclaration to detect reads hidden inside scripts, plugins, or binaries. Such indirect behavior follows the normal sandbox or Full Access trust boundary rather than receiving a false guarantee from command classification.

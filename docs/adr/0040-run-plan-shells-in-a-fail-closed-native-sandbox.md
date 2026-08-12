@@ -1,0 +1,5 @@
+# Run Plan shells in a fail-closed native sandbox
+
+Status: Accepted. Supersedes ADR 0037 and the Plan-v1 no-Disposable-State limitation in ADR 0032.
+
+Plan Mode exposes `run_shell` only when shared execution infrastructure can enforce a native sandbox that makes Repository State read-only, confines writes to Run-scoped Disposable State, hides unauthorized host-private data, denies network access, applies the boundary to child processes, and fails closed when isolation is unavailable. Workspace access is rooted in the canonical Repository path; traversal and symlink targets outside that root remain host-private rather than inheriting repository-read authority. Command analysis and input rules decide approval behavior but never serve as Effect proof. Loom Agent uses lightweight OS primitives—Seatbelt on macOS and bubblewrap on Linux/WSL2—instead of containers, virtual machines, or repository copies; this accepts platform-adapter work to preserve Plan Mode's non-overridable Repository State and external-mutation guarantees.
