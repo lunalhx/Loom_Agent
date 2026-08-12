@@ -28,7 +28,7 @@ public class ExecutionGrantValidatorTest {
                 base.homeRoot(), base.temporaryRoot(), base.networkAllowed(), base.hostPrivateVisible(),
                 List.of(new ExecutionGrant(external, FilesystemAccess.READ, GrantLifetime.SESSION)), base.sandboxBackend());
 
-        validator.validate("run_shell", input(child, "read"), granted);
+        validator.validate(validator.requests("run_shell", input(child, "read"), granted), granted.externalGrants());
         assertDenied(input(child, "write"), granted);
         assertDenied(input(workspace.resolve("not-granted.txt"), "read"), granted);
     }
@@ -40,7 +40,7 @@ public class ExecutionGrantValidatorTest {
 
     private void assertDenied(com.fasterxml.jackson.databind.JsonNode input, ExecutionProfile profile) {
         try {
-            validator.validate("run_shell", input, profile);
+            validator.validate(validator.requests("run_shell", input, profile), profile.externalGrants());
             fail("execution grant validation should reject this request");
         } catch (IllegalArgumentException expected) {
             // expected

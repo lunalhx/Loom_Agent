@@ -953,6 +953,29 @@ public class CliSessionService implements AutoCloseable {
                 return null;
             }
         }
+
+        @Override
+        public cn.lunalhx.ai.domain.tool.model.GrantLifetime askExecutionGrant(
+                cn.lunalhx.ai.domain.tool.model.ExecutionGrantRequest request) {
+            if (!interactive) return null;
+            System.out.println();
+            System.out.println("external filesystem access required: " + request.access().name().toLowerCase()
+                    + " " + request.canonicalPath());
+            System.out.print("allow once/session/workspace? [o/s/w/N] ");
+            System.out.flush();
+            try {
+                String line = reader.readLine();
+                if (line == null) return null;
+                return switch (line.strip().toLowerCase()) {
+                    case "o", "once" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE;
+                    case "s", "session" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
+                    case "w", "workspace" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.WORKSPACE;
+                    default -> null;
+                };
+            } catch (IOException e) {
+                return null;
+            }
+        }
     }
 
     private static String currentStamp() {

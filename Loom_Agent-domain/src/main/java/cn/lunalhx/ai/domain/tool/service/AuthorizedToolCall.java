@@ -13,17 +13,20 @@ public final class AuthorizedToolCall {
     private final NormalizedToolCall normalizedCall;
     private final EffectProfile effectProfile;
     private final ExecutionProfile executionProfile;
+    private final ExecutionProfile baseExecutionProfile;
     private final PermissionDecision permissionDecision;
     private final String runId;
     private final String snapshotDigest;
 
     AuthorizedToolCall(ToolCall rawCall, NormalizedToolCall normalizedCall,
                        EffectProfile effectProfile, ExecutionProfile executionProfile,
-                       PermissionDecision permissionDecision, String runId, String snapshotDigest) {
+                       ExecutionProfile baseExecutionProfile, PermissionDecision permissionDecision,
+                       String runId, String snapshotDigest) {
         this.executionCall = immutableExecutionCopy(rawCall);
         this.normalizedCall = normalizedCall;
         this.effectProfile = effectProfile;
         this.executionProfile = executionProfile;
+        this.baseExecutionProfile = baseExecutionProfile;
         this.permissionDecision = permissionDecision;
         this.runId = runId;
         this.snapshotDigest = snapshotDigest;
@@ -35,6 +38,7 @@ public final class AuthorizedToolCall {
     public NormalizedToolCall normalizedCall() { return normalizedCall; }
     public EffectProfile effectProfile() { return effectProfile; }
     public ExecutionProfile executionProfile() { return executionProfile; }
+    public ExecutionProfile baseExecutionProfile() { return baseExecutionProfile; }
     public PermissionDecision permissionDecision() { return permissionDecision; }
     public String runId() { return runId; }
     public String snapshotDigest() { return snapshotDigest; }
@@ -44,7 +48,7 @@ public final class AuthorizedToolCall {
         ToolCall copy = immutableExecutionCopy(executionCall);
         copy.setDelegateRequest(request);
         return new AuthorizedToolCall(copy, normalizedCall, effectProfile, executionProfile,
-                permissionDecision, runId, snapshotDigest);
+                baseExecutionProfile, permissionDecision, runId, snapshotDigest);
     }
 
     private static ToolCall immutableExecutionCopy(ToolCall source) {

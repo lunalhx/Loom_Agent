@@ -233,6 +233,36 @@ public class SecurityContractTest {
         assertEquals(2, prompts.get());
     }
 
+    @Test
+    public void executionGrantIsPromptedSeparatelyAndBoundToTheAuthorizedProfile() throws Exception {
+        java.nio.file.Path external = java.nio.file.Files.createTempDirectory("execution-grant").toRealPath();
+        cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry registry = new cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry(
+                List.of(externalShellTool()), new cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator(
+                new com.fasterxml.jackson.databind.ObjectMapper()));
+        java.util.concurrent.atomic.AtomicInteger prompts = new java.util.concurrent.atomic.AtomicInteger();
+        cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService gate =
+                new cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService(registry,
+                        new com.fasterxml.jackson.databind.ObjectMapper(), new cn.lunalhx.ai.domain.tool.service.PermissionPrompt() {
+                    @Override public cn.lunalhx.ai.domain.tool.model.GrantLifetime ask(
+                            cn.lunalhx.ai.domain.tool.service.AuthorizationDisplay d,
+                            cn.lunalhx.ai.domain.tool.model.PermissionDecision p) { return null; }
+                    @Override public cn.lunalhx.ai.domain.tool.model.GrantLifetime askExecutionGrant(
+                            cn.lunalhx.ai.domain.tool.model.ExecutionGrantRequest request) {
+                        prompts.incrementAndGet();
+                        return cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
+                    }
+                });
+        AgentContext ctx = authorizationContext();
+        ctx.setPermissionPolicySnapshot(new cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot(
+                cn.lunalhx.ai.domain.tool.model.PermissionAction.ALLOW, List.of(), List.of()));
+        var result = authoriseExternalShell(gate, ctx, external);
+
+        assertTrue(result.authorized());
+        assertEquals(1, prompts.get());
+        assertEquals(external, result.authorizedCall().executionProfile().externalGrants().getFirst().canonicalPath());
+        assertEquals(1, ctx.getExecutionGrants().size());
+    }
+
     private cn.lunalhx.ai.domain.tool.adapter.port.AgentTool simpleShellTool() {
         return new cn.lunalhx.ai.domain.tool.adapter.port.AgentTool() {
             @Override
@@ -245,6 +275,19 @@ public class SecurityContractTest {
 
             @Override
             public cn.lunalhx.ai.domain.tool.model.ToolResult call(cn.lunalhx.ai.domain.tool.model.ToolCall call) {
+                return cn.lunalhx.ai.domain.tool.model.ToolResult.success("ok", false, 0L);
+            }
+        };
+    }
+
+    private cn.lunalhx.ai.domain.tool.adapter.port.AgentTool externalShellTool() {
+        return new cn.lunalhx.ai.domain.tool.adapter.port.AgentTool() {
+            @Override public cn.lunalhx.ai.domain.tool.model.ToolSpec spec() {
+                return cn.lunalhx.ai.domain.tool.model.ToolSpec.builder().name("run_shell").description("shell")
+                        .inputSchema("{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"external_access\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"access\":{\"type\":\"string\",\"enum\":[\"read\",\"write\"]}},\"required\":[\"path\",\"access\"],\"additionalProperties\":false}}},\"required\":[\"command\"],\"additionalProperties\":false}")
+                        .capabilityEnvelope(cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope.shell()).build();
+            }
+            @Override public cn.lunalhx.ai.domain.tool.model.ToolResult call(cn.lunalhx.ai.domain.tool.model.ToolCall call) {
                 return cn.lunalhx.ai.domain.tool.model.ToolResult.success("ok", false, 0L);
             }
         };
@@ -270,6 +313,19 @@ public class SecurityContractTest {
         return gate.authorize(ctx, call, new cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy(
                 java.util.Set.of("run_shell"), cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD,
                 0, 1, ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
+    }
+
+    private cn.lunalhx.ai.domain.tool.service.ToolAuthorizationResult authoriseExternalShell(
+            cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService gate, AgentContext ctx, java.nio.file.Path external) {
+        com.fasterxml.jackson.databind.node.ObjectNode input = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                .put("command", "cat external");
+        input.set("external_access", com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode()
+                .add(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                        .put("path", external.toString()).put("access", "read")));
+        return gate.authorize(ctx, cn.lunalhx.ai.domain.tool.model.ToolCall.builder().name("run_shell").input(input).build(),
+                new cn.lunalhx.ai.domain.tool.service.ToolExecutor.ToolRuntimePolicy(java.util.Set.of("run_shell"),
+                        cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, 0, 1,
+                        ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
     }
 
     @Test

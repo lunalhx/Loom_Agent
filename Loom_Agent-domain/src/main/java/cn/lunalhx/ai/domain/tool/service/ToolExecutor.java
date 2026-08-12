@@ -80,7 +80,7 @@ public class ToolExecutor {
         if (authorized == null || !Objects.equals(context.getRunId(), authorized.runId())
                 || context.getPermissionPolicySnapshot() == null
                 || !Objects.equals(context.getPermissionPolicySnapshot().snapshotDigest(), authorized.snapshotDigest())
-                || !Objects.equals(context.getExecutionProfile(), authorized.executionProfile())) {
+                || !Objects.equals(context.getExecutionProfile(), authorized.baseExecutionProfile())) {
             return unauthorized(context);
         }
         var call = authorized.executionCall();

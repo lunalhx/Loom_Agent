@@ -24,6 +24,7 @@ import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 
 import java.math.BigDecimal;
@@ -148,6 +149,9 @@ public class AgentContext {
     public List<PermissionGrant> getPermissionGrants() { return environment.permissionGrants(); }
     public void setPermissionGrants(List<PermissionGrant> v) { environment.setPermissionGrants(v); }
     public void addPermissionGrant(PermissionGrant v) { environment.addPermissionGrant(v); }
+    public List<ExecutionGrant> getExecutionGrants() { return environment.executionGrants(); }
+    public void setExecutionGrants(List<ExecutionGrant> v) { environment.setExecutionGrants(v); }
+    public void addExecutionGrant(ExecutionGrant v) { environment.addExecutionGrant(v); }
     public AgentRuntimeProperties runtimeProperties(AgentRuntimeProperties fallback) {
         return environment.runConfig() == null ? fallback : environment.runConfig().agent();
     }

@@ -43,6 +43,11 @@ public record ExecutionProfile(ExecutionProfileKind kind, Path workspace,
                 networkAllowed, hostPrivateVisible, externalGrants, sandboxBackend);
     }
 
+    public ExecutionProfile withExternalGrants(List<ExecutionGrant> grants) {
+        return new ExecutionProfile(kind, workspace, workspaceAccess, homeRoot, temporaryRoot,
+                networkAllowed, hostPrivateVisible, grants, sandboxBackend);
+    }
+
     public boolean allows(EffectProfile profile) {
         if (profile == null) return false;
         if (!profile.complete()) return kind == ExecutionProfileKind.BUILD_SANDBOX

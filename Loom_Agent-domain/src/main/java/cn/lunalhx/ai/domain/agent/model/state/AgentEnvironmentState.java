@@ -6,6 +6,7 @@ import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ public final class AgentEnvironmentState {
     private ExecutionProfile executionProfile;
     private PermissionPolicySnapshot permissionPolicySnapshot;
     private List<PermissionGrant> permissionGrants = new ArrayList<>();
+    private List<ExecutionGrant> executionGrants = new ArrayList<>();
 
     public Path resolvedWorkspace() { return resolvedWorkspace; }
     public WorkspaceRef workspace() { return workspace; }
@@ -37,6 +39,7 @@ public final class AgentEnvironmentState {
     public ExecutionProfile executionProfile() { return executionProfile; }
     public PermissionPolicySnapshot permissionPolicySnapshot() { return permissionPolicySnapshot; }
     public List<PermissionGrant> permissionGrants() { return List.copyOf(permissionGrants); }
+    public List<ExecutionGrant> executionGrants() { return List.copyOf(executionGrants); }
 
     public void setResolvedWorkspace(Path v) { this.resolvedWorkspace = v; }
     public void setWorkspace(WorkspaceRef v) { this.workspace = v; }
@@ -51,4 +54,8 @@ public final class AgentEnvironmentState {
         this.permissionGrants = v == null ? new ArrayList<>() : new ArrayList<>(v);
     }
     public void addPermissionGrant(PermissionGrant v) { this.permissionGrants.add(v); }
+    public void setExecutionGrants(List<ExecutionGrant> v) {
+        this.executionGrants = v == null ? new ArrayList<>() : new ArrayList<>(v);
+    }
+    public void addExecutionGrant(ExecutionGrant v) { this.executionGrants.add(v); }
 }
