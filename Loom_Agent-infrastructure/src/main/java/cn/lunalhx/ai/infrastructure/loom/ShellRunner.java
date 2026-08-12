@@ -40,7 +40,7 @@ public final class ShellRunner {
         return run(command, cwd, timeoutSeconds, secretEnvNames, null);
     }
 
-    /** Executes the command inside Seatbelt when an ordinary profile is supplied. */
+    /** Executes the command through the selected native sandbox when a profile is supplied. */
     public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames,
                                   ExecutionProfile profile) {
         Map<String, String> env = new LinkedHashMap<>();
@@ -51,9 +51,8 @@ public final class ShellRunner {
             }
         }
 
-        List<String> target = profile == null || profile.kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
-                ? List.of("/bin/sh", "-c", command)
-                : List.of("/usr/bin/sandbox-exec", "-p", SeatbeltSandboxBackend.policy(profile), "/bin/sh", "-c", command);
+        List<String> shell = List.of("/bin/sh", "-c", command);
+        List<String> target = profile == null ? shell : NativeSandboxBackend.wrap(profile, shell);
         List<String> argv = profile == null ? target : NativeLauncher.wrap(target);
         ProcessBuilder builder = new ProcessBuilder(argv)
                 .directory(cwd.toFile());

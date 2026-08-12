@@ -48,8 +48,7 @@ public class RunShellTool implements AgentTool {
 
     @Override
     public boolean isAvailable(ExecutionProfile executionProfile) {
-        return executionProfile != null && (executionProfile.kind() == ExecutionProfileKind.DANGER_FULL_ACCESS
-                || executionProfile.kind() == ExecutionProfileKind.BUILD_SANDBOX && SeatbeltSandboxBackend.supported());
+        return NativeSandboxBackend.supported(executionProfile);
     }
 
     @Override

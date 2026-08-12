@@ -7,8 +7,8 @@ Complete the remaining Shell Permissions plan in the agreed order while preservi
 ## Phases
 
 1. **Complete — Native process supervision**: fixed native launcher establishes a process group before exec; timeout uses group TERM→KILL and normal completion clears ordinary in-group background processes. Root cancellation registration is grouped with the shared security scope in phase 3.
-2. **In progress — Sandbox backends**: complete Seatbelt contract coverage and add Bubblewrap availability/backend support.
-3. **Pending — Root-run security scope**: shared cancellation, shell semaphore, disposable HOME/TMP/cache lifecycle.
+2. **Complete — Sandbox backends**: Seatbelt and Bubblewrap are selected by platform and self-test; ordinary execution remains fail-closed when neither is usable. Bubblewrap uses an empty root with only runtime/workspace/grant mounts and network/PID/IPC namespaces.
+3. **In progress — Root-run security scope**: shared cancellation, shell semaphore, disposable HOME/TMP/cache lifecycle.
 4. **Pending — Repository state tracking**: replace best-effort workspace fingerprint and report partial success correctly.
 5. **Pending — Plan/Delegate shell**: profile intersection, Maven cache grants, conditional catalog exposure.
 6. **Pending — Shell evidence**: semantic observation, repository fallback receipts, verifier registry.
