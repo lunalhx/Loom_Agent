@@ -26,6 +26,8 @@ import cn.lunalhx.ai.domain.agent.service.context.SecretRedactor;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
+import cn.lunalhx.ai.domain.skill.service.SkillCatalogFormatter;
+import cn.lunalhx.ai.domain.skill.service.SkillDiscoveryService;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileDurableMemoryRepository;
@@ -739,6 +741,12 @@ public class CliSessionService implements AutoCloseable {
                     .append('\n');
         }
         return view.toString().stripTrailing();
+    }
+
+    /** Read-only Skill catalog; it never starts a model Run or changes Session state. */
+    public synchronized String skillsCatalogView() {
+        return new SkillCatalogFormatter().format(new SkillDiscoveryService()
+                .discover(Path.of(workspace), Path.of(System.getProperty("user.home"))));
     }
 
     /** Read-only current Plan detail; it never starts a model Run. */

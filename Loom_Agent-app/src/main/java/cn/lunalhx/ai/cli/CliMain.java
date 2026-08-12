@@ -33,6 +33,7 @@ public final class CliMain {
             /plan handoff [plan-id]  Start a Build Run bound to a fresh Plan revision.
             /plan list  List persisted Plans and computed freshness.
             /plan show  Show the current Plan and computed freshness.
+            /skills  List effective Skills, sources, and diagnostics.
             /new     Create a new independent session.
             /exit    Exit the agent.
             """;
@@ -173,6 +174,10 @@ public final class CliMain {
         }
         if (input.equals("/plan show")) {
             output.println(session.planShowView());
+            return true;
+        }
+        if (input.equals("/skills")) {
+            output.println(session.skillsCatalogView());
             return true;
         }
         if (input.equals("/plan new")) {
