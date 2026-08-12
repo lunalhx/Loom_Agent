@@ -60,6 +60,11 @@ public final class ToolCallNormalizer {
         for (String field : List.of("path", "source", "target", "directory")) {
             if (node.path(field).isTextual()) values.add(node.path(field).asText());
         }
+        if (node.path("external_access").isArray()) {
+            for (JsonNode entry : node.path("external_access")) {
+                if (entry.path("path").isTextual()) values.add(entry.path("path").asText());
+            }
+        }
         return values;
     }
 

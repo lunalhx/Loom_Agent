@@ -29,6 +29,7 @@ public final class ToolAuthorizationService {
     private final ToolRegistry registry;
     private final ToolCallNormalizer normalizer;
     private final PermissionPrompt prompt;
+    private final ExecutionGrantValidator executionGrantValidator = new ExecutionGrantValidator();
 
     public ToolAuthorizationService(ToolRegistry registry, ObjectMapper mapper, PermissionPrompt prompt) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
@@ -62,6 +63,11 @@ public final class ToolAuthorizationService {
         ExecutionProfile profile = runtimePolicy.executionProfile();
         if (!registry.isAvailable(name, profile)) {
             return reject(call, "execution_backend_unavailable", "execution_backend_unavailable", EffectProfile.unknown());
+        }
+        try {
+            executionGrantValidator.validate(name, normalized.canonicalInput(), profile);
+        } catch (IllegalArgumentException denied) {
+            return reject(call, "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
         }
         call.setExecutionProfile(profile);
         CallEffectAssessment effect = registry.assessEffect(name, call, profile);

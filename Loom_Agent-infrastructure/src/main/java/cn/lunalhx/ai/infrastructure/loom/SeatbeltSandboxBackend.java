@@ -51,6 +51,13 @@ final class SeatbeltSandboxBackend {
             policy.append("(allow file-read* (subpath ").append(temporary).append(")) ")
                     .append("(allow file-write* (subpath ").append(temporary).append(")) ");
         }
+        for (cn.lunalhx.ai.domain.tool.model.ExecutionGrant grant : profile.externalGrants()) {
+            String external = quote(grant.canonicalPath());
+            policy.append("(allow file-read* (subpath ").append(external).append(")) ");
+            if (grant.access().includes(cn.lunalhx.ai.domain.tool.model.FilesystemAccess.WRITE)) {
+                policy.append("(allow file-write* (subpath ").append(external).append(")) ");
+            }
+        }
         return policy.toString();
     }
 

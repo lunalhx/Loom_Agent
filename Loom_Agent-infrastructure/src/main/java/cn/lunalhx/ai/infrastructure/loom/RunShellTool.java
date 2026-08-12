@@ -36,7 +36,8 @@ public class RunShellTool implements AgentTool {
                         "\"type\":\"object\"," +
                         "\"properties\":{" +
                         "\"command\":{\"type\":\"string\",\"minLength\":1,\"description\":\"shell command\"}," +
-                        "\"timeout\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":120,\"default\":20,\"description\":\"timeout in seconds\"}" +
+                        "\"timeout\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":120,\"default\":20,\"description\":\"timeout in seconds\"}," +
+                        "\"external_access\":{\"type\":\"array\",\"maxItems\":16,\"default\":[],\"items\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"access\":{\"type\":\"string\",\"enum\":[\"read\",\"write\"]}},\"required\":[\"path\",\"access\"],\"additionalProperties\":false}}" +
                         "}," +
                         "\"required\":[\"command\"]," +
                         "\"additionalProperties\":false" +
