@@ -69,7 +69,8 @@ public final class ToolCallNormalizer {
     }
 
     private ShellParse parseShell(String command) {
-        if (command == null || command.isBlank() || hasOpaqueSyntax(command)) return ShellParse.OPAQUE;
+        if (command == null || command.isBlank()) return ShellParse.OPAQUE;
+        if (hasOpaqueSyntax(command)) return new ShellParse(List.of(command.trim()), true);
         List<String> units = new ArrayList<>();
         StringBuilder unit = new StringBuilder();
         boolean single = false;

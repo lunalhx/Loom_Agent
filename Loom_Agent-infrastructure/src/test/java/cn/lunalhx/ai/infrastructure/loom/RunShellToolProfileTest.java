@@ -16,6 +16,7 @@ public class RunShellToolProfileTest {
     public void planAndDelegateAcceptOnlyConservativeReadOnlyCommands() {
         ExecutionProfile plan = ExecutionProfile.forRun(CollaborationMode.PLAN, false);
         assertTrue(tool.assessEffect(call("git status --short"), plan).trusted());
+        assertTrue(tool.assessEffect(call("git status && rg TODO"), plan).trusted());
         assertFalse(tool.assessEffect(call("git reset --hard"), plan).trusted());
         assertFalse(tool.assessEffect(call("cat $HOME/.ssh/id_rsa"), plan).trusted());
     }

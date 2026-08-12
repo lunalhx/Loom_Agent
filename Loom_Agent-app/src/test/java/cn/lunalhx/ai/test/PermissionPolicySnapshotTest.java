@@ -64,6 +64,8 @@ public class PermissionPolicySnapshotTest {
         assertTrue(credential.perCallOnly());
         assertEquals(PermissionAction.ALLOW, policy.evaluate(new PermissionSubject("run_shell", "sample",
                 List.of("cat .env.example"), false, List.of(), List.of())).action());
+        assertEquals(PermissionAction.DENY, policy.evaluate(new PermissionSubject("run_shell", "fork",
+                List.of(":(){ :|:& };:"), true, List.of(), List.of())).action());
     }
 
     @Test

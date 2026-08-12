@@ -57,7 +57,9 @@ public class RunAuthorizationSourceTest {
     public void userLocalMavenRepositoryIsAnExplicitReadOnlyPlanCapability() throws Exception {
         Path home = Files.createTempDirectory("loom-policy-home");
         Path workspace = Files.createTempDirectory("loom-policy-workspace").toRealPath();
-        Path repository = Files.createTempDirectory("loom-maven-repository").toRealPath();
+        Path repository = Files.createTempDirectory("loom-maven-home").resolve(".m2/repository");
+        Files.createDirectories(repository);
+        repository = repository.toRealPath();
         WorkspacePermissionGrantStore store = new WorkspacePermissionGrantStore(home, new ObjectMapper());
         Files.createDirectories(store.workspaceDirectory(workspace));
         Files.writeString(store.policyFile(workspace), """
@@ -71,5 +73,26 @@ public class RunAuthorizationSourceTest {
         assertEquals(1, grants.size());
         assertEquals(repository, grants.getFirst().canonicalPath());
         assertEquals(FilesystemAccess.READ, grants.getFirst().access());
+    }
+
+    @Test
+    public void mavenRepositoryRejectsArbitraryHostDirectories() throws Exception {
+        Path home = Files.createTempDirectory("loom-policy-home");
+        Path workspace = Files.createTempDirectory("loom-policy-workspace").toRealPath();
+        Path sensitive = Files.createTempDirectory("loom-sensitive-host-directory").toRealPath();
+        WorkspacePermissionGrantStore store = new WorkspacePermissionGrantStore(home, new ObjectMapper());
+        Files.createDirectories(store.workspaceDirectory(workspace));
+        Files.writeString(store.policyFile(workspace), """
+                version: 1
+                rules: []
+                maven_repository: '%s'
+                """.formatted(sensitive));
+
+        try {
+            new RunAuthorizationSource(store).loadMavenRepositoryGrants(workspace);
+            throw new AssertionError("only the Maven artifact cache may be granted to Plan");
+        } catch (IllegalArgumentException expected) {
+            assertEquals(true, expected.getMessage().contains(".m2/repository"));
+        }
     }
 }

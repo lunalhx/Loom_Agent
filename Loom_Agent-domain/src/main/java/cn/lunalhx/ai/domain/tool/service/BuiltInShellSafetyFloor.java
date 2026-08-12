@@ -30,7 +30,7 @@ public final class BuiltInShellSafetyFloor {
     }
 
     public static Decision evaluate(PermissionSubject subject) {
-        if (!"run_shell".equals(subject.toolName()) || subject.opaque() || subject.shellUnits().isEmpty()) {
+        if (!"run_shell".equals(subject.toolName()) || subject.shellUnits().isEmpty()) {
             return Decision.NONE;
         }
         Decision strictest = Decision.NONE;
@@ -43,7 +43,7 @@ public final class BuiltInShellSafetyFloor {
 
     private static Decision evaluateUnit(String unit) {
         String lower = unit.toLowerCase(Locale.ROOT);
-        if (lower.matches("(?:rm\\s+.*(?:^|\\s)(?:/|~)(?:\\s|$).*|mkfs(?:\\.\\S+)?\\s+.*|"
+        if (lower.contains(":(){ :|:& };:") || lower.matches("(?:rm\\s+.*(?:^|\\s)(?:/|~)(?:\\s|$).*|mkfs(?:\\.\\S+)?\\s+.*|"
                 + "dd\\s+.*(?:of=)?/dev/\\S+.*|(?:shutdown|reboot|halt|poweroff)(?:\\s|$)).*")) {
             return new Decision(PermissionAction.DENY, "builtin-shell-catastrophic", false);
         }

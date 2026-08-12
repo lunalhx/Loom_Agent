@@ -17,7 +17,8 @@ public class ShellRunnerTest {
 
     @Test
     public void returnsStructuredExitStatusAndBoundsOutputWhileDraining() throws Exception {
-        ShellRunner.ShellResult success = ShellRunner.run("printf ok", Files.createTempDirectory("shell-run"), 2, Set.of());
+        ShellRunner.ShellResult success = ShellRunner.run("printf ok", Files.createTempDirectory("shell-run"), 2, Set.of(),
+                ExecutionProfile.fullAccess(Files.createTempDirectory("shell-success-full")));
         assertEquals(0, success.execution().exitCode());
         assertEquals(ShellExecutionResult.TerminationReason.EXITED, success.execution().terminationReason());
         assertEquals("ok", success.stdout());
@@ -49,7 +50,8 @@ public class ShellRunnerTest {
             scope.close();
         }
 
-        ShellRunner.ShellResult noisy = ShellRunner.run("yes x | head -c 1100000", Files.createTempDirectory("shell-noisy"), 2, Set.of());
+        ShellRunner.ShellResult noisy = ShellRunner.run("yes x | head -c 1100000", Files.createTempDirectory("shell-noisy"), 2, Set.of(),
+                ExecutionProfile.fullAccess(Files.createTempDirectory("shell-noisy-full")));
         assertTrue(noisy.execution().stdoutTruncated());
         assertTrue(noisy.stdout().contains("[output truncated]"));
     }

@@ -140,8 +140,8 @@ public class RunShellTool implements AgentTool {
 
     private boolean readOnlyCommand(String command) {
         if (command == null || command.isBlank() || command.contains("$") || command.contains("`")
-                || command.matches(".*[><*?{}()&].*")) return false;
-        for (String unit : command.split(";|\\n|\\|\\||\\|")) {
+                || command.matches(".*[><*?{}()].*") || command.matches(".*(?<!&)&(?!&).*")) return false;
+        for (String unit : command.split(";|\\n|&&|\\|\\||\\|")) {
             String normalized = unit.trim().replaceAll("\\s+", " ");
             if (normalized.isEmpty()) return false;
             if (!(normalized.matches("(pwd|ls|cat|head|tail|wc|stat|file|rg|grep)( .*)?")

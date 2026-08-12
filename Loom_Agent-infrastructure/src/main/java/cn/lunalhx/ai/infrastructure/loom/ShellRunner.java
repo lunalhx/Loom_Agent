@@ -38,11 +38,7 @@ public final class ShellRunner {
     private ShellRunner() {
     }
 
-    public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames) {
-        return run(command, cwd, timeoutSeconds, secretEnvNames, null);
-    }
-
-    /** Executes the command through the selected native sandbox when a profile is supplied. */
+    /** Executes the command through the selected native sandbox. */
     public static ShellResult run(String command, Path cwd, int timeoutSeconds, Set<String> secretEnvNames,
                                   ExecutionProfile profile) {
         return run(command, cwd, timeoutSeconds, secretEnvNames, profile, null);
@@ -68,9 +64,10 @@ public final class ShellRunner {
             env.put("TEMP", profile.temporaryRoot().toString());
         }
 
+        if (profile == null) throw new IllegalArgumentException("execution profile is required");
         List<String> shell = List.of("/bin/sh", "-c", command);
-        List<String> target = profile == null ? shell : NativeSandboxBackend.wrap(profile, shell);
-        List<String> argv = profile == null ? target : NativeLauncher.wrap(target);
+        List<String> target = NativeSandboxBackend.wrap(profile, shell);
+        List<String> argv = NativeLauncher.wrap(target);
         ProcessBuilder builder = new ProcessBuilder(argv)
                 .directory(cwd.toFile());
         Map<String, String> builderEnv = builder.environment();
@@ -92,7 +89,7 @@ public final class ShellRunner {
             PosixProcessSupervisor supervisor = new PosixProcessSupervisor();
             canceller = () -> supervisor.terminate(process);
             if (scope != null) scope.registerShellCanceller(canceller);
-            if (profile != null && !NativeLauncher.awaitReadyAndRelease(process, supervisor)) {
+            if (!NativeLauncher.awaitReadyAndRelease(process, supervisor)) {
                 supervisor.terminate(process);
                 return new ShellResult("", "error: native launcher initialization failed", new ShellExecutionResult(-1,
                         ShellExecutionResult.TerminationReason.LAUNCH_FAILED, false, false, false));
@@ -105,15 +102,9 @@ public final class ShellRunner {
             boolean completed = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
             boolean cleanedBackground = false;
             if (!completed) {
-                if (profile != null) supervisor.terminate(process);
-                else {
-                    terminateTree(process);
-                    process.waitFor(2, TimeUnit.SECONDS);
-                }
-            } else if (profile != null) {
-                cleanedBackground = supervisor.terminateRemainingGroup(process);
+                supervisor.terminate(process);
             } else {
-                cleanedBackground = terminateLiveDescendants(process);
+                cleanedBackground = supervisor.terminateRemainingGroup(process);
             }
             for (Thread t : readers) {
                 t.join(1000);
@@ -145,29 +136,6 @@ public final class ShellRunner {
         return SENSITIVE_SUFFIX.matcher(upper).find();
     }
 
-    private static void terminateTree(Process process) {
-        terminateLiveDescendants(process);
-        process.destroy();
-        try { process.waitFor(500, TimeUnit.MILLISECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        if (process.isAlive()) process.destroyForcibly();
-    }
-
-    private static boolean terminateLiveDescendants(Process process) {
-        List<ProcessHandle> descendants;
-        try {
-            descendants = process.toHandle().descendants().toList();
-        } catch (RuntimeException unavailable) {
-            // Some host sandboxes deny process enumeration.  The shell result remains
-            // truthful; the native supervisor added by the sandbox layer owns cleanup.
-            return false;
-        }
-        boolean found = descendants.stream().anyMatch(ProcessHandle::isAlive);
-        descendants.forEach(handle -> { if (handle.isAlive()) handle.destroy(); });
-        try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        descendants.forEach(handle -> { if (handle.isAlive()) handle.destroyForcibly(); });
-        return found;
-    }
-
     private static Thread startReader(InputStream in, BoundedOutput out) {
         Thread t = new Thread(() -> {
             try (InputStream is = in) {
@@ -194,7 +162,7 @@ public final class ShellRunner {
             for (int i = 0; i < length; i++) {
                 if (total < OUTPUT_EDGE) head.write(bytes[i]);
                 if (total < OUTPUT_LIMIT) complete.write(bytes[i]);
-                else tail[(int) (total % OUTPUT_EDGE)] = bytes[i];
+                tail[(int) (total % OUTPUT_EDGE)] = bytes[i];
                 total++;
             }
         }

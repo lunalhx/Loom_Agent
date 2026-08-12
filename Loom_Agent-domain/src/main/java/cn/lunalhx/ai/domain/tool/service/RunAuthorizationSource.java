@@ -83,8 +83,11 @@ public final class RunAuthorizationSource {
                 throw new IllegalArgumentException(source + " maven_repository must be a non-empty path");
             }
             Path repository = Path.of(value.asText()).toRealPath();
-            if (!Files.isDirectory(repository)) {
-                throw new IllegalArgumentException(source + " maven_repository must resolve to a directory");
+            if (!Files.isDirectory(repository) || repository.getFileName() == null
+                    || !"repository".equals(repository.getFileName().toString())
+                    || repository.getParent() == null || repository.getParent().getFileName() == null
+                    || !".m2".equals(repository.getParent().getFileName().toString())) {
+                throw new IllegalArgumentException(source + " maven_repository must resolve to a .m2/repository directory");
             }
             return List.of(new ExecutionGrant(repository, FilesystemAccess.READ, GrantLifetime.WORKSPACE));
         } catch (Exception e) {
