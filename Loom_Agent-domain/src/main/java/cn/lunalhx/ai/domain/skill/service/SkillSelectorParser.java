@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 /**
  * Independent {@code $skill-name} selector: appearance-order dedupe and removal from task text.
  */
-public final class SkillSelectorParser {
+final class SkillSelectorParser {
     private static final Pattern SELECTOR = Pattern.compile("\\$([a-z0-9]+(?:-[a-z0-9]+)*)");
 
     public ParsedSelectors parse(String taskText) {

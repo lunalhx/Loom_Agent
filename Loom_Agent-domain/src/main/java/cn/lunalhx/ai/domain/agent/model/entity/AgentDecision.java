@@ -27,6 +27,7 @@ public class AgentDecision {
     private List<Map<String, Object>> evidence;
     private PlanSubmission planSubmission;
     private PlanDeviation planDeviation;
+    private String skillName;
 
     public String getReason() {
         if (StringUtils.isNotBlank(reason)) {

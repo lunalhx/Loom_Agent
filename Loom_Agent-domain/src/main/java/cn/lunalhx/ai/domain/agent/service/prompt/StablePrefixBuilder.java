@@ -47,7 +47,7 @@ public final class StablePrefixBuilder {
     /** Common protocol rules appended for both main and delegate agents. */
     public static final String COMMON_PROTOCOL_RULES =
             "Rules:\n"
-                    + "- Return exactly one <tool>...</tool> or one <final>...</final>.\n"
+                    + "- Return exactly one <tool>...</tool>, one <skill_activation>{\"name\":\"skill-name\"}</skill_activation>, or one <final>...</final>.\n"
                     + "- Tool calls must look like:\n"
                     + "  <tool>{\"name\":\"tool_name\",\"args\":{...}}</tool>\n"
                     + "- For write_file and patch_file with multi-line text, prefer XML style:\n"
@@ -71,6 +71,7 @@ public final class StablePrefixBuilder {
             "Valid response examples:\n"
                     + "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\".\"}}</tool>\n"
                     + "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\",\"start\":1,\"end\":80}}</tool>\n"
+                    + "<skill_activation>{\"name\":\"review-pr\"}</skill_activation>\n"
                     + "<tool name=\"write_file\" path=\"binary_search.py\"><content>def binary_search(nums, target):\n"
                     + "    return -1\n</content></tool>\n"
                     + "<tool name=\"patch_file\" path=\"binary_search.py\"><old_text>return -1</old_text><new_text>return mid</new_text></tool>\n"

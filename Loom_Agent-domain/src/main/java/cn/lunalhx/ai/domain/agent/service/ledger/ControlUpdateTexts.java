@@ -165,4 +165,18 @@ public final class ControlUpdateTexts {
         return "[Approval Expired] Approval " + StringUtils.defaultString(approvalId, "unknown")
                 + " has expired or is no longer available.";
     }
+
+    /**
+     * Render a deterministic Skill Activation control note.
+     *
+     * <p>Format:
+     * <pre>{@code
+     * [Skill Activation] name: review-pr source: project .agents/skills/review-pr status: activated
+     * }</pre>
+     */
+    public static String renderSkillActivation(String name, String source, boolean alreadyActive) {
+        return "[Skill Activation] name: " + StringUtils.defaultString(name, "unknown")
+                + " source: " + StringUtils.defaultString(source, "unknown")
+                + " status: " + (alreadyActive ? "already_active" : "activated");
+    }
 }

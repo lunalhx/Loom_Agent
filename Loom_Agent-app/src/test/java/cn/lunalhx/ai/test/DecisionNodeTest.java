@@ -17,6 +17,8 @@ import org.junit.Test;
 
 import java.util.List;
 import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -354,6 +356,109 @@ public class DecisionNodeTest {
 
         assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(trailing).getPhase());
         assertEquals(AgentLoopPhase.NEXT_ROUND, node.apply(duplicate).getPhase());
+    }
+
+    // ---- skill activation ----
+
+    @Test
+    public void exactSkillActivationRoutesToHandlerWithoutToolInput() throws Exception {
+        Path root = Files.createTempDirectory("decision-skill-activation");
+        Path pkg = root.resolve("review-pr");
+        Files.createDirectories(pkg);
+        String skillMd = """
+                ---
+                name: review-pr
+                description: Review pull requests.
+                ---
+                Check tests first.
+                """;
+        Files.writeString(pkg.resolve("SKILL.md"), skillMd, java.nio.charset.StandardCharsets.UTF_8);
+        byte[] bytes = skillMd.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String digest = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        cn.lunalhx.ai.domain.skill.model.SkillCatalogEntry entry =
+                new cn.lunalhx.ai.domain.skill.model.SkillCatalogEntry(
+                        "review-pr", "Review pull requests.", "project .agents/skills/review-pr",
+                        true, true, digest, null, null, null, List.of(), pkg);
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<skill_activation>{\"name\":\"review-pr\"}</skill_activation>",
+                List.of(t.spec()));
+        ctx.setSkillCatalogSnapshot(new cn.lunalhx.ai.domain.skill.model.SkillCatalog(
+                List.of(entry), List.of(), List.of(), List.of()));
+        ctx.setActiveSkills(List.of());
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("skill_activation", ctx.getDecision().getType());
+        assertEquals("review-pr", ctx.getDecision().getSkillName());
+        assertNull(ctx.getToolResult());
+        assertEquals(0, ctx.getToolSteps());
+        assertEquals(1, ctx.getActiveSkills().size());
+        assertTrue(ctx.getActiveSkills().getFirst().instructionBody().contains("Check tests first."));
+    }
+
+    @Test
+    public void skillActivationCannotFallBackToFinal() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<skill_activation>{\"name\":\"review-pr\"}</skill_activation><final>fallback</final>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void skillActivationCannotBeCombinedWithTool() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<skill_activation>{\"name\":\"review-pr\"}</skill_activation><tool>{\"name\":\"msg_tool\",\"args\":{}}</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void malformedSkillActivationReturnsFormatRetry() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<skill_activation>{\"name\":\"review-pr\"</skill_activation>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertEquals("retry", ctx.getDecision().getType());
+    }
+
+    @Test
+    public void markerInsideToolPayloadRemainsSkillActivationData() {
+        AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+
+        AgentContext ctx = context(
+                "<tool>{\"name\":\"msg_tool\",\"args\":{\"message\":\"<skill_activation>\"}}</tool>",
+                List.of(t.spec()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentNodeNames.TOOL_INPUT, result.getNextNode());
+        assertEquals("action", ctx.getDecision().getType());
     }
 
     // ---- plan deviation ----

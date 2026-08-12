@@ -164,13 +164,14 @@ public class CliExplicitSkillActivationE2ETest {
         try {
             assertEquals("done", service.runTurn("$beta $alpha $beta finish both"));
             String system = prompts.get(0).getSystemPrompt();
-            int betaAt = system.indexOf("name: beta");
-            int alphaAt = system.indexOf("name: alpha");
+            String activeSection = system.substring(system.indexOf("Active skills:"));
+            int betaAt = activeSection.indexOf("name: beta");
+            int alphaAt = activeSection.indexOf("name: alpha");
             assertTrue(betaAt >= 0);
             assertTrue(alphaAt >= 0);
             assertTrue(betaAt < alphaAt);
-            assertEquals(1, countOccurrences(system, "Alpha body."));
-            assertEquals(1, countOccurrences(system, "Beta body."));
+            assertEquals(1, countOccurrences(activeSection, "Alpha body."));
+            assertEquals(1, countOccurrences(activeSection, "Beta body."));
             assertFalse(modelVisible(prompts.get(0)).contains("$"));
         } finally {
             restoreHome(previousHome);

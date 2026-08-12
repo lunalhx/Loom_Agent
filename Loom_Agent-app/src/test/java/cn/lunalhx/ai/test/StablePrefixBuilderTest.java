@@ -93,7 +93,8 @@ public class StablePrefixBuilderTest {
     public void buildRoleProtocolTextContainsProtocolRules() {
         String text = StablePrefixBuilder.buildRoleProtocolText(false, true, null,
                 cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD);
-        assertTrue(text.contains("Return exactly one <tool>...</tool> or one <final>...</final>."));
+        assertTrue(text.contains("<skill_activation>"));
+        assertTrue(text.contains("<final>"));
     }
 
     @Test

@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
+import cn.lunalhx.ai.domain.skill.service.SkillActivationDecisionHandler;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -30,6 +31,7 @@ public class DecisionNode extends AbstractAgentNode {
     private final AgentRuntimeProperties properties;
     private final ConversationHistoryAppendService ledgerAppendService;
     private final DecisionParser decisionParser;
+    private final SkillActivationDecisionHandler skillActivationHandler;
 
     public DecisionNode(ObjectMapper objectMapper,
                         AgentRuntimeProperties properties,
@@ -39,6 +41,7 @@ public class DecisionNode extends AbstractAgentNode {
         this.properties = properties;
         this.ledgerAppendService = ledgerAppendService;
         this.decisionParser = new DecisionParser(objectMapper);
+        this.skillActivationHandler = new SkillActivationDecisionHandler(ledgerAppendService);
     }
 
     @Override
@@ -57,6 +60,9 @@ public class DecisionNode extends AbstractAgentNode {
             }
             if ("plan_deviation".equals(type)) {
                 return NodeResult.complete(List.of());
+            }
+            if ("skill_activation".equals(type)) {
+                return skillActivationHandler.apply(context, decision);
             }
             if ("retry".equals(type)) {
                 return formatRetry(context, decision);
@@ -112,7 +118,8 @@ public class DecisionNode extends AbstractAgentNode {
             terminalAction = ", or one exact <plan_deviation> JSON action";
         }
         return "Reply with a valid <tool> call" + terminalAction
-                + " or a non-empty <final> answer. "
+                + ", one exact <skill_activation>{\"name\":\"skill-name\"}</skill_activation>, "
+                + "or a non-empty <final> answer. "
                 + "For multi-line files, prefer <tool name=\"write_file\" path=\"file.py\"><content>...</content></tool>.";
     }
 

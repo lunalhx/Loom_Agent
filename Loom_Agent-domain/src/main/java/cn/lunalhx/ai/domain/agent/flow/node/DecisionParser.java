@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
  * <p>Parse priority (fixed):
  * <ol>
  *   <li>Plan Deviation and Plan Submission terminal actions</li>
+ *   <li>{@code <skill_activation>{...json...}</skill_activation>} — non-terminal Skill Activation</li>
  *   <li>{@code <tool>{...json...}</tool>} — JSON object with name/args</li>
  *   <li>XML-style tool with attributes and child tags</li>
  *   <li>{@code <final>...</final>}</li>
@@ -46,10 +47,13 @@ final class DecisionParser {
     private static final String PLAN_SUBMISSION_CLOSE = "</plan_submission>";
     private static final String PLAN_DEVIATION_OPEN = "<plan_deviation>";
     private static final String PLAN_DEVIATION_CLOSE = "</plan_deviation>";
+    private static final String SKILL_ACTIVATION_OPEN = "<skill_activation>";
+    private static final String SKILL_ACTIVATION_CLOSE = "</skill_activation>";
     private static final Set<String> PLAN_SUBMISSION_FIELDS =
             Set.of("title", "body", "dependencies");
     private static final Set<String> PLAN_DEVIATION_FIELDS =
             Set.of("conflict", "workspace_changes");
+    private static final Set<String> SKILL_ACTIVATION_FIELDS = Set.of("name");
     private static final Set<String> PLAN_DEVIATION_CONFLICT_FIELDS =
             Set.of("kind", "summary");
     private static final Set<String> PLAN_DEVIATION_CHANGE_FIELDS =
@@ -90,15 +94,25 @@ final class DecisionParser {
         if (isExactPlanWrapper(stripped)) {
             return parsePlanSubmission(text);
         }
+        if (isExactSkillActivationWrapper(stripped)) {
+            return parseSkillActivation(text);
+        }
         if (hasPlanDeviationMarker(text)
                 && !isExactToolWrapper(stripped)
-                && !isExactFinalWrapper(stripped)) {
+                && !isExactFinalWrapper(stripped)
+                && !isExactSkillActivationWrapper(stripped)) {
             return retry("model returned an invalid plan deviation wrapper");
         }
         if (hasPlanSubmissionMarker(text)
                 && !isExactToolWrapper(stripped)
-                && !isExactFinalWrapper(stripped)) {
+                && !isExactFinalWrapper(stripped)
+                && !isExactSkillActivationWrapper(stripped)) {
             return retry("model returned an invalid plan submission wrapper");
+        }
+        if (hasSkillActivationMarker(text)
+                && !isExactToolWrapper(stripped)
+                && !isExactFinalWrapper(stripped)) {
+            return retry("model returned an invalid skill activation wrapper");
         }
 
         // 3. <tool> JSON object (takes priority over <final> like loom-code)
@@ -235,6 +249,46 @@ final class DecisionParser {
         Set<String> fields = new HashSet<>();
         object.fieldNames().forEachRemaining(fields::add);
         return fields;
+    }
+
+    private AgentDecision parseSkillActivation(String text) {
+        String stripped = text.strip();
+        String body = stripped.substring(
+                SKILL_ACTIVATION_OPEN.length(),
+                stripped.length() - SKILL_ACTIVATION_CLOSE.length()).strip();
+        JsonNode payload;
+        try (JsonParser parser = objectMapper.getFactory().createParser(body)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            payload = objectMapper.readTree(parser);
+            if (parser.nextToken() != null) {
+                return retry("skill activation payload must contain exactly one JSON value");
+            }
+        } catch (Exception e) {
+            return retry("model returned malformed skill activation JSON");
+        }
+        if (payload == null || !payload.isObject()) {
+            return retry("skill activation payload must be a JSON object");
+        }
+        if (!fieldNames(payload).equals(SKILL_ACTIVATION_FIELDS)) {
+            return retry("skill activation payload must contain exactly name");
+        }
+        JsonNode name = payload.get("name");
+        if (name == null || !name.isTextual() || name.asText().isBlank()) {
+            return retry("skill activation name must be a non-blank string");
+        }
+        return AgentDecision.builder()
+                .type("skill_activation")
+                .skillName(name.asText().strip())
+                .build();
+    }
+
+    private boolean hasSkillActivationMarker(String text) {
+        return text.contains("<skill_activation") || text.contains("</skill_activation>");
+    }
+
+    private boolean isExactSkillActivationWrapper(String text) {
+        return text.startsWith(SKILL_ACTIVATION_OPEN)
+                && text.endsWith(SKILL_ACTIVATION_CLOSE);
     }
 
     private AgentDecision parsePlanSubmission(String text) {
