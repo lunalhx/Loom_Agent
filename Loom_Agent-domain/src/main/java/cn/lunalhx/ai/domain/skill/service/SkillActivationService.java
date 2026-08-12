@@ -5,6 +5,7 @@ import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalogEntry;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalogLimits;
+import cn.lunalhx.ai.domain.skill.model.SkillResourceEntry;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,6 +24,7 @@ import java.util.Objects;
  */
 public final class SkillActivationService {
     private final SkillFrontmatterParser frontmatterParser = new SkillFrontmatterParser();
+    private final SkillResourceIndexer resourceIndexer = new SkillResourceIndexer();
 
     public List<ActiveSkillSnapshot> activateExplicit(SkillCatalog catalog, List<String> namesInOrder) {
         Objects.requireNonNull(catalog, "catalog");
@@ -138,7 +140,10 @@ public final class SkillActivationService {
             throw new SkillActivationException(
                     "skill " + entry.name() + " instruction body is empty");
         }
-        return new ActiveSkillSnapshot(entry.name(), entry.sourceLabel(), body, digest);
+        List<SkillResourceEntry> resources =
+                resourceIndexer.index(entry.packageRoot());
+        return new ActiveSkillSnapshot(
+                entry.name(), entry.sourceLabel(), body, digest, entry.packageRoot(), resources);
     }
 
     private static String digestOrThrow(byte[] bytes) {

@@ -9,6 +9,8 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
+import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 
 import java.util.ArrayList;
@@ -19,9 +21,12 @@ import java.util.Objects;
 public final class SkillActivationDecisionHandler {
     private final SkillActivationService activation = new SkillActivationService();
     private final ConversationHistoryAppendService ledgerAppendService;
+    private final ToolRegistry toolRegistry;
 
-    public SkillActivationDecisionHandler(ConversationHistoryAppendService ledgerAppendService) {
+    public SkillActivationDecisionHandler(ConversationHistoryAppendService ledgerAppendService,
+                                            ToolRegistry toolRegistry) {
         this.ledgerAppendService = ledgerAppendService;
+        this.toolRegistry = toolRegistry;
     }
 
     public NodeResult apply(AgentContext context, AgentDecision decision) {
@@ -46,6 +51,9 @@ public final class SkillActivationDecisionHandler {
             ActiveSkillSnapshot snapshot = activation.activateImplicit(catalog, skillName);
             List<ActiveSkillSnapshot> merged = activation.mergeActive(context.getActiveSkills(), snapshot);
             context.setActiveSkills(merged);
+            if (toolRegistry != null) {
+                context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
+            }
             appendControlNote(context, snapshot, false);
             context.setToolResult(null);
             return NodeResult.nextRound(List.of());

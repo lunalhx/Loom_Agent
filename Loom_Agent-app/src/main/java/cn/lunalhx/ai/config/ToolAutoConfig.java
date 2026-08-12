@@ -12,6 +12,7 @@ import cn.lunalhx.ai.infrastructure.loom.DelegateTool;
 import cn.lunalhx.ai.infrastructure.loom.ListFilesTool;
 import cn.lunalhx.ai.infrastructure.loom.PatchFileTool;
 import cn.lunalhx.ai.infrastructure.loom.ReadFileTool;
+import cn.lunalhx.ai.infrastructure.loom.ReadSkillResourceTool;
 import cn.lunalhx.ai.infrastructure.loom.RunShellTool;
 import cn.lunalhx.ai.infrastructure.loom.SearchTool;
 import cn.lunalhx.ai.infrastructure.loom.WriteFileTool;
@@ -69,6 +70,7 @@ public class ToolAutoConfig {
                 new RunShellTool(workspacePort),
                 new WriteFileTool(workspacePort),
                 new PatchFileTool(workspacePort),
+                new ReadSkillResourceTool(),
                 new DelegateTool(delegateRunner));
     }
 

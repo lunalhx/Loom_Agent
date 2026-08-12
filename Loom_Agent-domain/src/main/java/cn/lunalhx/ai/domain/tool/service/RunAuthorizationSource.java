@@ -142,6 +142,7 @@ public final class RunAuthorizationSource {
 
     private List<PermissionRule> builtIns() {
         return List.of(new PermissionRule("builtin-read-file", "builtin", "read_file", PermissionRule.MatcherKind.TOOL, "read_file", PermissionAction.ALLOW),
+                new PermissionRule("builtin-read-skill-resource", "builtin", "read_skill_resource", PermissionRule.MatcherKind.TOOL, "read_skill_resource", PermissionAction.ALLOW),
                 new PermissionRule("builtin-list-files", "builtin", "list_files", PermissionRule.MatcherKind.TOOL, "list_files", PermissionAction.ALLOW),
                 new PermissionRule("builtin-search", "builtin", "search", PermissionRule.MatcherKind.TOOL, "search", PermissionAction.ALLOW),
                 new PermissionRule("builtin-delegate", "builtin", "delegate", PermissionRule.MatcherKind.TOOL, "delegate", PermissionAction.ALLOW));

@@ -75,6 +75,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                         ? null : Set.copyOf(context.runtimeProperties(properties).getSecretEnvNames()))
                 .recentSummary(context.workingMemoryOrCreate().taskSummary())
                 .securityScope(context.getSecurityScope())
+                .activeSkills(context.getActiveSkills())
                 .build();
 
         ToolExecutor.ToolRuntimePolicy policy = resolvePolicy(context);

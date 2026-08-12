@@ -15,6 +15,7 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.service.RunAuthorizationSource;
 import org.apache.commons.lang3.StringUtils;
 
@@ -133,8 +134,7 @@ public final class AgentContextFactory {
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
-        context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
-                context.getExecutionProfile()));
+        context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         if (previous != null) {
@@ -200,8 +200,7 @@ public final class AgentContextFactory {
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
-        context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
-                context.getExecutionProfile()));
+        context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }

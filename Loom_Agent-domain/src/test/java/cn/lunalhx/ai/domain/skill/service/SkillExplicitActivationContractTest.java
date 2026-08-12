@@ -69,7 +69,9 @@ public class SkillExplicitActivationContractTest {
                         "review-pr",
                         "project .agents/skills/review-pr",
                         "Always check tests first.",
-                        "abc")));
+                        "abc",
+                        null,
+                        List.of())));
         assertTrue(system.contains("Collaboration mode: build"));
         assertTrue(system.contains(SkillPromptRenderer.SECTION_TITLE));
         assertTrue(system.contains("name: review-pr"));

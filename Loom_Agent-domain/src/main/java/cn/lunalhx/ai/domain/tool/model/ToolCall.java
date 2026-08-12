@@ -35,6 +35,7 @@ public class ToolCall {
     private ExecutionProfile executionProfile;
     private transient RootRunSecurityScope securityScope;
     private DelegateRequest delegateRequest;
+    private transient List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

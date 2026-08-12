@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.skill.service.SkillActivationDecisionHandler;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,13 +36,14 @@ public class DecisionNode extends AbstractAgentNode {
 
     public DecisionNode(ObjectMapper objectMapper,
                         AgentRuntimeProperties properties,
-                        ConversationHistoryAppendService ledgerAppendService) {
+                        ConversationHistoryAppendService ledgerAppendService,
+                        ToolRegistry toolRegistry) {
         super(AgentNodeNames.DECISION, List.of("modelOutput", "parseErrors", "decision"));
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.ledgerAppendService = ledgerAppendService;
         this.decisionParser = new DecisionParser(objectMapper);
-        this.skillActivationHandler = new SkillActivationDecisionHandler(ledgerAppendService);
+        this.skillActivationHandler = new SkillActivationDecisionHandler(ledgerAppendService, toolRegistry);
     }
 
     @Override

@@ -25,6 +25,8 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
 import cn.lunalhx.ai.domain.skill.service.SkillRunBootstrap;
+import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -35,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -54,16 +57,19 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
     private final SkillRunBootstrap skillRunBootstrap = new SkillRunBootstrap();
+    private final ToolRegistry toolRegistry;
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
                             AgentRunLifecycle lifecycle,
-                            ConversationExecutionGuard executionGuard) {
+                            ConversationExecutionGuard executionGuard,
+                            ToolRegistry toolRegistry) {
         this.properties = assembly.properties();
         this.nodes = assembly.flow().nodes();
         this.components = assembly.components();
         this.lifecycle = lifecycle;
         this.executor = executor;
         this.executionGuard = executionGuard;
+        this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
     }
 
     // ==================== 公共入口 ====================
@@ -89,6 +95,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 capture.accept(context);
                 try {
                     skillRunBootstrap.prepareRootRun(context, null);
+                    context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
                 } catch (SkillActivationException e) {
                     context.runtime().fail(AgentStopReason.MODEL_ERROR, "skill_activation_failed",
                             e.getMessage());

@@ -54,7 +54,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":{\"msg\":\"hello\"}}</tool>", List.of(t.spec()));
 
@@ -70,7 +70,7 @@ public class DecisionNodeTest {
     public void planMarkerInsideToolJsonRemainsToolPayloadData() {
         String schema = "{\"type\":\"object\",\"properties\":{\"msg\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"msg\"],\"additionalProperties\":false}";
         AgentTool t = tool("msg_tool", schema);
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool>{\"name\":\"msg_tool\",\"args\":{\"msg\":\"literal <plan_submission> marker\"}}</tool>",
@@ -86,7 +86,7 @@ public class DecisionNodeTest {
     public void jsonToolMissingArgsDefaultsToEmptyObject() {
         AgentTool t = tool("empty_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"empty_tool\"}</tool>", List.of(t.spec()));
 
@@ -99,7 +99,7 @@ public class DecisionNodeTest {
     public void malformedToolJsonReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",</tool>", List.of(t.spec()));
 
@@ -113,7 +113,7 @@ public class DecisionNodeTest {
     public void missingToolNameReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -127,7 +127,7 @@ public class DecisionNodeTest {
     public void nonObjectArgsReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"msg_tool\",\"args\":[]}</tool>", List.of(t.spec()));
 
@@ -144,7 +144,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("write_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool name=\"write_file\" path=\"a.txt\"><content>hello\nworld</content></tool>",
@@ -162,7 +162,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("write_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool name=\"write_file\" path=\"a.txt\">\ndef f():\n    return 1\n</tool>",
@@ -179,7 +179,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("patch_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_text\":{\"type\":\"string\"},\"new_text\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_text\",\"new_text\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool name=\"patch_file\" path=\"a.py\"><old_text>return -1</old_text><new_text>return mid</new_text></tool>",
@@ -197,7 +197,7 @@ public class DecisionNodeTest {
         AgentTool t = tool("read_file",
                 "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool name='read_file' path='README.md'></tool>", List.of(t.spec()));
 
@@ -211,7 +211,7 @@ public class DecisionNodeTest {
     public void xmlToolWithoutNameReturnsFormatRetry() {
         AgentTool t = tool("read_file", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool path=\"README.md\"></tool>", List.of(t.spec()));
 
@@ -226,7 +226,7 @@ public class DecisionNodeTest {
     public void finalTagCompletes() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<final>Done.</final>", List.of(t.spec()));
 
@@ -240,7 +240,7 @@ public class DecisionNodeTest {
     public void emptyFinalReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<final>   </final>", List.of(t.spec()));
 
@@ -253,7 +253,7 @@ public class DecisionNodeTest {
     public void bareTextCompletesAsFinal() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("just an answer", List.of(t.spec()));
 
@@ -267,7 +267,7 @@ public class DecisionNodeTest {
     public void emptyOutputReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("", List.of(t.spec()));
 
@@ -282,7 +282,7 @@ public class DecisionNodeTest {
     @Test
     public void exactPlanSubmissionCompletesWithStructuredPayload() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_submission>{\"title\":\"Ship the first slice\",\"body\":\"Read the repository and implement the slice.\",\"dependencies\":[\"JDK 21\"]}</plan_submission>",
@@ -302,7 +302,7 @@ public class DecisionNodeTest {
     @Test
     public void planSubmissionWithUnknownFieldReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[],\"target\":\"NEW\"}</plan_submission>",
@@ -317,7 +317,7 @@ public class DecisionNodeTest {
     @Test
     public void planSubmissionMarkerCannotFallBackToFinal() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]}</plan_submission><final>fallback</final>",
@@ -332,7 +332,7 @@ public class DecisionNodeTest {
     @Test
     public void closingPlanSubmissionMarkerCannotFallBackToBareText() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("ordinary text </plan_submission>", List.of(t.spec()));
 
@@ -345,7 +345,7 @@ public class DecisionNodeTest {
     @Test
     public void planSubmissionRejectsTrailingOrDuplicateJson() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext trailing = context(
                 "<plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]} {}</plan_submission>",
@@ -381,7 +381,7 @@ public class DecisionNodeTest {
                         "review-pr", "Review pull requests.", "project .agents/skills/review-pr",
                         true, true, digest, null, null, null, List.of(), pkg);
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<skill_activation>{\"name\":\"review-pr\"}</skill_activation>",
@@ -404,7 +404,7 @@ public class DecisionNodeTest {
     @Test
     public void skillActivationCannotFallBackToFinal() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<skill_activation>{\"name\":\"review-pr\"}</skill_activation><final>fallback</final>",
@@ -419,7 +419,7 @@ public class DecisionNodeTest {
     @Test
     public void skillActivationCannotBeCombinedWithTool() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<skill_activation>{\"name\":\"review-pr\"}</skill_activation><tool>{\"name\":\"msg_tool\",\"args\":{}}</tool>",
@@ -434,7 +434,7 @@ public class DecisionNodeTest {
     @Test
     public void malformedSkillActivationReturnsFormatRetry() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<skill_activation>{\"name\":\"review-pr\"</skill_activation>",
@@ -449,7 +449,7 @@ public class DecisionNodeTest {
     @Test
     public void markerInsideToolPayloadRemainsSkillActivationData() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool>{\"name\":\"msg_tool\",\"args\":{\"message\":\"<skill_activation>\"}}</tool>",
@@ -466,7 +466,7 @@ public class DecisionNodeTest {
     @Test
     public void exactPlanDeviationCompletesWithStructuredPayload() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"The required API is outside the bound scope.\"},\"workspace_changes\":[{\"path\":\"src/main/java/example/Feature.java\",\"operation\":\"modified\",\"summary\":\"Added the initial implementation.\"}]}</plan_deviation>",
@@ -488,7 +488,7 @@ public class DecisionNodeTest {
     @Test
     public void planDeviationCannotFallBackToAnotherAction() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><final>fallback</final>",
@@ -503,7 +503,7 @@ public class DecisionNodeTest {
     @Test
     public void planDeviationCannotBeCombinedWithPlanSubmission() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><plan_submission>{\"title\":\"A\",\"body\":\"B\",\"dependencies\":[]}</plan_submission>",
@@ -518,7 +518,7 @@ public class DecisionNodeTest {
     @Test
     public void planDeviationCannotBeCombinedWithTool() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[]}</plan_deviation><tool>{\"name\":\"msg_tool\",\"args\":{}}</tool>",
@@ -533,7 +533,7 @@ public class DecisionNodeTest {
     @Test
     public void planDeviationRejectsMalformedJson() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[}</plan_deviation>",
@@ -548,7 +548,7 @@ public class DecisionNodeTest {
     @Test
     public void markerInsideToolPayloadRemainsData() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool>{\"name\":\"msg_tool\",\"args\":{\"message\":\"<plan_deviation>\"}}</tool>",
@@ -564,7 +564,7 @@ public class DecisionNodeTest {
     @Test
     public void markerInsidePlanSubmissionPayloadRemainsData() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<plan_submission>{\"title\":\"A\",\"body\":\"The text mentions <plan_deviation> as data.\",\"dependencies\":[]}</plan_submission>",
@@ -579,7 +579,7 @@ public class DecisionNodeTest {
     @Test
     public void ordinaryDeviationProseRemainsFinalAnswer() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("Continuing would be a deviation from the agreed scope.",
                 List.of(t.spec()));
@@ -595,7 +595,7 @@ public class DecisionNodeTest {
     @Test
     public void planDeviationRejectsUnknownFieldsAndUnsafePaths() {
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext unknownField = context(
                 "<plan_deviation>{\"conflict\":{\"kind\":\"scope\",\"summary\":\"scope changed\"},\"workspace_changes\":[],\"run_id\":\"fake\"}</plan_deviation>",
@@ -623,7 +623,7 @@ public class DecisionNodeTest {
     public void unknownToolStillRoutesToToolInputForGate() {
         AgentTool t = tool("known", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"unknown\",\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -639,7 +639,7 @@ public class DecisionNodeTest {
         AgentTool t1 = tool("exposed", "{\"type\":\"object\",\"additionalProperties\":false}");
         AgentTool t2 = tool("hidden", "{\"type\":\"object\",\"additionalProperties\":false}");
         ToolRegistry registry = new ToolRegistry(List.of(t1, t2), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"hidden\",\"args\":{}}</tool>", List.of(t1.spec()));
 
@@ -655,7 +655,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}},\"required\":[\"cmd\"],\"additionalProperties\":false}";
         AgentTool t = tool("test_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"test_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -671,7 +671,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\"}},\"required\":[\"count\"],\"additionalProperties\":false}";
         AgentTool t = tool("count_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context(
                 "<tool>{\"name\":\"count_tool\",\"args\":{\"count\":\"not_a_number\"}}</tool>",
@@ -688,7 +688,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"}},\"required\":[\"x\"],\"additionalProperties\":false}";
         AgentTool t = tool("int_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool>{\"name\":\"int_tool\",\"args\":{}}</tool>", List.of(t.spec()));
 
@@ -703,7 +703,7 @@ public class DecisionNodeTest {
         String schema = "{\"type\":\"object\",\"properties\":{\"start\":{\"type\":\"integer\"},\"end\":{\"type\":\"integer\"}},\"required\":[\"start\"],\"additionalProperties\":false}";
         AgentTool t = tool("range_tool", schema);
         ToolRegistry registry = new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper));
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
 
         AgentContext ctx = context("<tool name=\"range_tool\" start=\"1\" end=\"80\"></tool>", List.of(t.spec()));
 

@@ -10,6 +10,12 @@ public final class SkillCatalogLimits {
     public static final int MAX_ACTIVE_BODY_CHARS = 32 * 1024;
     /** Whole-body admission ceiling for all Active Skill instruction bodies in one Run. */
     public static final int MAX_ACTIVE_TOTAL_CHARS = 64 * 1024;
+    /** Maximum indexed resources per Active Skill Snapshot. */
+    public static final int MAX_RESOURCES_PER_SKILL = 64;
+    /** Maximum bytes for one indexed resource file. */
+    public static final int MAX_RESOURCE_BYTES = 256 * 1024;
+    /** Maximum bytes returned in one read_skill_resource chunk. */
+    public static final int MAX_RESOURCE_CHUNK_BYTES = 16 * 1024;
 
     private SkillCatalogLimits() {
     }

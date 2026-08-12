@@ -9,7 +9,8 @@ import java.util.Set;
 
 public final class ToolOperation {
 
-    private static final Set<String> READ_TOOLS = Set.of("read_file", "list_files", "search");
+    private static final Set<String> READ_TOOLS = Set.of(
+            "read_file", "list_files", "search", "read_skill_resource");
     private static final Set<String> WORKSPACE_WRITE_TOOLS = Set.of("write_file", "patch_file");
 
     private ToolOperation() {

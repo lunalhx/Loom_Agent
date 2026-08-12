@@ -62,7 +62,7 @@ public class AgentLoopFactory {
         AgentLoopAssembly assembly = assemble(toolRegistry);
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
                 state.runRepository(), state.checkpointRepository());
-        return new DefaultAgentLoopService(assembly, executor, lifecycle, executionGuard);
+        return new DefaultAgentLoopService(assembly, executor, lifecycle, executionGuard, toolRegistry);
     }
 
     AgentLoopAssembly assemble(ToolRegistry toolRegistry) {

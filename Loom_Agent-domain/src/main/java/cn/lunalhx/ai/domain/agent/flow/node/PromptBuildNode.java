@@ -21,6 +21,8 @@ import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.workspace.WorkspaceFacts;
 import cn.lunalhx.ai.domain.skill.service.SkillCatalogPromptRenderer;
 import cn.lunalhx.ai.domain.skill.service.SkillPromptRenderer;
+import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -39,18 +41,24 @@ public class PromptBuildNode extends AbstractAgentNode {
     private final LedgerPromptServices ledgerServices;
     private final ContextManager contextManager;
     private final ConversationHistoryAppendService ledgerAppendService;
+    private final ToolRegistry toolRegistry;
 
     public PromptBuildNode(LedgerPromptServices ledgerServices,
                            ContextManager contextManager,
-                           ConversationHistoryAppendService ledgerAppendService) {
+                           ConversationHistoryAppendService ledgerAppendService,
+                           ToolRegistry toolRegistry) {
         super(AgentNodeNames.PROMPT_BUILD, List.of("question", "toolSpecs", "conversationHistory"));
         this.ledgerServices = Objects.requireNonNull(ledgerServices, "ledgerServices must not be null");
         this.contextManager = Objects.requireNonNull(contextManager, "contextManager must not be null");
         this.ledgerAppendService = ledgerAppendService;
+        this.toolRegistry = toolRegistry;
     }
 
     @Override
     protected NodeResult doApply(AgentContext context) {
+        if (toolRegistry != null) {
+            context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
+        }
         try {
             runBootstrap(context);
         } catch (RuntimeException e) {

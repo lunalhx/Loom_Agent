@@ -107,11 +107,11 @@ public class AgentFlowFactory {
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new PromptBuildNode(
                         new LedgerPromptServices(bootstrapService, new StablePrefixBuilder()),
-                        contextManager, ledgerAppendService),
+                        contextManager, ledgerAppendService, toolRegistry),
                 new ModelCallNode(assembler, properties, ledgerAppendService,
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder, runtime.agentMetrics())),
-                new DecisionNode(objectMapper, properties, ledgerAppendService),
+                new DecisionNode(objectMapper, properties, ledgerAppendService, toolRegistry),
                 new ToolDispatchNode(authorizationService, runtime.toolOutputSanitizer(), properties),
                 new ToolExecuteNode(executor),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
