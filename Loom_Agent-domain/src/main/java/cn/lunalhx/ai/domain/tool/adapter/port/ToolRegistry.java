@@ -95,6 +95,12 @@ public class ToolRegistry {
     /** Model-visible catalog projected from mode and base-session allowlist. */
     public List<ToolSpec> effectiveSpecs(CollaborationMode mode,
                                          Collection<String> allowedTools) {
+        return effectiveSpecs(mode, allowedTools, ExecutionProfile.forRun(mode, false));
+    }
+
+    /** Catalog projected against the already frozen execution capability. */
+    public List<ToolSpec> effectiveSpecs(CollaborationMode mode, Collection<String> allowedTools,
+                                         ExecutionProfile executionProfile) {
         CollaborationMode effectiveMode = Objects.requireNonNull(mode,
                 "collaboration mode must not be null");
         return tools.get().values().stream()
@@ -102,7 +108,7 @@ public class ToolRegistry {
                         || allowedTools.contains(tool.spec().getName()))
                 .filter(tool -> effectiveMode != CollaborationMode.PLAN
                         || isPlanVisible(tool))
-                .filter(tool -> tool.isAvailable(ExecutionProfile.forRun(effectiveMode, false)))
+                .filter(tool -> tool.isAvailable(executionProfile))
                 .map(AgentTool::spec)
                 .collect(Collectors.toList());
     }

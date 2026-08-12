@@ -129,7 +129,9 @@ public final class AgentContextFactory {
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
-        freezeAuthorization(context);
+        freezeAuthorization(context, question.isFullAccess());
+        context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
+                context.getExecutionProfile()));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         if (previous != null) {
@@ -192,7 +194,9 @@ public final class AgentContextFactory {
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
-        freezeAuthorization(context);
+        freezeAuthorization(context, question.isFullAccess());
+        context.setToolSpecs(toolRegistry.effectiveSpecs(context.getCollaborationMode(), context.getAllowedTools(),
+                context.getExecutionProfile()));
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
         }
@@ -224,7 +228,7 @@ public final class AgentContextFactory {
         return StringUtils.defaultIfBlank(runProperties.getApprovalPolicy(), "ask");
     }
 
-    private void freezeAuthorization(AgentContext context) {
+    private void freezeAuthorization(AgentContext context, boolean fullAccessRequested) {
         boolean delegate = context.getParentRunId() != null || context.getAgentDepth() > 0;
         Path workspace = context.getResolvedWorkspace();
         try {
@@ -232,14 +236,17 @@ public final class AgentContextFactory {
         } catch (java.io.IOException e) {
             throw new IllegalArgumentException("workspace cannot be canonicalized for authorization", e);
         }
-        context.setExecutionProfile(ExecutionProfile.forRun(context.getCollaborationMode(), delegate)
-                .withWorkspace(workspace));
+        context.setExecutionProfile(fullAccessRequested && context.getCollaborationMode() == CollaborationMode.BUILD && !delegate
+                ? ExecutionProfile.fullAccess(workspace)
+                : ExecutionProfile.forRun(context.getCollaborationMode(), delegate).withWorkspace(workspace));
         // A delegate inherits the root's already validated snapshot; it never
         // re-reads policy sources or applies a child default.
         if (context.getParentRunId() != null && context.getPermissionPolicySnapshot() != null) {
             return;
         }
-        PermissionAction defaultAction = switch (context.getApprovalPolicy()) {
+        PermissionAction defaultAction = context.getExecutionProfile().kind()
+                == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
+                ? PermissionAction.ALLOW : switch (context.getApprovalPolicy()) {
             case "auto" -> PermissionAction.ALLOW;
             case "never" -> PermissionAction.DENY;
             default -> PermissionAction.ASK;
@@ -249,6 +256,7 @@ public final class AgentContextFactory {
         context.setPermissionGrants(authorizationSource.loadWorkspaceGrants(workspace));
         context.setExecutionGrants(authorizationSource.loadWorkspaceExecutionGrants(workspace));
     }
+
 
     private CollaborationMode resolveMode(AgentQuestion question, AgentContextSnapshot previous) {
         if (question.getCollaborationMode() != null) {

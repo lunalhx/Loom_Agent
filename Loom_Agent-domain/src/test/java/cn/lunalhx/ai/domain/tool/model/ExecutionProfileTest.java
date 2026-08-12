@@ -6,6 +6,7 @@ import org.junit.Test;
 import java.util.Set;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class ExecutionProfileTest {
 
@@ -21,5 +22,11 @@ public class ExecutionProfileTest {
         EffectProfile externalRead = new EffectProfile(Set.of(ToolEffect.EXTERNAL_READ),
                 OutboundDisclosure.NONE, true);
         assertFalse(ExecutionProfile.forRun(CollaborationMode.PLAN, false).allows(externalRead));
+    }
+
+    @Test
+    public void fullAccessIsExplicitlyDistinguishedFromOrdinaryBuild() {
+        assertTrue(ExecutionProfile.fullAccess(java.nio.file.Path.of("/tmp")).allows(
+                new EffectProfile(Set.of(ToolEffect.EXTERNAL_MUTATION), OutboundDisclosure.PRESENT, true)));
     }
 }

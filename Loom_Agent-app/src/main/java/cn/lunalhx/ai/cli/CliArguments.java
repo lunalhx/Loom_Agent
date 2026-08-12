@@ -33,6 +33,7 @@ public final class CliArguments {
     public String approval = "ask";
     /** Null means a resumed Session keeps its persisted mode. */
     public CollaborationMode mode;
+    public boolean fullAccess;
     public final List<String> secretEnvNames = new ArrayList<>();
     public int maxSteps = 6;
     public int maxNewTokens = 512;
@@ -55,6 +56,7 @@ public final class CliArguments {
                 case "--resume" -> result.resume = requireValue(args, ++i, arg);
                 case "--approval" -> result.approval = requireValue(args, ++i, arg);
                 case "--mode" -> result.mode = parseMode(requireValue(args, ++i, arg), arg);
+                case "--full-access" -> result.fullAccess = true;
                 case "--secret-env-name" -> result.secretEnvNames.add(requireValue(args, ++i, arg));
                 case "--max-steps" -> result.maxSteps = intValue(requireValue(args, ++i, arg), arg);
                 case "--max-new-tokens" -> result.maxNewTokens = intValue(requireValue(args, ++i, arg), arg);

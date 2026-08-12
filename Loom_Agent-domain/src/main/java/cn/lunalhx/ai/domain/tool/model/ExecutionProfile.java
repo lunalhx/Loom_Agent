@@ -38,6 +38,12 @@ public record ExecutionProfile(ExecutionProfileKind kind, Path workspace,
                 FilesystemAccess.WRITE, null, null, false, false, List.of(), "unresolved");
     }
 
+    public static ExecutionProfile fullAccess(Path workspace) {
+        return new ExecutionProfile(ExecutionProfileKind.DANGER_FULL_ACCESS, workspace,
+                FilesystemAccess.WRITE, Path.of(System.getProperty("user.home")), null,
+                true, true, List.of(), "full-access");
+    }
+
     public ExecutionProfile withWorkspace(Path canonicalWorkspace) {
         return new ExecutionProfile(kind, canonicalWorkspace, workspaceAccess, homeRoot, temporaryRoot,
                 networkAllowed, hostPrivateVisible, externalGrants, sandboxBackend);

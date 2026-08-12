@@ -288,6 +288,20 @@ public final class CliMain {
         options.workspaceRoot = Path.of(arguments.cwd).toAbsolutePath().normalize().toString();
         options.approvalPolicy = arguments.approval;
         options.startupMode = arguments.mode;
+        if (arguments.fullAccess) {
+            if (arguments.mode == CollaborationMode.PLAN) {
+                throw new CliSessionService.OptionsException("Full Access cannot be activated in Plan mode");
+            }
+            java.io.Console console = System.console();
+            if (console == null) {
+                throw new CliSessionService.OptionsException("--full-access requires an interactive terminal");
+            }
+            String confirmation = console.readLine("Type FULL ACCESS to confirm unrestricted host execution: ");
+            if (!"FULL ACCESS".equals(confirmation)) {
+                throw new CliSessionService.OptionsException("Full Access confirmation was not accepted");
+            }
+            options.fullAccess = true;
+        }
         options.maxSteps = arguments.maxSteps;
         options.maxNewTokens = arguments.maxNewTokens;
         options.temperature = arguments.temperature;
@@ -340,6 +354,7 @@ public final class CliMain {
         System.out.println("provider: " + options.provider + "  model: " + options.model);
         System.out.println("workspace: " + options.workspaceRoot);
         System.out.println("approval: " + options.approvalPolicy + "  session: " + session.sessionId());
+        if (options.fullAccess) System.out.println("sandbox: FULL ACCESS (launch-scoped)");
         System.out.println("mode: " + session.collaborationMode().cliName());
     }
 }

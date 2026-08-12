@@ -51,7 +51,8 @@ public final class ShellRunner {
             }
         }
 
-        List<String> argv = profile == null ? List.of("/bin/sh", "-c", command)
+        List<String> argv = profile == null || profile.kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS
+                ? List.of("/bin/sh", "-c", command)
                 : List.of("/usr/bin/sandbox-exec", "-p", SeatbeltSandboxBackend.policy(profile), "/bin/sh", "-c", command);
         ProcessBuilder builder = new ProcessBuilder(argv)
                 .directory(cwd.toFile());

@@ -46,5 +46,7 @@ public class AgentQuestion {
     private transient PermissionPolicySnapshot inheritedPermissionPolicySnapshot;
     /** Trusted session-scoped mutable overlay, never model-provided or checkpointed. */
     private transient List<ExecutionGrant> inheritedSessionExecutionGrants;
+    /** Launch-scoped Full Access selection; never written to a session or checkpoint. */
+    private transient boolean fullAccess;
 
 }

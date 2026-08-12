@@ -312,6 +312,7 @@ public class CliSessionService implements AutoCloseable {
                 .runStartGuard(runStartGuard)
                 .seedSnapshot(seed)
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
+                .fullAccess(options.fullAccess)
                 .build();
 
         Map<String, Object> taskState = newTaskState(runId, safePrompt);
@@ -1045,6 +1046,8 @@ public class CliSessionService implements AutoCloseable {
         public final List<String> secretEnvNames = new ArrayList<>();
         public final List<String> secretValues = new ArrayList<>();
         public cn.lunalhx.ai.domain.tool.service.PermissionPrompt approvalPrompt;
+        /** Confirmed only at this CLI launch; never saved to session or checkpoints. */
+        public boolean fullAccess;
         public ModelGateway modelGateway;
     }
 }
