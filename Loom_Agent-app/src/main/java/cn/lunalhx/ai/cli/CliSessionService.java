@@ -181,6 +181,7 @@ public class CliSessionService implements AutoCloseable {
     /** Create and activate a new durable Session without starting a Run. */
     public synchronized String newSession() {
         sessionId = newSessionId();
+        options.fullAccess = false;
         session = createFreshSession(sessionId, session.getCollaborationMode());
         return sessionId;
     }
@@ -948,6 +949,9 @@ public class CliSessionService implements AutoCloseable {
             }
             System.out.println();
             System.out.println("permission required: " + display.toolName() + " " + display.normalizedSummary());
+            if (display.profile().kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS) {
+                System.out.println("FULL ACCESS: command runs without the ordinary sandbox.");
+            }
             System.out.print("allow once/session/workspace? [o/s/w/N] ");
             System.out.flush();
             try {

@@ -26,6 +26,8 @@ public final class CliMain {
             /memory  Show the agent's distilled working memory.
             /session Show the session id.
             /mode plan|build  Show or change the collaboration mode.
+            /sandbox workspace  Show ordinary sandbox mode.
+            /sandbox full-access  Full Access is selected only with --full-access at launch.
             /plan new  Start an independent Plan.
             /plan select <plan-id>  Select a Plan's latest revision.
             /plan handoff [plan-id]  Start a Build Run bound to a fresh Plan revision.
@@ -208,6 +210,14 @@ public final class CliMain {
         }
         if (input.equals("/mode")) {
             output.println("mode: " + session.collaborationMode().cliName());
+            return true;
+        }
+        if (input.equals("/sandbox workspace")) {
+            output.println("sandbox: workspace");
+            return true;
+        }
+        if (input.equals("/sandbox full-access")) {
+            output.println("error: restart with --full-access and confirm FULL ACCESS");
             return true;
         }
         if (input.startsWith("/mode ")) {
