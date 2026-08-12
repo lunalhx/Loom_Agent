@@ -28,6 +28,46 @@ _Avoid_: Live Policy Reload、Partial Rule Set、Silent Fallback
 用户对 Permission Decision 为 `ASK` 的工具调用是否放行的决定。用户通过 Approval Display 审查调用；是否请求 Tool Approval 与该调用的 Effect Profile 是两个独立维度，且任何批准都不能放宽 Plan Mode 或 Execution Profile 的约束。
 _Avoid_: Plan Approval、Plan Acceptance
 
+**Skill Activation**:
+Runtime 控制面将一个已发现并校验的 Skill 指令内容纳入当前 Run 受控模型指令上下文的非终止状态转换；它可以来自用户显式选择或模型根据 Skill 描述提交的专用 `Skill Activation` 协议动作，但不是 Tool Call，不产生 Permission Decision，不请求 Tool Approval，也不消耗 Tool step。Runtime 只接受当前 Skill Catalog Snapshot 中的 Effective Skill Descriptor，按内容摘要解析并冻结完整 Active Skill Snapshot，再以独立、低于基础 Runtime 规则的 system-prompt 区段装配到下一次模型调用；普通 ToolResult 永远不提供这条提升路径。Activation 只在该 Run 内有效，Run 结束即丢弃，不写入 Session active state；每个新 Run 都基于当前请求和新的不可变 Skill Catalog Snapshot 重新匹配与装配，因此同一 Session 的后续请求不会自动携带此前 Skill。Skill 只影响模型如何完成任务，不能增加 Effective Tool Catalog、授予 Permission Grant 或 Execution Grant、放宽 Execution Profile、改变 Permission Policy，或预批准后续调用；模型依据 Skill 发起的每个 Tool Call 与普通 Tool Call 完全相同，独立通过既有 Runtime Gate，因此在 `ALLOW` 下直接执行、在 `ASK` 下请求批准、在 `DENY` 或能力越界时拒绝。
+_Avoid_: Load-skill Tool、Trusted Tool Output、Session Skill State、Sticky Skill、Skill Approval、Tool Authorization、Permission Grant、Direct Tool Invocation
+
+**Active Skill Snapshot**:
+Skill Activation 成功时由 Runtime 从 Effective Skill Descriptor 对应内容原子生成的、仅属于当前 Run 的不可变指令快照，包含稳定名称、来源、完整指令正文、正文摘要，以及带规范化相对路径和内容摘要的不可变资源清单。正文必须在装配前整体通过大小和上下文预算校验，不能静默截断；来源发生漂移、读取不完整或预算不足时 Activation 原子失败，不把部分指令加入 prompt。它是受控的低优先级模型指令，不是权限、Tool Output、Session 状态或可执行代码；Run checkpoint 必须足以确定性恢复同一快照。
+_Avoid_: Tool Result、Partial Skill、Live Skill File、Permission Grant、Executable Script
+
+**Skill Invocation**:
+为当前 Run 请求 Skill Activation 的产品入口。用户可以在请求中通过 `$skill-name` 显式选择一个或多个允许用户调用的 Skill，Runtime 在第一次模型调用前解析、去重并装配；模型也可以根据 Skill Catalog Snapshot 中允许模型调用的名称、描述与来源，在 Run 内提交专用 Skill Activation 动作隐式选择。两条路径必须汇聚到同一校验、快照和 prompt 装配流程，不产生不同权限；`disable-model-invocation` 与 `user-invocable` 只缩小对应入口。显式选择未知、无效、禁止用户调用或无法完整装配的 Skill 时在模型调用前明确失败。`/skills` 是列出当前 Workspace 有效 Skill、准确来源、调用方向与遮蔽/校验/兼容诊断的控制命令，不创建 Run；首版不把任意 `/skill-name` 注册为动态控制命令。
+_Avoid_: Slash-command Skill、Model-parsed Explicit Selection、Implicit Permission、Different Activation Trust
+
+**Skill Resource Observation**:
+模型通过普通 `read_skill_resource` Tool 对当前 Run 已激活 Skill 的配套文件进行的按需只读观察。Runtime 只接受 Active Skill Snapshot 已绑定资源清单中的规范化相对路径，拒绝绝对路径、路径穿越、越出 Skill 根目录的 symlink、内容漂移、未激活 Skill 和未纳入清单的文件；结果始终作为不可信 Tool 数据处理并遵循普通 Tool 的 Effect、Permission Policy、Execution Profile、trace 与大小限制，不能改变 Agent 规则。`references/`、`assets/` 与 `scripts/` 只是约定目录，`scripts/` 不赋予自动执行语义；执行任何脚本必须由独立的普通 Tool Call 完成。首版不提供 Skill 创建、安装、更新、复制或专用脚本执行 Tool。
+_Avoid_: Skill Instruction、Implicit Execution、Arbitrary Host Read、Trusted Resource、Skill Script Runner
+
+**Skill Script Execution**:
+模型依据 Active Skill Snapshot 请求执行配套脚本时产生的普通 Shell Tool Call，而不是 Skill Activation 的组成部分。项目 Skill 脚本位于 Workspace 内，按当前 Run 的普通 Shell Permission Policy 与 Execution Profile 求值；用户 Skill 脚本位于 Workspace 外，只有匹配的既有 Execution Grant、用户批准的最小 Execution Request 或 Full Access 才能让进程访问。Tool Permission 的 `ALLOW` 不隐含工作区外文件访问，Skill Activation 也不自动挂载用户 Skill 根目录、复制可执行代码或授予 Host Resource；所有现有 sandbox、Effect、Plan Mode 和 Built-in Safety Floor 约束继续生效。
+_Avoid_: Skill Runtime、Automatic Mount、Implicit Execution Grant、Activation-time Execution、Permission Bypass
+
+**Skill Inheritance**:
+同一根 Run 任务树内的 Delegate Skill 传播规则。Delegate Run 不重新扫描磁盘，而是继承根 Run 冻结的 Skill Catalog Snapshot 与创建 Delegate 时父级已有的 Active Skill Snapshot，使用户显式选择或父级采用的当前任务方法在委派后保持有效；Delegate 可以根据其子任务从继承 Catalog 中额外执行 Skill Activation，但新增快照只属于该 Delegate 及其后代，不反向修改父级。继承与新增 Skill 都不能扩大 Delegate 的 Effective Tool Catalog、Permission Policy 或 Execution Profile；根 Run 完成时整个任务树的 Skill 状态一起丢弃。
+_Avoid_: Delegate Rediscovery、Session Skill State、Child-to-parent Activation、Capability Inheritance
+
+**Skill Catalog Snapshot**:
+Runtime 在根 Run 启动时从已配置 Skill 来源完成发现、校验和冲突处理后冻结的不可变元数据视图，至少保留稳定身份、名称、描述、来源、内容摘要与诊断，并作为该 Run 显式或隐式 Skill Activation 的唯一候选集合。它只用于模型发现、用户选择和确定性激活，不是授权边界；磁盘变化只影响后续 Run，Delegate Run 只能继承或进一步缩小根 Run 的 Snapshot。
+_Avoid_: Live Skill Index、Session Skill State、Active Skill、Authorization Catalog
+
+**Skill Source**:
+Runtime 被明确配置为发现 Skill Package 的本地根目录及其信任来源。首版同时发现用户级 `~/.agents/skills`、`~/.claude/skills` 与项目级 `<workspace>/.agents/skills`、`<workspace>/.claude/skills`；`.agents/skills` 是 Loom 的规范来源，`.claude/skills` 仅提供零迁移的目录与开放格式兼容，不承诺 Claude 专属运行语义。未知扩展不能扩大 Loom 能力：加载过程不执行动态命令替换，`allowed-tools` 不产生授权，脚本只可由模型通过普通 Tool Call 执行；历史 `~/.loom-agent/skills` 不再支持。
+_Avoid_: Full Claude Compatibility、Legacy Skill Path、Dynamic Instruction Source、Permission Rule Source
+
+**Skill Package**:
+Skill Source 下以目录组织的可移植行为包，必须包含符合 Agent Skills 开放格式的 `SKILL.md`，并可包含 `references/`、`assets/`、`scripts/` 等配套资源。首版严格要求合法且与目录身份一致的 `name` 和非空 `description`，支持标准 `license`、`compatibility`、`metadata`；YAML、名称、编码、大小、路径或资源清单校验失败时整个 Package 无效，不进行部分加载。为兼容 `.claude/skills`，Loom 额外尊重 `disable-model-invocation: true` 与 `user-invocable: false` 的调用方向限制；`allowed-tools`、`disallowed-tools`、`context`、`agent`、`model`、参数替换及动态命令注入等未支持扩展只产生确定性兼容诊断，不能改变权限、执行拓扑或加载结果。Skill body 中类似命令的文本仍是静态指令，Activation 不执行它。
+_Avoid_: Partial Skill、Loose Frontmatter、Claude Runtime Extension、Loading-time Execution、Authority-bearing Metadata
+
+**Effective Skill Descriptor**:
+Skill Catalog Snapshot 对某个规范化 Skill Name 选出的唯一可激活描述符，保留名称、描述、内容摘要及准确 Skill Source。多个来源定义同名 Skill 时，Runtime 按 `user .agents > user .claude > project .agents > project .claude` 选择最高优先级版本；其余版本不进入激活候选集，但必须产生包含胜出与被遮蔽来源的确定性诊断，且目录展示、Activation trace 与审计始终保留胜出来源。项目 Skill 因此不能用同名定义覆盖用户 Skill。
+_Avoid_: Source-erased Skill、Ambiguous Skill Name、Project-over-user Shadowing、Qualified Invocation
+
 **Approval Display**:
 Runtime 在请求 Tool Approval 时向当前交互用户展示的临时、已脱敏调用视图。Shell 调用必须展示规范化命令、子命令、工作区、Execution Profile、命中规则及理由，使用户能够理解授权对象；未脱敏输入不得因此进入 trace、Session 或其他持久 Artifact。
 _Avoid_: Approval Audit、Argument Hash、Raw Persisted Input

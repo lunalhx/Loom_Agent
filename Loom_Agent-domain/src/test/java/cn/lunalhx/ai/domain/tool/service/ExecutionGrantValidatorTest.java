@@ -33,6 +33,27 @@ public class ExecutionGrantValidatorTest {
         assertDenied(input(workspace.resolve("not-granted.txt"), "read"), granted);
     }
 
+    @Test
+    public void userSkillScriptPathsRemainOutsideWorkspaceAndNeedExecutionGrants() throws Exception {
+        Path workspace = Files.createTempDirectory("grant-skill-ws").toRealPath();
+        Path home = Files.createTempDirectory("grant-skill-home").toRealPath();
+        Path script = Files.writeString(
+                Files.createDirectories(home.resolve(".agents/skills/pack/scripts")).resolve("task.sh"),
+                "#!/bin/sh\necho ok\n").toRealPath();
+        ExecutionProfile ordinaryBuild = ExecutionProfile.forRun(CollaborationMode.BUILD, false)
+                .withWorkspace(workspace);
+
+        assertDenied(input(script, "read"), ordinaryBuild);
+
+        ExecutionProfile withGrant = new ExecutionProfile(ordinaryBuild.kind(), ordinaryBuild.workspace(),
+                ordinaryBuild.workspaceAccess(), ordinaryBuild.homeRoot(), ordinaryBuild.temporaryRoot(),
+                ordinaryBuild.networkAllowed(), ordinaryBuild.hostPrivateVisible(),
+                List.of(new ExecutionGrant(script.getParent(), FilesystemAccess.READ, GrantLifetime.SESSION)),
+                ordinaryBuild.sandboxBackend());
+        validator.validate(validator.requests("run_shell", input(script, "read"), withGrant),
+                withGrant.externalGrants());
+    }
+
     private com.fasterxml.jackson.databind.JsonNode input(Path path, String access) {
         return mapper.createObjectNode().set("external_access", mapper.createArrayNode()
                 .add(mapper.createObjectNode().put("path", path.toString()).put("access", access)));
