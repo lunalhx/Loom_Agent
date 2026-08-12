@@ -89,12 +89,12 @@ public class ToolExecutor {
         Path root = call.getWorkspaceRoot();
         boolean inspectWorkspace = requiresWorkspaceInspection(effectProfile);
         Map<String, String> before = inspectWorkspace
-                ? WorkspaceFingerprint.snapshot(root) : Map.of();
+                ? RepositoryStateTracker.snapshot(root) : Map.of();
         Map<String, String> after = before;
         try {
             ToolResult result = registry.call(call);
-            after = inspectWorkspace ? WorkspaceFingerprint.snapshot(root) : before;
-            WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
+            after = inspectWorkspace ? RepositoryStateTracker.snapshot(root) : before;
+            RepositoryStateTracker.DiffResult diff = RepositoryStateTracker.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
 
             capturePlanEvidence(context, result);
@@ -118,8 +118,8 @@ public class ToolExecutor {
             context.setToolResult(result);
             return result;
         } catch (Exception e) {
-            after = inspectWorkspace ? WorkspaceFingerprint.snapshot(root) : before;
-            WorkspaceFingerprint.DiffResult diff = WorkspaceFingerprint.diff(before, after);
+            after = inspectWorkspace ? RepositoryStateTracker.snapshot(root) : before;
+            RepositoryStateTracker.DiffResult diff = RepositoryStateTracker.diff(before, after);
             boolean workspaceChanged = !diff.affectedPaths().isEmpty();
             String securityEvent = e.getMessage() != null && e.getMessage().contains("path escapes workspace")
                     ? "path_escape" : "";
@@ -281,7 +281,7 @@ public class ToolExecutor {
 
     private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,
                                EffectProfile effectProfile,
-                               WorkspaceFingerprint.DiffResult diff,
+                               RepositoryStateTracker.DiffResult diff,
                                boolean workspaceChanged, Path root) {
         result.setToolStatus(toolStatus);
         result.setToolErrorCode(toolErrorCode);
@@ -290,7 +290,7 @@ public class ToolExecutor {
         result.setWorkspaceChanged(workspaceChanged);
         result.setDiffSummary(diff.diffSummary());
         if (root != null) {
-            result.setWorkspaceFingerprint(WorkspaceFingerprint.stableFingerprint(root));
+            result.setWorkspaceFingerprint(RepositoryStateTracker.stableFingerprint(root));
         }
     }
 
