@@ -2,6 +2,7 @@ package cn.lunalhx.ai.infrastructure.loom;
 
 import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind;
 import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 
 import java.io.IOException;
@@ -55,6 +56,16 @@ public final class ShellRunner {
             if (value != null) {
                 env.put(key, value);
             }
+        }
+        if (profile != null && profile.kind() != ExecutionProfileKind.DANGER_FULL_ACCESS) {
+            if (profile.homeRoot() == null || profile.temporaryRoot() == null) {
+                return new ShellResult("", "error: sandbox disposable roots are unavailable", new ShellExecutionResult(-1,
+                        ShellExecutionResult.TerminationReason.LAUNCH_FAILED, false, false, false));
+            }
+            env.put("HOME", profile.homeRoot().toString());
+            env.put("TMPDIR", profile.temporaryRoot().toString());
+            env.put("TMP", profile.temporaryRoot().toString());
+            env.put("TEMP", profile.temporaryRoot().toString());
         }
 
         List<String> shell = List.of("/bin/sh", "-c", command);

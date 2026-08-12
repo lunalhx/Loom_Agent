@@ -3,6 +3,9 @@ package cn.lunalhx.ai.domain.tool.service;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
+import cn.lunalhx.ai.domain.tool.model.FilesystemAccess;
+import cn.lunalhx.ai.domain.tool.model.GrantLifetime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -20,6 +23,8 @@ import java.util.Set;
 /** Atomically validates the on-disk project policy before a root run starts. */
 public final class RunAuthorizationSource {
     private static final Set<String> RULE_FIELDS = Set.of("id", "tool", "action", "match");
+    private static final Set<String> PROJECT_FIELDS = Set.of("version", "rules");
+    private static final Set<String> USER_FIELDS = Set.of("version", "rules", "maven_repository");
     private final ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
     private final WorkspacePermissionGrantStore workspaceGrants;
 
@@ -55,6 +60,38 @@ public final class RunAuthorizationSource {
         return workspaceGrants.loadExecution(workspace);
     }
 
+    /**
+     * A user-local policy may expose one existing Maven artifact repository as
+     * read-only input for Plan shells.  It is deliberately not an execution
+     * request: Plan cannot ask for arbitrary host paths at tool-call time.
+     */
+    public List<ExecutionGrant> loadMavenRepositoryGrants(Path workspace) {
+        Path source = workspaceGrants.policyFile(workspace);
+        if (!Files.exists(source)) return List.of();
+        try {
+            if (Files.isSymbolicLink(source)) {
+                throw new IllegalArgumentException("user permission source must not be a symlink");
+            }
+            JsonNode root = yaml.readTree(Files.readAllBytes(source));
+            if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
+                throw new IllegalArgumentException(source + " requires version: 1");
+            }
+            rejectUnknown(root, USER_FIELDS, source);
+            if (!root.has("maven_repository")) return List.of();
+            JsonNode value = root.path("maven_repository");
+            if (!value.isTextual() || value.asText().isBlank()) {
+                throw new IllegalArgumentException(source + " maven_repository must be a non-empty path");
+            }
+            Path repository = Path.of(value.asText()).toRealPath();
+            if (!Files.isDirectory(repository)) {
+                throw new IllegalArgumentException(source + " maven_repository must resolve to a directory");
+            }
+            return List.of(new ExecutionGrant(repository, FilesystemAccess.READ, GrantLifetime.WORKSPACE));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid permission source: " + e.getMessage(), e);
+        }
+    }
+
     private void loadRules(Path source, String sourceId, boolean allowsAllow,
                            List<PermissionRule> rules, List<String> digests, Set<String> ids) throws Exception {
         if (!Files.exists(source)) return;
@@ -64,7 +101,7 @@ public final class RunAuthorizationSource {
         if (root == null || !root.isObject() || root.path("version").asInt(-1) != 1) {
             throw new IllegalArgumentException(source + " requires version: 1");
         }
-        rejectUnknown(root, Set.of("version", "rules"), source);
+        rejectUnknown(root, allowsAllow ? USER_FIELDS : PROJECT_FIELDS, source);
         JsonNode rulesNode = root.path("rules");
         if (!rulesNode.isArray()) throw new IllegalArgumentException(source + " requires rules array");
         for (JsonNode rule : rulesNode) {

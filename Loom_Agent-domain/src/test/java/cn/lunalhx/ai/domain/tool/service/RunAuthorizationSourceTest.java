@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.tool.service;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionSubject;
+import cn.lunalhx.ai.domain.tool.model.FilesystemAccess;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
@@ -50,5 +51,25 @@ public class RunAuthorizationSourceTest {
         } catch (IllegalArgumentException expected) {
             assertEquals(true, expected.getMessage().contains("project rules may only ASK or DENY"));
         }
+    }
+
+    @Test
+    public void userLocalMavenRepositoryIsAnExplicitReadOnlyPlanCapability() throws Exception {
+        Path home = Files.createTempDirectory("loom-policy-home");
+        Path workspace = Files.createTempDirectory("loom-policy-workspace").toRealPath();
+        Path repository = Files.createTempDirectory("loom-maven-repository").toRealPath();
+        WorkspacePermissionGrantStore store = new WorkspacePermissionGrantStore(home, new ObjectMapper());
+        Files.createDirectories(store.workspaceDirectory(workspace));
+        Files.writeString(store.policyFile(workspace), """
+                version: 1
+                rules: []
+                maven_repository: '%s'
+                """.formatted(repository));
+
+        var grants = new RunAuthorizationSource(store).loadMavenRepositoryGrants(workspace);
+
+        assertEquals(1, grants.size());
+        assertEquals(repository, grants.getFirst().canonicalPath());
+        assertEquals(FilesystemAccess.READ, grants.getFirst().access());
     }
 }

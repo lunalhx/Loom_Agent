@@ -77,8 +77,10 @@ public final class ToolAuthorizationService {
         } catch (IllegalArgumentException denied) {
             return reject(call, "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
         }
-        ExecutionProfile effectiveProfile = profile.withExternalGrants(executionRequests.stream()
+        List<ExecutionGrant> effectiveGrants = new ArrayList<>(profile.externalGrants());
+        effectiveGrants.addAll(executionRequests.stream()
                 .map(request -> new ExecutionGrant(request.canonicalPath(), request.access(), GrantLifetime.ONCE)).toList());
+        ExecutionProfile effectiveProfile = profile.withExternalGrants(effectiveGrants);
         call.setExecutionProfile(effectiveProfile);
         CallEffectAssessment effect = registry.assessEffect(name, call, effectiveProfile);
         if (!effect.trusted() || !profile.allows(effect.profile())) {

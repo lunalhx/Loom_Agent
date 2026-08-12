@@ -10,8 +10,8 @@ Complete the remaining Shell Permissions plan in the agreed order while preservi
 2. **Complete — Sandbox backends**: Seatbelt and Bubblewrap are selected by platform and self-test; ordinary execution remains fail-closed when neither is usable. Bubblewrap uses an empty root with only runtime/workspace/grant mounts and network/PID/IPC namespaces.
 3. **Complete — Root-run security scope**: shared transient scope provides disposable HOME/TMP, fair one-Shell permit, registered process cancellation, delegate inheritance, Reactor cancellation propagation, and root terminal cleanup.
 4. **Complete — Repository state tracking**: RepositoryStateTracker replaces best-effort fingerprints, records symlink entries without traversal, excludes only runtime artifacts, and adds Git logical HEAD/index/refs state to diffs used for partial-success reporting.
-5. **In progress — Plan/Delegate shell**: profile intersection, Maven cache grants, conditional catalog exposure.
-6. **Pending — Shell evidence**: semantic observation, repository fallback receipts, verifier registry.
+5. **Complete — Plan/Delegate shell**: profile intersection, explicitly configured read-only Maven cache for Plan, disposable HOME/TMP, and conditional catalog exposure.
+6. **In progress — Shell evidence**: semantic observation, repository fallback receipts, verifier registry.
 7. **Pending — Normalizer/classifier**: conservative POSIX coverage, safety floors, sensitive-resource rules.
 8. **Pending — Full Access controls**: complete REPL sandbox selection and host-credential per-call-only behavior.
 9. **Pending — Schema cutover and cleanup**: context/checkpoint snapshots, obsolete code removal, final contract suites and review.

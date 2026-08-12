@@ -35,6 +35,7 @@ final class BubblewrapSandboxBackend {
         }
         bind(argv, profile.workspace(), profile.workspace(), profile.workspaceAccess());
         if (profile.temporaryRoot() != null) bind(argv, profile.temporaryRoot(), profile.temporaryRoot(), FilesystemAccess.WRITE);
+        if (profile.homeRoot() != null) bind(argv, profile.homeRoot(), profile.homeRoot(), FilesystemAccess.WRITE);
         for (ExecutionGrant grant : profile.externalGrants()) bind(argv, grant.canonicalPath(), grant.canonicalPath(), grant.access());
         argv.addAll(List.of("--chdir", profile.workspace().toString()));
         argv.addAll(target);

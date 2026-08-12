@@ -265,6 +265,11 @@ public final class AgentContextFactory {
         context.setPermissionPolicySnapshot(authorizationSource.load(workspace, defaultAction));
         context.setPermissionGrants(authorizationSource.loadWorkspaceGrants(workspace));
         context.setExecutionGrants(authorizationSource.loadWorkspaceExecutionGrants(workspace));
+        if (context.getExecutionProfile().kind()
+                == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.PLAN_SANDBOX) {
+            context.setExecutionProfile(context.getExecutionProfile().withExternalGrants(
+                    authorizationSource.loadMavenRepositoryGrants(workspace)));
+        }
     }
 
 
