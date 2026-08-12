@@ -165,6 +165,7 @@ public class ToolRegistry {
         ToolSpec spec = tool.spec();
         ExecutionProfile planProfile = ExecutionProfile.forRun(CollaborationMode.PLAN, false);
         if ("run_shell".equals(spec.getName())) return tool.isPlanCatalogVisible(planProfile);
+        if ("read_skill_resource".equals(spec.getName())) return true;
         ToolCall probe = ToolCall.builder()
                 .name(spec.getName())
                 .input(JsonNodeFactory.instance.objectNode())

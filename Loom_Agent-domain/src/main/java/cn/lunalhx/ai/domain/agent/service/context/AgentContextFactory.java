@@ -127,14 +127,13 @@ public final class AgentContextFactory {
         context.setModelAttempts(0);
         context.setParseErrors(0);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
-        context.setToolSpecs(toolRegistry.effectiveSpecs(
-                context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
+        freezeEffectiveToolCatalog(context);
         applyInheritedSkills(context, question);
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
@@ -193,10 +192,8 @@ public final class AgentContextFactory {
                 context.getSkillCatalogSnapshot(), workspace.getRoot(), userHome));
         context.setActiveSkills(binder.rebindActive(
                 context.getActiveSkills(), workspace.getRoot(), userHome));
-        context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools() != null
-                ? question.getAllowedTools() : context.getAllowedTools()));
         context.setToolSpecs(toolRegistry.effectiveSpecs(
-                context.getCollaborationMode(), context.getAllowedTools()));
+                context.getCollaborationMode(), context.getAllowedTools(), context.getExecutionProfile()));
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
@@ -218,6 +215,7 @@ public final class AgentContextFactory {
         context.setPermissionPolicySnapshot(frozen.toPolicy());
         context.setPermissionGrants(frozen.permissionGrants());
         context.setExecutionGrants(frozen.executionGrants());
+        context.setAllowedTools(frozen.allowedTools());
         context.setExecutionProfile(frozen.toExecutionProfile(
                 workspace, scope.homeRoot(), scope.temporaryRoot()));
     }
@@ -253,14 +251,13 @@ public final class AgentContextFactory {
         context.setModelAttempts(0);
         context.setParseErrors(0);
         context.setAllowedTools(normalizeAllowedTools(question.getAllowedTools()));
-        context.setToolSpecs(toolRegistry.effectiveSpecs(
-                context.getCollaborationMode(), context.getAllowedTools()));
         context.setApprovalPolicy(resolveApprovalPolicy(question, runProperties));
         context.setPermissionPolicySnapshot(question.getInheritedPermissionPolicySnapshot());
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
         context.setSecurityScope(question.getInheritedSecurityScope() == null
                 ? RootRunSecurityScope.create() : question.getInheritedSecurityScope());
         freezeAuthorization(context, question.isFullAccess());
+        freezeEffectiveToolCatalog(context);
         applyInheritedSkills(context, question);
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
         if (StringUtils.isNotBlank(question.getModel())) {
@@ -291,6 +288,18 @@ public final class AgentContextFactory {
             }
         }
         return List.copyOf(normalized);
+    }
+
+    /** Freeze the exact catalog available at Run creation so restore cannot
+     * acquire a Tool that the original Run did not have. */
+    private void freezeEffectiveToolCatalog(AgentContext context) {
+        List<cn.lunalhx.ai.domain.tool.model.ToolSpec> effective = toolRegistry.effectiveSpecs(
+                context.getCollaborationMode(), context.getAllowedTools(), context.getExecutionProfile());
+        context.setAllowedTools(effective.stream()
+                .map(cn.lunalhx.ai.domain.tool.model.ToolSpec::getName)
+                .distinct()
+                .toList());
+        context.setToolSpecs(effective);
     }
 
     private String resolveApprovalPolicy(AgentQuestion question, AgentRuntimeProperties runProperties) {

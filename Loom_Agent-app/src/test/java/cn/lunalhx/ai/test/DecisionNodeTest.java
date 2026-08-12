@@ -381,7 +381,8 @@ public class DecisionNodeTest {
                         "review-pr", "Review pull requests.", "project .agents/skills/review-pr",
                         true, true, digest, null, null, null, List.of(), pkg);
         AgentTool t = tool("msg_tool", "{\"type\":\"object\",\"additionalProperties\":true}");
-        DecisionNode node = new DecisionNode(mapper, buildProps(), null, null);
+        DecisionNode node = new DecisionNode(mapper, buildProps(), null,
+                new ToolRegistry(List.of(t), new ToolSchemaValidator(mapper)));
 
         AgentContext ctx = context(
                 "<skill_activation>{\"name\":\"review-pr\"}</skill_activation>",
@@ -399,6 +400,45 @@ public class DecisionNodeTest {
         assertEquals(0, ctx.getToolSteps());
         assertEquals(1, ctx.getActiveSkills().size());
         assertTrue(ctx.getActiveSkills().getFirst().instructionBody().contains("Check tests first."));
+    }
+
+    @Test
+    public void implicitActivationRejectsContextOverflowWithoutCommittingActiveState() throws Exception {
+        Path root = Files.createTempDirectory("decision-skill-admission");
+        Path pkg = root.resolve("review-pr");
+        Files.createDirectories(pkg);
+        String skillMd = """
+                ---
+                name: review-pr
+                description: Review pull requests.
+                ---
+                Check tests first.
+                """;
+        Files.writeString(pkg.resolve("SKILL.md"), skillMd, java.nio.charset.StandardCharsets.UTF_8);
+        byte[] bytes = skillMd.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String digest = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        AgentRuntimeProperties properties = buildProps();
+        properties.getContext().setTotalBudgetChars(200);
+        properties.getContext().setWorkspaceFloorChars(1);
+        properties.getContext().setMemoryFloorChars(1);
+        properties.getContext().setRelevantMemoryFloorChars(1);
+        properties.getContext().setHistoryFloorChars(1);
+        DecisionNode node = new DecisionNode(mapper, properties, null,
+                new ToolRegistry(List.of(), new ToolSchemaValidator(mapper)));
+        AgentContext ctx = context("<skill_activation>{\"name\":\"review-pr\"}</skill_activation>", List.of());
+        ctx.setSkillCatalogSnapshot(new cn.lunalhx.ai.domain.skill.model.SkillCatalog(List.of(
+                new cn.lunalhx.ai.domain.skill.model.SkillCatalogEntry(
+                        "review-pr", "Review pull requests.", "project .agents/skills/review-pr",
+                        true, true, digest, null, null, null, List.of(), pkg)),
+                List.of(), List.of(), List.of()));
+
+        NodeResult result = node.apply(ctx);
+
+        assertEquals(AgentLoopPhase.NEXT_ROUND, result.getPhase());
+        assertTrue(ctx.getActiveSkills().isEmpty());
+        assertNotNull(ctx.getToolResult());
+        assertTrue(ctx.getToolResult().getMessage().contains("context budget"));
     }
 
     @Test

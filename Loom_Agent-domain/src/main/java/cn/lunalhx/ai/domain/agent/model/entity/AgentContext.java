@@ -8,6 +8,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentPromptState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.state.PlanEvidenceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunConfig;
@@ -56,6 +57,7 @@ public class AgentContext {
     private AgentRecoveryState recovery;
     private AgentTraceState trace;
     private PlanEvidenceState evidence;
+    private AgentSkillState skills;
 
     public AgentContext() {
         this.identity = new AgentIdentity(null, null, null, null, null, 0);
@@ -69,6 +71,7 @@ public class AgentContext {
         this.recovery = new AgentRecoveryState();
         this.trace = new AgentTraceState();
         this.evidence = new PlanEvidenceState();
+        this.skills = new AgentSkillState();
     }
 
     // ==================== component accessors ====================
@@ -83,6 +86,7 @@ public class AgentContext {
     public AgentRecoveryState recovery() { return recovery; }
     public AgentTraceState trace() { return trace; }
     public PlanEvidenceState evidence() { return evidence; }
+    public AgentSkillState skills() { return skills; }
 
     // ==================== identity delegates ====================
 
@@ -220,16 +224,16 @@ public class AgentContext {
         prompt.setWorkingMemory(v);
     }
     public cn.lunalhx.ai.domain.skill.model.SkillCatalog getSkillCatalogSnapshot() {
-        return prompt.skillCatalogSnapshot();
+        return skills.catalogSnapshot();
     }
     public void setSkillCatalogSnapshot(cn.lunalhx.ai.domain.skill.model.SkillCatalog v) {
-        prompt.setSkillCatalogSnapshot(v);
+        skills.setCatalogSnapshot(v);
     }
     public List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> getActiveSkills() {
-        return prompt.activeSkills();
+        return skills.activeSkills();
     }
     public void setActiveSkills(List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> v) {
-        prompt.setActiveSkills(v);
+        skills.setActiveSkills(v);
     }
     public cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory workingMemoryOrCreate() {
         if (prompt.workingMemory() == null) {

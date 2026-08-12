@@ -53,6 +53,7 @@ public class SkillDurableContinuationContractTest {
         original.setResolvedWorkspace(workspace);
         original.setWorkspace(WorkspaceRef.local(workspace, workspace.getFileName().toString()));
         original.setApprovalPolicy("ask");
+        original.setAllowedTools(List.of("read_file"));
         original.setSecurityScope(RootRunSecurityScope.create());
         original.setExecutionProfile(ExecutionProfile.forRun(CollaborationMode.BUILD, false)
                 .withWorkspace(workspace));
@@ -89,6 +90,7 @@ public class SkillDurableContinuationContractTest {
         restored.setPermissionGrants(frozen.permissionGrants());
         restored.setExecutionGrants(frozen.executionGrants());
         restored.setApprovalPolicy(frozen.approvalPolicy());
+        restored.setAllowedTools(frozen.allowedTools());
         restored.setExecutionProfile(frozen.toExecutionProfile(
                 workspace, newScope.homeRoot(), newScope.temporaryRoot()));
         SkillPackageRootBinder binder = new SkillPackageRootBinder();
@@ -102,6 +104,7 @@ public class SkillDurableContinuationContractTest {
                 restored.getPermissionPolicySnapshot().compiledRules().getFirst().action());
         assertEquals(ExecutionProfileKind.BUILD_SANDBOX, restored.getExecutionProfile().kind());
         assertEquals(FilesystemAccess.WRITE, restored.getExecutionProfile().workspaceAccess());
+        assertEquals(List.of("read_file"), restored.getAllowedTools());
         assertNotEquals(original.getSecurityScope().homeRoot(), restored.getSecurityScope().homeRoot());
         assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("DRIFTED_BODY"));
         assertNotNull(restored.getActiveSkills().getFirst().packageRoot());
@@ -131,7 +134,7 @@ public class SkillDurableContinuationContractTest {
         PermissionPolicySnapshot policy = new PermissionPolicySnapshot(
                 PermissionAction.ASK, List.of(), List.of("src"));
         FrozenAuthorizationSnapshot frozen = FrozenAuthorizationSnapshot.capture(
-                policy, bound, List.of(grant), List.of(), "ask");
+                policy, bound, List.of(grant), List.of(), "ask", List.of("write_file"));
 
         ExecutionProfile restored = frozen.toExecutionProfile(
                 workspace, Path.of("/tmp/new-home"), Path.of("/tmp/new-tmp"));

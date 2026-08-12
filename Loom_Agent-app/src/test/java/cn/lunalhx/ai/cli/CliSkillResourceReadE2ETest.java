@@ -2,6 +2,7 @@ package cn.lunalhx.ai.cli;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
@@ -77,6 +78,31 @@ public class CliSkillResourceReadE2ETest {
         try {
             assertEquals("done", service.runTurn("$plain finish"));
             assertFalse(prompts.get(0).getSystemPrompt().contains("read_skill_resource"));
+        } finally {
+            restoreHome(previousHome);
+            service.close();
+        }
+    }
+
+    @Test
+    public void planModeAllowsAnActiveSkillToReadItsIndexedProjectResource() throws Exception {
+        Path home = Files.createTempDirectory("cli-plan-skill-resource-home");
+        Path workspace = Files.createTempDirectory("cli-plan-skill-resource-workspace").toRealPath();
+        Path skillDir = workspace.resolve(".agents/skills/doc-skill");
+        writeSkillWithResource(skillDir, "doc-skill", "Docs.", "Use references.", "Detailed guide.");
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        CopyOnWriteArrayList<ChatPrompt> prompts = new CopyOnWriteArrayList<>();
+        AtomicInteger modelCalls = new AtomicInteger();
+        ModelGateway gateway = readThenFinalGateway(prompts, modelCalls);
+        CliSessionService service = service(options(workspace, gateway), gateway);
+        try {
+            service.setCollaborationMode(CollaborationMode.PLAN);
+
+            assertEquals("done", service.runTurn("$doc-skill read the guide"));
+            assertEquals(2, modelCalls.get());
+            assertTrue(prompts.get(0).getSystemPrompt().contains("read_skill_resource"));
+            assertTrue(modelVisible(prompts.get(1)).contains("[tool:read_skill_resource]"));
         } finally {
             restoreHome(previousHome);
             service.close();

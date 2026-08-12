@@ -11,6 +11,8 @@ import cn.lunalhx.ai.domain.tool.model.FilesystemAccess;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -77,6 +79,7 @@ public class AgentContextSnapshotV14ContractTest {
         context.setExecutionProfile(ExecutionProfile.forRun(CollaborationMode.BUILD, false)
                 .withWorkspace(Path.of("/tmp/ws").toAbsolutePath()));
         context.setApprovalPolicy("ask");
+        context.setAllowedTools(List.of("read_file"));
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         assertEquals(14, (int) snapshot.getSchemaVersion());
@@ -108,6 +111,7 @@ public class AgentContextSnapshotV14ContractTest {
         assertEquals(1, restored.getFrozenAuthorization().compiledRules().size());
         assertEquals(ExecutionProfileKind.BUILD_SANDBOX, restored.getFrozenAuthorization().profileKind());
         assertEquals(FilesystemAccess.WRITE, restored.getFrozenAuthorization().workspaceAccess());
+        assertEquals(List.of("read_file"), restored.getFrozenAuthorization().allowedTools());
     }
 
     @Test
@@ -130,6 +134,26 @@ public class AgentContextSnapshotV14ContractTest {
         } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("incompatible schema"));
         }
+    }
+
+    @Test
+    public void unrestrictedRunFreezesItsResolvedToolCatalog() {
+        AgentContext context = new AgentContext();
+        context.setRunId("run-1");
+        context.setQuestion("task");
+        context.setCollaborationMode(CollaborationMode.BUILD);
+        context.setPermissionPolicySnapshot(new PermissionPolicySnapshot(
+                PermissionAction.ASK, List.of(), List.of()));
+        context.setExecutionProfile(ExecutionProfile.forRun(CollaborationMode.BUILD, false));
+        context.setToolSpecs(List.of(
+                ToolSpec.builder().name("write_file").capabilityEnvelope(ToolCapabilityEnvelope.repositoryMutation()).build(),
+                ToolSpec.builder().name("read_file").capabilityEnvelope(ToolCapabilityEnvelope.repositoryRead()).build()));
+        context.setSkillCatalogSnapshot(new SkillCatalog(List.of(), List.of(), List.of(), List.of()));
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
+
+        assertEquals(List.of("read_file", "write_file"),
+                snapshot.getFrozenAuthorization().allowedTools());
     }
 
     @Test

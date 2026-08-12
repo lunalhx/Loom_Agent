@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.skill.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
@@ -17,6 +18,12 @@ public final class SkillRunBootstrap {
     private final SkillDiscoveryService discovery = new SkillDiscoveryService();
     private final SkillSelectorParser selectorParser = new SkillSelectorParser();
     private final SkillActivationService activation = new SkillActivationService();
+    private final SkillContextAdmissionService contextAdmission;
+
+    public SkillRunBootstrap(AgentRuntimeProperties properties,
+                             cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry toolRegistry) {
+        this.contextAdmission = new SkillContextAdmissionService(properties, toolRegistry);
+    }
 
     /** Prepare Skill state for a Run. Root Runs discover and activate; Delegates keep inheritance. */
     public void prepareRun(AgentContext context, Path userHome) {
@@ -47,6 +54,7 @@ public final class SkillRunBootstrap {
                     "task is empty after removing skill selectors");
         }
         List<ActiveSkillSnapshot> active = activation.activateExplicit(catalog, parsed.names());
+        contextAdmission.assertAdmitted(context, active);
         context.setActiveSkills(active);
         context.setQuestion(parsed.taskWithoutSelectors());
         if (context.getPendingContinuation() != null) {

@@ -42,12 +42,13 @@ public class SkillRunBootstrapResourceTest {
         context.setResolvedWorkspace(workspace);
         context.setCollaborationMode(CollaborationMode.BUILD);
 
-        new SkillRunBootstrap().prepareRun(context, home);
+        ToolRegistry registry = new ToolRegistry(List.of(readSkillResourceStub()),
+                new ToolSchemaValidator(new com.fasterxml.jackson.databind.ObjectMapper()));
+        new SkillRunBootstrap(new cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties(), registry)
+                .prepareRun(context, home);
 
         ActiveSkillSnapshot active = context.getActiveSkills().get(0);
         assertFalse(active.resources().isEmpty());
-        ToolRegistry registry = new ToolRegistry(List.of(readSkillResourceStub()),
-                new ToolSchemaValidator(new com.fasterxml.jackson.databind.ObjectMapper()));
         List<ToolSpec> specs = SkillToolCatalogProjector.project(context, registry);
         assertTrue(specs.stream().anyMatch(spec ->
                 SkillToolCatalogProjector.READ_SKILL_RESOURCE.equals(spec.getName())));

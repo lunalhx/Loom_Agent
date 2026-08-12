@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.service.context.ContextBuildResult;
 import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
+import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import org.junit.Test;
 
@@ -261,6 +262,26 @@ public class ContextManagerV2Test {
         assertTrue(last.getContent().endsWith("任务".repeat(600)));
     }
 
+    @Test
+    public void activeSkillBodyIsNeverTrimmedWhenItCannotFitTheContextBudget() {
+        AgentRuntimeProperties props = new AgentRuntimeProperties();
+        props.getContext().setTotalBudgetChars(1000);
+        props.getContext().setPrefixBudgetChars(100);
+        props.getContext().setPrefixFloorChars(20);
+        ContextManager mgr = new ContextManager(props);
+        AgentContext ctx = context();
+        String body = "SKILL_BODY_MUST_REMAIN_WHOLE".repeat(80);
+        ctx.setStablePrefix(new StablePrefix("Runtime rules\n" + body, "fp-active", "ws", "tools", "runtime", 1L));
+        ctx.setActiveSkills(List.of(new ActiveSkillSnapshot(
+                "large-skill", "project .agents/skills/large-skill", body, "digest", null, List.of())));
+        history(ctx).appendWithEventKey("user", "task", ConversationEntryType.USER_TASK, "run:init:user_task");
+
+        ContextBuildResult result = mgr.build(ctx);
+
+        assertTrue(result.blocked());
+        assertTrue(result.systemPrefix().contains(body));
+    }
+
     // ---- prefix signatures: tool change invalidates, git-status churn does not ----
 
     @Test
@@ -270,10 +291,10 @@ public class ContextManagerV2Test {
                 .description("Read").inputSchema("{}").build());
         StablePrefix a = builder.build(false, true, null, specs,
                 "Workspace:\n- status: M A.java", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         StablePrefix b = builder.build(false, true, null, specs,
                 "Workspace:\n- status: M B.java", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         assertTrue(a.matches(b));
     }
 
@@ -285,9 +306,9 @@ public class ContextManagerV2Test {
         List<ToolSpec> specB = List.of(ToolSpec.builder().name("write_file")
                 .description("Write").inputSchema("{}").build());
         StablePrefix a = builder.build(false, true, null, specA, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         StablePrefix b = builder.build(false, true, null, specB, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         assertFalse(a.matches(b));
         assertNotEquals(a.toolSignature(), b.toolSignature());
     }
@@ -298,9 +319,9 @@ public class ContextManagerV2Test {
         List<ToolSpec> specs = List.of(ToolSpec.builder().name("read_file")
                 .description("Read").inputSchema("{}").build());
         StablePrefix main = builder.build(false, true, null, specs, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         StablePrefix delegate = builder.build(true, false, null, specs, "", "ws-fp",
-                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null);
+                cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode.BUILD, null, null, List.of());
         assertFalse(main.matches(delegate));
         assertNotEquals(main.runtimeSignature(), delegate.runtimeSignature());
     }

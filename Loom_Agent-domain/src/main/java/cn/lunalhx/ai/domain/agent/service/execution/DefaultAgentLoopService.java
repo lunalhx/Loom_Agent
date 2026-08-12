@@ -56,7 +56,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
-    private final SkillRunBootstrap skillRunBootstrap = new SkillRunBootstrap();
+    private final SkillRunBootstrap skillRunBootstrap;
     private final ToolRegistry toolRegistry;
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
@@ -70,6 +70,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.executor = executor;
         this.executionGuard = executionGuard;
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
+        this.skillRunBootstrap = new SkillRunBootstrap(properties, toolRegistry);
     }
 
     // ==================== 公共入口 ====================
@@ -289,6 +290,13 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
                 if (AgentNodeNames.TOOL_OUTPUT.equals(currentNode)) {
                     emit(sink, lifecycle.checkpointAfterTool(context));
+                }
+
+                if (AgentNodeNames.DECISION.equals(currentNode)
+                        && context.getDecision() != null
+                        && "skill_activation".equals(context.getDecision().getType())
+                        && context.getToolResult() == null) {
+                    emit(sink, lifecycle.checkpointAfterSkillActivation(context));
                 }
 
                 NodeResult result = execution.result();

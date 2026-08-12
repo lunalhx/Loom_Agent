@@ -19,6 +19,13 @@ public final class SkillToolCatalogProjector {
     }
 
     public static List<ToolSpec> project(AgentContext context, ToolRegistry registry) {
+        return project(context, registry, context.getActiveSkills());
+    }
+
+    /** Project a candidate active set without mutating durable Run state. */
+    public static List<ToolSpec> project(AgentContext context,
+                                          ToolRegistry registry,
+                                          List<ActiveSkillSnapshot> activeSkills) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(registry, "registry");
         CollaborationMode mode = context.getCollaborationMode() == null
@@ -27,7 +34,7 @@ public final class SkillToolCatalogProjector {
                 ? ExecutionProfile.forRun(mode, context.getParentRunId() != null)
                 : context.getExecutionProfile();
         List<ToolSpec> specs = registry.effectiveSpecs(mode, context.getAllowedTools(), profile);
-        if (!hasIndexedResources(context.getActiveSkills())) {
+        if (!hasIndexedResources(activeSkills)) {
             return specs.stream()
                     .filter(spec -> !READ_SKILL_RESOURCE.equals(spec.getName()))
                     .toList();

@@ -1,6 +1,8 @@
 package cn.lunalhx.ai.domain.skill.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.DelegateRequest;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
@@ -42,7 +44,7 @@ public class SkillInheritanceContractTest {
         root.setQuestion("$parent-method do work");
         root.setResolvedWorkspace(workspace);
         root.setCollaborationMode(CollaborationMode.BUILD);
-        new SkillRunBootstrap().prepareRun(root, home);
+        bootstrap().prepareRun(root, home);
         SkillCatalog frozen = root.getSkillCatalogSnapshot();
         List<ActiveSkillSnapshot> active = root.getActiveSkills();
         assertEquals(1, active.size());
@@ -73,7 +75,7 @@ public class SkillInheritanceContractTest {
         child.setSkillCatalogSnapshot(frozen);
         child.setActiveSkills(active);
 
-        new SkillRunBootstrap().prepareRun(child, home);
+        bootstrap().prepareRun(child, home);
 
         assertSame(frozen, child.getSkillCatalogSnapshot());
         assertEquals(1, child.getActiveSkills().size());
@@ -83,5 +85,30 @@ public class SkillInheritanceContractTest {
         assertFalse(child.getSkillCatalogSnapshot().effective().stream()
                 .map(SkillCatalogEntry::name).anyMatch("ghost-skill"::equals));
         assertFalse(child.getActiveSkills().getFirst().instructionBody().contains("DRIFTED"));
+    }
+
+    @Test
+    public void delegateDoesNotReintroduceResourceReadWhenParentExplicitlyDisallowsIt() {
+        AgentContext parent = new AgentContext();
+        parent.setRunId("parent");
+        parent.setRootRunId("parent");
+        parent.setMaxSteps(4);
+        parent.setMaxAttempts(4);
+        parent.setCollaborationMode(CollaborationMode.BUILD);
+        parent.setAllowedTools(List.of("read_file"));
+        parent.setSkillCatalogSnapshot(new SkillCatalog(List.of(), List.of(), List.of(), List.of()));
+
+        DelegateRequest child = DelegateRequest.fromParent(parent,
+                new AgentRuntimeProperties(), null);
+
+        assertEquals(List.of("read_file"), child.getAllowedTools());
+        assertFalse(child.getAllowedTools().contains("read_skill_resource"));
+    }
+
+    private static SkillRunBootstrap bootstrap() {
+        return new SkillRunBootstrap(new AgentRuntimeProperties(),
+                new cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry(List.of(),
+                        new cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator(
+                                new com.fasterxml.jackson.databind.ObjectMapper())));
     }
 }

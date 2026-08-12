@@ -3,6 +3,7 @@ package cn.lunalhx.ai.domain.skill.service;
 import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
@@ -20,13 +21,14 @@ import java.util.Objects;
 /** Applies model-initiated Skill Activation without Tool steps or ToolResult. */
 public final class SkillActivationDecisionHandler {
     private final SkillActivationService activation = new SkillActivationService();
+    private final SkillContextAdmissionService contextAdmission;
     private final ConversationHistoryAppendService ledgerAppendService;
-    private final ToolRegistry toolRegistry;
 
-    public SkillActivationDecisionHandler(ConversationHistoryAppendService ledgerAppendService,
+    public SkillActivationDecisionHandler(AgentRuntimeProperties properties,
+                                            ConversationHistoryAppendService ledgerAppendService,
                                             ToolRegistry toolRegistry) {
+        this.contextAdmission = new SkillContextAdmissionService(properties, toolRegistry);
         this.ledgerAppendService = ledgerAppendService;
-        this.toolRegistry = toolRegistry;
     }
 
     public NodeResult apply(AgentContext context, AgentDecision decision) {
@@ -50,10 +52,10 @@ public final class SkillActivationDecisionHandler {
             }
             ActiveSkillSnapshot snapshot = activation.activateImplicit(catalog, skillName);
             List<ActiveSkillSnapshot> merged = activation.mergeActive(context.getActiveSkills(), snapshot);
+            List<cn.lunalhx.ai.domain.tool.model.ToolSpec> candidateTools =
+                    contextAdmission.assertAdmitted(context, merged);
             context.setActiveSkills(merged);
-            if (toolRegistry != null) {
-                context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
-            }
+            context.setToolSpecs(candidateTools);
             appendControlNote(context, snapshot, false);
             context.setToolResult(null);
             return NodeResult.nextRound(List.of());

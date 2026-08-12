@@ -83,7 +83,6 @@ public class DelegateRequest {
                 .filter(READ_ONLY_TOOLS::contains)
                 .sorted()
                 .toList();
-
         List<ActiveSkillSnapshot> inheritedActive = context.getActiveSkills() == null
                 ? List.of() : List.copyOf(context.getActiveSkills());
 

@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Checkpoint snapshot v14 — durable state needed for recovery of an unfinished Run,
@@ -170,7 +171,8 @@ public class AgentContextSnapshot {
                     context.getExecutionProfile(),
                     context.getPermissionGrants(),
                     context.environment().runExecutionGrants(),
-                    context.getApprovalPolicy());
+                    context.getApprovalPolicy(),
+                    frozenAllowedTools(context));
         }
 
         return AgentContextSnapshot.builder()
@@ -258,6 +260,26 @@ public class AgentContextSnapshot {
                 // working memory (v7)
                 .workingMemory(context.getWorkingMemory())
                 .build();
+    }
+
+    /**
+     * Freeze the effective catalog rather than retaining an unrestricted
+     * allowlist sentinel. A resumed Run must not acquire tools registered
+     * after its checkpoint.
+     */
+    private static List<String> frozenAllowedTools(AgentContext context) {
+        if (context.getAllowedTools() != null) {
+            return List.copyOf(context.getAllowedTools());
+        }
+        ArrayList<String> names = new ArrayList<>();
+        if (context.getToolSpecs() != null) {
+            context.getToolSpecs().stream()
+                    .map(spec -> spec == null ? null : spec.getName())
+                    .filter(Objects::nonNull)
+                    .filter(name -> !name.isBlank())
+                    .forEach(names::add);
+        }
+        return names.stream().distinct().sorted().toList();
     }
 
     public AgentContext restore() {

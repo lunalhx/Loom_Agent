@@ -88,7 +88,8 @@ public final class ContextManager {
         int relevantFloor = positive(cfg.getRelevantMemoryFloorChars(), 300);
         int historyFloor = positive(cfg.getHistoryFloorChars(), 1300);
 
-        String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixFloor);
+        boolean hasActiveSkills = !context.getActiveSkills().isEmpty();
+        String trimmedPrefix = hasActiveSkills ? raw.prefix : TextUtil.clipHeadTail(raw.prefix, prefixFloor);
         String trimmedWorkspace = TextUtil.clipHeadTail(raw.workspace, workspaceFloor);
         String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryFloor);
         String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantFloor);
@@ -111,7 +112,8 @@ public final class ContextManager {
 
         ContextBuildResult.ContextRenderMetadata metadata =
                 new ContextBuildResult.ContextRenderMetadata(
-                        total, positive(cfg.getTotalBudgetChars(), 12000), false,
+                        total, positive(cfg.getTotalBudgetChars(), 12000),
+                        total > positive(cfg.getTotalBudgetChars(), 12000),
                         rawChars, budget, rendered, SECTION_ORDER,
                         List.of("floor_pressure"), true,
                         raw.historyResult.merged(), raw.historyResult.summarized(),
@@ -121,7 +123,27 @@ public final class ContextManager {
 
         List<ChatMessage> messages = messages(
                 trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, raw.currentRequest);
-        return new ContextBuildResult(trimmedPrefix, messages, metadata, false, null);
+        boolean blocked = hasActiveSkills && total > positive(cfg.getTotalBudgetChars(), 12000);
+        return new ContextBuildResult(trimmedPrefix, messages, metadata, blocked,
+                blocked ? "active Skill instructions exceed context budget" : null);
+    }
+
+    /** Exact smallest render for a protected system prefix under the current
+     * Run's dynamic context. Activation uses this before committing a Skill
+     * body, so later reduction never has to clip that body. */
+    public int minimumContextChars(AgentContext context, String protectedPrefix) {
+        ContextProperties cfg = contextProperties(context);
+        Sections raw = renderSections(context, cfg);
+        return TextUtil.length(protectedPrefix)
+                + TextUtil.length(TextUtil.clipHeadTail(raw.workspace,
+                positive(cfg.getWorkspaceFloorChars(), 400)))
+                + TextUtil.length(TextUtil.clipHeadTail(raw.memory,
+                positive(cfg.getMemoryFloorChars(), 400)))
+                + TextUtil.length(TextUtil.clipHeadTail(raw.relevantMemory,
+                positive(cfg.getRelevantMemoryFloorChars(), 300)))
+                + TextUtil.length(TextUtil.clipHeadTail(raw.historyText,
+                positive(cfg.getHistoryFloorChars(), 1300)))
+                + TextUtil.length(raw.currentRequest);
     }
 
     // ================================================================
@@ -295,7 +317,8 @@ public final class ContextManager {
         // Current request is always preserved and never trimmed.
         int currentRequestChars = TextUtil.length(raw.currentRequest);
 
-        String trimmedPrefix = TextUtil.clipHeadTail(raw.prefix, prefixBudget);
+        boolean hasActiveSkills = !context.getActiveSkills().isEmpty();
+        String trimmedPrefix = hasActiveSkills ? raw.prefix : TextUtil.clipHeadTail(raw.prefix, prefixBudget);
         String trimmedWorkspace = TextUtil.clipHeadTail(raw.workspace, workspaceBudget);
         String trimmedMemory = TextUtil.clipHeadTail(raw.memory, memoryBudget);
         String trimmedRelevant = TextUtil.clipHeadTail(raw.relevantMemory, relevantBudget);
@@ -326,7 +349,7 @@ public final class ContextManager {
             reductions.add("workspace->floor");
             total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
         }
-        if (total > totalBudget && TextUtil.length(trimmedPrefix) > prefixFloor) {
+        if (!hasActiveSkills && total > totalBudget && TextUtil.length(trimmedPrefix) > prefixFloor) {
             trimmedPrefix = TextUtil.clipHeadTail(trimmedPrefix, prefixFloor);
             reductions.add("prefix->floor");
             total = totalLength(trimmedPrefix, trimmedWorkspace, trimmedMemory, trimmedRelevant, trimmedHistory, currentRequestChars);
@@ -352,7 +375,9 @@ public final class ContextManager {
                         raw.historyResult.deduped(), raw.historyResult.summaryReuse(),
                         raw.relevantSelected,
                         raw.currentRequest, true, currentRequestChars);
-        return new ContextBuildResult(trimmedPrefix, messages, metadata, false, null);
+        boolean blocked = hasActiveSkills && total > totalBudget;
+        return new ContextBuildResult(trimmedPrefix, messages, metadata, blocked,
+                blocked ? "active Skill instructions exceed context budget" : null);
     }
 
     private Map<String, Integer> sectionRawChars(Sections raw) {

@@ -22,7 +22,8 @@ public record FrozenAuthorizationSnapshot(
         List<PermissionGrant> permissionGrants,
         List<ExecutionGrant> executionGrants,
         List<ExecutionGrant> externalGrants,
-        String approvalPolicy) {
+        String approvalPolicy,
+        List<String> allowedTools) {
 
     public FrozenAuthorizationSnapshot {
         Objects.requireNonNull(defaultAction, "defaultAction");
@@ -36,6 +37,7 @@ public record FrozenAuthorizationSnapshot(
         executionGrants = executionGrants == null ? List.of() : List.copyOf(executionGrants);
         externalGrants = externalGrants == null ? List.of() : List.copyOf(externalGrants);
         approvalPolicy = approvalPolicy == null ? "ask" : approvalPolicy;
+        allowedTools = allowedTools == null ? null : List.copyOf(allowedTools);
     }
 
     public static FrozenAuthorizationSnapshot capture(
@@ -43,7 +45,8 @@ public record FrozenAuthorizationSnapshot(
             ExecutionProfile profile,
             List<PermissionGrant> permissionGrants,
             List<ExecutionGrant> executionGrants,
-            String approvalPolicy) {
+            String approvalPolicy,
+            List<String> allowedTools) {
         Objects.requireNonNull(policy, "policy");
         Objects.requireNonNull(profile, "profile");
         // Persist grants without disposable home/tmp/workspace roots; keep the
@@ -78,10 +81,15 @@ public record FrozenAuthorizationSnapshot(
                 durablePermissionGrants,
                 executionGrants,
                 profile.externalGrants(),
-                approvalPolicy);
+                approvalPolicy,
+                allowedTools);
     }
 
     public PermissionPolicySnapshot toPolicy() {
+        if (allowedTools == null) {
+            throw new IllegalArgumentException(
+                    "frozen authorization snapshot lacks a frozen tool catalog");
+        }
         PermissionPolicySnapshot policy = new PermissionPolicySnapshot(
                 defaultAction, compiledRules, sourceDigests);
         if (!snapshotDigest.equals(policy.snapshotDigest())) {

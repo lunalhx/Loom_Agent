@@ -19,8 +19,6 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.workspace.WorkspaceFacts;
-import cn.lunalhx.ai.domain.skill.service.SkillCatalogPromptRenderer;
-import cn.lunalhx.ai.domain.skill.service.SkillPromptRenderer;
 import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import org.apache.commons.lang3.StringUtils;
@@ -75,6 +73,11 @@ public class PromptBuildNode extends AbstractAgentNode {
                 : contextManager.build(context);
 
         if (result.blocked()) {
+            if (!context.getActiveSkills().isEmpty()) {
+                fail(context, AgentStopReason.MODEL_ERROR, "skill_context_budget_exceeded",
+                        "active Skill instructions exceed the Run context budget");
+                return NodeResult.fail(List.of());
+            }
             context.setContextBlockedReason(result.blockedReason());
             context.waitForRecoveryInput(result.blockedReason(), null);
             AgentEvent event = AgentEvent.builder()
@@ -93,13 +96,7 @@ public class PromptBuildNode extends AbstractAgentNode {
             return NodeResult.pauseUserInput(List.of(event));
         }
 
-        PreparedContextView view = PreparedContextView.from(result);
-        String systemPrompt = new SkillPromptRenderer().appendToSystemPrompt(
-                new SkillCatalogPromptRenderer().appendToSystemPrompt(
-                        view.systemPrefix(), context.getSkillCatalogSnapshot()),
-                context.getActiveSkills());
-        view = PreparedContextView.withSystemPrefix(view, systemPrompt);
-        context.setPreparedView(view);
+        context.setPreparedView(PreparedContextView.from(result));
 
         List<AgentEvent> events = new ArrayList<>();
         if (hasReduction(result)) {
@@ -137,7 +134,9 @@ public class PromptBuildNode extends AbstractAgentNode {
                 workspaceFactsText,
                 workspaceFingerprint,
                 context.getCollaborationMode(),
-                context.getPlanBinding());
+                context.getPlanBinding(),
+                context.getSkillCatalogSnapshot(),
+                context.getActiveSkills());
     }
 
     /** Collect workspace facts exactly once per round; both the rendered text and

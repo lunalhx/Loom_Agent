@@ -48,7 +48,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * CLI E2E: Delegate inherits frozen catalog + active skills, may activate locally,
- * can read inherited resources, and never mutates the parent prompt/state.
+ * can read resources introduced by local activation, and never mutates the parent prompt/state.
  */
 public class CliDelegateSkillInheritanceE2ETest {
 
@@ -61,13 +61,13 @@ public class CliDelegateSkillInheritanceE2ETest {
         Path workspace = Files.createTempDirectory("cli-delegate-skill-workspace").toRealPath();
         Path parentSkill = workspace.resolve(".agents/skills/parent-method");
         Path childSkill = workspace.resolve(".agents/skills/child-extra");
-        writeSkillWithResource(parentSkill, "parent-method",
+        writeSkill(parentSkill, "parent-method",
                 "Parent working method.",
-                "PARENT_BODY_V1: follow the parent checklist.",
-                "PARENT_REF_V1");
-        writeSkill(childSkill, "child-extra",
+                "PARENT_BODY_V1: follow the parent checklist.");
+        writeSkillWithResource(childSkill, "child-extra",
                 "Child specialization.",
-                "CHILD_BODY: specialized subtask guidance.");
+                "CHILD_BODY: specialized subtask guidance.",
+                "CHILD_REF_V1");
 
         String previousHome = System.getProperty("user.home");
         System.setProperty("user.home", home.toString());
@@ -95,7 +95,8 @@ public class CliDelegateSkillInheritanceE2ETest {
             assertFalse(childFirst.getSystemPrompt().contains("CHILD_BODY"));
             assertFalse(childFirst.getSystemPrompt().contains("ghost-skill"));
             String childTools = toolsCatalog(childFirst.getSystemPrompt());
-            assertTrue(childTools.contains("- read_file(") || childTools.contains("- read_skill_resource("));
+            assertTrue(childTools.contains("- read_file("));
+            assertFalse(childTools.contains("- read_skill_resource("));
             assertFalse(childTools.contains("- write_file("));
             assertFalse(childTools.contains("- patch_file("));
             assertFalse(childTools.contains("- run_shell("));
@@ -108,7 +109,7 @@ public class CliDelegateSkillInheritanceE2ETest {
 
             String childVisible = modelVisible(prompts.get(3));
             assertTrue(childVisible.contains("[tool:read_skill_resource]"));
-            assertTrue(childVisible.contains("PARENT_REF_V1"));
+            assertTrue(childVisible.contains("CHILD_REF_V1"));
             assertTrue(childVisible.contains("<untrusted_tool_output>"));
             assertFalse(childVisible.contains("no_active_skill"));
 
@@ -157,7 +158,7 @@ public class CliDelegateSkillInheritanceE2ETest {
                         yield "<tool>{\"name\":\"delegate\",\"args\":{\"task\":\"specialize and read parent ref\",\"max_steps\":3}}</tool>";
                     }
                     case 1 -> "<skill_activation>{\"name\":\"child-extra\"}</skill_activation>";
-                    case 2 -> "<tool>{\"name\":\"read_skill_resource\",\"args\":{\"skill\":\"parent-method\",\"path\":\"references/guide.md\"}}</tool>";
+                    case 2 -> "<tool>{\"name\":\"read_skill_resource\",\"args\":{\"skill\":\"child-extra\",\"path\":\"references/guide.md\"}}</tool>";
                     case 3 -> "<final>child done</final>";
                     default -> "<final>done</final>";
                 };

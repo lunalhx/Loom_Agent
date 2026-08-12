@@ -24,9 +24,11 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 public class CliImplicitSkillActivationE2ETest {
@@ -62,8 +64,11 @@ public class CliImplicitSkillActivationE2ETest {
             assertTrue(second.getSystemPrompt().contains("Active skills:"));
             assertTrue(second.getSystemPrompt().contains("Always check tests first."));
             assertTrue(second.getSystemPrompt().contains("Never skip edge cases."));
+            assertNotEquals(first.getStablePrefixSignature(), second.getStablePrefixSignature());
             assertEquals(0, (int) service.runRepository().findLatestRootByConversationId(service.sessionId())
                     .orElseThrow().getToolSteps());
+            assertActivationCheckpoint(workspace, service.runRepository()
+                    .findLatestRootByConversationId(service.sessionId()).orElseThrow().getRunId());
         } finally {
             restoreHome(previousHome);
             service.close();
@@ -206,6 +211,21 @@ public class CliImplicitSkillActivationE2ETest {
             from += needle.length();
         }
         return count;
+    }
+
+    private void assertActivationCheckpoint(Path workspace, String runId) throws Exception {
+        Path directory = workspace.resolve(".loom-code/checkpoints").resolve(runId);
+        boolean found = false;
+        try (Stream<Path> checkpoints = Files.list(directory)) {
+            for (Path checkpoint : checkpoints.filter(path -> path.toString().endsWith(".json")).toList()) {
+                var node = mapper.readTree(checkpoint.toFile());
+                if ("after_skill_activation".equals(node.path("reason").asText())
+                        && node.path("contextSnapshot").path("activeSkills").size() == 1) {
+                    found = true;
+                }
+            }
+        }
+        assertTrue("implicit activation must be checkpointed before the next round", found);
     }
 
     private static void restoreHome(String previousHome) {

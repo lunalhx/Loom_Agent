@@ -75,7 +75,16 @@ public final class AgentRunLifecycle {
      *  {@code prompt_build} and the running context's current node is never
      *  mutated by the save. */
     public List<AgentEvent> checkpointAfterTool(AgentContext context) {
-        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, "after_tool");
+        return checkpointRunningAtPromptBuild(context, "after_tool");
+    }
+
+    /** Skill activation changes durable prompt authority and must survive before the next tool step. */
+    public List<AgentEvent> checkpointAfterSkillActivation(AgentContext context) {
+        return checkpointRunningAtPromptBuild(context, "after_skill_activation");
+    }
+
+    private List<AgentEvent> checkpointRunningAtPromptBuild(AgentContext context, String reason) {
+        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, reason);
         context.setCheckpointVersion(checkpoint.getVersion());
         saveRun(context, AgentNodeNames.PROMPT_BUILD, AgentRunStatus.RUNNING);
         return List.of(AgentEvent.builder()

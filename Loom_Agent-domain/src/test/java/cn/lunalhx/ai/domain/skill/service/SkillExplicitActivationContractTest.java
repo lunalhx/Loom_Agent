@@ -1,5 +1,8 @@
 package cn.lunalhx.ai.domain.skill.service;
 
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
@@ -104,6 +107,43 @@ public class SkillExplicitActivationContractTest {
         } catch (SkillActivationException e) {
             assertTrue(e.getMessage().contains("drifted"));
         }
+    }
+
+    @Test
+    public void contextBudgetRejectionDoesNotCommitExplicitActiveState() throws Exception {
+        Path home = Files.createTempDirectory("skill-admission-home");
+        Path workspace = Files.createTempDirectory("skill-admission-workspace").toRealPath();
+        Path skill = workspace.resolve(".agents/skills/tiny");
+        Files.createDirectories(skill);
+        Files.writeString(skill.resolve("SKILL.md"), """
+                ---
+                name: tiny
+                description: Tiny skill.
+                ---
+                This whole body must not be clipped.
+                """, StandardCharsets.UTF_8);
+        AgentRuntimeProperties properties = new AgentRuntimeProperties();
+        properties.getContext().setTotalBudgetChars(200);
+        properties.getContext().setWorkspaceFloorChars(1);
+        properties.getContext().setMemoryFloorChars(1);
+        properties.getContext().setRelevantMemoryFloorChars(1);
+        properties.getContext().setHistoryFloorChars(1);
+        AgentContext context = new AgentContext();
+        context.setQuestion("$tiny do work");
+        context.setResolvedWorkspace(workspace);
+        context.setCollaborationMode(CollaborationMode.BUILD);
+
+        try {
+            new SkillRunBootstrap(properties,
+                    new cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry(List.of(),
+                            new cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator(
+                                    new com.fasterxml.jackson.databind.ObjectMapper())))
+                    .prepareRun(context, home);
+            fail("expected context-budget rejection");
+        } catch (SkillActivationException e) {
+            assertTrue(e.getMessage().contains("context budget"));
+        }
+        assertTrue(context.getActiveSkills().isEmpty());
     }
 
     private static String digest(byte[] bytes) throws Exception {

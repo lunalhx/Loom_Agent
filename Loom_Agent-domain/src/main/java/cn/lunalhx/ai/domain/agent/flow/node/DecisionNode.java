@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Parses Loom XML tool/final/terminal/retry decisions. This node performs no tool
@@ -32,7 +33,7 @@ public class DecisionNode extends AbstractAgentNode {
     private final AgentRuntimeProperties properties;
     private final ConversationHistoryAppendService ledgerAppendService;
     private final DecisionParser decisionParser;
-    private final SkillActivationDecisionHandler skillActivationHandler;
+    private final ToolRegistry toolRegistry;
 
     public DecisionNode(ObjectMapper objectMapper,
                         AgentRuntimeProperties properties,
@@ -43,7 +44,7 @@ public class DecisionNode extends AbstractAgentNode {
         this.properties = properties;
         this.ledgerAppendService = ledgerAppendService;
         this.decisionParser = new DecisionParser(objectMapper);
-        this.skillActivationHandler = new SkillActivationDecisionHandler(ledgerAppendService, toolRegistry);
+        this.toolRegistry = toolRegistry;
     }
 
     @Override
@@ -64,7 +65,11 @@ public class DecisionNode extends AbstractAgentNode {
                 return NodeResult.complete(List.of());
             }
             if ("skill_activation".equals(type)) {
-                return skillActivationHandler.apply(context, decision);
+                return new SkillActivationDecisionHandler(
+                        properties,
+                        ledgerAppendService,
+                        Objects.requireNonNull(toolRegistry, "toolRegistry"))
+                        .apply(context, decision);
             }
             if ("retry".equals(type)) {
                 return formatRetry(context, decision);

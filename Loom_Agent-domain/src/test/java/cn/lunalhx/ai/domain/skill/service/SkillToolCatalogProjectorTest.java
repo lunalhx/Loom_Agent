@@ -48,6 +48,20 @@ public class SkillToolCatalogProjectorTest {
                 SkillToolCatalogProjector.READ_SKILL_RESOURCE.equals(spec.getName())));
     }
 
+    @Test
+    public void exposesIndexedProjectResourcesInPlanMode() {
+        AgentContext context = new AgentContext();
+        context.setCollaborationMode(CollaborationMode.PLAN);
+        context.setActiveSkills(List.of(new ActiveSkillSnapshot(
+                "with-ref", "source", "body", "digest", Path.of("."),
+                List.of(new SkillResourceEntry("references/guide.md", "abc")))));
+
+        List<ToolSpec> specs = SkillToolCatalogProjector.project(context, registry);
+
+        assertTrue(specs.stream().anyMatch(spec ->
+                SkillToolCatalogProjector.READ_SKILL_RESOURCE.equals(spec.getName())));
+    }
+
     private static AgentTool readSkillResourceStub() {
         return new AgentTool() {
             @Override

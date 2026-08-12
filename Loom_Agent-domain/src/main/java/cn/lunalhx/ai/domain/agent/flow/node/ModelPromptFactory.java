@@ -46,9 +46,9 @@ public class ModelPromptFactory {
                 .deadlineEpochMs(deadlineEpochMs)
                 .outputFormat(OutputFormat.TEXT)
                 .runtimeProperties(context.getRunConfig() == null ? null : context.getRunConfig().model())
-                // Cache key input: only the stable prefix signature is used,
-                // never the dynamic history / working memory / current request /
-                // run-scoped active skill instructions.
+                // Cache key input is the complete frozen prefix signature. It
+                // includes the frozen Skill catalog and active Skill snapshots,
+                // but excludes dynamic history / working memory / current request.
                 .stablePrefixSignature(signature)
                 .cachePolicy(cacheEnabled ? ChatPrompt.CachePolicy.READ : ChatPrompt.CachePolicy.NONE)
                 .promptCacheCapability(cn.lunalhx.ai.domain.model.valobj.PromptCacheCapability.fromProviderModel(
