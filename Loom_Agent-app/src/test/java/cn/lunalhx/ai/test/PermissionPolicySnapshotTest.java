@@ -4,11 +4,16 @@ import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
 import cn.lunalhx.ai.domain.tool.model.PermissionSubject;
+import cn.lunalhx.ai.domain.tool.model.ToolCall;
+import cn.lunalhx.ai.domain.tool.service.ToolCallNormalizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.Test;
 
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class PermissionPolicySnapshotTest {
 
@@ -45,5 +50,27 @@ public class PermissionPolicySnapshotTest {
                         PermissionRule.MatcherKind.SHELL_PREFIX, "rg", PermissionAction.ALLOW)), List.of());
         assertEquals(PermissionAction.ASK, policy.evaluate(new PermissionSubject("run_shell", "key",
                 List.of("rg needle", "unknown-command"), false, List.of(), List.of())).action());
+    }
+
+    @Test
+    public void safetyFloorOverridesFullAccessDefaultAndMakesHostCredentialsPerCallOnly() {
+        PermissionPolicySnapshot policy = new PermissionPolicySnapshot(PermissionAction.ALLOW, List.of(), List.of());
+
+        assertEquals(PermissionAction.DENY, policy.evaluate(new PermissionSubject("run_shell", "rm-root",
+                List.of("rm -rf /"), false, List.of(), List.of())).action());
+        var credential = policy.evaluate(new PermissionSubject("run_shell", "credentials",
+                List.of("cat ~/.ssh/id_ed25519"), false, List.of(), List.of()));
+        assertEquals(PermissionAction.ASK, credential.action());
+        assertTrue(credential.perCallOnly());
+        assertEquals(PermissionAction.ALLOW, policy.evaluate(new PermissionSubject("run_shell", "sample",
+                List.of("cat .env.example"), false, List.of(), List.of())).action());
+    }
+
+    @Test
+    public void loneBackgroundOperatorIsOpaqueInsteadOfBeingTreatedAsACompoundRead() {
+        ToolCall call = ToolCall.builder().name("run_shell")
+                .input(JsonNodeFactory.instance.objectNode().put("command", "rg needle & sleep 1 && pwd"))
+                .build();
+        assertTrue(new ToolCallNormalizer(new ObjectMapper()).normalize(call).permissionSubject().opaque());
     }
 }

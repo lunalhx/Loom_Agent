@@ -100,7 +100,16 @@ public final class ToolCallNormalizer {
     private boolean hasOpaqueSyntax(String command) {
         return command.contains("$") || command.contains("`") || command.contains("<") || command.contains(">")
                 || command.contains("*") || command.contains("?") || command.contains("[") || command.contains("{")
-                || command.contains("}") || command.contains("(") || command.contains(")") || command.contains("&") && !command.contains("&&");
+                || command.contains("}") || command.contains("(") || command.contains(")") || hasBackgroundOperator(command);
+    }
+
+    private boolean hasBackgroundOperator(String command) {
+        for (int i = 0; i < command.length(); i++) {
+            if (command.charAt(i) != '&') continue;
+            if (i + 1 >= command.length() || command.charAt(i + 1) != '&') return true;
+            i++;
+        }
+        return false;
     }
 
     private String normalizeUnit(String value) {

@@ -95,6 +95,9 @@ public final class ToolAuthorizationService {
             if (prompt == null) return reject(call, "approval_denied", "approval_unavailable", effect.profile());
             GrantLifetime lifetime = prompt.ask(display(call, normalized, profile), decision);
             if (lifetime == null) return reject(call, "approval_denied", "approval_denied", effect.profile());
+            if (decision.perCallOnly() && lifetime != GrantLifetime.ONCE) {
+                return reject(call, "approval_denied", "per_call_only", effect.profile());
+            }
             if (lifetime != GrantLifetime.ONCE) {
                 PermissionGrant grant = PermissionGrant.issue(normalized.permissionSubject().exactKey(), profile, lifetime);
                 try {

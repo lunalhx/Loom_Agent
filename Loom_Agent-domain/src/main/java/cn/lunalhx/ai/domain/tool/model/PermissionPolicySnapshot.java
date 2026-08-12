@@ -1,5 +1,7 @@
 package cn.lunalhx.ai.domain.tool.model;
 
+import cn.lunalhx.ai.domain.tool.service.BuiltInShellSafetyFloor;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -51,6 +53,11 @@ public final class PermissionPolicySnapshot {
                 matches.add(rule);
             }
         }
+        BuiltInShellSafetyFloor.Decision safety = BuiltInShellSafetyFloor.evaluate(subject);
+        if (safety.action() != null) {
+            matches.add(new PermissionRule(safety.ruleId(), "builtin", subject.toolName(),
+                    PermissionRule.MatcherKind.EXACT_CALL, subject.exactKey(), safety.action()));
+        }
         PermissionAction action = defaultAction;
         if (matches.stream().anyMatch(r -> r.action() == PermissionAction.DENY)) {
             action = PermissionAction.DENY;
@@ -62,7 +69,7 @@ public final class PermissionPolicySnapshot {
         return new PermissionDecision(action,
                 matches.isEmpty() ? "default_" + defaultAction.name().toLowerCase() : "matched_rule",
                 matches.stream().map(PermissionRule::id).toList(),
-                matches.stream().map(PermissionRule::sourceId).distinct().toList(), false);
+                matches.stream().map(PermissionRule::sourceId).distinct().toList(), safety.perCallOnly());
     }
 
     private static int rank(PermissionAction action) {

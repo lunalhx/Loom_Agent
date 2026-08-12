@@ -12,8 +12,8 @@ Complete the remaining Shell Permissions plan in the agreed order while preservi
 4. **Complete — Repository state tracking**: RepositoryStateTracker replaces best-effort fingerprints, records symlink entries without traversal, excludes only runtime artifacts, and adds Git logical HEAD/index/refs state to diffs used for partial-success reporting.
 5. **Complete — Plan/Delegate shell**: profile intersection, explicitly configured read-only Maven cache for Plan, disposable HOME/TMP, and conditional catalog exposure.
 6. **Complete — Shell evidence**: transient receipt lists, real repository-state fallback observations, and registry-based revalidation.
-7. **In progress — Normalizer/classifier**: conservative POSIX coverage, safety floors, sensitive-resource rules.
-8. **Pending — Full Access controls**: complete REPL sandbox selection and host-credential per-call-only behavior.
+7. **Complete — Normalizer/classifier**: conservative compound parsing, non-opaque unit policy composition, built-in safety floor, and sensitive-resource rules.
+8. **In progress — Full Access controls**: complete REPL sandbox selection; host-credential per-call-only behavior is implemented with the classifier.
 9. **Pending — Schema cutover and cleanup**: context/checkpoint snapshots, obsolete code removal, final contract suites and review.
 
 ## Acceptance checks
