@@ -54,11 +54,10 @@ public record ExecutionProfile(ExecutionProfileKind kind, Path workspace,
         Set<ToolEffect> effects = profile.effects();
         if (kind == ExecutionProfileKind.PLAN_SANDBOX || kind == ExecutionProfileKind.DELEGATE_SANDBOX) {
             return profile.outboundDisclosure() == OutboundDisclosure.NONE
-                    && EnumSet.of(ToolEffect.REPOSITORY_READ, ToolEffect.EXTERNAL_READ)
+                    && EnumSet.of(ToolEffect.REPOSITORY_READ)
                     .containsAll(effects);
         }
-        return profile.outboundDisclosure() != OutboundDisclosure.PRESENT
-                || kind == ExecutionProfileKind.BUILD_SANDBOX;
+        return profile.outboundDisclosure() != OutboundDisclosure.PRESENT;
     }
 
     /** True when this profile grants no more authority than {@code other}. */
