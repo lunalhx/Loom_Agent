@@ -413,9 +413,9 @@ public class CliSessionService implements AutoCloseable {
         return entry;
     }
 
-    /** Persist loop-derived state back into the session. The latest root run
-     *  checkpoint overlay is the source of truth for Session Working Memory
-     *  and key files; Conversation History stays in its own store. */
+    /** Persist loop-derived state back into the session. A normally completed
+     *  root Run projects its Working Memory Overlay into Session Working Memory
+     *  once; Conversation History stays in its own store. */
     public synchronized void persistSession() {
         recoverPendingIfPresent();
         // Re-read the durable Session before applying loop-derived state. A
@@ -445,7 +445,7 @@ public class CliSessionService implements AutoCloseable {
             AgentRun run = latestRoot.get();
             session.setId(run.getSessionId() == null ? sessionId : run.getSessionId());
             session.setUpdatedAt(Instant.now());
-            syncFromCheckpoint(run);
+            projectWorkingMemoryOverlayOnce(run);
         }
         redactSessionInPlace();
         if (!sessionStore.saveIfUnchanged(session, durableUpdatedAt)) {
@@ -483,8 +483,18 @@ public class CliSessionService implements AutoCloseable {
         }
     }
 
-    private void syncFromCheckpoint(AgentRun run) {
+    /**
+     * Project a normally completed root Run's Working Memory Overlay into the
+     * Session exactly once. The Session records {@code lastProjectedRunId} in the
+     * same durable write, so crash-finish cannot re-project. FAILED, STOPPED,
+     * ABANDONED, conflict, and deviation outcomes keep their overlay in the
+     * checkpoint only.
+     */
+    private void projectWorkingMemoryOverlayOnce(AgentRun run) {
         if (run.getStatus() != AgentRunStatus.COMPLETED) {
+            return;
+        }
+        if (run.getRunId() != null && run.getRunId().equals(session.getLastProjectedRunId())) {
             return;
         }
         Optional<cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint> latest =
@@ -493,12 +503,11 @@ public class CliSessionService implements AutoCloseable {
             return;
         }
         AgentContextSnapshot snapshot = latest.get().getContextSnapshot();
-        if (snapshot == null) {
+        if (snapshot == null || snapshot.getWorkingMemory() == null) {
             return;
         }
-        if (snapshot.getWorkingMemory() != null) {
-            session.setWorkingMemory(snapshot.getWorkingMemory());
-        }
+        session.setWorkingMemory(snapshot.getWorkingMemory());
+        session.setLastProjectedRunId(run.getRunId());
         syncKeyFiles(snapshot);
     }
 

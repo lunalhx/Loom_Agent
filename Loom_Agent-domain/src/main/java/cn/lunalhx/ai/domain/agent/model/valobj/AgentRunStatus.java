@@ -7,12 +7,14 @@ public enum AgentRunStatus {
     WAITING_USER_INPUT,
     COMPLETED,
     STOPPED,
-    FAILED;
+    FAILED,
+    ABANDONED;
 
     public boolean terminal() {
         return this == COMPLETED
                 || this == STOPPED
-                || this == FAILED;
+                || this == FAILED
+                || this == ABANDONED;
     }
 
     public boolean resumable() {

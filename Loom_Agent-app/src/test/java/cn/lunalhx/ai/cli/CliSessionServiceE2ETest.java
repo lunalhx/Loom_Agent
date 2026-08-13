@@ -19,12 +19,14 @@ import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmissionTransaction;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
+import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
+import cn.lunalhx.ai.test.FakeModelGateway;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.conversation.model.entity.ModelStreamChunk;
@@ -772,6 +774,246 @@ public class CliSessionServiceE2ETest {
         assertTrue(history.getEntries().stream()
                 .anyMatch(e -> "second question".equals(e.content())));
         resumed.close();
+    }
+
+    @Test
+    public void completedRootRunProjectsWorkingMemoryOnceAndCrashFinishDoesNotReproject()
+            throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-wm-project-once");
+        CliSessionService first = service(workspace, finalAnswerGateway("projected-summary"));
+        String sessionId = first.sessionId();
+        first.runTurn("capture memory");
+        AgentRun completed = first.runRepository().findLatestRootByConversationId(sessionId)
+                .orElseThrow();
+        first.close();
+
+        FileAgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
+        AgentSession projected = sessions.find(sessionId).orElseThrow();
+        assertEquals("projected-summary", projected.getWorkingMemory().taskSummary());
+        assertEquals(completed.getRunId(), projected.getLastProjectedRunId());
+
+        WorkingContextMemory mutated = projected.getWorkingMemory();
+        mutated.addNote(WorkingContextMemory.MemoryNote.of("post-projection session note"));
+        projected.setWorkingMemory(mutated);
+        // Keep lastProjectedRunId so crash-finish knows this Run already projected.
+        sessions.save(projected);
+
+        CliSessionService.CliOptions opts = options(workspace, finalAnswerGateway("unused"));
+        opts.resumeSessionId = sessionId;
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        CliSessionService reopened = new CliSessionService(opts, mapper, agent,
+                new ModelRuntimeProperties(),
+                sessions,
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper,
+                        finalAnswerGateway("unused"), agent, java.util.List.of()));
+        reopened.persistSession();
+        reopened.close();
+
+        AgentSession afterCrashFinish = sessions.find(sessionId).orElseThrow();
+        assertEquals("projected-summary", afterCrashFinish.getWorkingMemory().taskSummary());
+        assertTrue("crash-finish must not re-project and wipe later Session Working Memory",
+                afterCrashFinish.getWorkingMemory().notes().stream()
+                        .anyMatch(note -> "post-projection session note".equals(note.text())));
+    }
+
+    @Test
+    public void sessionResumeInheritsProjectedWorkingMemoryOnNewRootRun() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-wm-resume-inherit");
+        CliSessionService first = service(workspace, finalAnswerGateway("session-baseline"));
+        String sessionId = first.sessionId();
+        first.runTurn("establish baseline");
+        String oldRunId = first.runRepository().findLatestRootByConversationId(sessionId)
+                .orElseThrow().getRunId();
+        assertEquals("session-baseline",
+                first.sessionRepository().find(sessionId).orElseThrow()
+                        .getWorkingMemory().taskSummary());
+        first.close();
+
+        CliSessionService.CliOptions opts = options(workspace, finalAnswerGateway("second-turn"));
+        opts.resumeSessionId = sessionId;
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
+        CliSessionService resumed = new CliSessionService(opts, mapper, agent,
+                new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                runs, checkpoints, historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper,
+                        finalAnswerGateway("second-turn"), agent, java.util.List.of()));
+
+        assertEquals("session-baseline",
+                resumed.sessionRepository().find(sessionId).orElseThrow()
+                        .getWorkingMemory().taskSummary());
+        assertEquals("second-turn", resumed.runTurn("continue with baseline"));
+
+        AgentRun newRoot = runs.findLatestRootByConversationId(sessionId).orElseThrow();
+        assertNotEquals(oldRunId, newRoot.getRunId());
+        assertEquals(oldRunId, runs.find(oldRunId).orElseThrow().getRunId());
+        assertEquals("COMPLETED", runs.find(oldRunId).orElseThrow().getStatus().name());
+
+        AgentContextSnapshot newOverlay = checkpoints.latest(newRoot.getRunId())
+                .orElseThrow().getContextSnapshot();
+        assertNotNull(newOverlay.getWorkingMemory());
+        assertEquals("second-turn", newOverlay.getWorkingMemory().taskSummary());
+        AgentSession afterSecond = resumed.sessionRepository().find(sessionId).orElseThrow();
+        assertEquals("second-turn", afterSecond.getWorkingMemory().taskSummary());
+        assertEquals(newRoot.getRunId(), afterSecond.getLastProjectedRunId());
+        resumed.close();
+    }
+
+    @Test
+    public void failedStoppedAbandonedConflictAndDeviationOverlaysDoNotEnterSessionMemory()
+            throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-wm-no-bad-project");
+        CliSessionService baseline = service(workspace, finalAnswerGateway("kept-baseline"));
+        String sessionId = baseline.sessionId();
+        baseline.runTurn("keep this");
+        baseline.close();
+        assertEquals("kept-baseline",
+                new FileAgentSessionRepository(workspace, mapper).find(sessionId).orElseThrow()
+                        .getWorkingMemory().taskSummary());
+
+        // FAILED via Plan Conflict
+        CliSessionService conflictSession = resumeService(workspace, sessionId,
+                planSubmissionGateway(new AtomicInteger()));
+        conflictSession.setCollaborationMode(CollaborationMode.PLAN);
+        FileAgentSessionRepository external = new FileAgentSessionRepository(workspace, mapper);
+        AgentSession bumped = external.find(sessionId).orElseThrow();
+        bumped.setPlanStateVersion(9L);
+        external.save(bumped);
+        conflictSession.runTurn("submit conflicting plan");
+        AgentRun conflictRun = conflictSession.runRepository()
+                .findLatestRootByConversationId(sessionId).orElseThrow();
+        assertEquals(AgentRunStatus.FAILED, conflictRun.getStatus());
+        assertEquals("PLAN_CONFLICT", conflictRun.getStopReason());
+        String conflictSummary = new FileAgentCheckpointRepository(workspace, mapper)
+                .latest(conflictRun.getRunId()).orElseThrow()
+                .getContextSnapshot().getWorkingMemory().taskSummary();
+        assertNotNull(conflictSummary);
+        assertTrue(conflictSummary.toLowerCase().contains("conflict"));
+        assertEquals("kept-baseline",
+                external.find(sessionId).orElseThrow().getWorkingMemory().taskSummary());
+        conflictSession.close();
+
+        // STOPPED via step limit
+        FakeModelGateway stepLimitGateway = new FakeModelGateway(java.util.List.of(
+                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\"a\"}}</tool>",
+                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\"b\"}}</tool>",
+                "<tool>{\"name\":\"list_files\",\"args\":{\"path\":\"c\"}}</tool>"));
+        AgentRuntimeProperties stepAgent = CliLoopTestFixture.agentProperties(workspace);
+        stepAgent.setMaxSteps(1);
+        CliSessionService.CliOptions stepOpts = options(workspace, stepLimitGateway);
+        stepOpts.resumeSessionId = sessionId;
+        stepOpts.maxSteps = 1;
+        CliSessionService stoppedSession = new CliSessionService(stepOpts, mapper, stepAgent,
+                new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper, stepLimitGateway, stepAgent,
+                        java.util.List.of(),
+                        java.util.List.of(new cn.lunalhx.ai.infrastructure.loom.ListFilesTool(
+                                new LocalWorkspacePort()))));
+        stoppedSession.runTurn("hit step limit");
+        AgentRun stoppedRun = stoppedSession.runRepository()
+                .findLatestRootByConversationId(sessionId).orElseThrow();
+        assertEquals(AgentRunStatus.STOPPED, stoppedRun.getStatus());
+        assertEquals("STEP_LIMIT_REACHED", stoppedRun.getStopReason());
+        String stoppedSummary = new FileAgentCheckpointRepository(workspace, mapper)
+                .latest(stoppedRun.getRunId()).orElseThrow()
+                .getContextSnapshot().getWorkingMemory().taskSummary();
+        assertNotNull(stoppedSummary);
+        assertTrue(stoppedSummary.contains("上限") || stoppedSummary.contains("停止"));
+        assertEquals("kept-baseline",
+                external.find(sessionId).orElseThrow().getWorkingMemory().taskSummary());
+        stoppedSession.close();
+
+        // ABANDONED and PLAN_DEVIATION fabricated overlays must also stay out of Session WM
+        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
+        FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
+        persistNonProjectingTerminalOverlay(runs, checkpoints, sessionId, workspace,
+                "run_abandoned_overlay", AgentRunStatus.ABANDONED, "ABANDONED",
+                "abandoned-overlay-must-not-project");
+        persistNonProjectingTerminalOverlay(runs, checkpoints, sessionId, workspace,
+                "run_deviation_overlay", AgentRunStatus.STOPPED, "PLAN_DEVIATION",
+                "deviation-overlay-must-not-project");
+
+        CliSessionService.CliOptions reopenOpts = options(workspace, finalAnswerGateway("unused"));
+        reopenOpts.resumeSessionId = sessionId;
+        AgentRuntimeProperties reopenAgent = CliLoopTestFixture.agentProperties(workspace);
+        CliSessionService reopened = new CliSessionService(reopenOpts, mapper, reopenAgent,
+                new ModelRuntimeProperties(),
+                external, runs, checkpoints, historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper,
+                        finalAnswerGateway("unused"), reopenAgent, java.util.List.of()));
+        reopened.persistSession();
+        reopened.close();
+
+        String sessionSummary = external.find(sessionId).orElseThrow()
+                .getWorkingMemory().taskSummary();
+        assertEquals("kept-baseline", sessionSummary);
+        assertFalse(sessionSummary.contains("abandoned-overlay"));
+        assertFalse(sessionSummary.contains("deviation-overlay"));
+        assertFalse(sessionSummary.toLowerCase().contains("conflict"));
+    }
+
+    private CliSessionService resumeService(Path workspace, String sessionId, ModelGateway gateway) {
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        CliSessionService.CliOptions opts = options(workspace, gateway);
+        opts.resumeSessionId = sessionId;
+        return new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper, gateway, agent, java.util.List.of()));
+    }
+
+    private void persistNonProjectingTerminalOverlay(
+            FileAgentRunRepository runs,
+            FileAgentCheckpointRepository checkpoints,
+            String sessionId,
+            Path workspace,
+            String runId,
+            AgentRunStatus status,
+            String stopReason,
+            String overlaySummary) {
+        WorkingContextMemory overlay = new WorkingContextMemory();
+        overlay.setTaskSummary(overlaySummary);
+        runs.save(AgentRun.builder()
+                .schemaVersion(AgentRun.CURRENT_SCHEMA_VERSION)
+                .runId(runId)
+                .sessionId(sessionId)
+                .rootRunId(runId)
+                .requestId("req-" + runId)
+                .conversationId(sessionId)
+                .runKind(AgentRunKind.ROOT)
+                .runModeSnapshot(CollaborationMode.BUILD)
+                .status(status)
+                .stopReason(stopReason)
+                .workspace(workspace.toString())
+                .updatedAt(Instant.now())
+                .createdAt(Instant.now())
+                .build());
+        checkpoints.save(AgentCheckpoint.builder()
+                .runId(runId)
+                .currentNode("prompt_build")
+                .reason("terminal_fixture")
+                .contextSnapshot(AgentContextSnapshot.builder()
+                        .schemaVersion(AgentContextSnapshot.CURRENT_SCHEMA_VERSION)
+                        .runModeSnapshot(CollaborationMode.BUILD)
+                        .workingMemory(overlay)
+                        .build())
+                .build());
     }
 
     // ---- checkpoint + run + trace + report consistency ----

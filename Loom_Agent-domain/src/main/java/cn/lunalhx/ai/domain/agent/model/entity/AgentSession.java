@@ -42,6 +42,13 @@ public class AgentSession {
     /** Session Working Memory projected from normally completed root Runs. */
     private WorkingContextMemory workingMemory;
 
+    /**
+     * runId of the last root Run whose Working Memory Overlay was projected into
+     * {@link #workingMemory}. Stored with the Session write so crash-finish cannot
+     * re-project the same Run.
+     */
+    private String lastProjectedRunId;
+
     /** Path → SHA-256 of key files the session depends on. */
     @Builder.Default
     private Map<String, String> keyFiles = new LinkedHashMap<>();
