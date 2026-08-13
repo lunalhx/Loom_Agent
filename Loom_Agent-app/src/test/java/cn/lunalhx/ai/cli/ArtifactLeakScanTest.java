@@ -111,7 +111,8 @@ public class ArtifactLeakScanTest {
                         java.util.Set.of(), java.util.Set.of(SECRET), java.util.Set.of());
         CliSessionService session = service(workspace, opts, gateway,
                 List.of(new cn.lunalhx.ai.infrastructure.loom.RunShellTool(
-                        new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())), redactor);
+                        new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort(),
+                        new cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository(workspace, mapper))), redactor);
         session.runTurn("echo the secret");
         session.close();
 

@@ -1,5 +1,6 @@
 package cn.lunalhx.ai.infrastructure.loom;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.tool.adapter.port.AgentTool;
 import cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
@@ -26,10 +27,12 @@ import cn.lunalhx.ai.domain.tool.model.ToolEffect;
 public class RunShellTool implements AgentTool {
 
     private final WorkspacePort workspacePort;
+    private final AttemptLeaseRepository leases;
     private final ShellEvidenceObservationService evidence = new ShellEvidenceObservationService();
 
-    public RunShellTool(WorkspacePort workspacePort) {
+    public RunShellTool(WorkspacePort workspacePort, AttemptLeaseRepository leases) {
         this.workspacePort = workspacePort;
+        this.leases = leases;
     }
 
     @Override
@@ -85,6 +88,7 @@ public class RunShellTool implements AgentTool {
             return failure("timeout must be in [1, 120]", startedAt);
         }
         try {
+            requireLiveFence(call);
             Path root = LoomToolSupport.root(workspacePort, call);
             ExecutionProfile profile = call.getExecutionProfile();
             if (!isAvailable(profile)) {
@@ -104,10 +108,18 @@ public class RunShellTool implements AgentTool {
                     && result.execution().exitCode() == 0) {
                 toolResult.setEvidenceCandidates(evidence.observe(root, command));
             }
+            requireLiveFence(call);
             return toolResult;
         } catch (Exception e) {
             return failure(e.getMessage(), startedAt);
         }
+    }
+
+    private void requireLiveFence(ToolCall call) {
+        if (call.getRunId() == null || call.getLeaseFence() == null) {
+            throw new IllegalStateException("attempt lease fence cannot start shell");
+        }
+        leases.requireWritableAndRenew(call.getRunId(), call.getLeaseFence());
     }
 
     private String text(ToolCall call, String key, String def) {

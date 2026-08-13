@@ -35,7 +35,7 @@ public class ToolDeterministicOrderingTest {
                 new cn.lunalhx.ai.infrastructure.loom.ListFilesTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.ReadFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.SearchTool(null),
-                new cn.lunalhx.ai.infrastructure.loom.RunShellTool(null),
+                new cn.lunalhx.ai.infrastructure.loom.RunShellTool(null, null),
                 new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.PatchFileTool(null),
                 new cn.lunalhx.ai.infrastructure.loom.DelegateTool(

@@ -36,6 +36,8 @@ public class ToolCall {
     private transient RootRunSecurityScope securityScope;
     private DelegateRequest delegateRequest;
     private transient List<cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot> activeSkills;
+    /** Attempt Lease fence; adapter-only, never a durable secret. */
+    private transient String leaseFence;
 
     public WorkspaceRef workspaceRef() {
         if (workspace != null) {

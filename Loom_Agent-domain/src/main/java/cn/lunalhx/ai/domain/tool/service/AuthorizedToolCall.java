@@ -63,7 +63,8 @@ public final class AuthorizedToolCall {
                 .executionProfile(source.getExecutionProfile())
                 .securityScope(source.getSecurityScope())
                 .activeSkills(source.getActiveSkills())
-                .delegateRequest(source.getDelegateRequest()).build();
+                .delegateRequest(source.getDelegateRequest())
+                .leaseFence(source.getLeaseFence()).build();
         return copy;
     }
 }

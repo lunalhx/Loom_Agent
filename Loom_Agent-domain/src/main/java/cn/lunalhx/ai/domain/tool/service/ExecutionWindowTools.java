@@ -7,6 +7,8 @@ public final class ExecutionWindowTools {
     }
 
     public static boolean requiresWindow(String toolName) {
-        return ObservationTools.isObservation(toolName) || FileMutationTools.isFileMutation(toolName);
+        return ObservationTools.isObservation(toolName)
+                || FileMutationTools.isFileMutation(toolName)
+                || ShellTools.isShell(toolName);
     }
 }

@@ -31,4 +31,11 @@ public interface AttemptLeaseRepository {
      * @throws IllegalStateException if this fence may not write
      */
     void requireWritable(String runId, String fence);
+
+    /**
+     * Re-validates this fence under the Run lock and renews the heartbeat.
+     *
+     * @throws IllegalStateException if this fence may not write
+     */
+    void requireWritableAndRenew(String runId, String fence);
 }

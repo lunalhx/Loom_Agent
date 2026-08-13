@@ -111,6 +111,15 @@ public final class FileAttemptLeaseRepository implements AttemptLeaseRepository 
 
     @Override
     public void requireWritable(String runId, String fence) {
+        requireWritableAndRenew(runId, fence, false);
+    }
+
+    @Override
+    public void requireWritableAndRenew(String runId, String fence) {
+        requireWritableAndRenew(runId, fence, true);
+    }
+
+    private void requireWritableAndRenew(String runId, String fence, boolean renew) {
         if (runId == null || fence == null) {
             throw new IllegalStateException("attempt lease fence is missing");
         }
@@ -119,6 +128,10 @@ public final class FileAttemptLeaseRepository implements AttemptLeaseRepository 
             if (current.isEmpty() || !writable(current.get(), fence)) {
                 throw new IllegalStateException(
                         "attempt lease fence cannot write run " + runId);
+            }
+            if (renew) {
+                current.get().setHeartbeatEpochMilli(clock.millis());
+                writeUnlocked(current.get());
             }
             return true;
         });

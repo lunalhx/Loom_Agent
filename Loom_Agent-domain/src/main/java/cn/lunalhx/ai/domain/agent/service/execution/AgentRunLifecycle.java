@@ -29,6 +29,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.recovery.FileMutationEvidence;
 import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import cn.lunalhx.ai.domain.tool.service.FileMutationTools;
+import cn.lunalhx.ai.domain.tool.service.ShellTools;
 import cn.lunalhx.ai.domain.tool.service.PendingInteractionRecorder;
 import org.apache.commons.lang3.StringUtils;
 
@@ -143,7 +144,8 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
             context.setExecutionWindow(null);
             return checkpointRunningAtPromptBuild(context, "after_tool");
         }
-        if (FileMutationEvidence.matchesCurrentState(window, context.getResolvedWorkspace())) {
+        if (!ShellTools.isShell(window.getToolName())
+                && FileMutationEvidence.matchesCurrentState(window, context.getResolvedWorkspace())) {
             window.setReconciled(true);
         }
         context.addInterruptedToolCall(window);
@@ -156,6 +158,14 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
                 ConversationHistoryInitializer.eventKey(context.getRunId(),
                         window.getToolCallId(), "interrupted_tool"));
         return checkpointRunningAtPromptBuild(context, "interrupted_tool");
+    }
+
+    private static boolean awaitsAmbiguityReview(ToolExecutionMarker marker) {
+        if (marker == null || !marker.awaitsAmbiguityReview()) {
+            return false;
+        }
+        return FileMutationTools.isFileMutation(marker.getToolName())
+                || ShellTools.isShell(marker.getToolName());
     }
 
     private boolean hasMatchingToolResult(AgentContext context, String toolCallId) {
@@ -244,9 +254,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
             return false;
         }
         for (ToolExecutionMarker marker : interrupted) {
-            if (marker != null
-                    && FileMutationTools.isFileMutation(marker.getToolName())
-                    && marker.awaitsAmbiguityReview()) {
+            if (awaitsAmbiguityReview(marker)) {
                 return true;
             }
         }
@@ -300,9 +308,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         if (interrupted != null) {
             List<ToolExecutionMarker> updated = new ArrayList<>();
             for (ToolExecutionMarker marker : interrupted) {
-                if (marker != null
-                        && FileMutationTools.isFileMutation(marker.getToolName())
-                        && marker.awaitsAmbiguityReview()) {
+                if (awaitsAmbiguityReview(marker)) {
                     marker.setAmbiguityAccepted(true);
                 }
                 updated.add(marker);

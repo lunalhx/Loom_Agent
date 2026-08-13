@@ -62,12 +62,13 @@ public class ToolAutoConfig {
 
     @Bean
     public List<AgentTool> loomCodeTools(cn.lunalhx.ai.domain.tool.adapter.port.WorkspacePort workspacePort,
-                                         cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner delegateRunner) {
+                                         cn.lunalhx.ai.domain.agent.adapter.port.DelegateRunner delegateRunner,
+                                         cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository leases) {
         return List.of(
                 new ListFilesTool(workspacePort),
                 new ReadFileTool(workspacePort),
                 new SearchTool(workspacePort),
-                new RunShellTool(workspacePort),
+                new RunShellTool(workspacePort, leases),
                 new WriteFileTool(workspacePort),
                 new PatchFileTool(workspacePort),
                 new ReadSkillResourceTool(),

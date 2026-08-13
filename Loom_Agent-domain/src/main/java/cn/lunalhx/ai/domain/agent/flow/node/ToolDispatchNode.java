@@ -76,6 +76,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .recentSummary(context.workingMemoryOrCreate().taskSummary())
                 .securityScope(context.getSecurityScope())
                 .activeSkills(context.getActiveSkills())
+                .leaseFence(context.getLeaseFence())
                 .build();
 
         ToolExecutor.ToolRuntimePolicy policy = resolvePolicy(context);

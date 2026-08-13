@@ -10,7 +10,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class RunShellToolProfileTest {
-    private final RunShellTool tool = new RunShellTool(null);
+    private final RunShellTool tool = new RunShellTool(null, null);
 
     @Test
     public void planAndDelegateAcceptOnlyConservativeReadOnlyCommands() {
