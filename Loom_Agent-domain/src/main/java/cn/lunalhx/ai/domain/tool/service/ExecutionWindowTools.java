@@ -14,6 +14,7 @@ public final class ExecutionWindowTools {
         return ObservationTools.isObservation(toolName)
                 || FileMutationTools.isFileMutation(toolName)
                 || ShellTools.isShell(toolName)
+                || DelegateTools.isDelegate(toolName)
                 || UnverifiableExternalTools.isUnverifiableExternal(toolName, contracts);
     }
 }

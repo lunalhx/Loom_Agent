@@ -9,13 +9,15 @@ public enum AgentRunStatus {
     COMPLETED,
     STOPPED,
     FAILED,
-    ABANDONED;
+    ABANDONED,
+    INTERRUPTED_WITH_PARENT;
 
     public boolean terminal() {
         return this == COMPLETED
                 || this == STOPPED
                 || this == FAILED
-                || this == ABANDONED;
+                || this == ABANDONED
+                || this == INTERRUPTED_WITH_PARENT;
     }
 
     public boolean resumable() {

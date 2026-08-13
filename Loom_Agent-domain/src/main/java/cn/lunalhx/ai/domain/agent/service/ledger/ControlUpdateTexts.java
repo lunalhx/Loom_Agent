@@ -199,6 +199,13 @@ public final class ControlUpdateTexts {
                 + " do not replay this call.";
     }
 
+    public static String renderInterruptedDelegateCall(String toolCallId) {
+        return "[Interrupted Delegate Call] id="
+                + StringUtils.defaultIfBlank(toolCallId, "unknown")
+                + " produced no durable Delegate Result. The child Run is not recovered;"
+                + " do not reconnect it. Replan and create a new delegate through ordinary permissions.";
+    }
+
     public static String renderReconciledFileMutation(String toolName, String toolCallId, String safetyTarget) {
         return "[Reconciled File Mutation] " + StringUtils.defaultIfBlank(toolName, "unknown")
                 + " id=" + StringUtils.defaultIfBlank(toolCallId, "unknown")

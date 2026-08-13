@@ -23,11 +23,13 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
+import cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.recovery.FileMutationEvidence;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.DelegateTools;
 import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import cn.lunalhx.ai.domain.tool.service.FileMutationTools;
 import cn.lunalhx.ai.domain.tool.service.ShellTools;
@@ -152,13 +154,19 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         }
         context.addInterruptedToolCall(window);
         context.setExecutionWindow(null);
-        String note = Boolean.TRUE.equals(window.getReconciled())
-                ? ControlUpdateTexts.renderReconciledFileMutation(
-                        window.getToolName(), window.getToolCallId(), window.getSafetyTarget())
-                : ControlUpdateTexts.renderInterruptedToolCall(window.getToolName(), window.getToolCallId());
+        String note;
+        if (DelegateTools.isDelegate(window.getToolName())) {
+            note = ControlUpdateTexts.renderInterruptedDelegateCall(window.getToolCallId());
+        } else if (Boolean.TRUE.equals(window.getReconciled())) {
+            note = ControlUpdateTexts.renderReconciledFileMutation(
+                    window.getToolName(), window.getToolCallId(), window.getSafetyTarget());
+        } else {
+            note = ControlUpdateTexts.renderInterruptedToolCall(window.getToolName(), window.getToolCallId());
+        }
         historyAppend.appendSystemNote(context, note,
                 ConversationHistoryInitializer.eventKey(context.getRunId(),
-                        window.getToolCallId(), "interrupted_tool"));
+                        window.getToolCallId(), DelegateTools.isDelegate(window.getToolName())
+                                ? "interrupted_delegate" : "interrupted_tool"));
         return checkpointRunningAtPromptBuild(context, "interrupted_tool");
     }
 
@@ -167,13 +175,77 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
             return false;
         }
         if (FileMutationTools.isFileMutation(marker.getToolName())
-                || ShellTools.isShell(marker.getToolName())) {
+                || ShellTools.isShell(marker.getToolName())
+                || DelegateTools.isDelegate(marker.getToolName())) {
             return true;
         }
         List<ToolSpec> contracts = context.getFrozenToolContracts() != null
                 ? context.getFrozenToolContracts()
                 : context.getToolSpecs();
         return UnverifiableExternalTools.isUnverifiableExternal(marker.getToolName(), contracts);
+    }
+
+    /**
+     * Root recovery owns the task tree: children without a durable parent-visible
+     * Delegate Result terminate as {@code INTERRUPTED_WITH_PARENT} and keep no
+     * independent Attempt Lease or recovery entry.
+     */
+    public void terminalizeInterruptedDelegates(AgentContext context) {
+        if (context == null || StringUtils.isNotBlank(context.getParentRunId())) {
+            return;
+        }
+        List<AgentRun> children = runRepository.findChildren(context.getRunId());
+        if (children == null || children.isEmpty()) {
+            return;
+        }
+        long accounted = durableDelegateResultCount(context);
+        List<AgentRun> unmatched = children.stream()
+                .filter(child -> child != null
+                        && child.getStatus() != AgentRunStatus.INTERRUPTED_WITH_PARENT)
+                .sorted((a, b) -> {
+                    Instant left = a.getCreatedAt() == null ? Instant.EPOCH : a.getCreatedAt();
+                    Instant right = b.getCreatedAt() == null ? Instant.EPOCH : b.getCreatedAt();
+                    return left.compareTo(right);
+                })
+                .toList();
+        for (int i = 0; i < unmatched.size(); i++) {
+            if (i < accounted) {
+                continue;
+            }
+            terminalizeInterruptedWithParent(unmatched.get(i));
+        }
+    }
+
+    private long durableDelegateResultCount(AgentContext context) {
+        ConversationHistory history = context.getConversationHistory();
+        if (history == null || history.entries() == null) {
+            return 0L;
+        }
+        long count = 0L;
+        for (ConversationHistoryEntry entry : history.entries()) {
+            if (entry != null
+                    && entry.stableType() == ConversationEntryType.TOOL_RESULT
+                    && DelegateTools.isDelegate(entry.toolName())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void terminalizeInterruptedWithParent(AgentRun child) {
+        if (child == null || StringUtils.isBlank(child.getRunId())
+                || child.getStatus() == null
+                || child.getStatus().terminal()) {
+            return;
+        }
+        child.setStatus(AgentRunStatus.INTERRUPTED_WITH_PARENT);
+        child.setStopReason(AgentStopReason.INTERRUPTED_WITH_PARENT.name());
+        runRepository.save(child);
+        leaseRepository.find(child.getRunId()).ifPresent(lease -> {
+            if (lease.getFence() != null) {
+                leaseRepository.release(child.getRunId(), lease.getFence());
+            }
+        });
     }
 
     private boolean hasMatchingToolResult(AgentContext context, String toolCallId) {
@@ -184,7 +256,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         String expected = ConversationHistoryInitializer.eventKey(
                 context.getRunId(), toolCallId, "tool_result");
         for (ConversationHistoryEntry entry : history.entries()) {
-            if (entry.stableType() == cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType.TOOL_RESULT
+            if (entry.stableType() == ConversationEntryType.TOOL_RESULT
                     && expected.equals(entry.eventKey())) {
                 return true;
             }

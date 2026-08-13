@@ -101,6 +101,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     rejectTerminalRun(question, sink);
                     return;
                 }
+                if (isExistingChildRun(question)) {
+                    rejectChildRecovery(question, sink);
+                    return;
+                }
                 AgentRunStartGuard startGuard = question == null ? null : question.getRunStartGuard();
                 if (startGuard != null) {
                     try {
@@ -170,6 +174,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         context.setCurrentNode(AgentNodeNames.PROMPT_BUILD);
                         emit(sink, lifecycle.resumeRunning(context));
                         emit(sink, lifecycle.reconcileToolDurability(context));
+                        lifecycle.terminalizeInterruptedDelegates(context);
                         if (StringUtils.isNotBlank(question.getAmbiguityFact())) {
                             emit(sink, lifecycle.recordAmbiguityFact(context, question.getAmbiguityFact()));
                             sink.complete();
@@ -271,6 +276,27 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 .flatMap(run -> components.checkpointRepository().latest(run.getRunId()))
                 .map(checkpoint -> checkpoint.getContextSnapshot() != null)
                 .orElse(false);
+    }
+
+    private boolean isExistingChildRun(AgentQuestion question) {
+        if (question == null || StringUtils.isBlank(question.getRunId())) {
+            return false;
+        }
+        return components.runRepository().find(question.getRunId())
+                .filter(run -> StringUtils.isNotBlank(run.getParentRunId()))
+                .isPresent();
+    }
+
+    private void rejectChildRecovery(AgentQuestion question, FluxSink<AgentEvent> sink) {
+        AgentContext context = resolveContext(question);
+        String message = "Delegate child Runs are not independent recovery units";
+        context.runtime().fail(AgentStopReason.RUNTIME_SCHEMA_MISMATCH,
+                "child_run_recovery", message);
+        context.setFinalAnswer(message);
+        emit(sink, List.of(components.eventFactory().agentError(context)));
+        emit(sink, List.of(components.eventFactory().done(
+                context, AgentStopReason.RUNTIME_SCHEMA_MISMATCH)));
+        sink.complete();
     }
 
     private boolean isTerminalRun(AgentQuestion question) {

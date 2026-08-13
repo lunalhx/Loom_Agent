@@ -33,6 +33,7 @@ import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.skill.service.SkillCatalogFormatter;
 import cn.lunalhx.ai.domain.skill.service.SkillDiscoveryService;
+import cn.lunalhx.ai.domain.tool.service.DelegateTools;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository;
@@ -276,7 +277,11 @@ public class CliSessionService implements AutoCloseable {
                         if (marker == null || !marker.awaitsAmbiguityReview()) {
                             continue;
                         }
-                        out.append("Interrupted Tool Call ").append(marker.getToolName());
+                        if (DelegateTools.isDelegate(marker.getToolName())) {
+                            out.append("Interrupted Delegate Call");
+                        } else {
+                            out.append("Interrupted Tool Call ").append(marker.getToolName());
+                        }
                         if (marker.getSafetyTarget() != null) {
                             out.append(" target=").append(marker.getSafetyTarget());
                         }
