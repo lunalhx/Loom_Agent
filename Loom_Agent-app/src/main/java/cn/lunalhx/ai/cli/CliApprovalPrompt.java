@@ -88,4 +88,24 @@ public final class CliApprovalPrompt implements PermissionPrompt {
             return null;
         }
     }
+
+    @Override
+    public String askUserInput(String redactedDisplay) {
+        if (!interactive) {
+            return null;
+        }
+        System.out.println();
+        System.out.println(redactedDisplay);
+        System.out.print("continue with additional instruction (empty aborts): ");
+        System.out.flush();
+        try {
+            String line = reader.readLine();
+            if (line == null || line.isBlank()) {
+                return null;
+            }
+            return line.strip();
+        } catch (IOException e) {
+            return null;
+        }
+    }
 }

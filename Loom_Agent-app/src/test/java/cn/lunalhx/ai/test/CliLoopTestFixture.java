@@ -107,8 +107,10 @@ public final class CliLoopTestFixture {
                 new RedactingToolOutputSanitizer(redactor),
                 model);
         ConversationHistoryAppendService ledger = new ConversationHistoryAppendService();
+        cn.lunalhx.ai.domain.tool.service.PermissionPrompt prompt =
+                ignored == null || ignored.isEmpty() ? null : ignored.getFirst();
         AgentLoopFactory factory = new AgentLoopFactory(gateway, state, runtime, ledger,
-                new ContextManager(agent), new ConversationExecutionGuard(), null,
+                new ContextManager(agent), new ConversationExecutionGuard(), prompt,
                 new cn.lunalhx.ai.cli.FilePlanSubmissionHandler(sessions, runs, mapper));
         ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
         return factory.createStandalone(registry, Runnable::run);

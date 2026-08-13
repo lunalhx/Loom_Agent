@@ -266,6 +266,8 @@ public class AgentContext {
     public void addInterruptedToolCall(ToolExecutionMarker marker) { action.addInterruptedToolCall(marker); }
     public AmbiguityReview getAmbiguityReview() { return action.ambiguityReview(); }
     public void setAmbiguityReview(AmbiguityReview v) { action.setAmbiguityReview(v); }
+    public PendingInteraction getPendingInteraction() { return action.pendingInteraction(); }
+    public void setPendingInteraction(PendingInteraction v) { action.setPendingInteraction(v); }
 
     // ==================== Plan Evidence ====================
 

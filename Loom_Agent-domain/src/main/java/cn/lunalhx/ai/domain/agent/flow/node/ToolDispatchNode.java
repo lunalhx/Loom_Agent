@@ -79,12 +79,11 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .build();
 
         ToolExecutor.ToolRuntimePolicy policy = resolvePolicy(context);
+        // Redact the durable decision before approval I/O so a pending-approval
+        // checkpoint cannot persist raw secret parameters.
+        applyRedactedInput(decision, toolCall.getName());
         ToolAuthorizationResult authorization = approvalResolver.resolve(context, toolCall, policy,
                 context.getPermissionPolicySnapshot());
-
-        // Only the redacted display value enters events/state/checkpoint;
-        // the raw value lives solely in the transient ToolCall.
-        applyRedactedInput(decision, toolCall.getName());
 
         List<AgentEvent> events = new ArrayList<>();
         events.add(event(context, AgentEventType.THOUGHT)

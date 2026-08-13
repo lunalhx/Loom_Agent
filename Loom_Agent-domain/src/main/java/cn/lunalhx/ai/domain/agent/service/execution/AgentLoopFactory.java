@@ -59,29 +59,27 @@ public class AgentLoopFactory {
     public DefaultAgentLoopService createStandalone(ToolRegistry toolRegistry, Executor executor) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         Objects.requireNonNull(executor, "executor must not be null");
-        AgentLoopAssembly assembly = assemble(toolRegistry);
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
                 state.runRepository(), state.checkpointRepository(), state.historyRepository(),
                 state.leaseRepository());
+        AgentLoopAssembly assembly = assemble(toolRegistry, lifecycle);
         return new DefaultAgentLoopService(assembly, executor, lifecycle, executionGuard, toolRegistry);
     }
 
-    AgentLoopAssembly assemble(ToolRegistry toolRegistry) {
-        AgentFlowDefinition flow = flowFactory.create(toolRegistry);
-        AgentLoopComponents components = buildComponents(flow, toolRegistry);
-        return new AgentLoopAssembly(runtime.properties(), flow, components);
+    AgentLoopAssembly assemble(ToolRegistry toolRegistry, AgentRunLifecycle lifecycle) {
+        AgentFlowDefinition flow = flowFactory.create(toolRegistry, lifecycle);
+        AgentLoopComponents components = buildComponents(flow, toolRegistry, lifecycle);
+        return new AgentLoopAssembly(runtime.properties(), flow, components, permissionPrompt);
     }
 
-    private AgentLoopComponents buildComponents(AgentFlowDefinition flow, ToolRegistry toolRegistry) {
+    private AgentLoopComponents buildComponents(AgentFlowDefinition flow, ToolRegistry toolRegistry,
+                                                AgentRunLifecycle lifecycle) {
         AgentEventFactory eventFactory = new AgentEventFactory();
         AgentContextFactory contextFactory = new AgentContextFactory(
                 runtime.properties(), state.workspaceResolver(),
                 runtime.runtimeConfigSource(), toolRegistry, state.historyRepository());
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), eventFactory, flow.nodes());
-        AgentRunLifecycle lifecycle = new AgentRunLifecycle(
-                state.runRepository(), state.checkpointRepository(), state.historyRepository(),
-                state.leaseRepository());
         return new AgentLoopComponents(contextFactory, nodeLifecycle, eventFactory,
                 state.runRepository(), state.checkpointRepository(),
                 lifecycle, ledgerAppendService, planSubmissionHandler);

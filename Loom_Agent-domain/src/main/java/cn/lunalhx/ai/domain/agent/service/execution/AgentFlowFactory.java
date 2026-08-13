@@ -23,6 +23,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.service.PendingInteractionRecorder;
 import cn.lunalhx.ai.domain.tool.service.PermissionPrompt;
 import cn.lunalhx.ai.domain.tool.service.ToolApprovalResolver;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
@@ -77,8 +78,10 @@ public class AgentFlowFactory {
         this.permissionPrompt = permissionPrompt;
     }
 
-    public AgentFlowDefinition create(ToolRegistry toolRegistry) {
+    public AgentFlowDefinition create(ToolRegistry toolRegistry,
+                                      PendingInteractionRecorder pendingRecorder) {
         Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
+        Objects.requireNonNull(pendingRecorder, "pendingRecorder must not be null");
         AgentRuntimeProperties properties = runtime.properties();
         TraceRecorder traceRecorder = runtime.traceRecorder();
         BudgetGuard budgetGuard = runtime.budgetGuard();
@@ -100,7 +103,8 @@ public class AgentFlowFactory {
 
         ToolExecutor executor = new ToolExecutor(toolRegistry, runtime.toolOutputSanitizer());
         ToolApprovalResolver approvalResolver = new ToolApprovalResolver(
-                new ToolAuthorizationService(toolRegistry, objectMapper), permissionPrompt);
+                new ToolAuthorizationService(toolRegistry, objectMapper), permissionPrompt,
+                pendingRecorder);
 
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new PromptBuildNode(

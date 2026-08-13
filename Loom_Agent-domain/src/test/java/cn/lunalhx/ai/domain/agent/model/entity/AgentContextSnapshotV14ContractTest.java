@@ -118,6 +118,43 @@ public class AgentContextSnapshotV14ContractTest {
     }
 
     @Test
+    public void pendingInteractionRoundTripKeepsDisplayDigestAndTypeWithoutRawSecrets()
+            throws Exception {
+        String secret = "TOPSECRET_pending_xyz";
+        AgentContext context = new AgentContext();
+        context.setRunId("run-pending");
+        context.setSessionId("sess-pending");
+        context.setConversationId("conv-pending");
+        context.setQuestion("task");
+        context.setCollaborationMode(CollaborationMode.BUILD);
+        context.setWorkspace(WorkspaceRef.local(Path.of("/tmp/ws"), "ws"));
+        context.setPermissionPolicySnapshot(new PermissionPolicySnapshot(
+                PermissionAction.ASK, List.of(), List.of()));
+        context.setExecutionProfile(ExecutionProfile.forRun(CollaborationMode.BUILD, false)
+                .withWorkspace(Path.of("/tmp/ws").toAbsolutePath()));
+        context.setPendingInteraction(PendingInteraction.builder()
+                .interactionType(PendingInteraction.TOOL_APPROVAL)
+                .redactedDisplay("write_file {path=notes.txt, content={length=21, sha256=abcd}}")
+                .subjectDigest("a".repeat(64))
+                .toolName("write_file")
+                .build());
+
+        AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
+        String json = mapper.writeValueAsString(snapshot);
+        assertFalse(json.contains(secret));
+        assertTrue(json.contains("TOOL_APPROVAL"));
+        assertTrue(json.contains("write_file"));
+        assertEquals(PendingInteraction.TOOL_APPROVAL,
+                snapshot.getPendingInteraction().getInteractionType());
+        assertEquals(64, snapshot.getPendingInteraction().getSubjectDigest().length());
+
+        AgentContext restored = mapper.readValue(json, AgentContextSnapshot.class).restore();
+        assertEquals(PendingInteraction.TOOL_APPROVAL, restored.getPendingInteraction().getInteractionType());
+        assertEquals("write_file", restored.getPendingInteraction().getToolName());
+        assertFalse(restored.getPendingInteraction().getRedactedDisplay().contains(secret));
+    }
+
+    @Test
     public void v13CheckpointShapeIsRejected() throws Exception {
         String json = """
                 {

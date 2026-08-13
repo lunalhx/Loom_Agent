@@ -32,6 +32,7 @@ import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
+import cn.lunalhx.ai.domain.tool.service.PermissionPrompt;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -69,6 +70,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final SkillRunBootstrap skillRunBootstrap;
     private final ToolRegistry toolRegistry;
     private final AttemptLeaseRepository leaseRepository;
+    private final PermissionPrompt permissionPrompt;
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
                             AgentRunLifecycle lifecycle,
@@ -83,6 +85,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         this.skillRunBootstrap = new SkillRunBootstrap(properties, toolRegistry);
         this.leaseRepository = lifecycle.attemptLeaseRepository();
+        this.permissionPrompt = assembly.permissionPrompt();
     }
 
     // ==================== 公共入口 ====================
@@ -178,6 +181,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         if (question.isContinueWithAmbiguity()) {
                             emit(sink, lifecycle.acceptAmbiguity(context));
                         }
+                        emit(sink, new PendingInteractionResolver(permissionPrompt, lifecycle)
+                                .resolve(context));
                     } else {
                         emit(sink, lifecycle.initializeRun(context));
                     }

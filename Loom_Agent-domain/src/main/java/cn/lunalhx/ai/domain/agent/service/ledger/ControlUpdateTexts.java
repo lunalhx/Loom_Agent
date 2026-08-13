@@ -180,6 +180,18 @@ public final class ControlUpdateTexts {
                 + " status: " + (alreadyActive ? "already_active" : "activated");
     }
 
+    public static String renderPendingApprovalReplan(String toolName) {
+        return "[Pending Approval] " + StringUtils.defaultIfBlank(toolName, "unknown")
+                + " was approved after recovery. The original call was not executed;"
+                + " replan from current Repository State.";
+    }
+
+    public static String renderPendingApprovalDenied(String toolName) {
+        return "[Pending Approval] " + StringUtils.defaultIfBlank(toolName, "unknown")
+                + " was denied after recovery. The original call was not executed;"
+                + " replan from current Repository State.";
+    }
+
     public static String renderInterruptedToolCall(String toolName, String toolCallId) {
         return "[Interrupted Tool Call] " + StringUtils.defaultIfBlank(toolName, "unknown")
                 + " id=" + StringUtils.defaultIfBlank(toolCallId, "unknown")

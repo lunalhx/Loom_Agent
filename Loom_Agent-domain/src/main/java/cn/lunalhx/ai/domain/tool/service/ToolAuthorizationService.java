@@ -154,17 +154,7 @@ public final class ToolAuthorizationService {
         if (lifetime != GrantLifetime.ONCE) {
             PermissionGrant grant = PermissionGrant.issue(
                     pending.normalized().permissionSubject().exactKey(), pending.baseProfile(), lifetime);
-            try {
-                if (lifetime == GrantLifetime.WORKSPACE) {
-                    Path workspace = context.getResolvedWorkspace();
-                    if (workspace == null) {
-                        return reject(pending.call(), "grant_persistence_failed", "grant_persistence_failed",
-                                pending.effectProfile());
-                    }
-                    new WorkspacePermissionGrantStore().append(workspace, grant);
-                }
-                context.addPermissionGrant(grant);
-            } catch (RuntimeException e) {
+            if (!persistReusableGrant(context, grant)) {
                 return reject(pending.call(), "grant_persistence_failed", "grant_persistence_failed",
                         pending.effectProfile());
             }
@@ -211,6 +201,27 @@ public final class ToolAuthorizationService {
         }
         return ToolAuthorizationResult.authorized(new AuthorizedToolCall(call, normalized,
                 effect.profile(), effectiveProfile, profile, decision, context.getRunId(), policy.snapshotDigest()));
+    }
+
+    /** Persist a SESSION or WORKSPACE grant through the existing stores. */
+    public static boolean persistReusableGrant(AgentContext context, PermissionGrant grant) {
+        Objects.requireNonNull(grant, "grant");
+        if (grant.lifetime() == GrantLifetime.ONCE) {
+            return true;
+        }
+        try {
+            if (grant.lifetime() == GrantLifetime.WORKSPACE) {
+                Path workspace = context.getResolvedWorkspace();
+                if (workspace == null) {
+                    return false;
+                }
+                new WorkspacePermissionGrantStore().append(workspace, grant);
+            }
+            context.addPermissionGrant(grant);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private ToolAuthorizationResult reject(ToolCall call, String errorCode, String event,

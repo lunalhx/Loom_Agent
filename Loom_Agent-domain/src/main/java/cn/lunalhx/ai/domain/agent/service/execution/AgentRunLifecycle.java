@@ -11,6 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AmbiguityReview;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingInteraction;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.ToolExecutionMarker;
@@ -28,6 +29,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.recovery.FileMutationEvidence;
 import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import cn.lunalhx.ai.domain.tool.service.FileMutationTools;
+import cn.lunalhx.ai.domain.tool.service.PendingInteractionRecorder;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -43,7 +45,7 @@ import java.util.Objects;
  * <p>Conversation History is persisted before each AgentCheckpoint so the
  * checkpoint may only store an exact History anchor.
  */
-public final class AgentRunLifecycle {
+public final class AgentRunLifecycle implements PendingInteractionRecorder {
 
     static final String EXECUTION_WINDOW_REASON = "execution_window";
 
@@ -205,9 +207,23 @@ public final class AgentRunLifecycle {
     }
 
     public List<AgentEvent> pauseForUserInput(AgentContext context) {
-        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, "pause_user_input");
+        if (context.getPendingInteraction() == null) {
+            String display = "自动上下文恢复已耗尽。请补充更聚焦的指令后继续，或终止本次运行。";
+            String subject = StringUtils.defaultIfBlank(context.getContextBlockedReason(), "user_input");
+            context.setPendingInteraction(PendingInteraction.userInput(display, subject));
+        }
+        return persistPending(context, context.getPendingInteraction());
+    }
+
+    @Override
+    public List<AgentEvent> persistPending(AgentContext context, PendingInteraction pending) {
+        context.setPendingInteraction(Objects.requireNonNull(pending, "pending"));
+        boolean approval = pending.toolApproval();
+        String reason = approval ? "pending_approval" : "pause_user_input";
+        AgentRunStatus status = approval ? AgentRunStatus.WAITING_APPROVAL : AgentRunStatus.WAITING_USER_INPUT;
+        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, reason);
         context.setCheckpointVersion(checkpoint.getVersion());
-        saveRun(context, AgentNodeNames.PROMPT_BUILD, AgentRunStatus.WAITING_USER_INPUT);
+        saveRun(context, AgentNodeNames.PROMPT_BUILD, status);
         return List.of(AgentEvent.builder()
                 .type(AgentEventType.CHECKPOINT_SAVED)
                 .runId(context.identity().runId())
@@ -305,6 +321,12 @@ public final class AgentRunLifecycle {
                 ConversationHistoryInitializer.eventKey(context.getRunId(),
                         "continue", "continue_with_ambiguity"));
         return checkpointRunningAtPromptBuild(context, "continue_with_ambiguity");
+    }
+
+    @Override
+    public List<AgentEvent> clearPending(AgentContext context) {
+        context.setPendingInteraction(null);
+        return checkpointRunningAtPromptBuild(context, "pending_resolved");
     }
 
     // ================================================================

@@ -13,4 +13,9 @@ public interface PermissionPrompt {
     default GrantLifetime askExecutionGrant(ExecutionGrantRequest request) {
         return null;
     }
+
+    /** Re-present a durable user-input pause. Null means the user did not answer. */
+    default String askUserInput(String redactedDisplay) {
+        return null;
+    }
 }

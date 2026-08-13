@@ -30,6 +30,12 @@ public class CliApprovalPromptTest {
     }
 
     @Test
+    public void userInputReturnsTrimmedLine() {
+        CliApprovalPrompt prompt = new CliApprovalPrompt(true, new StringReader("  focus on tests  \n"));
+        assertEquals("focus on tests", prompt.askUserInput("please add a narrower request"));
+    }
+
+    @Test
     public void executionGrantParsesSessionChoice() {
         CliApprovalPrompt prompt = new CliApprovalPrompt(true, new StringReader("s\n"));
         GrantLifetime lifetime = prompt.askExecutionGrant(

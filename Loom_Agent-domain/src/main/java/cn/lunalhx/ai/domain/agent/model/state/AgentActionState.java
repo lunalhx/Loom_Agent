@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.model.state;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
 import cn.lunalhx.ai.domain.agent.model.entity.AmbiguityReview;
+import cn.lunalhx.ai.domain.agent.model.entity.PendingInteraction;
 import cn.lunalhx.ai.domain.agent.model.entity.ToolExecutionMarker;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -22,6 +23,7 @@ public final class AgentActionState {
     private ToolExecutionMarker executionWindow;
     private List<ToolExecutionMarker> interruptedToolCalls = new ArrayList<>();
     private AmbiguityReview ambiguityReview;
+    private PendingInteraction pendingInteraction;
 
     public AgentDecision decision() { return decision; }
     public ToolCall toolCall() { return toolCall; }
@@ -31,12 +33,18 @@ public final class AgentActionState {
     public List<ToolExecutionMarker> interruptedToolCalls() {
         return interruptedToolCalls == null ? List.of() : List.copyOf(interruptedToolCalls);
     }
+    public PendingInteraction pendingInteraction() {
+        return pendingInteraction;
+    }
 
     public void setDecision(AgentDecision v) { this.decision = v; }
     public void setToolCall(ToolCall v) { this.toolCall = v; }
     public void setToolResult(ToolResult v) { this.toolResult = v; }
     public void setAuthorizedToolCall(AuthorizedToolCall v) { this.authorizedToolCall = v; }
     public void setExecutionWindow(ToolExecutionMarker v) { this.executionWindow = v; }
+    public void setPendingInteraction(PendingInteraction v) {
+        this.pendingInteraction = v;
+    }
     public void setInterruptedToolCalls(List<ToolExecutionMarker> v) {
         this.interruptedToolCalls = v == null ? new ArrayList<>() : new ArrayList<>(v);
     }
