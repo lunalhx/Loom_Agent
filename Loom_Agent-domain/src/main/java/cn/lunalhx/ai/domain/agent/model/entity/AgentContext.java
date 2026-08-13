@@ -259,6 +259,11 @@ public class AgentContext {
     public void setAuthorizedToolCall(AuthorizedToolCall v) { action.setAuthorizedToolCall(v); }
     public ToolResult getToolResult() { return action.toolResult(); }
     public void setToolResult(ToolResult v) { action.setToolResult(v); }
+    public ToolExecutionMarker getExecutionWindow() { return action.executionWindow(); }
+    public void setExecutionWindow(ToolExecutionMarker v) { action.setExecutionWindow(v); }
+    public List<ToolExecutionMarker> getInterruptedToolCalls() { return action.interruptedToolCalls(); }
+    public void setInterruptedToolCalls(List<ToolExecutionMarker> v) { action.setInterruptedToolCalls(v); }
+    public void addInterruptedToolCall(ToolExecutionMarker marker) { action.addInterruptedToolCall(marker); }
 
     // ==================== Plan Evidence ====================
 

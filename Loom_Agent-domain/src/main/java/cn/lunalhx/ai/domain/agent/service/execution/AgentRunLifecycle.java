@@ -11,6 +11,8 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
+import cn.lunalhx.ai.domain.agent.model.entity.ToolExecutionMarker;
 import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
@@ -19,6 +21,10 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
+import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
+import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
+import cn.lunalhx.ai.domain.tool.service.ObservationTools;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -35,10 +41,13 @@ import java.util.Objects;
  */
 public final class AgentRunLifecycle {
 
+    static final String EXECUTION_WINDOW_REASON = "execution_window";
+
     private final AgentRunRepository runRepository;
     private final AgentCheckpointRepository checkpointRepository;
     private final ConversationHistoryRepository historyRepository;
     private final AttemptLeaseRepository leaseRepository;
+    private final ConversationHistoryAppendService historyAppend = new ConversationHistoryAppendService();
 
     public AgentRunLifecycle(AgentRunRepository runRepository,
                              AgentCheckpointRepository checkpointRepository,
@@ -91,11 +100,70 @@ public final class AgentRunLifecycle {
         persistConversationHistory(context);
     }
 
+    /** Persist the sanitized Tool Call and open the execution window before adapter invocation. */
+    public List<AgentEvent> openExecutionWindow(AgentContext context) {
+        var toolCall = context.getToolCall();
+        if (toolCall == null || !ObservationTools.isObservation(toolCall.getName())) {
+            return List.of();
+        }
+        String toolCallId = StringUtils.defaultIfBlank(toolCall.getToolCallId(), "unknown");
+        String sanitizedInput = context.getDecision() == null || context.getDecision().getInput() == null
+                ? "{}" : context.getDecision().getInput().toString();
+        historyAppend.appendToolCall(context, toolCall.getName(), toolCallId, sanitizedInput,
+                ConversationHistoryInitializer.eventKey(context.getRunId(), toolCallId, "tool_call"));
+        persistConversationHistory(context);
+        context.setExecutionWindow(ToolExecutionMarker.builder()
+                .toolCallId(toolCallId)
+                .toolName(toolCall.getName())
+                .sanitizedInput(sanitizedInput)
+                .build());
+        return checkpointRunningAtPromptBuild(context, EXECUTION_WINDOW_REASON);
+    }
+
+    /**
+     * When History has a matching Tool Result, close the execution window without
+     * replaying. A marker without a result becomes an Interrupted Tool Call.
+     */
+    public List<AgentEvent> reconcileToolDurability(AgentContext context) {
+        ToolExecutionMarker window = context.getExecutionWindow();
+        if (window == null || StringUtils.isBlank(window.getToolCallId())) {
+            return List.of();
+        }
+        if (hasMatchingToolResult(context, window.getToolCallId())) {
+            context.setExecutionWindow(null);
+            return checkpointRunningAtPromptBuild(context, "after_tool");
+        }
+        context.addInterruptedToolCall(window);
+        context.setExecutionWindow(null);
+        historyAppend.appendSystemNote(context,
+                ControlUpdateTexts.renderInterruptedToolCall(window.getToolName(), window.getToolCallId()),
+                ConversationHistoryInitializer.eventKey(context.getRunId(),
+                        window.getToolCallId(), "interrupted_tool"));
+        return checkpointRunningAtPromptBuild(context, "interrupted_tool");
+    }
+
+    private boolean hasMatchingToolResult(AgentContext context, String toolCallId) {
+        ConversationHistory history = context.getConversationHistory();
+        if (history == null) {
+            return false;
+        }
+        String expected = ConversationHistoryInitializer.eventKey(
+                context.getRunId(), toolCallId, "tool_result");
+        for (ConversationHistoryEntry entry : history.entries()) {
+            if (entry.stableType() == cn.lunalhx.ai.domain.agent.model.valobj.ConversationEntryType.TOOL_RESULT
+                    && expected.equals(entry.eventKey())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Post-tool checkpoint: the snapshot already contains the sanitized
      *  result, history, memory and ledger. The next recovery node is always
      *  {@code prompt_build} and the running context's current node is never
      *  mutated by the save. */
     public List<AgentEvent> checkpointAfterTool(AgentContext context) {
+        context.setExecutionWindow(null);
         return checkpointRunningAtPromptBuild(context, "after_tool");
     }
 

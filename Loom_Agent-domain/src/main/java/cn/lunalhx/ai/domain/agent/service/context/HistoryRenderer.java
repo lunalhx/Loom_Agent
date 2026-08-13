@@ -178,6 +178,12 @@ final class HistoryRenderer {
                     "[tool:" + toolName + "] " + untrusted(singleLine(escape(unwrapToolBoundary(item.first().content())))),
                     false, false, false);
         }
+        if (item.first().stableType() == ConversationEntryType.TOOL_CALL) {
+            String toolName = item.first().toolName() != null ? item.first().toolName() : "tool";
+            return RenderOutcome.line(
+                    "[tool:" + toolName + "] " + singleLine(item.first().content()),
+                    false, false, false);
+        }
         String role = item.first().role();
         if ("assistant".equals(role)) {
             return RenderOutcome.line("Assistant: " + (compressed
@@ -265,14 +271,19 @@ final class HistoryRenderer {
         List<LogicalItem> items = new ArrayList<>();
         for (int i = 0; i < entries.size(); i++) {
             ConversationHistoryEntry entry = entries.get(i);
-            if (entry.stableType() == ConversationEntryType.ASSISTANT_ACTION
-                    && i + 1 < entries.size()
-                    && entries.get(i + 1).stableType() == ConversationEntryType.TOOL_RESULT
-                    && sameCorrelation(entry, entries.get(i + 1))) {
-                items.add(LogicalItem.toolPair(entry, entries.get(i + 1)));
-                i++;
-            } else if (entry.stableType() == ConversationEntryType.TOOL_RESULT) {
-                items.add(LogicalItem.single(entry));
+            int resultIndex = i + 1;
+            while (resultIndex < entries.size()
+                    && entries.get(resultIndex).stableType() == ConversationEntryType.TOOL_CALL
+                    && entry.stableType() != ConversationEntryType.TOOL_CALL) {
+                resultIndex++;
+            }
+            if ((entry.stableType() == ConversationEntryType.TOOL_CALL
+                    || entry.stableType() == ConversationEntryType.ASSISTANT_ACTION)
+                    && resultIndex < entries.size()
+                    && entries.get(resultIndex).stableType() == ConversationEntryType.TOOL_RESULT
+                    && sameCorrelation(entry, entries.get(resultIndex))) {
+                items.add(LogicalItem.toolPair(entry, entries.get(resultIndex)));
+                i = resultIndex;
             } else {
                 items.add(LogicalItem.single(entry));
             }

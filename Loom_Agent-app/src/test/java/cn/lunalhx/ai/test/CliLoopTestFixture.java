@@ -72,14 +72,26 @@ public final class CliLoopTestFixture {
                                          List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools,
                                          cn.lunalhx.ai.domain.agent.service.context.SecretRedactor redactor) {
         Path root = workspace.toAbsolutePath().normalize();
+        cn.lunalhx.ai.infrastructure.store.ArtifactRedactor artifacts =
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor);
+        return build(workspace, mapper, gateway, agent, ignored, tools, redactor,
+                new FileConversationHistoryRepository(root, mapper, artifacts),
+                new FileAgentCheckpointRepository(root, mapper, artifacts));
+    }
+
+    public static AgentLoopService build(Path workspace, ObjectMapper mapper,
+                                         ModelGateway gateway,
+                                         AgentRuntimeProperties agent,
+                                         List<cn.lunalhx.ai.domain.tool.service.PermissionPrompt> ignored,
+                                         List<cn.lunalhx.ai.domain.tool.adapter.port.AgentTool> tools,
+                                         cn.lunalhx.ai.domain.agent.service.context.SecretRedactor redactor,
+                                         ConversationHistoryRepository histories,
+                                         AgentCheckpointRepository checkpoints) {
+        Path root = workspace.toAbsolutePath().normalize();
         AgentWorkspaceResolver resolver = new AgentWorkspaceResolver(agent);
         AgentRunRepository runs = new FileAgentRunRepository(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         AgentSessionRepository sessions = new FileAgentSessionRepository(root, mapper,
-                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
-        AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper,
-                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
-        ConversationHistoryRepository histories = new FileConversationHistoryRepository(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         TraceRecorder traces = new FileTraceRecorder(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
