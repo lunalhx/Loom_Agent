@@ -296,8 +296,8 @@ public class CliSessionService implements AutoCloseable {
 
     /**
      * Terminal Run Abandonment. Works for Recovery Required and for an active
-     * sandboxed Run. Does not call the model or tools, preserves existing
-     * History and checkpoints, and cannot be recovered afterwards.
+     * Run, including Full Access. Does not call the model or tools, preserves
+     * existing History and checkpoints, and cannot be recovered afterwards.
      */
     public String abandon() {
         String active = activeRunId;
@@ -338,6 +338,10 @@ public class CliSessionService implements AutoCloseable {
 
     public boolean hasActiveRecoverableRun() {
         return activeRunId != null && !fullAccessActive();
+    }
+
+    public boolean hasActiveRun() {
+        return activeRunId != null;
     }
 
     /**

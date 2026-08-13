@@ -15,8 +15,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JLine REPL. An active sandboxed Run is left on a worker so Ctrl-C, EOF, and
- * /exit can present Suspend vs Abandon without implicitly deciding.
+ * JLine REPL. An active Run is left on a worker so Ctrl-C, EOF, and /exit can
+ * present an explicit exit choice without implicitly deciding. Sandboxed Runs
+ * choose Suspend vs Abandon; Full Access Runs choose continue vs Abandon.
  */
 final class CliInteractiveLoop {
 
@@ -37,7 +38,9 @@ final class CliInteractiveLoop {
                 .build()) {
             LineReader reader = LineReaderBuilder.builder().terminal(terminal).build();
             PrintStream output = System.out;
-            SuspendAbandonChooser chooser = new SuspendAbandonChooser(new JlineLineSource(reader), output);
+            JlineLineSource lines = new JlineLineSource(reader);
+            SuspendAbandonChooser recoverable = new SuspendAbandonChooser(lines, output);
+            ContinueAbandonChooser fullAccess = new ContinueAbandonChooser(lines, output);
             while (true) {
                 String line;
                 try {
@@ -78,7 +81,7 @@ final class CliInteractiveLoop {
                 }
                 output.println();
                 Future<String> turn = turns.submit(() -> runSafe(session, input));
-                waitForTurn(session, reader, chooser, turn);
+                waitForTurn(session, reader, recoverable, fullAccess, turn);
                 try {
                     output.println(turn.get(1, TimeUnit.MINUTES));
                 } catch (Exception e) {
@@ -94,7 +97,9 @@ final class CliInteractiveLoop {
     }
 
     private static void waitForTurn(CliSessionService session, LineReader reader,
-                                    SuspendAbandonChooser chooser, Future<String> turn) {
+                                    SuspendAbandonChooser recoverable,
+                                    ContinueAbandonChooser fullAccess,
+                                    Future<String> turn) {
         Thread waker = Thread.ofVirtual().name("cli-turn-waker").start(() -> {
             try {
                 turn.get();
@@ -108,19 +113,18 @@ final class CliInteractiveLoop {
         try {
             while (!turn.isDone()) {
                 try {
-                    String line = reader.readLine(
-                            "(run in progress; Ctrl-C, EOF, or /exit to choose suspend/abandon)> ");
+                    String line = reader.readLine(inProgressPrompt(session));
                     if (line != null) {
                         String stripped = line.strip();
                         if ("/exit".equals(stripped) || "/quit".equals(stripped)) {
-                            applyExitChoice(session, chooser);
+                            applyExitChoice(session, recoverable, fullAccess);
                         }
                     }
                 } catch (UserInterruptException | EndOfFileException e) {
                     if (turn.isDone()) {
                         return;
                     }
-                    applyExitChoice(session, chooser);
+                    applyExitChoice(session, recoverable, fullAccess);
                 }
             }
         } finally {
@@ -128,15 +132,29 @@ final class CliInteractiveLoop {
         }
     }
 
-    private static void applyExitChoice(CliSessionService session, SuspendAbandonChooser chooser) {
-        if (!session.hasActiveRecoverableRun()) {
+    private static String inProgressPrompt(CliSessionService session) {
+        if (session.fullAccessActive()) {
+            return "(run in progress; Ctrl-C, EOF, or /exit to choose continue/abandon)> ";
+        }
+        return "(run in progress; Ctrl-C, EOF, or /exit to choose suspend/abandon)> ";
+    }
+
+    private static void applyExitChoice(CliSessionService session,
+                                        SuspendAbandonChooser recoverable,
+                                        ContinueAbandonChooser fullAccess) {
+        if (session.hasActiveRecoverableRun()) {
+            RunExitAction action = recoverable.choose();
+            if (action == RunExitAction.SUSPEND) {
+                session.suspend();
+            } else {
+                session.abandon();
+            }
             return;
         }
-        RunExitAction action = chooser.choose();
-        if (action == RunExitAction.SUSPEND) {
-            session.suspend();
-        } else {
-            session.abandon();
+        if (session.hasActiveRun()) {
+            if (fullAccess.choose() == ContinueAbandonChooser.Choice.ABANDON) {
+                session.abandon();
+            }
         }
     }
 

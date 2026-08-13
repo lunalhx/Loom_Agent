@@ -15,10 +15,10 @@ public final class SuspendAbandonChooser {
             "Active Run: type suspend (recoverable) or abandon (terminal). "
                     + "Ctrl-C/EOF does not choose.";
 
-    private final LineSource source;
+    private final ChooserLineSource source;
     private final PrintStream output;
 
-    public SuspendAbandonChooser(LineSource source, PrintStream output) {
+    public SuspendAbandonChooser(ChooserLineSource source, PrintStream output) {
         this.source = Objects.requireNonNull(source, "source");
         this.output = Objects.requireNonNull(output, "output");
     }
@@ -26,12 +26,12 @@ public final class SuspendAbandonChooser {
     public RunExitAction choose() {
         output.println(PROMPT);
         while (true) {
-            LineSource.Read read = source.read("suspend/abandon> ");
-            if (read instanceof LineSource.Interrupt || read instanceof LineSource.Eof) {
+            ChooserLineSource.Read read = source.read("suspend/abandon> ");
+            if (read instanceof ChooserLineSource.Interrupt || read instanceof ChooserLineSource.Eof) {
                 output.println(PROMPT);
                 continue;
             }
-            if (read instanceof LineSource.Line line) {
+            if (read instanceof ChooserLineSource.Line line) {
                 String choice = line.value() == null ? "" : line.value().strip().toLowerCase();
                 if ("s".equals(choice) || "suspend".equals(choice)) {
                     return RunExitAction.SUSPEND;
@@ -41,17 +41,5 @@ public final class SuspendAbandonChooser {
                 }
             }
         }
-    }
-
-    public interface LineSource {
-        Read read(String prompt);
-
-        sealed interface Read permits Line, Interrupt, Eof {}
-
-        record Line(String value) implements Read {}
-
-        record Interrupt() implements Read {}
-
-        record Eof() implements Read {}
     }
 }

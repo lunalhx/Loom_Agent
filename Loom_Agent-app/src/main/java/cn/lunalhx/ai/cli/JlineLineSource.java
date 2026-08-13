@@ -6,8 +6,8 @@ import org.jline.reader.UserInterruptException;
 
 import java.util.Objects;
 
-/** Adapts a JLine {@link LineReader} into the suspend/abandon chooser. */
-final class JlineLineSource implements SuspendAbandonChooser.LineSource {
+/** Adapts a JLine {@link LineReader} into the active-Run exit choosers. */
+final class JlineLineSource implements ChooserLineSource {
 
     private final LineReader reader;
 
