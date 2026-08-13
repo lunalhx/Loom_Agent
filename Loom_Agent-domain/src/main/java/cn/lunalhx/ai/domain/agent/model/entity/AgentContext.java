@@ -371,9 +371,24 @@ public class AgentContext {
 
     private String attemptId;
     private String leaseFence;
+    private String attemptProvider;
+    private String attemptRuntimeIdentity;
+    private List<ToolSpec> frozenToolContracts;
 
     public String getAttemptId() { return attemptId; }
     public void setAttemptId(String attemptId) { this.attemptId = attemptId; }
     public String getLeaseFence() { return leaseFence; }
     public void setLeaseFence(String leaseFence) { this.leaseFence = leaseFence; }
+    public String getAttemptProvider() { return attemptProvider; }
+    public void setAttemptProvider(String attemptProvider) { this.attemptProvider = attemptProvider; }
+    public String getAttemptRuntimeIdentity() { return attemptRuntimeIdentity; }
+    public void setAttemptRuntimeIdentity(String attemptRuntimeIdentity) {
+        this.attemptRuntimeIdentity = attemptRuntimeIdentity;
+    }
+    public List<ToolSpec> getFrozenToolContracts() {
+        return frozenToolContracts;
+    }
+    public void setFrozenToolContracts(List<ToolSpec> frozenToolContracts) {
+        this.frozenToolContracts = frozenToolContracts;
+    }
 }

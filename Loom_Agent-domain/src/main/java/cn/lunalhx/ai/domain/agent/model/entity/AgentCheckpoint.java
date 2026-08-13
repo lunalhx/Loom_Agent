@@ -21,5 +21,11 @@ public class AgentCheckpoint {
     private String lastToolExecutionJson;
     private String reason;
     private Instant createdAt;
+    /** Actual model identity used by this Attempt; not a frozen Run contract. */
+    private String model;
+    /** Actual provider identity used by this Attempt; not a frozen Run contract. */
+    private String provider;
+    /** Actual Runtime identity used by this Attempt; not a frozen Run contract. */
+    private String runtimeIdentity;
 
 }

@@ -61,6 +61,31 @@ public class PersistenceSchemaRejectionTest {
     }
 
     @Test
+    public void latestCorruptCheckpointDoesNotFallBackToOlderValidVersion() throws Exception {
+        Path workspace = Files.createTempDirectory("schema-cp-no-fallback");
+        Path dir = Files.createDirectories(workspace.resolve(".loom-code").resolve("checkpoints").resolve("run-1"));
+        Files.writeString(dir.resolve("1.json"), """
+                {"runId":"run-1","version":1,"currentNode":"prompt_build",
+                "contextSnapshot":{"schemaVersion":15,"runId":"run-1","runModeSnapshot":"BUILD",
+                "historyAnchor":{"nextSequence":0}}}
+                """);
+        Files.writeString(dir.resolve("2.json"), """
+                {"runId":"run-1","version":2,"currentNode":"prompt_build",
+                "contextSnapshot":{"schemaVersion":14,"runId":"run-1","runModeSnapshot":"BUILD",
+                "ledgerEntries":[],"ledgerNextSequence":0}}
+                """);
+
+        try {
+            new FileAgentCheckpointRepository(workspace, mapper).latest("run-1");
+            fail("expected latest incompatible checkpoint to fail closed");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("incompatible"));
+            assertTrue(e.getMessage().contains("2.json"));
+        }
+        assertTrue(Files.readString(dir.resolve("1.json")).contains("\"schemaVersion\":15"));
+    }
+
+    @Test
     public void agentCheckpointV14IsRejected() throws Exception {
         Path workspace = Files.createTempDirectory("schema-cp-v14");
         Path dir = Files.createDirectories(workspace.resolve(".loom-code").resolve("checkpoints").resolve("run-1"));

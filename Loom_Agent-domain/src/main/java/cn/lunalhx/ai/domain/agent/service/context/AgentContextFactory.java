@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.agent.service.recovery.RecoveredToolCatalog;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 import cn.lunalhx.ai.domain.skill.service.SkillPackageRootBinder;
 import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
@@ -20,6 +21,7 @@ import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.RunAuthorizationSource;
 import org.apache.commons.lang3.StringUtils;
 
@@ -162,9 +164,7 @@ public final class AgentContextFactory {
 
         context.setPendingContinuation(context.getQuestion());
 
-        if (StringUtils.isNotBlank(question.getModel())) {
-            context.setCurrentModel(question.getModel());
-        }
+        applyAttemptRuntime(context, question);
         return context;
     }
 
@@ -201,13 +201,26 @@ public final class AgentContextFactory {
                 context.getSkillCatalogSnapshot(), workspace.getRoot(), userHome));
         context.setActiveSkills(binder.rebindActive(
                 context.getActiveSkills(), workspace.getRoot(), userHome));
-        context.setToolSpecs(toolRegistry.effectiveSpecs(
-                context.getCollaborationMode(), context.getAllowedTools(), context.getExecutionProfile()));
-        context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
-        if (StringUtils.isNotBlank(question.getModel())) {
-            context.setCurrentModel(question.getModel());
-        }
+        applyRecoveredToolCatalog(context, checkpoint);
+        applyAttemptRuntime(context, question);
         return context;
+    }
+
+    private void applyRecoveredToolCatalog(AgentContext context, AgentContextSnapshot checkpoint) {
+        List<ToolSpec> frozen = checkpoint.getFrozenToolContracts() == null
+                ? List.of() : List.copyOf(checkpoint.getFrozenToolContracts());
+        context.setFrozenToolContracts(frozen);
+        context.setAllowedTools(frozen.stream()
+                .map(ToolSpec::getName)
+                .filter(name -> name != null && !name.isBlank())
+                .distinct()
+                .toList());
+        List<ToolSpec> recovered = RecoveredToolCatalog.keepCompatible(
+                frozen, SkillToolCatalogProjector.project(context, toolRegistry));
+        context.setToolSpecs(recovered);
+        context.setAllowedTools(recovered.stream()
+                .map(ToolSpec::getName)
+                .toList());
     }
 
     private ConversationHistory loadHistoryForSnapshot(AgentContextSnapshot snapshot, String sessionId) {
@@ -304,8 +317,18 @@ public final class AgentContextFactory {
         freezeEffectiveToolCatalog(context);
         applyInheritedSkills(context, question);
         context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
+        applyAttemptRuntime(context, question);
+    }
+
+    private void applyAttemptRuntime(AgentContext context, AgentQuestion question) {
         if (StringUtils.isNotBlank(question.getModel())) {
             context.setCurrentModel(question.getModel());
+        }
+        if (StringUtils.isNotBlank(question.getProvider())) {
+            context.setAttemptProvider(question.getProvider());
+        }
+        if (StringUtils.isNotBlank(question.getRuntimeIdentity())) {
+            context.setAttemptRuntimeIdentity(question.getRuntimeIdentity());
         }
     }
 

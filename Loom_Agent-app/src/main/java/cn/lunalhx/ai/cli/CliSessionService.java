@@ -27,6 +27,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.service.context.SecretRedactor;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
+import cn.lunalhx.ai.domain.agent.service.recovery.RecoveryCompatibility;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
 import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.domain.skill.service.SkillCatalogFormatter;
@@ -84,6 +85,7 @@ public class CliSessionService implements AutoCloseable {
     private final SecretRedactor redactor;
     private final FilePlanSubmissionHandler planSubmissionHandler;
     private final CliSessionBootstrap sessionBootstrap;
+    private final RecoveryCompatibility recoveryCompatibility;
 
     private AgentSession session;
 
@@ -143,6 +145,8 @@ public class CliSessionService implements AutoCloseable {
                 redactor == null ? null : "cli");
         this.session = openOrCreateSession();
         this.loopService = loopService;
+        this.recoveryCompatibility = new RecoveryCompatibility(
+                checkpointStore, historyStore, Path.of(workspace));
     }
 
     private AgentSession openOrCreateSession() {
@@ -196,13 +200,28 @@ public class CliSessionService implements AutoCloseable {
                 .filter(run -> !leaseStore.isHealthy(run.getRunId()));
     }
 
+    public boolean recoveryBlocked() {
+        return recoveryBlockedReason() != null;
+    }
+
+    public String recoveryBlockedReason() {
+        return recoveryRequiredRun()
+                .flatMap(recoveryCompatibility::blockedReason)
+                .orElse(null);
+    }
+
     /**
      * Explicit Run Recovery: keep the original runId, create a new Attempt, and
-     * continue from the last durable checkpoint.
+     * continue from the last durable checkpoint. Recovery Blocked Runs cannot
+     * create an Attempt.
      */
     public String recover() {
         AgentRun interrupted = recoveryRequiredRun()
                 .orElseThrow(() -> new OptionsException("no Recovery Required run to recover"));
+        Optional<String> blocked = recoveryCompatibility.blockedReason(interrupted);
+        if (blocked.isPresent()) {
+            throw new OptionsException("Recovery Blocked: " + blocked.get());
+        }
         return continueRun(interrupted.getRunId());
     }
 
@@ -230,6 +249,9 @@ public class CliSessionService implements AutoCloseable {
                 .maxSteps(options.maxSteps)
                 .approvalPolicy(options.approvalPolicy)
                 .collaborationMode(session.getCollaborationMode())
+                .model(options.model)
+                .provider(options.provider)
+                .runtimeIdentity("cli")
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
                 .fullAccess(false)
                 .build();
@@ -266,6 +288,10 @@ public class CliSessionService implements AutoCloseable {
                            AgentRunStartGuard runStartGuard) {
         if (recoveryRequired()) {
             AgentRun blocked = recoveryRequiredRun().orElseThrow();
+            if (recoveryBlocked()) {
+                throw new OptionsException("Recovery Blocked: unfinished run "
+                        + blocked.getRunId() + " — use /abandon");
+            }
             throw new OptionsException("Recovery Required: unfinished run "
                     + blocked.getRunId() + " — use /recover or /abandon");
         }
@@ -312,6 +338,9 @@ public class CliSessionService implements AutoCloseable {
                 .seedSnapshot(seedSnapshot)
                 .seedHistoryEntries(seedHistoryEntries)
                 .seedHistoryNextSequence(seedHistoryNextSequence)
+                .model(options.model)
+                .provider(options.provider)
+                .runtimeIdentity("cli")
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
                 .fullAccess(options.fullAccess && runMode == CollaborationMode.BUILD)
                 .build();

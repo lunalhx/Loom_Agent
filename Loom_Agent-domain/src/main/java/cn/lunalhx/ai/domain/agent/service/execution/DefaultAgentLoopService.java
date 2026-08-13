@@ -26,9 +26,11 @@ import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuar
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.skill.model.SkillActivationException;
+import cn.lunalhx.ai.domain.agent.service.recovery.RecoveredToolCatalog;
 import cn.lunalhx.ai.domain.skill.service.SkillRunBootstrap;
 import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -116,6 +118,14 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 try {
                     skillRunBootstrap.prepareRun(context, null);
                     context.setToolSpecs(SkillToolCatalogProjector.project(context, toolRegistry));
+                    if (continuing) {
+                        List<ToolSpec> recovered = RecoveredToolCatalog.keepCompatible(
+                                context.getFrozenToolContracts(), context.getToolSpecs());
+                        context.setToolSpecs(recovered);
+                        context.setAllowedTools(recovered.stream()
+                                .map(ToolSpec::getName)
+                                .toList());
+                    }
                 } catch (SkillActivationException e) {
                     context.runtime().fail(AgentStopReason.MODEL_ERROR, "skill_activation_failed",
                             e.getMessage());

@@ -185,6 +185,9 @@ public final class AgentRunLifecycle {
                 .currentNode(currentNode)
                 .contextSnapshot(snapshot)
                 .reason(reason)
+                .model(context.getCurrentModel())
+                .provider(context.getAttemptProvider())
+                .runtimeIdentity(context.getAttemptRuntimeIdentity())
                 .build());
     }
 

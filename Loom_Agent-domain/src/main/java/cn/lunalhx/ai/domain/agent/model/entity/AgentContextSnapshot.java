@@ -13,6 +13,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.model.WorkspaceRef;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
@@ -86,6 +87,9 @@ public class AgentContextSnapshot {
     // -- run-scoped skills (frozen; no host-absolute package roots) --
     private SkillCatalog skillCatalogSnapshot;
     private List<ActiveSkillSnapshot> activeSkills;
+
+    // -- frozen tool contracts (name + input schema + effect envelope) --
+    private List<ToolSpec> frozenToolContracts;
 
     // -- runtime (durable) --
     private Integer toolSteps;
@@ -203,6 +207,8 @@ public class AgentContextSnapshot {
                 .skillCatalogSnapshot(context.getSkillCatalogSnapshot())
                 .activeSkills(context.getActiveSkills() == null ? List.of()
                         : List.copyOf(context.getActiveSkills()))
+                .frozenToolContracts(context.getToolSpecs() == null ? List.of()
+                        : List.copyOf(context.getToolSpecs()))
                 // runtime
                 .toolSteps(runtime.toolSteps())
                 .modelAttempts(runtime.modelAttempts())

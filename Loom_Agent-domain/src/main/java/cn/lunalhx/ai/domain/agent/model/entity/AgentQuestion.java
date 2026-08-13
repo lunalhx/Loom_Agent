@@ -34,6 +34,8 @@ public class AgentQuestion {
     private Boolean includeTrace;
     private String traceId;
     private String model;
+    private String provider;
+    private String runtimeIdentity;
     private List<String> allowedTools;
     private String approvalPolicy;
     private CollaborationMode collaborationMode;

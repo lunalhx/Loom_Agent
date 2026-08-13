@@ -397,6 +397,15 @@ public final class CliMain {
         if (options.fullAccess) System.out.println("sandbox: FULL ACCESS (launch-scoped)");
         System.out.println("mode: " + session.collaborationMode().cliName());
         session.recoveryRequiredRun().ifPresent(run -> {
+            if (session.recoveryBlocked()) {
+                System.out.println("Recovery Blocked: unfinished run " + run.getRunId());
+                if (run.getQuestion() != null && !run.getQuestion().isBlank()) {
+                    System.out.println("task: " + run.getQuestion());
+                }
+                System.out.println(session.recoveryBlockedReason());
+                System.out.println("Use /abandon to discard the run.");
+                return;
+            }
             System.out.println("Recovery Required: unfinished run " + run.getRunId());
             if (run.getQuestion() != null && !run.getQuestion().isBlank()) {
                 System.out.println("task: " + run.getQuestion());
