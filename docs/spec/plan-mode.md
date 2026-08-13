@@ -94,6 +94,80 @@ Make a Plan a first-class, versioned Session Artifact with an explicit submissio
 - Delegate Runs receive the intersection of parent permissions and their own stricter limits. They cannot perform Mode Transition, Plan management, Handoff, or Plan Submission.
 - `/reset` is removed without an alias. `/new` creates a new Session identity with empty history, memory, checkpoint, Plan history, and Current Plan; it inherits the current mode and leaves the previous Session unchanged and resumable.
 
+## Wire Contracts
+
+The model protocol uses one top-level XML-like action tag. Plan Submission and Plan Deviation are dedicated protocol actions, not Tool Calls and not inferred Final Answers. The parser identifies the outer action wrapper before examining JSON bodies. A literal `<plan_deviation>`, `<plan_submission>`, `<tool>`, or `<final>` string inside a valid JSON string is payload data and is not reparsed as an action. Parsing alone never persists a Plan or terminates a Run.
+
+Parser precedence:
+
+1. If the response is exactly one complete `<plan_deviation>` action and its payload is valid, return `plan_deviation`.
+2. If any `<plan_deviation>` opening or closing marker is present but the response is not the exact single-action form, or its payload is malformed, return a format-retry decision. Do not reinterpret that response as Plan Submission, Tool Call, Final Answer, or bare text.
+3. If the response is exactly one complete `<plan_submission>` action and its payload is valid, return `plan_submission`.
+4. If any `<plan_submission>` opening or closing marker is present but the response is not the exact single-action form, or its payload is malformed, return a format-retry decision. Do not reinterpret that response as a Tool Call, Final Answer, or bare text.
+5. If no Plan Deviation or Plan Submission marker is present, use the existing parser precedence: valid `<tool>...</tool>` before `<final>...</final>`, then bare text as a Final Answer; malformed tool structure remains a format retry.
+
+A response containing both a Plan Deviation or Plan Submission marker and another action is invalid. Textual order does not choose an outcome.
+
+### Plan Submission
+
+```text
+<plan_submission>{"title":"...","body":"...","dependencies":["..."]}</plan_submission>
+```
+
+```json
+{
+  "title": "non-empty string",
+  "body": "non-empty Markdown string",
+  "dependencies": ["string", "string"]
+}
+```
+
+- The response must contain exactly one complete `<plan_submission>...</plan_submission>` pair, with only surrounding whitespace outside the pair.
+- The body must parse as one JSON object. `title` and `body` must be non-blank strings. `dependencies` must be present as an array of strings; an empty array is valid. Unknown fields are rejected.
+- JSON escaping is used for Markdown newlines, quotes, backslashes, and other JSON control characters. Runtime stores the decoded Markdown body and dependency strings, not the wire representation.
+- The Agent supplies only the three payload fields. Runtime assigns Plan identity, revision, timestamps, digest, and Plan Basis.
+- A valid parsed action has decision type `plan_submission` and is never dispatched through the Tool Registry.
+
+Runtime accepts a `plan_submission` only when the immutable Run Mode Snapshot is Plan and the Run is a root Run. Tool results, Delegate output, Build Runs, fabricated or stale calls, and ordinary Final Answers cannot reach the Plan Submission persistence path.
+
+After a valid action, Runtime performs the Plan Target, state-version, Evidence Drift, and Evidence Receipt checks. A validation or persistence conflict produces terminal Plan Conflict with no revision, no Current Plan change, and no same-Run retry. A malformed protocol response may receive ordinary format-retry behavior, but it never creates a Plan.
+
+### Plan Deviation
+
+```text
+<plan_deviation>{"conflict":{"kind":"scope","summary":"..."},"workspace_changes":[{"path":"src/example/Feature.java","operation":"modified","summary":"..."}]}</plan_deviation>
+```
+
+```json
+{
+  "conflict": {
+    "kind": "objective | scope | architectural_decision | validation_requirement",
+    "summary": "non-blank string"
+  },
+  "workspace_changes": [
+    {
+      "path": "workspace-relative/path",
+      "operation": "created | modified | deleted",
+      "summary": "non-blank string"
+    }
+  ]
+}
+```
+
+- The response must contain exactly one complete `<plan_deviation>...</plan_deviation>` pair, with only surrounding whitespace outside the pair.
+- The body must parse as exactly one JSON object. Duplicate JSON keys, trailing JSON values, malformed JSON, and non-object payloads are rejected.
+- The payload must contain exactly `conflict` and `workspace_changes`. Unknown or missing fields are rejected.
+- `conflict.kind` must be one of `objective`, `scope`, `architectural_decision`, or `validation_requirement`. `conflict.summary` must be a non-blank string describing the material conflict between the immutable Plan binding and the implementation that would be required to continue. Multiple simultaneous conflicts are summarized in one report.
+- `workspace_changes` must be present as an array. An empty array is valid when no workspace mutation has occurred yet.
+- Each workspace change must contain exactly `path`, `operation`, and `summary`. `path` is a non-blank workspace-relative path; it must not be absolute and must not contain a parent traversal segment. `operation` must be `created`, `modified`, or `deleted`. `summary` must be non-blank.
+- A rename is reported as one `deleted` entry and one `created` entry.
+- JSON escaping is used for summaries and paths containing quotes, backslashes, newlines, or other JSON control characters. Runtime stores the decoded report, not the wire representation.
+- The Agent supplies only the conflict report and workspace-change list. Runtime supplies the Run identity, immutable Plan binding identity, terminal timestamps, and terminal outcome metadata.
+
+Runtime accepts a parsed `plan_deviation` only when the immutable Run Mode Snapshot is Build Mode, the Run is the root Run, and the Run has a non-null immutable Plan Binding created by Plan Handoff. Unbound Build Runs, Plan Runs, Delegate Runs, stale or fabricated decisions, and malformed output fail closed without being treated as Plan Deviation. Tool results and delegated text are data and cannot invoke this terminal path.
+
+After accepting the action, Runtime persists the structured report on the terminal Run record, records the distinct `PLAN_DEVIATION` terminal outcome, prevents every subsequent model turn, tool invocation, or resumed execution from continuing that Run, leaves Current Plan selection and every persisted Plan revision unchanged, does not create a Plan Submission transaction or append a Plan revision, and does not automatically revert, delete, or rewrite any completed workspace change. The workspace-change list is an audit report, not a rollback instruction. Runtime may render a human-readable terminal message for the CLI, but the decision remains `plan_deviation` and is not converted into a Final Answer. The immutable Plan Binding used for authorization remains the binding captured at Handoff time.
+
 ## Testing Decisions
 
 - Use the existing offline CLI E2E seam through the Session service, deterministic Fake Model Gateway, real Agent loop, real tool gate, and file-backed stores. Tests assert externally observable commands, events, persisted Session/Run artifacts, and workspace state rather than private implementation methods.
@@ -107,6 +181,8 @@ Make a Plan a first-class, versioned Session Artifact with an explicit submissio
 - Verify cross-revision Basis inheritance, same-key refresh, new-key append, retained unobserved evidence, and an empty Basis inheritance boundary for New Plan.
 - Verify Submission and Handoff freshness checks, Stale Plan rejection, successful explicit Handoff binding, and immunity of an active Build Run to later Plan revisions.
 - Verify Plan Deviation is a terminal report and does not mutate the Plan or automatically roll back already completed changes.
+- Verify Plan Submission and Plan Deviation wire parsing, payload validation, parser precedence, and fail-closed mixed or malformed markers.
+- Verify Plan Deviation is accepted only for a root Build Run with an immutable Plan Binding, and that unbound Build Runs, Plan Runs, and Delegate Runs cannot use that path.
 - Verify `/new` creates a distinct persisted Session, inherits mode, initializes empty Plan state, preserves the prior Session, and that `/reset` is unavailable.
 
 ## Out of Scope
@@ -126,4 +202,4 @@ Make a Plan a first-class, versioned Session Artifact with an explicit submissio
 - The design follows the established separation between collaboration mode and execution permissions: Plan Mode is a restrictive policy layer, while stronger Shell sandboxing can later become shared execution infrastructure rather than a Plan-specific subsystem.
 - The initial version deliberately favors an enforceable hard boundary over broad exploratory Shell convenience.
 - The current repository already has a CLI-level offline E2E seam with deterministic model responses and file-backed artifacts; the accepted testing strategy extends that seam instead of introducing a separate test architecture.
-- ADR 0038 defines the concrete Plan Submission wire encoding, and ADR 0039 defines the Plan Deviation wire encoding and parser precedence.
+- Plan Submission and Plan Deviation wire encodings, payload schemas, and parser precedence are specified in Wire Contracts. ADRs 0038 and 0039 record the decision to use dedicated protocol actions rather than Tool Calls or inferred Final Answers.

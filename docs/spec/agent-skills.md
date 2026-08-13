@@ -122,5 +122,5 @@ Supporting files remain ordinary untrusted data. The model can read a resource b
 - Exact numeric limits for catalog metadata, active instruction bodies, resource counts, and resource sizes remain implementation-planning details. The fixed behavioral requirement is deterministic bounded operation, diagnostics on omitted catalog entries, and whole-body admission or rejection for active instructions.
 - The exact XML field encoding of the dedicated Skill Activation action remains an implementation-planning detail; the fixed architecture decision is that it is a dedicated non-terminal Runtime control action rather than a Tool Call.
 - Binary asset presentation, diagnostic CLI formatting, and internal class/package decomposition remain implementation-planning details.
-- The architecture decision to preserve untrusted ToolResult semantics and introduce a dedicated Skill Activation control action should be recorded in an ADR during implementation planning.
+- The architecture decision to preserve untrusted ToolResult semantics and introduce a dedicated Skill Activation control action is recorded in ADR 0059.
 - The domain vocabulary and accepted invariants are recorded in the project glossary.
