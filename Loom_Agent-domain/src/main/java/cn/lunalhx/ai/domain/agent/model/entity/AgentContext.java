@@ -368,4 +368,12 @@ public class AgentContext {
     public void waitForModelCallInput(String blockedReason, String transcriptArtifactId) {
         modelCall.waitForUserInput(blockedReason, transcriptArtifactId);
     }
+
+    private String attemptId;
+    private String leaseFence;
+
+    public String getAttemptId() { return attemptId; }
+    public void setAttemptId(String attemptId) { this.attemptId = attemptId; }
+    public String getLeaseFence() { return leaseFence; }
+    public void setLeaseFence(String leaseFence) { this.leaseFence = leaseFence; }
 }

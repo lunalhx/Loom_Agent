@@ -238,11 +238,11 @@ public final class AgentContextFactory {
                         "conversation history anchor lastEntryId does not match durable entry");
             }
         }
-        List<ConversationHistoryEntry> entries = document.getEntries() == null ? List.of()
-                : document.getEntries().stream()
-                .filter(entry -> entry.sequence() < anchor.getNextSequence())
-                .toList();
-        return ConversationHistory.fromPersisted(new ArrayList<>(entries), anchor.getNextSequence());
+        // History is authoritative when it is ahead of the checkpoint anchor.
+        // The anchor only proves the checkpoint does not point past History.
+        List<ConversationHistoryEntry> entries = document.getEntries() == null
+                ? List.of() : List.copyOf(document.getEntries());
+        return ConversationHistory.fromPersisted(new ArrayList<>(entries), document.getNextSequence());
     }
 
     private void rehydrateFrozenAuthorization(AgentContext context,

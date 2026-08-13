@@ -14,6 +14,7 @@ import java.time.Instant;
 public class AgentCheckpoint {
 
     private String runId;
+    private String attemptId;
     private Long version;
     private String currentNode;
     private AgentContextSnapshot contextSnapshot;

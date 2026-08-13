@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
@@ -14,6 +15,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.infrastructure.store.ArtifactRedactor;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
 import cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
@@ -67,6 +69,12 @@ public class CliPersistenceAutoConfig {
                                                                ObjectMapper mapper,
                                                                ArtifactRedactor redactor) {
         return new FileAgentCheckpointRepository(workspace(agent), mapper, redactor);
+    }
+
+    @Bean
+    public AttemptLeaseRepository attemptLeaseRepository(AgentRuntimeProperties agent,
+                                                         ObjectMapper mapper) {
+        return new FileAttemptLeaseRepository(workspace(agent), mapper);
     }
 
     @Bean

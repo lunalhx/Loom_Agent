@@ -35,6 +35,8 @@ public final class CliMain {
             /plan show  Show the current Plan and computed freshness.
             /skills  List effective Skills, sources, and diagnostics.
             /new     Create a new independent session.
+            /recover Continue the unfinished Run in Recovery Required.
+            /abandon Abandon the unfinished Run in Recovery Required.
             /exit    Exit the agent.
             """;
 
@@ -250,6 +252,22 @@ public final class CliMain {
                 output.println("new session: " + newId + " (previous: " + previousId + ")");
                 yield true;
             }
+            case "/recover" -> {
+                try {
+                    output.println(session.recover());
+                } catch (CliSessionService.OptionsException e) {
+                    output.println("error: " + e.getMessage());
+                }
+                yield true;
+            }
+            case "/abandon" -> {
+                try {
+                    output.println(session.abandon());
+                } catch (CliSessionService.OptionsException e) {
+                    output.println("error: " + e.getMessage());
+                }
+                yield true;
+            }
             case "/reset" -> {
                 output.println("error: /reset is unavailable; use /new");
                 yield true;
@@ -378,5 +396,12 @@ public final class CliMain {
         System.out.println("approval: " + options.approvalPolicy + "  session: " + session.sessionId());
         if (options.fullAccess) System.out.println("sandbox: FULL ACCESS (launch-scoped)");
         System.out.println("mode: " + session.collaborationMode().cliName());
+        session.recoveryRequiredRun().ifPresent(run -> {
+            System.out.println("Recovery Required: unfinished run " + run.getRunId());
+            if (run.getQuestion() != null && !run.getQuestion().isBlank()) {
+                System.out.println("task: " + run.getQuestion());
+            }
+            System.out.println("Use /recover to continue or /abandon to discard the run.");
+        });
     }
 }

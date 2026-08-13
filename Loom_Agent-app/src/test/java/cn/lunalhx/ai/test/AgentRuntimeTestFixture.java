@@ -190,6 +190,9 @@ public final class AgentRuntimeTestFixture {
                 effectiveRunRepository(),
                 effectiveCheckpointRepository(),
                 effectiveHistoryRepository(),
+                new cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository(
+                        java.nio.file.Path.of(props.getWorkspaceRoot() == null ? "." : props.getWorkspaceRoot()),
+                        objectMapper),
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),

@@ -88,7 +88,7 @@ public class CliDurableSkillContinuationE2ETest {
             AgentSession session = resumed.sessionRepository().find(sessionId).orElseThrow();
             assertEquals(AgentSession.CURRENT_SCHEMA_VERSION, (int) session.getSchemaVersion());
 
-            String answer = resumed.continueInterruptedRun();
+            String answer = resumed.recover();
             assertEquals("continued", answer);
             assertEquals(1, resumeCalls.get());
             assertFalse(resumePrompts.isEmpty());

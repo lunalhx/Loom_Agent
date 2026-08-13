@@ -201,6 +201,7 @@ public class CliDelegateSkillInheritanceE2ETest {
                 new cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver(agent),
                 runs, checkpoints,
                 new cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository(root, mapper),
+                new cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository(root, mapper),
                 mapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 agent, traces,

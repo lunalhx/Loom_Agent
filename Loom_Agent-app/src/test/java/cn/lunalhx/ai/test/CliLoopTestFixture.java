@@ -87,7 +87,9 @@ public final class CliLoopTestFixture {
         ModelRuntimeProperties model = AgentRuntimeTestFixture.testModelRuntimeProperties();
 
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(
-                resolver, runs, checkpoints, histories, mapper);
+                resolver, runs, checkpoints, histories,
+                new cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository(root, mapper),
+                mapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 agent, traces, budget, new NoopAgentMetrics(),
                 new RedactingToolOutputSanitizer(redactor),

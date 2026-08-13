@@ -2,6 +2,7 @@ package cn.lunalhx.ai.config;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
@@ -34,8 +35,9 @@ public class AgentExecutionAutoConfig {
                                                                 AgentRunRepository runs,
                                                                 AgentCheckpointRepository checkpoints,
                                                                 ConversationHistoryRepository historyRepository,
+                                                                AttemptLeaseRepository leases,
                                                                 ObjectMapper mapper) {
-        return new AgentLoopStateDependencies(workspaces, runs, checkpoints, historyRepository, mapper);
+        return new AgentLoopStateDependencies(workspaces, runs, checkpoints, historyRepository, leases, mapper);
     }
 
     @Bean

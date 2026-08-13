@@ -36,6 +36,8 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository;
+import cn.lunalhx.ai.domain.agent.model.entity.AttemptLease;
 import cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.infrastructure.loom.DelegateTool;
@@ -1725,6 +1727,202 @@ public class CliSessionServiceE2ETest {
                         .build());
             }
         };
+    }
+
+    // ---- ticket 04: Recovery Required, /recover, /abandon for no-tool runs ----
+
+    @Test
+    public void interruptedNoToolRunEntersRecoveryRequiredAndRejectsOrdinaryRequest()
+            throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-recovery-required");
+        InterruptedNoToolRun interrupted = interruptNoToolRun(workspace);
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService resumed = resume(workspace, interrupted.sessionId,
+                countingFinalAnswerGateway("must not run", modelCalls));
+        try {
+            assertTrue(resumed.recoveryRequired());
+            AgentRun blocked = resumed.recoveryRequiredRun().orElseThrow();
+            assertEquals(interrupted.runId, blocked.getRunId());
+            assertEquals(AgentRunStatus.RUNNING, blocked.getStatus());
+
+            try {
+                resumed.runTurn("start a different task");
+                fail("ordinary request must be rejected while Recovery Required");
+            } catch (CliSessionService.OptionsException e) {
+                assertTrue(e.getMessage().contains("Recovery Required"));
+            }
+            assertEquals(0, modelCalls.get());
+            assertEquals(interrupted.runId,
+                    resumed.runRepository().findLatestRootByConversationId(interrupted.sessionId)
+                            .orElseThrow().getRunId());
+        } finally {
+            interrupted.close();
+            resumed.close();
+        }
+    }
+
+    @Test
+    public void recoverKeepsRunIdCreatesNewAttemptAndCompletesOriginalTask() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-recover");
+        InterruptedNoToolRun interrupted = interruptNoToolRun(workspace);
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService resumed = resume(workspace, interrupted.sessionId,
+                countingFinalAnswerGateway("original task done", modelCalls));
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            assertTrue(CliMain.handleControl(resumed, "/recover",
+                    new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+            assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8)
+                    .contains("original task done"));
+            assertEquals(1, modelCalls.get());
+            assertFalse(resumed.recoveryRequired());
+
+            AgentRun recovered = resumed.runRepository().find(interrupted.runId).orElseThrow();
+            assertEquals(interrupted.runId, recovered.getRunId());
+            assertNotEquals(interrupted.attemptId, recovered.getCurrentAttemptId());
+            assertEquals(AgentRunStatus.COMPLETED, recovered.getStatus());
+            assertEquals("original task done", recovered.getFinalAnswer());
+            assertEquals(1, resumed.runRepository().findByConversationId(interrupted.sessionId).size());
+        } finally {
+            interrupted.close();
+            resumed.close();
+        }
+    }
+
+    @Test
+    public void abandonDoesNotCallModelIsTerminalAndPreservesHistory() throws Exception {
+        Path workspace = Files.createTempDirectory("e2e-abandon");
+        InterruptedNoToolRun interrupted = interruptNoToolRun(workspace);
+        ConversationHistoryDocument before = historyRepository(workspace)
+                .find(interrupted.sessionId).orElseThrow();
+        assertFalse(before.getEntries().isEmpty());
+        AtomicInteger modelCalls = new AtomicInteger();
+        CliSessionService resumed = resume(workspace, interrupted.sessionId,
+                countingFinalAnswerGateway("after abandon", modelCalls));
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            assertTrue(CliMain.handleControl(resumed, "/abandon",
+                    new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)));
+            assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8)
+                    .contains("abandoned: " + interrupted.runId));
+            assertEquals(0, modelCalls.get());
+            assertFalse(resumed.recoveryRequired());
+
+            AgentRun abandoned = resumed.runRepository().find(interrupted.runId).orElseThrow();
+            assertEquals(AgentRunStatus.ABANDONED, abandoned.getStatus());
+            assertEquals("ABANDONED", abandoned.getStopReason());
+            ConversationHistoryDocument after = historyRepository(workspace)
+                    .find(interrupted.sessionId).orElseThrow();
+            assertEquals(before.getEntries().size(), after.getEntries().size());
+            assertEquals(before.getEntries().get(0).content(), after.getEntries().get(0).content());
+
+            try {
+                resumed.recover();
+                fail("abandoned Run must not be recoverable");
+            } catch (CliSessionService.OptionsException e) {
+                assertTrue(e.getMessage().contains("no Recovery Required"));
+            }
+
+            assertEquals("after abandon", resumed.runTurn("new work after abandon"));
+            assertEquals(1, modelCalls.get());
+            AgentRun next = resumed.runRepository().findLatestRootByConversationId(interrupted.sessionId)
+                    .orElseThrow();
+            assertNotEquals(interrupted.runId, next.getRunId());
+        } finally {
+            interrupted.close();
+            resumed.close();
+        }
+    }
+
+    private InterruptedNoToolRun interruptNoToolRun(Path workspace) throws Exception {
+        CountDownLatch modelStarted = new CountDownLatch(1);
+        CountDownLatch releaseModel = new CountDownLatch(1);
+        CliSessionService first = service(workspace,
+                blockingFinalGateway(modelStarted, releaseModel, "unused"));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<String> turn = executor.submit(() -> first.runTurn("finish the original task"));
+        assertTrue(modelStarted.await(10, TimeUnit.SECONDS));
+        AgentRun running = first.runRepository().findLatestRootByConversationId(first.sessionId())
+                .orElseThrow();
+        assertEquals(AgentRunStatus.RUNNING, running.getStatus());
+        assertNotNull(running.getCurrentAttemptId());
+        FileAttemptLeaseRepository leases = new FileAttemptLeaseRepository(workspace, mapper);
+        AttemptLease lease = leases.find(running.getRunId()).orElseThrow();
+        assertTrue(leases.isHealthy(running.getRunId()));
+        assertTrue(leases.release(running.getRunId(), lease.getFence()));
+        return new InterruptedNoToolRun(first, executor, turn, releaseModel,
+                first.sessionId(), running.getRunId(), running.getCurrentAttemptId());
+    }
+
+    private CliSessionService resume(Path workspace, String sessionId, ModelGateway gateway) {
+        CliSessionService.CliOptions opts = options(workspace, gateway);
+        opts.resumeSessionId = sessionId;
+        AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
+        return new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
+                new FileAgentSessionRepository(workspace, mapper),
+                new FileAgentRunRepository(workspace, mapper),
+                new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
+                new FileTraceRecorder(workspace, mapper),
+                CliLoopTestFixture.build(workspace, mapper, gateway, agent, java.util.List.of()));
+    }
+
+    private ModelGateway blockingFinalGateway(CountDownLatch started, CountDownLatch release,
+                                              String answer) {
+        return new ModelGateway() {
+            @Override
+            public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
+                return Flux.empty();
+            }
+
+            @Override
+            public Mono<ModelChatResult> complete(ChatPrompt prompt) {
+                started.countDown();
+                try {
+                    if (!release.await(60, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to release model");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("model wait interrupted", e);
+                }
+                return Mono.just(ModelChatResult.builder()
+                        .content("<final>" + answer + "</final>")
+                        .finishReason("stop")
+                        .actualModel("deepseek-v4-flash")
+                        .build());
+            }
+        };
+    }
+
+    private static final class InterruptedNoToolRun implements AutoCloseable {
+        private final CliSessionService first;
+        private final ExecutorService executor;
+        private final Future<String> turn;
+        private final CountDownLatch releaseModel;
+        private final String sessionId;
+        private final String runId;
+        private final String attemptId;
+
+        private InterruptedNoToolRun(CliSessionService first, ExecutorService executor,
+                                     Future<String> turn, CountDownLatch releaseModel,
+                                     String sessionId, String runId, String attemptId) {
+            this.first = first;
+            this.executor = executor;
+            this.turn = turn;
+            this.releaseModel = releaseModel;
+            this.sessionId = sessionId;
+            this.runId = runId;
+            this.attemptId = attemptId;
+        }
+
+        @Override
+        public void close() {
+            releaseModel.countDown();
+            turn.cancel(true);
+            executor.shutdownNow();
+            first.close();
+        }
     }
 
     // ---- secret values never appear in persisted artifacts ----

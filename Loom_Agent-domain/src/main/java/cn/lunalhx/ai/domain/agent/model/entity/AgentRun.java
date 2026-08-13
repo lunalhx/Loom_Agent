@@ -22,6 +22,7 @@ public class AgentRun {
 
     private Integer schemaVersion;
     private String runId;
+    private String currentAttemptId;
     private String sessionId;
     private String parentRunId;
     private String rootRunId;

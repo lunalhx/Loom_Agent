@@ -1,8 +1,10 @@
 package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionResult;
+import cn.lunalhx.ai.domain.agent.model.entity.AttemptLease;
 import cn.lunalhx.ai.domain.agent.flow.AgentLoopPhase;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
@@ -38,9 +40,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -58,6 +65,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final ConversationExecutionGuard executionGuard;
     private final SkillRunBootstrap skillRunBootstrap;
     private final ToolRegistry toolRegistry;
+    private final AttemptLeaseRepository leaseRepository;
 
     DefaultAgentLoopService(AgentLoopAssembly assembly, Executor executor,
                             AgentRunLifecycle lifecycle,
@@ -71,6 +79,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         this.executionGuard = executionGuard;
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
         this.skillRunBootstrap = new SkillRunBootstrap(properties, toolRegistry);
+        this.leaseRepository = lifecycle.attemptLeaseRepository();
     }
 
     // ==================== 公共入口 ====================
@@ -114,6 +123,15 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     sink.complete();
                     return;
                 }
+                Optional<AttemptLease> claimed = claimAttempt(context);
+                if (claimed.isEmpty()) {
+                    context.runtime().fail(AgentStopReason.RESUME_ERROR, "attempt_lease_held",
+                            "A healthy Attempt still owns this Run");
+                    emit(sink, List.of(components.eventFactory().agentError(context)));
+                    sink.complete();
+                    return;
+                }
+                ScheduledExecutorService heartbeats = startHeartbeat(context);
                 String lockKey = StringUtils.isBlank(context.getParentRunId())
                         ? ConversationExecutionGuard.effectiveLockKey(
                                 context.getConversationId(), context.getRunId())
@@ -122,6 +140,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 if (lockKey != null) {
                     token = executionGuard.tryAcquire(lockKey);
                     if (token == null) {
+                        stopHeartbeat(heartbeats);
+                        releaseLeaseQuietly(context);
                         emit(sink, List.of(components.eventFactory().conversationBusy(
                                 context.getConversationId(), context.getRunId(), context.getRequestId(),
                                 null, "ask", Instant.now())));
@@ -142,6 +162,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     startLease = null;
                     runLoop(context, AgentNodeNames.PROMPT_BUILD, sink);
                 } finally {
+                    stopHeartbeat(heartbeats);
+                    releaseLeaseQuietly(context);
                     if (token != null) {
                         executionGuard.release(lockKey, token);
                     }
@@ -150,6 +172,48 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 closeQuietly(startLease);
             }
         });
+    }
+
+    private Optional<AttemptLease> claimAttempt(AgentContext context) {
+        String attemptId = "attempt_" + UUID.randomUUID().toString().substring(0, 8);
+        Optional<AttemptLease> claimed = leaseRepository.tryAcquire(context.getRunId(), attemptId);
+        claimed.ifPresent(lease -> {
+            context.setAttemptId(lease.getAttemptId());
+            context.setLeaseFence(lease.getFence());
+        });
+        return claimed;
+    }
+
+    private ScheduledExecutorService startHeartbeat(AgentContext context) {
+        ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(thread -> {
+            Thread worker = new Thread(thread, "attempt-lease-heartbeat");
+            worker.setDaemon(true);
+            return worker;
+        });
+        heartbeats.scheduleAtFixedRate(() -> {
+            try {
+                leaseRepository.heartbeat(context.getRunId(), context.getLeaseFence());
+            } catch (RuntimeException ignored) {
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+        return heartbeats;
+    }
+
+    private void stopHeartbeat(ScheduledExecutorService heartbeats) {
+        if (heartbeats == null) {
+            return;
+        }
+        heartbeats.shutdownNow();
+    }
+
+    private void releaseLeaseQuietly(AgentContext context) {
+        if (context == null || context.getLeaseFence() == null) {
+            return;
+        }
+        try {
+            leaseRepository.release(context.getRunId(), context.getLeaseFence());
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private void closeQuietly(AutoCloseable lease) {
@@ -257,6 +321,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
         try {
             String currentNode = startNode;
             boolean firstRound = true;
+            boolean persistHistoryAfterFirstPrompt = true;
             while (!sink.isCancelled() && !activeCancellation.get()) {
                 if (!firstRound) {
                     if (isTotalTimeout(context)) {
@@ -285,6 +350,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 AgentNodeExecution execution =
                         components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
 
+                if (persistHistoryAfterFirstPrompt && AgentNodeNames.PROMPT_BUILD.equals(currentNode)) {
+                    lifecycle.persistHistoryAfterPrompt(context);
+                    persistHistoryAfterFirstPrompt = false;
+                }
                 if (AgentNodeNames.MODEL_CALL.equals(currentNode)) {
                     lifecycle.recordModelAttempt(context);
                 }

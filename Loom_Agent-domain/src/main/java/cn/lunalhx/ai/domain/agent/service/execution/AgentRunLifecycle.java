@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
@@ -37,13 +38,20 @@ public final class AgentRunLifecycle {
     private final AgentRunRepository runRepository;
     private final AgentCheckpointRepository checkpointRepository;
     private final ConversationHistoryRepository historyRepository;
+    private final AttemptLeaseRepository leaseRepository;
 
     public AgentRunLifecycle(AgentRunRepository runRepository,
                              AgentCheckpointRepository checkpointRepository,
-                             ConversationHistoryRepository historyRepository) {
+                             ConversationHistoryRepository historyRepository,
+                             AttemptLeaseRepository leaseRepository) {
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.checkpointRepository = Objects.requireNonNull(checkpointRepository, "checkpointRepository must not be null");
         this.historyRepository = Objects.requireNonNull(historyRepository, "historyRepository must not be null");
+        this.leaseRepository = Objects.requireNonNull(leaseRepository, "leaseRepository must not be null");
+    }
+
+    AttemptLeaseRepository attemptLeaseRepository() {
+        return leaseRepository;
     }
 
     // ================================================================
@@ -76,6 +84,11 @@ public final class AgentRunLifecycle {
 
     public void recordModelAttempt(AgentContext context) {
         saveRun(context, AgentNodeNames.MODEL_CALL, AgentRunStatus.RUNNING);
+    }
+
+    /** Persist History after prompt build so a lost Attempt still has durable user facts. */
+    public void persistHistoryAfterPrompt(AgentContext context) {
+        persistConversationHistory(context);
     }
 
     /** Post-tool checkpoint: the snapshot already contains the sanitized
@@ -163,10 +176,12 @@ public final class AgentRunLifecycle {
     // ================================================================
 
     private AgentCheckpoint saveCheckpoint(AgentContext context, String currentNode, String reason) {
+        requireWritable(context);
         persistConversationHistory(context);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         return checkpointRepository.save(AgentCheckpoint.builder()
                 .runId(context.identity().runId())
+                .attemptId(context.getAttemptId())
                 .currentNode(currentNode)
                 .contextSnapshot(snapshot)
                 .reason(reason)
@@ -174,6 +189,7 @@ public final class AgentRunLifecycle {
     }
 
     private void persistConversationHistory(AgentContext context) {
+        requireWritable(context);
         String sessionId = context.getSessionId();
         if (StringUtils.isBlank(sessionId)) {
             return;
@@ -190,7 +206,12 @@ public final class AgentRunLifecycle {
         historyRepository.save(sessionId, history);
     }
 
+    private void requireWritable(AgentContext context) {
+        leaseRepository.requireWritable(context.identity().runId(), context.getLeaseFence());
+    }
+
     private void saveRun(AgentContext context, String currentNode, AgentRunStatus fallbackStatus) {
+        requireWritable(context);
         AgentRuntimeState runtime = context.runtime();
         AgentIdentity id = context.identity();
         AgentBudgetState budget = context.budget();
@@ -202,6 +223,7 @@ public final class AgentRunLifecycle {
         runRepository.save(AgentRun.builder()
                 .schemaVersion(AgentRun.CURRENT_SCHEMA_VERSION)
                 .runId(id.runId())
+                .currentAttemptId(context.getAttemptId())
                 .sessionId(context.getSessionId())
                 .parentRunId(id.parentRunId())
                 .rootRunId(StringUtils.defaultIfBlank(id.rootRunId(), id.runId()))
@@ -263,6 +285,9 @@ public final class AgentRunLifecycle {
                 || reason == AgentStopReason.PLAN_CONFLICT
                 || reason == AgentStopReason.PLAN_SUBMISSION_REJECTED) {
             return AgentRunStatus.FAILED;
+        }
+        if (reason == AgentStopReason.ABANDONED) {
+            return AgentRunStatus.ABANDONED;
         }
         return fallback;
     }

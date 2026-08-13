@@ -61,7 +61,8 @@ public class AgentLoopFactory {
         Objects.requireNonNull(executor, "executor must not be null");
         AgentLoopAssembly assembly = assemble(toolRegistry);
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
-                state.runRepository(), state.checkpointRepository(), state.historyRepository());
+                state.runRepository(), state.checkpointRepository(), state.historyRepository(),
+                state.leaseRepository());
         return new DefaultAgentLoopService(assembly, executor, lifecycle, executionGuard, toolRegistry);
     }
 
@@ -79,7 +80,8 @@ public class AgentLoopFactory {
         AgentNodeLifecycle nodeLifecycle = new AgentNodeLifecycle(
                 runtime.traceRecorder(), runtime.agentMetrics(), eventFactory, flow.nodes());
         AgentRunLifecycle lifecycle = new AgentRunLifecycle(
-                state.runRepository(), state.checkpointRepository(), state.historyRepository());
+                state.runRepository(), state.checkpointRepository(), state.historyRepository(),
+                state.leaseRepository());
         return new AgentLoopComponents(contextFactory, nodeLifecycle, eventFactory,
                 state.runRepository(), state.checkpointRepository(),
                 lifecycle, ledgerAppendService, planSubmissionHandler);

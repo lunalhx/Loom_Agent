@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.AttemptLeaseRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
@@ -32,6 +33,7 @@ import cn.lunalhx.ai.domain.skill.service.SkillCatalogFormatter;
 import cn.lunalhx.ai.domain.skill.service.SkillDiscoveryService;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository;
 import cn.lunalhx.ai.infrastructure.store.FileDurableMemoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileRunStore;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -73,6 +75,7 @@ public class CliSessionService implements AutoCloseable {
     private final AgentRunRepository runStore;
     private final AgentCheckpointRepository checkpointStore;
     private final ConversationHistoryRepository historyStore;
+    private final AttemptLeaseRepository leaseStore;
     private final TraceRecorder traceRecorder;
     private final cn.lunalhx.ai.domain.memory.adapter.port.DurableMemoryRepository memoryStore;
     private final cn.lunalhx.ai.domain.memory.service.MemoryPromotionService memoryPromotion;
@@ -122,6 +125,7 @@ public class CliSessionService implements AutoCloseable {
         this.runStore = runStore;
         this.checkpointStore = checkpointStore;
         this.historyStore = historyStore;
+        this.leaseStore = new FileAttemptLeaseRepository(Path.of(workspace), mapper);
         this.traceRecorder = traceRecorder;
         this.memoryStore = new FileDurableMemoryRepository(Path.of(options.workspaceRoot), mapper,
                 artifactRedactor(options));
@@ -182,17 +186,38 @@ public class CliSessionService implements AutoCloseable {
         return runTurn(prompt, null, null, null);
     }
 
+    public boolean recoveryRequired() {
+        return recoveryRequiredRun().isPresent();
+    }
+
+    public Optional<AgentRun> recoveryRequiredRun() {
+        return runStore.findLatestRootByConversationId(sessionId)
+                .filter(run -> run.getStatus() != null && !run.getStatus().terminal())
+                .filter(run -> !leaseStore.isHealthy(run.getRunId()));
+    }
+
     /**
-     * Continue an unfinished root Run from its durable checkpoint after process
-     * restart. Reuses the existing run identity and resumes at {@code prompt_build}.
+     * Explicit Run Recovery: keep the original runId, create a new Attempt, and
+     * continue from the last durable checkpoint.
      */
-    public String continueInterruptedRun() {
-        AgentRun interrupted = runStore.findLatestRootByConversationId(sessionId)
-                .orElseThrow(() -> new OptionsException("no root run to continue"));
-        if (interrupted.getStatus().terminal()) {
-            throw new OptionsException("Run is already terminal and cannot be resumed");
-        }
+    public String recover() {
+        AgentRun interrupted = recoveryRequiredRun()
+                .orElseThrow(() -> new OptionsException("no Recovery Required run to recover"));
         return continueRun(interrupted.getRunId());
+    }
+
+    /**
+     * Terminal Run Abandonment. Does not call the model or tools, preserves
+     * existing History and checkpoints, and cannot be recovered afterwards.
+     */
+    public String abandon() {
+        AgentRun interrupted = recoveryRequiredRun()
+                .orElseThrow(() -> new OptionsException("no Recovery Required run to abandon"));
+        interrupted.setStatus(AgentRunStatus.ABANDONED);
+        interrupted.setStopReason(AgentStopReason.ABANDONED.name());
+        runStore.save(interrupted);
+        persistSession();
+        return "abandoned: " + interrupted.getRunId();
     }
 
     private String continueRun(String runId) {
@@ -239,6 +264,11 @@ public class CliSessionService implements AutoCloseable {
     private String runTurn(String prompt, PlanBinding planBinding,
                            CollaborationMode modeOverride,
                            AgentRunStartGuard runStartGuard) {
+        if (recoveryRequired()) {
+            AgentRun blocked = recoveryRequiredRun().orElseThrow();
+            throw new OptionsException("Recovery Required: unfinished run "
+                    + blocked.getRunId() + " — use /recover or /abandon");
+        }
         // Redact the user request at the single choke point so no secret
         // configured via --secret-env-name ever reaches the ledger, checkpoint,
         // run.json, trace or report on disk.
