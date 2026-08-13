@@ -191,7 +191,13 @@ public class CliSessionService implements AutoCloseable {
     }
 
     public boolean recoveryRequired() {
-        return recoveryRequiredRun().isPresent();
+        return recoveryRequiredRun().isPresent() && !ambiguityReview();
+    }
+
+    public boolean ambiguityReview() {
+        return recoveryRequiredRun()
+                .filter(run -> run.getStatus() == AgentRunStatus.WAITING_AMBIGUITY_REVIEW)
+                .isPresent();
     }
 
     public Optional<AgentRun> recoveryRequiredRun() {
@@ -216,13 +222,68 @@ public class CliSessionService implements AutoCloseable {
      * create an Attempt.
      */
     public String recover() {
+        if (ambiguityReview()) {
+            throw new OptionsException("Ambiguity Review: use /recovery fact, /recovery continue or /abandon");
+        }
         AgentRun interrupted = recoveryRequiredRun()
                 .orElseThrow(() -> new OptionsException("no Recovery Required run to recover"));
         Optional<String> blocked = recoveryCompatibility.blockedReason(interrupted);
         if (blocked.isPresent()) {
             throw new OptionsException("Recovery Blocked: " + blocked.get());
         }
-        return continueRun(interrupted.getRunId());
+        String answer = continueRun(interrupted.getRunId(), false, null);
+        if (ambiguityReview()) {
+            return formatAmbiguityReview();
+        }
+        return answer;
+    }
+
+    public String continueWithAmbiguity() {
+        AgentRun interrupted = recoveryRequiredRun()
+                .filter(run -> run.getStatus() == AgentRunStatus.WAITING_AMBIGUITY_REVIEW)
+                .orElseThrow(() -> new OptionsException("no Ambiguity Review to continue"));
+        return continueRun(interrupted.getRunId(), true, null);
+    }
+
+    public String addAmbiguityFact(String fact) {
+        AgentRun interrupted = recoveryRequiredRun()
+                .filter(run -> run.getStatus() == AgentRunStatus.WAITING_AMBIGUITY_REVIEW)
+                .orElseThrow(() -> new OptionsException("no Ambiguity Review to add a fact to"));
+        String safe = redactor.redact(fact == null ? "" : fact).strip();
+        if (safe.isEmpty()) {
+            throw new OptionsException("Ambiguity Review fact must not be empty");
+        }
+        continueRun(interrupted.getRunId(), false, safe);
+        return formatAmbiguityReview();
+    }
+
+    public String formatAmbiguityReview() {
+        AgentRun run = recoveryRequiredRun().orElse(null);
+        StringBuilder out = new StringBuilder();
+        out.append("Ambiguity Review");
+        if (run != null) {
+            out.append(": unfinished run ").append(run.getRunId());
+        }
+        out.append('\n');
+        if (run != null) {
+            checkpointStore.latest(run.getRunId()).ifPresent(checkpoint -> {
+                var snapshot = checkpoint.getContextSnapshot();
+                if (snapshot != null && snapshot.getInterruptedToolCalls() != null) {
+                    for (var marker : snapshot.getInterruptedToolCalls()) {
+                        if (marker == null || !marker.awaitsAmbiguityReview()) {
+                            continue;
+                        }
+                        out.append("Interrupted Tool Call ").append(marker.getToolName());
+                        if (marker.getSafetyTarget() != null) {
+                            out.append(" target=").append(marker.getSafetyTarget());
+                        }
+                        out.append(" id=").append(marker.getToolCallId()).append('\n');
+                    }
+                }
+            });
+        }
+        out.append("Use /recovery fact <text>, /recovery continue, or /abandon.");
+        return out.toString();
     }
 
     /**
@@ -239,7 +300,7 @@ public class CliSessionService implements AutoCloseable {
         return "abandoned: " + interrupted.getRunId();
     }
 
-    private String continueRun(String runId) {
+    private String continueRun(String runId, boolean continueWithAmbiguity, String ambiguityFact) {
         AgentQuestion question = AgentQuestion.builder()
                 .question("")
                 .runId(runId)
@@ -254,6 +315,8 @@ public class CliSessionService implements AutoCloseable {
                 .runtimeIdentity("cli")
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
                 .fullAccess(false)
+                .continueWithAmbiguity(continueWithAmbiguity)
+                .ambiguityFact(ambiguityFact)
                 .build();
         String finalAnswer = collectAskAnswer(question);
         persistSession();
@@ -286,6 +349,12 @@ public class CliSessionService implements AutoCloseable {
     private String runTurn(String prompt, PlanBinding planBinding,
                            CollaborationMode modeOverride,
                            AgentRunStartGuard runStartGuard) {
+        if (ambiguityReview()) {
+            AgentRun blocked = recoveryRequiredRun().orElseThrow();
+            throw new OptionsException("Ambiguity Review: unfinished run "
+                    + blocked.getRunId()
+                    + " — use /recovery fact, /recovery continue or /abandon");
+        }
         if (recoveryRequired()) {
             AgentRun blocked = recoveryRequiredRun().orElseThrow();
             if (recoveryBlocked()) {

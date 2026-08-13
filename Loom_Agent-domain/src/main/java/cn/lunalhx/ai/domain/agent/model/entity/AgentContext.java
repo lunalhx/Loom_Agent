@@ -264,6 +264,8 @@ public class AgentContext {
     public List<ToolExecutionMarker> getInterruptedToolCalls() { return action.interruptedToolCalls(); }
     public void setInterruptedToolCalls(List<ToolExecutionMarker> v) { action.setInterruptedToolCalls(v); }
     public void addInterruptedToolCall(ToolExecutionMarker marker) { action.addInterruptedToolCall(marker); }
+    public AmbiguityReview getAmbiguityReview() { return action.ambiguityReview(); }
+    public void setAmbiguityReview(AmbiguityReview v) { action.setAmbiguityReview(v); }
 
     // ==================== Plan Evidence ====================
 

@@ -110,6 +110,7 @@ public class AgentContextSnapshot {
     private ToolResult toolResult;
     private ToolExecutionMarker executionWindow;
     private List<ToolExecutionMarker> interruptedToolCalls;
+    private AmbiguityReview ambiguityReview;
 
     // -- Plan Evidence (safe receipts only) --
     private List<EvidenceReceipt> evidenceReceipts;
@@ -230,6 +231,7 @@ public class AgentContextSnapshot {
                 .executionWindow(action.executionWindow())
                 .interruptedToolCalls(action.interruptedToolCalls() == null ? List.of()
                         : List.copyOf(action.interruptedToolCalls()))
+                .ambiguityReview(action.ambiguityReview())
                 .evidenceReceipts(context.getEvidenceReceipts())
                 .evidenceDrift(context.isEvidenceDrift())
                 // budget
@@ -338,6 +340,7 @@ public class AgentContextSnapshot {
         context.setExecutionWindow(executionWindow);
         context.setInterruptedToolCalls(interruptedToolCalls == null ? List.of()
                 : List.copyOf(interruptedToolCalls));
+        context.setAmbiguityReview(ambiguityReview);
         context.restoreEvidence(evidenceReceipts, evidenceDrift);
 
         // budget

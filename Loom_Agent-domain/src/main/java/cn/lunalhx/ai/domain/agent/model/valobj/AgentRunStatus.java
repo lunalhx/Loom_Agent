@@ -5,6 +5,7 @@ public enum AgentRunStatus {
     RUNNING,
     WAITING_APPROVAL,
     WAITING_USER_INPUT,
+    WAITING_AMBIGUITY_REVIEW,
     COMPLETED,
     STOPPED,
     FAILED,
@@ -20,6 +21,7 @@ public enum AgentRunStatus {
     public boolean resumable() {
         return this == RUNNING
                 || this == WAITING_APPROVAL
-                || this == WAITING_USER_INPUT;
+                || this == WAITING_USER_INPUT
+                || this == WAITING_AMBIGUITY_REVIEW;
     }
 }

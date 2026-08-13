@@ -14,7 +14,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.domain.tool.service.ObservationTools;
+import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,7 +74,7 @@ public class ObservationNode extends AbstractAgentNode {
 
         if (ledgerAppendService != null) {
             String toolCallId = context.getToolCall() == null ? null : context.getToolCall().getToolCallId();
-            String resultIdentity = ObservationTools.isObservation(toolName)
+            String resultIdentity = ExecutionWindowTools.requiresWindow(toolName)
                     && StringUtils.isNotBlank(toolCallId)
                     ? toolCallId
                     : String.valueOf(Math.max(1, context.getToolSteps()));

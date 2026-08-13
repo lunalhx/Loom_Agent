@@ -186,4 +186,22 @@ public final class ControlUpdateTexts {
                 + " produced no durable Tool Result. Continue with a new safe observation;"
                 + " do not replay this call.";
     }
+
+    public static String renderReconciledFileMutation(String toolName, String toolCallId, String safetyTarget) {
+        return "[Reconciled File Mutation] " + StringUtils.defaultIfBlank(toolName, "unknown")
+                + " id=" + StringUtils.defaultIfBlank(toolCallId, "unknown")
+                + " target=" + StringUtils.defaultIfBlank(safetyTarget, "unknown")
+                + " matches current Repository State. There is no durable Tool Result;"
+                + " do not replay this call. Replan from the current files.";
+    }
+
+    public static String renderAmbiguityFact(String fact) {
+        return "[Ambiguity Review fact] " + StringUtils.defaultString(fact);
+    }
+
+    public static String renderContinueWithAmbiguity() {
+        return "[Continue with Ambiguity] Unknown Interrupted Tool Call results remain unresolved. "
+                + "Do not replay those calls. Replan from current Repository State. "
+                + "User facts are not Tool Results and do not grant permission.";
+    }
 }

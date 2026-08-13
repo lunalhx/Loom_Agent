@@ -61,5 +61,9 @@ public class AgentQuestion {
     private transient List<ConversationHistoryEntry> seedHistoryEntries;
     /** Next sequence after {@link #seedHistoryEntries}; null means 0. */
     private transient Long seedHistoryNextSequence;
+    /** Continue with Ambiguity: skip Ambiguity Review pause and replan. */
+    private transient boolean continueWithAmbiguity;
+    /** User-supplied Ambiguity Review fact; never a Tool Result. */
+    private transient String ambiguityFact;
 
 }

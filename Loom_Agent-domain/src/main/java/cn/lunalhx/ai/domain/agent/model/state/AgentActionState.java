@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.entity.AmbiguityReview;
 import cn.lunalhx.ai.domain.agent.model.entity.ToolExecutionMarker;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -20,6 +21,7 @@ public final class AgentActionState {
     private AuthorizedToolCall authorizedToolCall;
     private ToolExecutionMarker executionWindow;
     private List<ToolExecutionMarker> interruptedToolCalls = new ArrayList<>();
+    private AmbiguityReview ambiguityReview;
 
     public AgentDecision decision() { return decision; }
     public ToolCall toolCall() { return toolCall; }
@@ -48,4 +50,8 @@ public final class AgentActionState {
         }
         interruptedToolCalls.add(marker);
     }
+
+    public AmbiguityReview ambiguityReview() { return ambiguityReview; }
+
+    public void setAmbiguityReview(AmbiguityReview v) { this.ambiguityReview = v; }
 }

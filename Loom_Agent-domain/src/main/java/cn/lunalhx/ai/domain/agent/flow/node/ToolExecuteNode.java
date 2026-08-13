@@ -6,7 +6,7 @@ import cn.lunalhx.ai.domain.agent.flow.NodeResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.domain.tool.service.ObservationTools;
+import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 
 import java.util.List;
@@ -34,9 +34,9 @@ public class ToolExecuteNode extends AbstractAgentNode {
     protected NodeResult doApply(AgentContext context) {
         var authorized = context.getAuthorizedToolCall();
         String tool = authorized == null ? null : authorized.toolName();
-        if (ObservationTools.isObservation(tool) && context.getExecutionWindow() == null) {
+        if (ExecutionWindowTools.requiresWindow(tool) && context.getExecutionWindow() == null) {
             throw new IllegalStateException(
-                    "observation adapter cannot start without a durable execution-window marker");
+                    "adapter cannot start without a durable execution-window marker");
         }
         context.runtime().advanceToolStep(tool);
         ToolResult result = toolExecutor.execute(context, authorized);

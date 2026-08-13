@@ -36,6 +36,8 @@ public final class CliMain {
             /skills  List effective Skills, sources, and diagnostics.
             /new     Create a new independent session.
             /recover Continue the unfinished Run in Recovery Required.
+            /recovery fact <text>  Add an external fact in Ambiguity Review.
+            /recovery continue  Continue with Ambiguity from Ambiguity Review.
             /abandon Abandon the unfinished Run in Recovery Required.
             /exit    Exit the agent.
             """;
@@ -245,6 +247,28 @@ public final class CliMain {
             }
             return true;
         }
+        if (input.equals("/recovery continue")) {
+            try {
+                output.println(session.continueWithAmbiguity());
+            } catch (CliSessionService.OptionsException e) {
+                output.println("error: " + e.getMessage());
+            }
+            return true;
+        }
+        if (input.startsWith("/recovery fact")) {
+            String fact = input.equals("/recovery fact")
+                    ? "" : input.substring("/recovery fact".length()).strip();
+            try {
+                output.println(session.addAmbiguityFact(fact));
+            } catch (CliSessionService.OptionsException e) {
+                output.println("error: " + e.getMessage());
+            }
+            return true;
+        }
+        if (input.equals("/recovery") || input.startsWith("/recovery ")) {
+            output.println("error: use /recovery fact <text> or /recovery continue");
+            return true;
+        }
         return switch (input) {
             case "/new" -> {
                 String previousId = session.sessionId();
@@ -404,6 +428,10 @@ public final class CliMain {
                 }
                 System.out.println(session.recoveryBlockedReason());
                 System.out.println("Use /abandon to discard the run.");
+                return;
+            }
+            if (session.ambiguityReview()) {
+                System.out.println(session.formatAmbiguityReview());
                 return;
             }
             System.out.println("Recovery Required: unfinished run " + run.getRunId());

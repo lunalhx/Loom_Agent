@@ -10,6 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.AmbiguityReview;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.ToolExecutionMarker;
@@ -24,10 +25,13 @@ import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
-import cn.lunalhx.ai.domain.tool.service.ObservationTools;
+import cn.lunalhx.ai.domain.agent.service.recovery.FileMutationEvidence;
+import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
+import cn.lunalhx.ai.domain.tool.service.FileMutationTools;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -103,7 +107,7 @@ public final class AgentRunLifecycle {
     /** Persist the sanitized Tool Call and open the execution window before adapter invocation. */
     public List<AgentEvent> openExecutionWindow(AgentContext context) {
         var toolCall = context.getToolCall();
-        if (toolCall == null || !ObservationTools.isObservation(toolCall.getName())) {
+        if (toolCall == null || !ExecutionWindowTools.requiresWindow(toolCall.getName())) {
             return List.of();
         }
         String toolCallId = StringUtils.defaultIfBlank(toolCall.getToolCallId(), "unknown");
@@ -112,17 +116,21 @@ public final class AgentRunLifecycle {
         historyAppend.appendToolCall(context, toolCall.getName(), toolCallId, sanitizedInput,
                 ConversationHistoryInitializer.eventKey(context.getRunId(), toolCallId, "tool_call"));
         persistConversationHistory(context);
-        context.setExecutionWindow(ToolExecutionMarker.builder()
+        ToolExecutionMarker marker = ToolExecutionMarker.builder()
                 .toolCallId(toolCallId)
                 .toolName(toolCall.getName())
                 .sanitizedInput(sanitizedInput)
-                .build());
+                .build();
+        FileMutationEvidence.capture(marker, toolCall, context.getResolvedWorkspace());
+        context.setExecutionWindow(marker);
         return checkpointRunningAtPromptBuild(context, EXECUTION_WINDOW_REASON);
     }
 
     /**
      * When History has a matching Tool Result, close the execution window without
      * replaying. A marker without a result becomes an Interrupted Tool Call.
+     * File mutations whose pre-stored target and digest match current Repository
+     * State are marked reconciled without fabricating a Tool Result.
      */
     public List<AgentEvent> reconcileToolDurability(AgentContext context) {
         ToolExecutionMarker window = context.getExecutionWindow();
@@ -133,10 +141,16 @@ public final class AgentRunLifecycle {
             context.setExecutionWindow(null);
             return checkpointRunningAtPromptBuild(context, "after_tool");
         }
+        if (FileMutationEvidence.matchesCurrentState(window, context.getResolvedWorkspace())) {
+            window.setReconciled(true);
+        }
         context.addInterruptedToolCall(window);
         context.setExecutionWindow(null);
-        historyAppend.appendSystemNote(context,
-                ControlUpdateTexts.renderInterruptedToolCall(window.getToolName(), window.getToolCallId()),
+        String note = Boolean.TRUE.equals(window.getReconciled())
+                ? ControlUpdateTexts.renderReconciledFileMutation(
+                        window.getToolName(), window.getToolCallId(), window.getSafetyTarget())
+                : ControlUpdateTexts.renderInterruptedToolCall(window.getToolName(), window.getToolCallId());
+        historyAppend.appendSystemNote(context, note,
                 ConversationHistoryInitializer.eventKey(context.getRunId(),
                         window.getToolCallId(), "interrupted_tool"));
         return checkpointRunningAtPromptBuild(context, "interrupted_tool");
@@ -206,6 +220,91 @@ public final class AgentRunLifecycle {
                 .lastTool(context.runtime().lastTool())
                 .checkpointVersion(checkpoint.getVersion())
                 .build());
+    }
+
+    public boolean needsAmbiguityReview(AgentContext context) {
+        List<ToolExecutionMarker> interrupted = context.getInterruptedToolCalls();
+        if (interrupted == null) {
+            return false;
+        }
+        for (ToolExecutionMarker marker : interrupted) {
+            if (marker != null
+                    && FileMutationTools.isFileMutation(marker.getToolName())
+                    && marker.awaitsAmbiguityReview()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public List<AgentEvent> pauseForAmbiguityReview(AgentContext context) {
+        AmbiguityReview current = context.getAmbiguityReview();
+        List<String> facts = current == null || current.getFacts() == null
+                ? List.of() : List.copyOf(current.getFacts());
+        context.setAmbiguityReview(AmbiguityReview.builder()
+                .active(true)
+                .facts(new ArrayList<>(facts))
+                .build());
+        AgentCheckpoint checkpoint = saveCheckpoint(context, AgentNodeNames.PROMPT_BUILD, "ambiguity_review");
+        context.setCheckpointVersion(checkpoint.getVersion());
+        saveRun(context, AgentNodeNames.PROMPT_BUILD, AgentRunStatus.WAITING_AMBIGUITY_REVIEW);
+        return List.of(AgentEvent.builder()
+                .type(AgentEventType.CHECKPOINT_SAVED)
+                .runId(context.identity().runId())
+                .requestId(context.identity().requestId())
+                .conversationId(context.identity().conversationId())
+                .workspace(context.environment().workspaceDisplayName())
+                .node(AgentNodeNames.PROMPT_BUILD)
+                .toolSteps(context.runtime().toolSteps())
+                .modelAttempts(context.runtime().modelAttempts())
+                .lastTool(context.runtime().lastTool())
+                .checkpointVersion(checkpoint.getVersion())
+                .build());
+    }
+
+    public List<AgentEvent> recordAmbiguityFact(AgentContext context, String fact) {
+        String safe = StringUtils.trimToNull(fact);
+        if (safe == null) {
+            return List.of();
+        }
+        AmbiguityReview current = context.getAmbiguityReview();
+        List<String> facts = new ArrayList<>(current == null || current.getFacts() == null
+                ? List.of() : current.getFacts());
+        facts.add(safe);
+        context.setAmbiguityReview(AmbiguityReview.builder().active(true).facts(facts).build());
+        historyAppend.appendSystemNote(context,
+                ControlUpdateTexts.renderAmbiguityFact(safe),
+                ConversationHistoryInitializer.eventKey(context.getRunId(),
+                        String.valueOf(facts.size()), "ambiguity_fact"));
+        return pauseForAmbiguityReview(context);
+    }
+
+    public List<AgentEvent> acceptAmbiguity(AgentContext context) {
+        List<ToolExecutionMarker> interrupted = context.getInterruptedToolCalls();
+        if (interrupted != null) {
+            List<ToolExecutionMarker> updated = new ArrayList<>();
+            for (ToolExecutionMarker marker : interrupted) {
+                if (marker != null
+                        && FileMutationTools.isFileMutation(marker.getToolName())
+                        && marker.awaitsAmbiguityReview()) {
+                    marker.setAmbiguityAccepted(true);
+                }
+                updated.add(marker);
+            }
+            context.setInterruptedToolCalls(updated);
+        }
+        AmbiguityReview current = context.getAmbiguityReview();
+        List<String> facts = current == null || current.getFacts() == null
+                ? List.of() : List.copyOf(current.getFacts());
+        context.setAmbiguityReview(AmbiguityReview.builder()
+                .active(false)
+                .facts(new ArrayList<>(facts))
+                .build());
+        historyAppend.appendSystemNote(context,
+                ControlUpdateTexts.renderContinueWithAmbiguity(),
+                ConversationHistoryInitializer.eventKey(context.getRunId(),
+                        "continue", "continue_with_ambiguity"));
+        return checkpointRunningAtPromptBuild(context, "continue_with_ambiguity");
     }
 
     // ================================================================
