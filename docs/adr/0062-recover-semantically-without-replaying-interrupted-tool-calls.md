@@ -1,0 +1,5 @@
+# Recover semantically without replaying interrupted Tool Calls
+
+Status: Accepted.
+
+Run Recovery restores durable task context into a new Attempt and continues semantically; it does not reconnect to or automatically replay a Tool Call whose durable result was lost with the old Attempt. Before invoking an adapter, Runtime must durably record a sanitized execution-window marker in AgentCheckpoint; adapter execution cannot begin if that write fails. A matching durable Tool Result in authoritative Conversation History closes the window even if the next checkpoint was not written, while a marker without such a result becomes an Interrupted Tool Call. Runtime re-observes verifiable Repository State before continuing and reports unverifiable Shell, MCP, or external outcomes as ambiguous. V1 guarantees only that Runtime will not automatically replay the ambiguous call—not exactly-once effects, automatic rollback, universal reconciliation, or prevention of a later user/model request from issuing an equivalent new call; provider-specific idempotency and reconciliation can be added per Tool later.

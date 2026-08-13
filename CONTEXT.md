@@ -5,16 +5,84 @@ Loom Agent 是一个在本地工作区中与用户协作完成编码任务的 Ag
 ## Language
 
 **Session**:
-绑定一个工作区的持久对话，承载跨多次用户请求延续的模式、对话上下文、记忆和 Plan 集合。Plan 作为 Session 的独立字段持久化，不进入 conversation ledger，也不要求独立物理 Catalog。
+绑定一个工作区的持久对话，承载跨多次用户请求延续的模式、Conversation History、Session Working Memory 和 Plan 集合。Plan 作为 Session 的独立字段持久化，不进入 Conversation History，也不要求独立物理 Catalog。
 _Avoid_: Run、Task
+
+**Conversation History**:
+Session 中用户消息、模型消息和已取得持久结果的 Tool Call/Tool Result 的 append-only 事实来源。记录绑定准确的 Run 与 Attempt，并在 Run 的安全边界持续持久化；AgentCheckpoint 只引用其准确 sequence 与摘要，不复制完整历史。它不承载 Run 状态机、Interrupted Tool Call 或权限快照。旧的 Conversation Ledger 独立子系统及其 compaction/generation 设计已被舍弃，不因恢复机制重新引入；当前代码中残留的 `ledger*` 字段名不构成新的领域概念。
+_Avoid_: Conversation Ledger、AgentCheckpoint、Mutable History、Working Memory、Execution State
+
+**Session Working Memory**:
+跨多个 Run 继承的 Session 级记忆事实。一个 Run 从明确的 Session baseline 启动，并把该 Run 的 Working Memory Overlay 保存在 AgentCheckpoint；只有正常完成的根 Run 才把 overlay 投影到 Session Working Memory。暂停或等待中的 Run 继续由 AgentCheckpoint 持有 overlay，失败、停止、冲突、偏离或被放弃的 Run 不投影；其已持久事实仍保留在 Conversation History，checkpoint 不再复制另一份可独立修改的 Session memory。
+_Avoid_: Conversation History、Working Memory Overlay、TaskCheckpoint
+
+**Session Resume**:
+恢复一个既有 Session 的对话连续性。Runtime 加载该 Session 的持久上下文，但不接管其中未完成的 Run，也不重放其 Tool Call；恢复后的下一次用户请求创建新的根 Run，并按新 Run 规则重新冻结模式、能力与授权快照。
+_Avoid_: Run Recovery、Attempt、Tool Replay
 
 **New Session**:
 用户通过 `/new` 创建的独立对话。Runtime 分配新的 Session 身份，初始化空的对话历史、工作记忆、checkpoint、Plan 历史和 Current Plan，并继承当前 Session 的 Build Mode 或 Plan Mode；该模式初始化不是旧 Session 的 Mode Transition。该控制事件不创建 Run、不调用模型，也不修改或删除此前 Session，旧 Session 仍可显式恢复。产品不提供 `/reset` 或其兼容别名。
 _Avoid_: Reset、New Plan、Clear History
 
 **Run**:
-Session 内对一次用户请求的处理过程；它在启动时冻结 Session 当前模式为 Run Mode Snapshot，后续请求属于新的 Run，但可以继承同一 Session 的对话上下文。
+Session 内对一次用户请求的逻辑处理过程；它在启动时冻结 Session 当前模式为 Run Mode Snapshot，身份跨进程故障恢复保持不变，可以先后由多个 Attempt 推进。后续用户请求属于新的 Run，但可以继承同一 Session 的对话上下文。
 _Avoid_: Session
+
+**Run Recovery**:
+Runtime 在原 Attempt 异常丢失或经过 Run Suspension 后，由用户从 Recovery Required 状态显式选择、从持久安全边界语义继续一个未终止 Run 的产品操作。它保留原 `runId`、任务目标和冻结的 Run 范围状态，创建新的 Attempt 接管执行，不创建新用户请求或新 Run。它不重新连接、恢复程序计数器或自动重放原 Attempt 中未取得持久结果的 Tool Call；这类调用作为 Interrupted Tool Call 暴露，并在继续前重新观察可验证的当前状态。终态 Run 不可恢复，Session Resume 只检测并展示 Recovery Required，不会隐式执行该操作。
+_Avoid_: Session Resume、New Run、Terminal Retry、Tool Replay、Process Resume
+
+**Attempt**:
+一个 Runtime 进程对某个逻辑 Run 的一次独占推进周期。Run 初次执行创建首个 Attempt；异常中断后的 Run Recovery 创建新 Attempt，但不改变 Run 身份。Attempt 身份用于所有权、故障边界和审计，并记录该次实际使用的模型、provider 与 Runtime 身份；它不是新的任务身份，也不重新授予或扩大 Run 权限，同一 Run 同一时刻最多有一个有效 Attempt。
+_Avoid_: Run、Execution、Retry Count、Permission Grant
+
+**Attempt Lease**:
+Runtime 对未终态 Run 的持久独占写入权。初次执行或 Run Recovery 只有取得新的 fenced ownership 后才能创建并推进 Attempt；仍健康的 owner 不可被强制接管，已释放或过期的 owner 不能再写入 Run、AgentCheckpoint、Conversation History 或启动 Tool。Attempt Lease 只证明谁有权推进 Run，不能证明旧 Attempt 的 Tool 是否启动、完成或产生 Effect。
+_Avoid_: Process-local Lock、Session Lock、Tool Receipt、Permission Grant
+
+**Recovery Compatibility**:
+Runtime 在创建恢复 Attempt 前，对持久 Run 状态与当前执行环境进行的 fail-closed 契约校验。checkpoint schema 与 Workspace 身份必须可由当前 Runtime 原生接受；Run Mode、Permission Policy 与 Grants、Execution Profile、Skill Catalog 和 Active Skill Snapshot 保持冻结；Tool 的输入 schema、Effect 边界及恢复相关契约必须兼容。模型与 provider 可以变化并按 Attempt 审计，Runtime 也可以升级，但不读取旧 schema、不执行 migration 或兼容 fallback。缺失或不兼容的 Tool 只能从恢复 Run 的能力中移除，不能由同名但语义不兼容的实现替换；恢复能力只能保持或缩小，不能加入新发现的 Tool 或 Skill。
+_Avoid_: Binary Replay、Schema Migration、Compatibility Fallback、Capability Expansion
+
+**AgentCheckpoint**:
+Run 在持久安全边界保存的不可变、可版本化恢复快照，也是产品唯一的 checkpoint 类型。它保存 Run/Attempt 身份、执行状态、冻结契约、Working Memory Overlay、预算、Interrupted Tool Call、Ambiguity Review 及准确的 Conversation History anchor；它不复制完整 Conversation History 或 Session Working Memory。现有 `AgentCheckpoint` 直接改变为该 schema，不新增同义的 `RunCheckpoint`；`TaskCheckpoint` 被删除，旧 schema 不兼容读取或迁移。
+_Avoid_: TaskCheckpoint、RunCheckpoint、Conversation History Copy、Session Snapshot
+
+**Working Memory Overlay**:
+当前 Run 相对于启动时 Session Working Memory baseline 产生的 Run 范围记忆变化。它由 AgentCheckpoint 唯一持久化，用于同 Run 的 Attempt 恢复；只有根 Run 正常完成时才按明确顺序投影回 Session Working Memory，其他终止结果丢弃 overlay 的跨 Run 投影但不删除 Conversation History 事实，不能通过 checkpoint/history 双向复制隐式合并。
+_Avoid_: Session Working Memory、Conversation History、TaskCheckpoint
+
+**Interrupted Tool Call**:
+原 Attempt 已持久记录进入执行窗口、但在 Attempt 异常丢失前没有持久 Tool Result 的调用。该状态只证明调用处于可能执行的歧义窗口，不证明适配器实际启动、完成、失败或产生了何种 Effect；Run Recovery 不自动再次调用它，而是保留其脱敏身份，重新观察可验证的 Repository State，并向 Agent 与用户明确暴露无法验证的 Shell、MCP 或外部结果。它不是 `FAILED`、`PARTIAL` 或可安全重试的同义词，也不改变后续新 Tool Call 的 Permission Decision。
+_Avoid_: Failed Tool Call、Partial Success、Automatic Retry、Exactly-once Receipt
+
+**Interrupted Delegate Call**:
+父 Run 已创建 Delegate Run、但父级 Conversation History 尚未取得持久 Delegate Result 时，原 Attempt 异常丢失或暂停所留下的中断事实。根 Run 是唯一恢复单位；旧 Delegate 的 Attempt 不重连、不恢复，其子 Run 以 `INTERRUPTED_WITH_PARENT` 终止。Delegate 已产生但无法确认的 Repository State 或外部 Effect 进入根 Run 的 Ambiguity Review；根 Run 继续后可以重新规划并创建新的 Delegate Run，但不能拼接旧 Delegate 的内部推理、程序位置或进程状态。
+_Avoid_: Delegate Recovery、Independent Recovery Required、Delegate Result、Automatic Redispatch
+
+**Recovery Required**:
+Session 存在失去有效 Attempt 的未终态根 Run 时进入的阻塞控制状态。Runtime 自动检测并展示原任务、最后持久安全边界、Interrupted Tool Call、已知 Repository State 变化和中断时间，但不调用模型或工具；在用户显式选择可用的 Run Recovery 或 Run Abandonment 前，该 Session 不得接受普通用户请求或创建新的根 Run。Full Access Run 及其他不满足 Recovery Compatibility 的 Run 只允许检查和 Run Abandonment，不提供降级恢复。用户可以切换或创建其他 Session 继续工作。
+_Avoid_: Automatic Recovery、Background Resume、Non-blocking Warning、New Run
+
+**Recovery Blocked**:
+Recovery Required 中因 Full Access、最新 AgentCheckpoint 或 History anchor 损坏/缺失、Workspace 身份不匹配、schema 不受支持或冻结契约不兼容而无法创建恢复 Attempt 的 fail-closed 状态。Runtime 展示准确原因并只允许检查与 Run Abandonment；不能把损坏当作不存在、静默回退到更旧 checkpoint、迁移旧 schema，或用缩小 Execution Profile 规避边界。
+_Avoid_: Recovery Required、Older-checkpoint Fallback、Automatic Repair、Recover in Sandbox
+
+**Run Abandonment**:
+用户在活动 Run 或 Recovery Required 状态下显式停止并放弃未终态 Run 的终止控制事件。它不调用模型或工具，不回滚、删除或宣称解决已经发生的 Repository State 或外部 Effect，并保留 Interrupted Tool Call、修改与审计记录；被放弃的 Run 进入不可恢复终态，此后用户的普通请求创建新的 Run。
+_Avoid_: Run Recovery、Rollback、Delete Run、Mark Tool Failed
+
+**Run Suspension**:
+用户在活动 Run 中显式选择“暂停并退出”产生的可恢复控制事件。Runtime 请求停止当前 Attempt 及其进程树并持久化最后安全边界；Run 保持非终态，无法取得确定结果的在途调用成为 Interrupted Tool Call，Session 下次打开时进入 Recovery Required。活动 Run 的普通退出或首次 `Ctrl-C` 必须让用户在 Run Suspension 与 Run Abandonment 之间明确选择，不能含糊地把退出等同于失败、放弃或自动恢复。Full Access Run 不可在进程退出后恢复，因此不提供 Run Suspension；其退出选择只能是返回活动 Run 或明确 Run Abandonment。
+_Avoid_: Run Abandonment、Automatic Recovery、Terminal Failure、Background Process
+
+**Ambiguity Review**:
+Run Recovery 已完成允许的安全观察、但仍无法用可信证据确定某个 Interrupted Tool Call 结果时进入的阻塞控制状态。Runtime 保留并展示未知事实，不把它改写为成功、失败或 Partial Success；用户可以补充外部事实、选择 Run Abandonment，或选择 Continue with Ambiguity。该状态不授予、撤销或覆盖任何 Tool 权限。
+_Avoid_: Tool Approval、Permission Decision、Automatic Retry、Mark Failed
+
+**Continue with Ambiguity**:
+用户在 Ambiguity Review 中明确允许 Run 在保留未知 Tool 结果的前提下继续的控制事件。它不调用或重试 Tool，不把用户陈述提升为可信 Tool Result，也不产生 Permission Grant；此后的每个新 Tool Call 仍统一通过既有 Effect、Execution Profile 与 Permission Policy 求值，`ALLOW` 调用不会仅因与 Interrupted Tool Call 相同或相似而增加恢复专属询问。
+_Avoid_: Retry Approval、Permission Override、Mark Succeeded、Mark Failed
 
 **Run Mode Snapshot**:
 根 Run 启动时从 Session 当前 Build Mode 或 Plan Mode 复制的不可变模式值，决定该 Run 的 Prompt、Effective Tool Catalog 与 Call Effect 策略，并写入 Run 审计记录。Delegate Run 继承父 Run 的 Snapshot；Run 启动后的 Mode Transition 只影响后续 Run，不能改变进行中的 Run。
@@ -33,7 +101,7 @@ Runtime 控制面将一个已发现并校验的 Skill 指令内容纳入当前 R
 _Avoid_: Load-skill Tool、Trusted Tool Output、Session Skill State、Sticky Skill、Skill Approval、Tool Authorization、Permission Grant、Direct Tool Invocation
 
 **Active Skill Snapshot**:
-Skill Activation 成功时由 Runtime 从 Effective Skill Descriptor 对应内容原子生成的、仅属于当前 Run 的不可变指令快照，包含稳定名称、来源、完整指令正文、正文摘要，以及带规范化相对路径和内容摘要的不可变资源清单。正文必须在装配前整体通过大小和上下文预算校验，不能静默截断；来源发生漂移、读取不完整或预算不足时 Activation 原子失败，不把部分指令加入 prompt。它是受控的低优先级模型指令，不是权限、Tool Output、Session 状态或可执行代码；Run checkpoint 必须足以确定性恢复同一快照。
+Skill Activation 成功时由 Runtime 从 Effective Skill Descriptor 对应内容原子生成的、仅属于当前 Run 的不可变指令快照，包含稳定名称、来源、完整指令正文、正文摘要，以及带规范化相对路径和内容摘要的不可变资源清单。正文必须在装配前整体通过大小和上下文预算校验，不能静默截断；来源发生漂移、读取不完整或预算不足时 Activation 原子失败，不把部分指令加入 prompt。它是受控的低优先级模型指令，不是权限、Tool Output、Session 状态或可执行代码；AgentCheckpoint 必须足以确定性恢复同一快照。
 _Avoid_: Tool Result、Partial Skill、Live Skill File、Permission Grant、Executable Script
 
 **Skill Invocation**:
@@ -97,7 +165,7 @@ Agent 在普通根 Build Tool Call 中、进程启动前声明的最小额外文
 _Avoid_: Execution Grant、Post-failure Retry、Agent-granted Capability
 
 **Full Access**:
-用户在当前 Runtime launch 中为后续根 Build Run 显式选择的 `DANGER_FULL_ACCESS` Execution Profile 与默认 `ALLOW` Permission Action 组合。它允许普通工具调用和 Shell 命令在主机当前用户的文件系统与网络权限下静默执行，并继续求值工具 allowlist、显式 `ASK`/`DENY` 规则与 Built-in Safety Floor；但任意脚本、插件或二进制的内部行为不受 sandbox 约束，命令规则无法提供间接行为的主机安全保证。选择在 Run 启动时冻结，不写入 Session，Plan Mode、Delegate Run、Agent、项目配置和 Tool Approval 都不能启用或继承它。
+用户在当前 Runtime launch 中为后续根 Build Run 显式选择的 `DANGER_FULL_ACCESS` Execution Profile 与默认 `ALLOW` Permission Action 组合。它允许普通工具调用和 Shell 命令在主机当前用户的文件系统与网络权限下静默执行，并继续求值工具 allowlist、显式 `ASK`/`DENY` 规则与 Built-in Safety Floor；但任意脚本、插件或二进制的内部行为不受 sandbox 约束，命令规则无法提供间接行为的主机安全保证。选择在 Run 启动时冻结，不写入 Session，Plan Mode、Delegate Run、Agent、项目配置和 Tool Approval 都不能启用或继承它。使用 Full Access 的 Run 在进程退出后不可 Run Recovery：Recovery Required 只允许检查与 Run Abandonment，不能在同一 Run 中恢复 Full Access 或切换为 sandboxed Execution Profile。
 _Avoid_: Auto、Bypass Permission Evaluator、Plan Override
 
 **Host Resource Grant**:
@@ -165,7 +233,7 @@ Session 的一种持续协作模式，Agent 在其中探索问题并提出方案
 _Avoid_: Planning Phase、Planner Agent、Plan-and-Execute
 
 **Plan**:
-Plan Mode 中由 Agent 明确提交的、具有独立身份与修订历史的持久 Session Artifact。它由 Runtime 管理的结构化元数据与 Agent 提交的完整 Plan Document 组成，作为 AgentSession 中独立于 conversation ledger 的字段集合持久化；不设置 Draft 状态，也不是可执行步骤图或工作流状态机。一个 Session 可以保存多个 Plan；普通答疑、澄清和阶段性分析不是 Plan。Plan 的产出会完成当前 Run，但不会授权执行，也不会使 Run 进入等待审批状态。
+Plan Mode 中由 Agent 明确提交的、具有独立身份与修订历史的持久 Session Artifact。它由 Runtime 管理的结构化元数据与 Agent 提交的完整 Plan Document 组成，作为 AgentSession 中独立于 Conversation History 的字段集合持久化；不设置 Draft 状态，也不是可执行步骤图或工作流状态机。一个 Session 可以保存多个 Plan；普通答疑、澄清和阶段性分析不是 Plan。Plan 的产出会完成当前 Run，但不会授权执行，也不会使 Run 进入等待审批状态。
 _Avoid_: Assistant Message、Execution Contract、Tool Approval、TODO List
 
 **Plan Document**:
