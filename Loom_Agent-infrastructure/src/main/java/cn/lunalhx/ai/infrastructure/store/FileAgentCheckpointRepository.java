@@ -6,10 +6,17 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.FileLockInterruptionException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * File-backed {@link AgentCheckpoint} store under
@@ -17,6 +24,8 @@ import java.util.Optional;
  * an {@link AgentContextSnapshot} with a Conversation History anchor only.
  */
 public final class FileAgentCheckpointRepository implements AgentCheckpointRepository {
+
+    private static final ConcurrentMap<Path, ReentrantLock> CHECKPOINT_LOCKS = new ConcurrentHashMap<>();
 
     private final Path root;
     private final ObjectMapper mapper;
@@ -43,7 +52,7 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
 
     @Override
     public AgentCheckpoint save(AgentCheckpoint checkpoint) {
-        try {
+        return withLock(checkpoint.getRunId(), () -> {
             Path dir = root.resolve(checkpoint.getRunId());
             Files.createDirectories(dir);
             long nextVersion;
@@ -67,9 +76,7 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
             AtomicFiles.write(path(checkpoint.getRunId(), nextVersion),
                     mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(redacted));
             return checkpoint;
-        } catch (IOException e) {
-            throw new IllegalStateException("cannot save checkpoint: " + e.getMessage(), e);
-        }
+        });
     }
 
     @Override
@@ -134,5 +141,37 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
                     "checkpoint " + best + " uses an incompatible schema; "
                             + "no automatic migration is performed", e);
         }
+    }
+
+    private Path lockPath(String runId) {
+        return root.resolve(runId).resolve("checkpoint.lock");
+    }
+
+    private <T> T withLock(String runId, Locked<T> action) {
+        ReentrantLock lock = CHECKPOINT_LOCKS.computeIfAbsent(
+                root.resolve(runId).toAbsolutePath().normalize(),
+                ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            Files.createDirectories(root.resolve(runId));
+            try (FileChannel channel = FileChannel.open(lockPath(runId),
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 FileLock ignored = channel.lock()) {
+                return action.run();
+            }
+        } catch (FileLockInterruptionException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("cannot lock checkpoint " + runId + ": interrupted", e);
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "cannot save checkpoint: " + e.getMessage(), e);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @FunctionalInterface
+    private interface Locked<T> {
+        T run() throws IOException;
     }
 }

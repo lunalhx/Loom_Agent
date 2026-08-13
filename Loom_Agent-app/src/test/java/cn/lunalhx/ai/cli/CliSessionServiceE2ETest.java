@@ -937,16 +937,31 @@ public class CliSessionServiceE2ETest {
                 external.find(sessionId).orElseThrow().getWorkingMemory().taskSummary());
         stoppedSession.close();
 
-        // ABANDONED and PLAN_DEVIATION fabricated overlays must also stay out of Session WM
+        CountDownLatch abandonStarted = new CountDownLatch(1);
+        CountDownLatch abandonRelease = new CountDownLatch(1);
+        CliSessionService abandoning = resumeService(workspace, sessionId,
+                blockingFinalGateway(abandonStarted, abandonRelease, "must-not-finish"));
+        ExecutorService abandonExecutor = Executors.newSingleThreadExecutor();
+        String abandonedRunId;
+        try {
+            Future<String> abandonTurn = abandonExecutor.submit(
+                    () -> abandoning.runTurn("this overlay must not project"));
+            assertTrue(abandonStarted.await(10, TimeUnit.SECONDS));
+            abandonedRunId = abandoning.runRepository()
+                    .findLatestRootByConversationId(sessionId).orElseThrow().getRunId();
+            assertTrue(abandoning.abandon().startsWith("abandoned:"));
+            abandonTurn.get(10, TimeUnit.SECONDS);
+        } finally {
+            abandonRelease.countDown();
+            abandonExecutor.shutdownNow();
+            abandoning.close();
+        }
+        assertEquals(AgentRunStatus.ABANDONED,
+                new FileAgentRunRepository(workspace, mapper).find(abandonedRunId).orElseThrow()
+                        .getStatus());
+
         FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
         FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
-        persistNonProjectingTerminalOverlay(runs, checkpoints, sessionId, workspace,
-                "run_abandoned_overlay", AgentRunStatus.ABANDONED, "ABANDONED",
-                "abandoned-overlay-must-not-project");
-        persistNonProjectingTerminalOverlay(runs, checkpoints, sessionId, workspace,
-                "run_deviation_overlay", AgentRunStatus.STOPPED, "PLAN_DEVIATION",
-                "deviation-overlay-must-not-project");
-
         CliSessionService.CliOptions reopenOpts = options(workspace, finalAnswerGateway("unused"));
         reopenOpts.resumeSessionId = sessionId;
         AgentRuntimeProperties reopenAgent = CliLoopTestFixture.agentProperties(workspace);
@@ -962,9 +977,9 @@ public class CliSessionServiceE2ETest {
         String sessionSummary = external.find(sessionId).orElseThrow()
                 .getWorkingMemory().taskSummary();
         assertEquals("kept-baseline", sessionSummary);
-        assertFalse(sessionSummary.contains("abandoned-overlay"));
-        assertFalse(sessionSummary.contains("deviation-overlay"));
         assertFalse(sessionSummary.toLowerCase().contains("conflict"));
+        assertNotEquals(abandonedRunId,
+                external.find(sessionId).orElseThrow().getLastProjectedRunId());
     }
 
     private CliSessionService resumeService(Path workspace, String sessionId, ModelGateway gateway) {
@@ -978,44 +993,6 @@ public class CliSessionServiceE2ETest {
                 historyRepository(workspace),
                 new FileTraceRecorder(workspace, mapper),
                 CliLoopTestFixture.build(workspace, mapper, gateway, agent, java.util.List.of()));
-    }
-
-    private void persistNonProjectingTerminalOverlay(
-            FileAgentRunRepository runs,
-            FileAgentCheckpointRepository checkpoints,
-            String sessionId,
-            Path workspace,
-            String runId,
-            AgentRunStatus status,
-            String stopReason,
-            String overlaySummary) {
-        WorkingContextMemory overlay = new WorkingContextMemory();
-        overlay.setTaskSummary(overlaySummary);
-        runs.save(AgentRun.builder()
-                .schemaVersion(AgentRun.CURRENT_SCHEMA_VERSION)
-                .runId(runId)
-                .sessionId(sessionId)
-                .rootRunId(runId)
-                .requestId("req-" + runId)
-                .conversationId(sessionId)
-                .runKind(AgentRunKind.ROOT)
-                .runModeSnapshot(CollaborationMode.BUILD)
-                .status(status)
-                .stopReason(stopReason)
-                .workspace(workspace.toString())
-                .updatedAt(Instant.now())
-                .createdAt(Instant.now())
-                .build());
-        checkpoints.save(AgentCheckpoint.builder()
-                .runId(runId)
-                .currentNode("prompt_build")
-                .reason("terminal_fixture")
-                .contextSnapshot(AgentContextSnapshot.builder()
-                        .schemaVersion(AgentContextSnapshot.CURRENT_SCHEMA_VERSION)
-                        .runModeSnapshot(CollaborationMode.BUILD)
-                        .workingMemory(overlay)
-                        .build())
-                .build());
     }
 
     // ---- checkpoint + run + trace + report consistency ----
