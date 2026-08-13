@@ -25,6 +25,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
+import cn.lunalhx.ai.domain.agent.model.valobj.RunExitAction;
 import cn.lunalhx.ai.domain.agent.service.context.SecretRedactor;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
 import cn.lunalhx.ai.domain.agent.service.recovery.RecoveryCompatibility;
@@ -88,6 +89,8 @@ public class CliSessionService implements AutoCloseable {
     private final RecoveryCompatibility recoveryCompatibility;
 
     private AgentSession session;
+    private volatile String activeRunId;
+    private volatile RunExitAction pendingExit;
 
     public CliSessionService(ApplicationContext spring, CliOptions options) {
         this(options, spring.getBean(ObjectMapper.class),
@@ -287,10 +290,19 @@ public class CliSessionService implements AutoCloseable {
     }
 
     /**
-     * Terminal Run Abandonment. Does not call the model or tools, preserves
-     * existing History and checkpoints, and cannot be recovered afterwards.
+     * Terminal Run Abandonment. Works for Recovery Required and for an active
+     * sandboxed Run. Does not call the model or tools, preserves existing
+     * History and checkpoints, and cannot be recovered afterwards.
      */
     public String abandon() {
+        String active = activeRunId;
+        if (active != null) {
+            pendingExit = RunExitAction.ABANDON;
+            loopService.requestRunExit(active, RunExitAction.ABANDON);
+            awaitInactive();
+            persistSession();
+            return "abandoned: " + active;
+        }
         AgentRun interrupted = recoveryRequiredRun()
                 .orElseThrow(() -> new OptionsException("no Recovery Required run to abandon"));
         interrupted.setStatus(AgentRunStatus.ABANDONED);
@@ -298,6 +310,67 @@ public class CliSessionService implements AutoCloseable {
         runStore.save(interrupted);
         persistSession();
         return "abandoned: " + interrupted.getRunId();
+    }
+
+    /**
+     * Run Suspension: stop the Attempt and process tree, keep the Run
+     * non-terminal, and record unresolved calls as Interrupted Tool Call.
+     */
+    public String suspend() {
+        String runId = activeRunId;
+        if (runId == null) {
+            throw new OptionsException("no active Run to suspend");
+        }
+        if (fullAccessActive()) {
+            throw new OptionsException("Full Access Runs do not offer Run Suspension");
+        }
+        pendingExit = RunExitAction.SUSPEND;
+        loopService.requestRunExit(runId, RunExitAction.SUSPEND);
+        awaitInactive();
+        persistSession();
+        return "suspended: " + runId;
+    }
+
+    public boolean hasActiveRecoverableRun() {
+        return activeRunId != null && !fullAccessActive();
+    }
+
+    /**
+     * Suspend/abandon are explicit user choices. A released lease on a still
+     * non-terminal Run is Recovery Required, not an implicit suspension.
+     */
+    private String userVisibleAskResult(String runId, StringBuilder answer, StringBuilder error) {
+        AgentRun run = runStore.find(runId).orElse(null);
+        RunExitAction exit = pendingExit;
+        pendingExit = null;
+        if (run != null && run.getStatus() == AgentRunStatus.ABANDONED) {
+            return "abandoned: " + runId;
+        }
+        if (exit == RunExitAction.SUSPEND
+                && run != null
+                && run.getStatus() != null
+                && !run.getStatus().terminal()) {
+            return "suspended: " + runId;
+        }
+        if (answer.length() == 0 && error.length() > 0) {
+            return "error: " + error.toString().strip();
+        }
+        return answer.length() == 0 ? "(empty answer)" : answer.toString();
+    }
+
+    private void awaitInactive() {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (activeRunId != null && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new OptionsException("interrupted while waiting for the Attempt to stop");
+            }
+        }
+        if (activeRunId != null) {
+            throw new OptionsException("timed out waiting for the Attempt to stop");
+        }
     }
 
     private String continueRun(String runId, boolean continueWithAmbiguity, String ambiguityFact) {
@@ -324,26 +397,29 @@ public class CliSessionService implements AutoCloseable {
     }
 
     private String collectAskAnswer(AgentQuestion question) {
-        StringBuilder answer = new StringBuilder();
-        StringBuilder error = new StringBuilder();
-        List<AgentEvent> events = loopService.ask(question)
-                .collectList()
-                .block(Duration.ofMinutes(30));
-        if (events != null) {
-            for (AgentEvent event : events) {
-                if (event.getAnswer() != null && !event.getAnswer().isBlank()) {
-                    answer.setLength(0);
-                    answer.append(event.getAnswer());
-                }
-                if (event.getType() == AgentEventType.ERROR && event.getMessage() != null) {
-                    error.append(event.getMessage()).append('\n');
+        String runId = question.getRunId();
+        activeRunId = runId;
+        try {
+            StringBuilder answer = new StringBuilder();
+            StringBuilder error = new StringBuilder();
+            List<AgentEvent> events = loopService.ask(question)
+                    .collectList()
+                    .block(Duration.ofMinutes(30));
+            if (events != null) {
+                for (AgentEvent event : events) {
+                    if (event.getAnswer() != null && !event.getAnswer().isBlank()) {
+                        answer.setLength(0);
+                        answer.append(event.getAnswer());
+                    }
+                    if (event.getType() == AgentEventType.ERROR && event.getMessage() != null) {
+                        error.append(event.getMessage()).append('\n');
+                    }
                 }
             }
+            return userVisibleAskResult(runId, answer, error);
+        } finally {
+            activeRunId = null;
         }
-        if (answer.length() == 0 && error.length() > 0) {
-            return "error: " + error.toString().strip();
-        }
-        return answer.length() == 0 ? "(empty answer)" : answer.toString();
     }
 
     private String runTurn(String prompt, PlanBinding planBinding,
@@ -420,9 +496,15 @@ public class CliSessionService implements AutoCloseable {
         StringBuilder answer = new StringBuilder();
         StringBuilder error = new StringBuilder();
         AgentEvent terminal = null;
-        List<AgentEvent> events = loopService.ask(question)
-                .collectList()
-                .block(Duration.ofMinutes(30));
+        activeRunId = runId;
+        List<AgentEvent> events;
+        try {
+            events = loopService.ask(question)
+                    .collectList()
+                    .block(Duration.ofMinutes(30));
+        } finally {
+            activeRunId = null;
+        }
         if (events != null) {
             for (AgentEvent event : events) {
                 if (event.getAnswer() != null && !event.getAnswer().isBlank()) {
@@ -440,20 +522,21 @@ public class CliSessionService implements AutoCloseable {
 
         Optional<AgentRun> finalRun = runStore.find(runId);
         AgentRun run = finalRun.orElse(null);
-        String finalAnswer = answer.length() == 0 && error.length() > 0
-                ? "error: " + error.toString().strip()
-                : answer.length() == 0 ? "(empty answer)" : answer.toString();
+        String finalAnswer = userVisibleAskResult(runId, answer, error);
 
         AgentStopReason stopReason = terminal != null && terminal.getStopReason() != null
                 ? terminal.getStopReason()
                 : (run != null && run.getStopReason() != null
-                        ? AgentStopReason.valueOf(run.getStopReason()) : AgentStopReason.MODEL_ERROR);
+                        ? AgentStopReason.valueOf(run.getStopReason()) : null);
         String status = run != null ? run.getStatus().name().toLowerCase() : "failed";
+        String stopReasonName = stopReason == null
+                ? (run != null && run.getStatus() != null ? run.getStatus().name() : "MODEL_ERROR")
+                : stopReason.name();
 
         taskState.put("run_id", runId);
         taskState.put("session_id", sessionId);
         taskState.put("status", status);
-        taskState.put("stop_reason", stopReason.name());
+        taskState.put("stop_reason", stopReasonName);
         taskState.put("final_answer", redactor.redact(finalAnswer));
         taskState.put("tool_steps", run != null ? run.getToolSteps() : 0);
         taskState.put("attempts", run != null ? run.getModelAttempts() : 0);
@@ -463,12 +546,12 @@ public class CliSessionService implements AutoCloseable {
         FileRunStore fileRunStore = new FileRunStore(Path.of(workspace), mapper);
         fileRunStore.writeTaskState(runId, taskState);
         fileRunStore.appendTrace(runId, trace("run_finished", Map.of(
-                "status", status, "stop_reason", stopReason.name(),
+                "status", status, "stop_reason", stopReasonName,
                 "final_answer", redactor.redact(finalAnswer))));
         report.put("run_id", runId);
         report.put("session_id", sessionId);
         report.put("status", status);
-        report.put("stop_reason", stopReason.name());
+        report.put("stop_reason", stopReasonName);
         report.put("final_answer", redactor.redact(finalAnswer));
         report.put("tool_steps", run != null ? run.getToolSteps() : 0);
         report.put("model_attempts", run != null ? run.getModelAttempts() : 0);

@@ -57,6 +57,12 @@ public final class FileAgentRunRepository implements AgentRunRepository {
             }
             Path target = runFile(run.getRunId());
             validateCurrent(run, target);
+            Optional<AgentRun> existing = find(run.getRunId());
+            if (existing.isPresent()
+                    && existing.get().getStatus() != null
+                    && existing.get().getStatus().terminal()) {
+                throw new IllegalStateException("terminal Run cannot be written: " + run.getRunId());
+            }
             Files.createDirectories(target.getParent());
             Instant now = Instant.now();
             run.setUpdatedAt(now);

@@ -18,9 +18,11 @@ import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
+import cn.lunalhx.ai.domain.agent.model.valobj.RunExitAction;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
@@ -64,7 +66,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
     private final AgentLoopComponents components;
     private final AgentRunLifecycle lifecycle;
     private final Executor executor;
-    private final Map<String, AtomicBoolean> cancellationRequests = new ConcurrentHashMap<>();
+    private final Map<String, ActiveAttempt> attempts = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> conversationRuns = new ConcurrentHashMap<>();
     private final ConversationExecutionGuard executionGuard;
     private final SkillRunBootstrap skillRunBootstrap;
@@ -347,12 +349,37 @@ public class DefaultAgentLoopService implements AgentLoopService {
         runLoop(context, AgentNodeNames.PROMPT_BUILD, sink);
     }
 
+    @Override
+    public void requestRunExit(String runId, RunExitAction action) {
+        if (runId == null || action == null) {
+            return;
+        }
+        ActiveAttempt active = attempts.computeIfAbsent(runId, id -> new ActiveAttempt());
+        active.exit.set(action);
+        active.cancel.set(true);
+        RootRunSecurityScope scope = active.scope.get();
+        if (scope != null) {
+            scope.cancel();
+        }
+        Thread thread = active.thread.get();
+        if (thread != null) {
+            thread.interrupt();
+        }
+    }
+
     private void runLoop(AgentContext context, String startNode, FluxSink<AgentEvent> sink) {
-        AtomicBoolean cancellation = new AtomicBoolean(false);
-        AtomicBoolean existing = cancellationRequests.putIfAbsent(context.identity().runId(), cancellation);
-        AtomicBoolean activeCancellation = existing == null ? cancellation : existing;
+        String runId = context.identity().runId();
+        ActiveAttempt active = attempts.compute(runId, (id, existing) -> {
+            ActiveAttempt attempt = existing == null ? new ActiveAttempt() : existing;
+            attempt.thread.set(Thread.currentThread());
+            attempt.scope.set(context.getSecurityScope());
+            return attempt;
+        });
         if (context.getSecurityScope() != null) {
-            sink.onCancel(context.getSecurityScope()::cancel);
+            sink.onCancel(() -> {
+                context.getSecurityScope().cancel();
+                active.cancel.set(true);
+            });
         }
         String convId = context.identity().conversationId();
         if (convId != null) {
@@ -362,7 +389,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             String currentNode = startNode;
             boolean firstRound = true;
             boolean persistHistoryAfterFirstPrompt = true;
-            while (!sink.isCancelled() && !activeCancellation.get()) {
+            while (!sink.isCancelled() && !active.cancel.get()) {
                 if (!firstRound) {
                     if (isTotalTimeout(context)) {
                         finishTimeout(context, sink);
@@ -387,8 +414,18 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     return;
                 }
 
-                AgentNodeExecution execution =
-                        components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
+                AgentNodeExecution execution;
+                try {
+                    execution = components.nodeLifecycle().execute(context, node, events -> emit(sink, events));
+                } catch (RuntimeException e) {
+                    if (finishIfExitRequested(context, sink, active)) {
+                        return;
+                    }
+                    throw e;
+                }
+                if (finishIfExitRequested(context, sink, active)) {
+                    return;
+                }
 
                 if (persistHistoryAfterFirstPrompt && AgentNodeNames.PROMPT_BUILD.equals(currentNode)) {
                     lifecycle.persistHistoryAfterPrompt(context);
@@ -406,6 +443,10 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
                 if (AgentNodeNames.TOOL_OUTPUT.equals(currentNode)) {
                     emit(sink, lifecycle.checkpointAfterTool(context));
+                }
+
+                if (finishIfExitRequested(context, sink, active)) {
+                    return;
                 }
 
                 if (AgentNodeNames.DECISION.equals(currentNode)
@@ -432,9 +473,15 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         sink.complete();
                         return;
                     case FAIL:
+                        if (finishIfExitRequested(context, sink, active)) {
+                            return;
+                        }
                         finishFail(context, result.getEvents(), sink);
                         return;
                 }
+            }
+            if (finishIfExitRequested(context, sink, active)) {
+                return;
             }
             components.nodeLifecycle().cancelled(context, events -> emit(sink, events));
             lifecycle.cancelled(context);
@@ -443,9 +490,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
             if (context.getParentRunId() == null && context.getSecurityScope() != null) {
                 context.getSecurityScope().close();
             }
-            if (existing == null) {
-                cancellationRequests.remove(context.identity().runId(), cancellation);
-            }
+            attempts.remove(runId, active);
             if (convId != null) {
                 Set<String> runIds = conversationRuns.get(convId);
                 if (runIds != null) {
@@ -684,11 +729,35 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 > context.runtimeProperties(properties).getTotalTimeoutMs();
     }
 
+    private boolean finishIfExitRequested(AgentContext context, FluxSink<AgentEvent> sink,
+                                          ActiveAttempt active) {
+        RunExitAction action = active.exit.get();
+        if (action == null) {
+            return false;
+        }
+        Thread.interrupted();
+        context.runtime().clearOutcomeForContinuation();
+        if (action == RunExitAction.SUSPEND) {
+            emit(sink, lifecycle.suspend(context));
+        } else {
+            emit(sink, lifecycle.abandon(context));
+        }
+        sink.complete();
+        return true;
+    }
+
     private void emit(FluxSink<AgentEvent> sink, List<AgentEvent> events) {
         for (AgentEvent event : events) {
             if (!sink.isCancelled()) {
                 sink.next(event);
             }
         }
+    }
+
+    private static final class ActiveAttempt {
+        private final AtomicBoolean cancel = new AtomicBoolean();
+        private final AtomicReference<RunExitAction> exit = new AtomicReference<>();
+        private final AtomicReference<RootRunSecurityScope> scope = new AtomicReference<>();
+        private final AtomicReference<Thread> thread = new AtomicReference<>();
     }
 }

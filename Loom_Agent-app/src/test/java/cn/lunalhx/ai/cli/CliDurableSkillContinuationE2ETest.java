@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.AttemptLease;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.execution.AgentLoopService;
@@ -17,10 +18,10 @@ import cn.lunalhx.ai.infrastructure.loom.WriteFileTool;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileAttemptLeaseRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort;
 import cn.lunalhx.ai.test.CliLoopTestFixture;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 import reactor.core.publisher.Flux;
@@ -29,11 +30,13 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -60,56 +63,68 @@ public class CliDurableSkillContinuationE2ETest {
 
         CopyOnWriteArrayList<ChatPrompt> firstPrompts = new CopyOnWriteArrayList<>();
         AtomicInteger firstCalls = new AtomicInteger();
-        ModelGateway firstGateway = toolThenFinalGateway(firstPrompts, firstCalls);
+        CountDownLatch secondModel = new CountDownLatch(1);
+        CountDownLatch releaseModel = new CountDownLatch(1);
+        ModelGateway firstGateway = toolThenBlockingFinalGateway(
+                firstPrompts, firstCalls, secondModel, releaseModel);
         List<AgentTool> tools = List.of(new WriteFileTool(new LocalWorkspacePort()));
         CliSessionService first = service(options(workspace, firstGateway), firstGateway, tools);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
         String sessionId;
         String runId;
         try {
-            assertEquals("done", first.runTurn("$review-pr write note.txt then finish"));
+            executor.submit(() -> first.runTurn("$review-pr write note.txt then finish"));
+            assertTrue(secondModel.await(10, TimeUnit.SECONDS));
             sessionId = first.sessionId();
-            AgentRun completed = first.runRepository().findLatestRootByConversationId(sessionId).orElseThrow();
-            runId = completed.getRunId();
+            AgentRun running = first.runRepository().findLatestRootByConversationId(sessionId).orElseThrow();
+            runId = running.getRunId();
+            assertEquals(AgentRunStatus.RUNNING, running.getStatus());
             assertTrue(firstPrompts.get(0).getSystemPrompt().contains("FROZEN_BODY"));
-        } finally {
-            first.close();
-        }
+            assertAfterToolCheckpoint(workspace, runId);
 
-        prepareInterruptedRun(workspace, runId);
-        writeSkill(skillDir, "review-pr", "Review carefully.", "DRIFTED_BODY");
+            FileAttemptLeaseRepository leases = new FileAttemptLeaseRepository(workspace, mapper);
+            AttemptLease lease = leases.find(runId).orElseThrow();
+            assertTrue(leases.release(runId, lease.getFence()));
 
-        CopyOnWriteArrayList<ChatPrompt> resumePrompts = new CopyOnWriteArrayList<>();
-        AtomicInteger resumeCalls = new AtomicInteger();
-        ModelGateway resumeGateway = finalOnlyGateway(resumePrompts, resumeCalls);
-        CliSessionService.CliOptions resumeOpts = options(workspace, resumeGateway);
-        resumeOpts.resumeSessionId = sessionId;
-        CliSessionService resumed = service(resumeOpts, resumeGateway, tools);
-        try {
-            AgentSession session = resumed.sessionRepository().find(sessionId).orElseThrow();
-            assertEquals(AgentSession.CURRENT_SCHEMA_VERSION, (int) session.getSchemaVersion());
+            writeSkill(skillDir, "review-pr", "Review carefully.", "DRIFTED_BODY");
 
-            String answer = resumed.recover();
-            assertEquals("continued", answer);
-            assertEquals(1, resumeCalls.get());
-            assertFalse(resumePrompts.isEmpty());
-            String system = resumePrompts.get(0).getSystemPrompt();
-            assertTrue(system.contains("Active skills:"));
-            assertTrue(system.contains("FROZEN_BODY"));
-            assertFalse(system.contains("DRIFTED_BODY"));
-            assertEquals(firstPrompts.get(0).getStablePrefixSignature(),
-                    resumePrompts.get(0).getStablePrefixSignature());
+            CopyOnWriteArrayList<ChatPrompt> resumePrompts = new CopyOnWriteArrayList<>();
+            AtomicInteger resumeCalls = new AtomicInteger();
+            ModelGateway resumeGateway = finalOnlyGateway(resumePrompts, resumeCalls);
+            CliSessionService.CliOptions resumeOpts = options(workspace, resumeGateway);
+            resumeOpts.resumeSessionId = sessionId;
+            CliSessionService resumed = service(resumeOpts, resumeGateway, tools);
+            try {
+                AgentSession session = resumed.sessionRepository().find(sessionId).orElseThrow();
+                assertEquals(AgentSession.CURRENT_SCHEMA_VERSION, (int) session.getSchemaVersion());
 
-            AgentContextSnapshot latest = new FileAgentCheckpointRepository(workspace, mapper)
-                    .latest(runId).orElseThrow().getContextSnapshot();
-            assertEquals(15, (int) latest.getSchemaVersion());
-            assertNotNull(latest.getFrozenAuthorization());
-            assertNotNull(latest.getSkillCatalogSnapshot());
-            String json = mapper.writeValueAsString(latest);
-            assertFalse(json.contains(home.toString()));
-            assertFalse(json.contains(skillDir.toString()));
+                String answer = resumed.recover();
+                assertEquals("continued", answer);
+                assertEquals(1, resumeCalls.get());
+                assertFalse(resumePrompts.isEmpty());
+                String system = resumePrompts.get(0).getSystemPrompt();
+                assertTrue(system.contains("Active skills:"));
+                assertTrue(system.contains("FROZEN_BODY"));
+                assertFalse(system.contains("DRIFTED_BODY"));
+                assertEquals(firstPrompts.get(0).getStablePrefixSignature(),
+                        resumePrompts.get(0).getStablePrefixSignature());
+
+                AgentContextSnapshot latest = new FileAgentCheckpointRepository(workspace, mapper)
+                        .latest(runId).orElseThrow().getContextSnapshot();
+                assertEquals(15, (int) latest.getSchemaVersion());
+                assertNotNull(latest.getFrozenAuthorization());
+                assertNotNull(latest.getSkillCatalogSnapshot());
+                String json = mapper.writeValueAsString(latest);
+                assertFalse(json.contains(home.toString()));
+                assertFalse(json.contains(skillDir.toString()));
+            } finally {
+                resumed.close();
+            }
         } finally {
             restoreHome(previousHome);
-            resumed.close();
+            releaseModel.countDown();
+            executor.shutdownNow();
+            first.close();
         }
     }
 
@@ -150,44 +165,19 @@ public class CliDurableSkillContinuationE2ETest {
         }
     }
 
-    private void prepareInterruptedRun(Path workspace, String runId) throws Exception {
-        FileAgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(workspace, mapper);
-        Path dir = workspace.resolve(".loom-code/checkpoints").resolve(runId);
-        AgentCheckpoint afterTool = null;
-        try (Stream<Path> files = Files.list(dir)) {
-            List<Path> jsonFiles = files.filter(p -> p.getFileName().toString().endsWith(".json"))
-                    .sorted(Comparator.comparing(p -> p.getFileName().toString()))
-                    .toList();
-            for (Path file : jsonFiles) {
-                JsonNode node = mapper.readTree(file.toFile());
-                if ("after_tool".equals(node.path("reason").asText())) {
-                    afterTool = mapper.treeToValue(node, AgentCheckpoint.class);
-                }
-            }
-        }
-        assertNotNull("expected after_tool checkpoint", afterTool);
+    private void assertAfterToolCheckpoint(Path workspace, String runId) {
+        AgentCheckpoint afterTool = new FileAgentCheckpointRepository(workspace, mapper)
+                .latest(runId).orElseThrow();
+        assertEquals("after_tool", afterTool.getReason());
         assertEquals(15, (int) afterTool.getContextSnapshot().getSchemaVersion());
         assertNotNull(afterTool.getContextSnapshot().getActiveSkills());
         assertFalse(afterTool.getContextSnapshot().getActiveSkills().isEmpty());
-
-        // Make after_tool the latest recoverable checkpoint and reopen the Run.
-        checkpoints.save(AgentCheckpoint.builder()
-                .runId(runId)
-                .currentNode("prompt_build")
-                .contextSnapshot(afterTool.getContextSnapshot())
-                .reason("after_tool")
-                .build());
-
-        FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);
-        AgentRun run = runs.find(runId).orElseThrow();
-        run.setStatus(AgentRunStatus.RUNNING);
-        run.setStopReason(null);
-        run.setFinalAnswer(null);
-        runs.save(run);
     }
 
-    private ModelGateway toolThenFinalGateway(CopyOnWriteArrayList<ChatPrompt> prompts,
-                                              AtomicInteger calls) {
+    private ModelGateway toolThenBlockingFinalGateway(CopyOnWriteArrayList<ChatPrompt> prompts,
+                                                      AtomicInteger calls,
+                                                      CountDownLatch secondModel,
+                                                      CountDownLatch releaseModel) {
         return new ModelGateway() {
             @Override
             public Flux<ModelStreamChunk> stream(ChatPrompt prompt) {
@@ -204,6 +194,15 @@ public class CliDurableSkillContinuationE2ETest {
                             .finishReason("stop")
                             .actualModel("test")
                             .build());
+                }
+                secondModel.countDown();
+                try {
+                    if (!releaseModel.await(60, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to release model");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("model wait interrupted", e);
                 }
                 return Mono.just(ModelChatResult.builder()
                         .content("<final>done</final>")

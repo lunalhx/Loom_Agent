@@ -6,10 +6,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -20,7 +17,7 @@ import java.nio.file.Path;
  */
 public final class CliMain {
 
-    private static final String HELP = """
+    static final String HELP = """
             Commands:
             /help    Show this help message.
             /memory  Show the agent's distilled working memory.
@@ -81,7 +78,7 @@ public final class CliMain {
                     System.out.println(runSafe(session, arguments.prompt));
                     return 0;
                 }
-                return repl(session);
+                return CliInteractiveLoop.run(session);
             }
         } catch (CliSessionService.OptionsException e) {
             System.err.println("error: " + e.getMessage());
@@ -123,52 +120,8 @@ public final class CliMain {
         return application.run(arguments == null ? new String[0] : new String[0]);
     }
 
-    private static int repl(CliSessionService session) {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-        while (true) {
-            System.out.print("\nloom-code [" + session.collaborationMode().cliName() + "]> ");
-            System.out.flush();
-            String line;
-            try {
-                line = reader.readLine();
-            } catch (Exception e) {
-                System.out.println();
-                return 0;
-            }
-            if (line == null) {
-                System.out.println();
-                return 0;
-            }
-            String input = line.strip();
-            if (input.isEmpty()) {
-                continue;
-            }
-            if (handleControl(session, input, System.out)) {
-                continue;
-            }
-            switch (input) {
-                case "/exit", "/quit" -> {
-                    return 0;
-                }
-                case "/help" -> {
-                    System.out.println(HELP);
-                    continue;
-                }
-                case "/session" -> {
-                    System.out.println(session.sessionId());
-                    continue;
-                }
-                case "/memory" -> {
-                    System.out.println(session.memoryView());
-                    continue;
-                }
-                default -> {
-                    // fall through to ask
-                }
-            }
-            System.out.println();
-            System.out.println(runSafe(session, input));
-        }
+    static String helpText() {
+        return HELP;
     }
 
     static boolean handleControl(CliSessionService session, String input, PrintStream output) {

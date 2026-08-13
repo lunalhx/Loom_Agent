@@ -57,6 +57,11 @@
             <artifactId>spring-ai-starter-mcp-client</artifactId>
             <version>1.0.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.jline</groupId>
+            <artifactId>jline</artifactId>
+            <version>3.27.1</version>
+        </dependency>
 
         <!-- 工程模块 -->
         <dependency>

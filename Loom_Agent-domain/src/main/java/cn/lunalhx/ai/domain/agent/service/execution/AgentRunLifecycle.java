@@ -367,6 +367,30 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.STOPPED);
     }
 
+    /**
+     * Stop the Attempt, persist in-flight calls as Interrupted Tool Call, and
+     * leave the Run non-terminal so the next open enters Recovery Required.
+     */
+    public List<AgentEvent> suspend(AgentContext context) {
+        context.runtime().clearOutcomeForContinuation();
+        List<AgentEvent> events = new java.util.ArrayList<>(reconcileToolDurability(context));
+        events.addAll(checkpointRunningAtPromptBuild(context, "run_suspended"));
+        return events;
+    }
+
+    /**
+     * Stop the Attempt, persist interruption facts, and terminalize as abandoned.
+     */
+    public List<AgentEvent> abandon(AgentContext context) {
+        context.runtime().clearOutcomeForContinuation();
+        List<AgentEvent> events = new java.util.ArrayList<>(reconcileToolDurability(context));
+        context.runtime().stop(AgentStopReason.ABANDONED);
+        AgentCheckpoint checkpoint = saveCheckpoint(context, context.runtime().currentNode(), "run_abandoned");
+        context.setCheckpointVersion(checkpoint.getVersion());
+        saveRun(context, context.runtime().currentNode(), AgentRunStatus.ABANDONED);
+        return events;
+    }
+
     /** Terminal checkpoint so the final History anchor and Working Memory Overlay
      *  are durable with the terminal Run. */
     private void saveFinalCheckpoint(AgentContext context, String reason) {
@@ -413,7 +437,12 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
     }
 
     private void requireWritable(AgentContext context) {
-        leaseRepository.requireWritable(context.identity().runId(), context.getLeaseFence());
+        String runId = context.identity().runId();
+        AgentRun existing = runRepository.find(runId).orElse(null);
+        if (existing != null && existing.getStatus() != null && existing.getStatus().terminal()) {
+            throw new IllegalStateException("terminal Run cannot be written: " + runId);
+        }
+        leaseRepository.requireWritable(runId, context.getLeaseFence());
     }
 
     private void saveRun(AgentContext context, String currentNode, AgentRunStatus fallbackStatus) {
