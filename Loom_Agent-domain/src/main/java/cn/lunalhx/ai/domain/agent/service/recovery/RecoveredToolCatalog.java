@@ -1,6 +1,7 @@
 package cn.lunalhx.ai.domain.agent.service.recovery;
 
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.UnverifiableExternalTools;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -13,6 +14,7 @@ import java.util.Objects;
 /**
  * Recovery capability may only stay equal or shrink. Same-name tools whose
  * input schema or effect envelope drifted are removed, not substituted.
+ * Unverifiable MCP/external tools also require an unchanged description.
  */
 public final class RecoveredToolCatalog {
 
@@ -48,9 +50,15 @@ public final class RecoveredToolCatalog {
         if (frozen.getCapabilityEnvelope() == null || live.getCapabilityEnvelope() == null) {
             return false;
         }
-        return Objects.equals(frozen.getName(), live.getName())
-                && schemaEquals(frozen.getInputSchema(), live.getInputSchema())
-                && Objects.equals(frozen.getCapabilityEnvelope(), live.getCapabilityEnvelope());
+        if (!Objects.equals(frozen.getName(), live.getName())
+                || !schemaEquals(frozen.getInputSchema(), live.getInputSchema())
+                || !Objects.equals(frozen.getCapabilityEnvelope(), live.getCapabilityEnvelope())) {
+            return false;
+        }
+        if (UnverifiableExternalTools.isUnverifiableExternal(frozen.getName(), List.of(frozen))) {
+            return Objects.equals(frozen.getDescription(), live.getDescription());
+        }
+        return true;
     }
 
     private static boolean schemaEquals(String left, String right) {

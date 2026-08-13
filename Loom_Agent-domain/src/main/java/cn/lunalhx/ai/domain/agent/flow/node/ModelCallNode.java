@@ -17,6 +17,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.model.valobj.ModelCallPurpose;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
+import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
@@ -35,11 +36,13 @@ public class ModelCallNode extends AbstractAgentNode {
     private final ConversationHistoryAppendService ledgerAppendService;
     private final ModelPromptFactory promptFactory;
     private final ModelCallBudgetCoordinator budgetCoordinator;
+    private final ToolOutputSanitizer sanitizer;
 
     public ModelCallNode(ModelCallMiddlewareAssembler assembler,
                          AgentRuntimeProperties properties,
                          ConversationHistoryAppendService ledgerAppendService,
-                         ModelCallTerminalDeps terminalDeps) {
+                         ModelCallTerminalDeps terminalDeps,
+                         ToolOutputSanitizer sanitizer) {
         super(AgentNodeNames.MODEL_CALL, List.of("stablePrefix", "conversationHistory", "requestId", "conversationId"));
         this.promptFactory = new ModelPromptFactory();
         this.budgetCoordinator = new ModelCallBudgetCoordinator(
@@ -49,6 +52,7 @@ public class ModelCallNode extends AbstractAgentNode {
                 .assemble(ctx -> executeTerminal(ctx, terminalDeps));
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.ledgerAppendService = Objects.requireNonNull(ledgerAppendService, "ledgerAppendService must not be null");
+        this.sanitizer = Objects.requireNonNull(sanitizer, "sanitizer must not be null");
     }
 
     @Override
@@ -76,7 +80,7 @@ public class ModelCallNode extends AbstractAgentNode {
                 String eventKey = ConversationHistoryInitializer.eventKey(
                         context.getRunId(), String.valueOf(context.getModelAttempts()), "assistant");
                 ledgerAppendService.appendAssistant(
-                        context, context.getModelOutput(), eventKey);
+                        context, redactedModelOutput(context.getModelOutput()), eventKey);
                 return NodeResult.nextNode(AgentNodeNames.DECISION, events);
 
             case BUDGET_BLOCKED:
@@ -100,6 +104,17 @@ public class ModelCallNode extends AbstractAgentNode {
             case ERROR:
             default:
                 return NodeResult.fail(events);
+        }
+    }
+
+    private String redactedModelOutput(String output) {
+        if (output == null) {
+            return null;
+        }
+        try {
+            return sanitizer.sanitize(AgentNodeNames.MODEL_CALL, output).getOutput();
+        } catch (Exception e) {
+            return "<redacted>";
         }
     }
 

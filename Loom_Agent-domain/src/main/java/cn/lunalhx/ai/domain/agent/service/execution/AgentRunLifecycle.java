@@ -27,10 +27,12 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import cn.lunalhx.ai.domain.agent.service.ledger.ControlUpdateTexts;
 import cn.lunalhx.ai.domain.agent.service.recovery.FileMutationEvidence;
+import cn.lunalhx.ai.domain.tool.model.ToolSpec;
 import cn.lunalhx.ai.domain.tool.service.ExecutionWindowTools;
 import cn.lunalhx.ai.domain.tool.service.FileMutationTools;
 import cn.lunalhx.ai.domain.tool.service.ShellTools;
 import cn.lunalhx.ai.domain.tool.service.PendingInteractionRecorder;
+import cn.lunalhx.ai.domain.tool.service.UnverifiableExternalTools;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.Instant;
@@ -110,7 +112,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
     /** Persist the sanitized Tool Call and open the execution window before adapter invocation. */
     public List<AgentEvent> openExecutionWindow(AgentContext context) {
         var toolCall = context.getToolCall();
-        if (toolCall == null || !ExecutionWindowTools.requiresWindow(toolCall.getName())) {
+        if (toolCall == null || !ExecutionWindowTools.requiresWindow(toolCall.getName(), context.getToolSpecs())) {
             return List.of();
         }
         String toolCallId = StringUtils.defaultIfBlank(toolCall.getToolCallId(), "unknown");
@@ -160,12 +162,18 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         return checkpointRunningAtPromptBuild(context, "interrupted_tool");
     }
 
-    private static boolean awaitsAmbiguityReview(ToolExecutionMarker marker) {
+    private boolean awaitsAmbiguityReview(ToolExecutionMarker marker, AgentContext context) {
         if (marker == null || !marker.awaitsAmbiguityReview()) {
             return false;
         }
-        return FileMutationTools.isFileMutation(marker.getToolName())
-                || ShellTools.isShell(marker.getToolName());
+        if (FileMutationTools.isFileMutation(marker.getToolName())
+                || ShellTools.isShell(marker.getToolName())) {
+            return true;
+        }
+        List<ToolSpec> contracts = context.getFrozenToolContracts() != null
+                ? context.getFrozenToolContracts()
+                : context.getToolSpecs();
+        return UnverifiableExternalTools.isUnverifiableExternal(marker.getToolName(), contracts);
     }
 
     private boolean hasMatchingToolResult(AgentContext context, String toolCallId) {
@@ -254,7 +262,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
             return false;
         }
         for (ToolExecutionMarker marker : interrupted) {
-            if (awaitsAmbiguityReview(marker)) {
+            if (awaitsAmbiguityReview(marker, context)) {
                 return true;
             }
         }
@@ -308,7 +316,7 @@ public final class AgentRunLifecycle implements PendingInteractionRecorder {
         if (interrupted != null) {
             List<ToolExecutionMarker> updated = new ArrayList<>();
             for (ToolExecutionMarker marker : interrupted) {
-                if (awaitsAmbiguityReview(marker)) {
+                if (awaitsAmbiguityReview(marker, context)) {
                     marker.setAmbiguityAccepted(true);
                 }
                 updated.add(marker);

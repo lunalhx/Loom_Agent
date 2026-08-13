@@ -186,7 +186,7 @@ public final class ToolAuthorizationService {
         ExecutionProfile effectiveProfile = profile.withExternalGrants(effectiveGrants);
         call.setExecutionProfile(effectiveProfile);
         CallEffectAssessment effect = registry.assessEffect(call.getName(), call, effectiveProfile);
-        if (!effect.trusted() || !profile.allows(effect.profile())) {
+        if (!profile.allows(effect.profile())) {
             return reject(call, "execution_profile_denied", "execution_profile_denied", effect.profile());
         }
         PermissionDecision decision = Objects.requireNonNull(policy, "policy must not be null")

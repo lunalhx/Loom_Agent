@@ -400,7 +400,8 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 if (AgentNodeNames.TOOL_INPUT.equals(currentNode)
                         && context.getAuthorizedToolCall() != null
                         && ExecutionWindowTools.requiresWindow(
-                                context.getAuthorizedToolCall().toolName())) {
+                                context.getAuthorizedToolCall().toolName(),
+                                context.getToolSpecs())) {
                     emit(sink, lifecycle.openExecutionWindow(context));
                 }
                 if (AgentNodeNames.TOOL_OUTPUT.equals(currentNode)) {

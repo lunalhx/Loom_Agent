@@ -34,7 +34,8 @@ public class ToolExecuteNode extends AbstractAgentNode {
     protected NodeResult doApply(AgentContext context) {
         var authorized = context.getAuthorizedToolCall();
         String tool = authorized == null ? null : authorized.toolName();
-        if (ExecutionWindowTools.requiresWindow(tool) && context.getExecutionWindow() == null) {
+        if (ExecutionWindowTools.requiresWindow(tool, context.getToolSpecs())
+                && context.getExecutionWindow() == null) {
             throw new IllegalStateException(
                     "adapter cannot start without a durable execution-window marker");
         }

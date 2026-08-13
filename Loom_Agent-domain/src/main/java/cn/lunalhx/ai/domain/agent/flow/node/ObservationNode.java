@@ -74,7 +74,7 @@ public class ObservationNode extends AbstractAgentNode {
 
         if (ledgerAppendService != null) {
             String toolCallId = context.getToolCall() == null ? null : context.getToolCall().getToolCallId();
-            String resultIdentity = ExecutionWindowTools.requiresWindow(toolName)
+            String resultIdentity = ExecutionWindowTools.requiresWindow(toolName, context.getToolSpecs())
                     && StringUtils.isNotBlank(toolCallId)
                     ? toolCallId
                     : String.valueOf(Math.max(1, context.getToolSteps()));
