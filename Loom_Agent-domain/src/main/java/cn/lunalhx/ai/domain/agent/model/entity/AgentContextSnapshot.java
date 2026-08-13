@@ -3,13 +3,13 @@ package cn.lunalhx.ai.domain.agent.model.entity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentActionState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
-import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentModelCallState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentTraceState;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.skill.model.ActiveSkillSnapshot;
 import cn.lunalhx.ai.domain.skill.model.SkillCatalog;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
@@ -121,7 +121,7 @@ public class AgentContextSnapshot {
     private Integer reactiveCompactAttempts;
     private String currentModel;
     private String fallbackReason;
-    private ContextRecoveryStage contextRecoveryStage;
+    private ContextOverflowStage contextRecoveryStage;
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
@@ -161,7 +161,7 @@ public class AgentContextSnapshot {
         AgentRuntimeState runtime = context.runtime();
         AgentActionState action = context.action();
         AgentBudgetState budget = context.budget();
-        AgentRecoveryState recovery = context.recovery();
+        AgentModelCallState modelCall = context.modelCall();
         AgentTraceState trace = context.trace();
 
         FrozenAuthorizationSnapshot frozenAuth = null;
@@ -239,13 +239,13 @@ public class AgentContextSnapshot {
                 .usedTokens(budget.usedTokens())
                 .estimatedCost(budget.estimatedCost())
                 // recovery
-                .reactiveCompactAttempts(recovery.reactiveCompactAttempts())
-                .currentModel(recovery.currentModel())
-                .fallbackReason(recovery.fallbackReason())
-                .contextRecoveryStage(recovery.contextRecoveryStage())
-                .recoveryModelOverride(recovery.recoveryModelOverride())
-                .contextTranscriptArtifactId(recovery.contextTranscriptArtifactId())
-                .contextBlockedReason(recovery.contextBlockedReason())
+                .reactiveCompactAttempts(modelCall.reactiveCompactAttempts())
+                .currentModel(modelCall.currentModel())
+                .fallbackReason(modelCall.fallbackReason())
+                .contextRecoveryStage(modelCall.contextOverflowStage())
+                .recoveryModelOverride(modelCall.recoveryModelOverride())
+                .contextTranscriptArtifactId(modelCall.contextTranscriptArtifactId())
+                .contextBlockedReason(modelCall.contextBlockedReason())
                 // trace
                 .traceId(trace.traceId())
                 .traceSequenceNo(trace.traceSequenceNo())
@@ -350,7 +350,7 @@ public class AgentContextSnapshot {
         context.setReactiveCompactAttempts(reactiveCompactAttempts == null ? 0 : reactiveCompactAttempts);
         context.setCurrentModel(currentModel);
         context.setFallbackReason(fallbackReason);
-        context.setContextRecoveryStage(contextRecoveryStage == null ? ContextRecoveryStage.NONE : contextRecoveryStage);
+        context.setContextOverflowStage(contextRecoveryStage == null ? ContextOverflowStage.NONE : contextRecoveryStage);
         context.setRecoveryModelOverride(recoveryModelOverride);
         context.setContextTranscriptArtifactId(contextTranscriptArtifactId);
         context.setContextBlockedReason(contextBlockedReason);

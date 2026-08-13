@@ -42,8 +42,7 @@ public class PlanModeBoundaryTest {
     @Test
     public void planRejectsMutationBeforePermissionPromptOrExecution() {
         AtomicInteger calls = new AtomicInteger();
-        ToolAuthorizationService service = new ToolAuthorizationService(registry(calls), mapper,
-                (display, decision) -> { throw new AssertionError("restricted call must not prompt"); });
+        ToolAuthorizationService service = new ToolAuthorizationService(registry(calls), mapper);
         AgentContext context = context(CollaborationMode.PLAN);
         var result = service.authorize(context, ToolCall.builder().name("write_file")
                         .input(mapper.createObjectNode()).build(),
@@ -59,8 +58,7 @@ public class PlanModeBoundaryTest {
         AtomicInteger calls = new AtomicInteger();
         ToolRegistry registry = registry(calls);
         AgentContext context = context(CollaborationMode.BUILD);
-        ToolAuthorizationService service = new ToolAuthorizationService(registry, mapper,
-                (display, decision) -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE);
+        ToolAuthorizationService service = new ToolAuthorizationService(registry, mapper);
         var result = service.authorize(context, ToolCall.builder().name("write_file")
                         .input(mapper.createObjectNode()).build(),
                 new ToolExecutor.ToolRuntimePolicy(Set.of("write_file"), CollaborationMode.BUILD, 0, 1,

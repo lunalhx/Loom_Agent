@@ -1,6 +1,6 @@
 package cn.lunalhx.ai.domain.agent.model.valobj;
 
-public enum ContextRecoveryStage {
+public enum ContextOverflowStage {
 
     NONE,
     REACTIVE_COMPACTED,

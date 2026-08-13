@@ -5,7 +5,7 @@ import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentEnvironmentState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentPromptState;
-import cn.lunalhx.ai.domain.agent.model.state.AgentRecoveryState;
+import cn.lunalhx.ai.domain.agent.model.state.AgentModelCallState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRunDefinition;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentSkillState;
@@ -16,7 +16,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.agent.model.valobj.BudgetState;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.service.AuthorizedToolCall;
@@ -54,7 +54,7 @@ public class AgentContext {
     private AgentPromptState prompt;
     private AgentActionState action;
     private AgentBudgetState budget;
-    private AgentRecoveryState recovery;
+    private AgentModelCallState modelCall;
     private AgentTraceState trace;
     private PlanEvidenceState evidence;
     private AgentSkillState skills;
@@ -68,7 +68,7 @@ public class AgentContext {
         this.prompt = new AgentPromptState();
         this.action = new AgentActionState();
         this.budget = new AgentBudgetState();
-        this.recovery = new AgentRecoveryState();
+        this.modelCall = new AgentModelCallState();
         this.trace = new AgentTraceState();
         this.evidence = new PlanEvidenceState();
         this.skills = new AgentSkillState();
@@ -83,7 +83,7 @@ public class AgentContext {
     public AgentPromptState prompt() { return prompt; }
     public AgentActionState action() { return action; }
     public AgentBudgetState budget() { return budget; }
-    public AgentRecoveryState recovery() { return recovery; }
+    public AgentModelCallState modelCall() { return modelCall; }
     public AgentTraceState trace() { return trace; }
     public PlanEvidenceState evidence() { return evidence; }
     public AgentSkillState skills() { return skills; }
@@ -321,24 +321,24 @@ public class AgentContext {
                 budget.usedCompletionTokens(), budget.usedTokens(), v));
     }
 
-    // ==================== recovery delegates ====================
+    // ==================== model-call overflow delegates ====================
 
-    public int getReactiveCompactAttempts() { return recovery.reactiveCompactAttempts(); }
-    public void setReactiveCompactAttempts(int v) { recovery.setReactiveCompactAttempts(v); }
-    public String getCurrentModel() { return recovery.currentModel(); }
-    public void setCurrentModel(String v) { recovery.setCurrentModel(v); }
-    public String getFallbackReason() { return recovery.fallbackReason(); }
-    public void setFallbackReason(String v) { recovery.setFallbackReason(v); }
-    public ContextRecoveryStage getContextRecoveryStage() { return recovery.contextRecoveryStage(); }
-    public void setContextRecoveryStage(ContextRecoveryStage v) { recovery.setContextRecoveryStage(v); }
-    public String getRecoveryModelOverride() { return recovery.recoveryModelOverride(); }
-    public void setRecoveryModelOverride(String v) { recovery.setRecoveryModelOverride(v); }
-    public String getContextTranscriptArtifactId() { return recovery.contextTranscriptArtifactId(); }
-    public void setContextTranscriptArtifactId(String v) { recovery.setContextTranscriptArtifactId(v); }
-    public String getContextBlockedReason() { return recovery.contextBlockedReason(); }
-    public void setContextBlockedReason(String v) { recovery.setContextBlockedReason(v); }
-    public boolean isFloorRetryPending() { return recovery.floorRetryPending(); }
-    public void setFloorRetryPending(boolean v) { recovery.setFloorRetryPending(v); }
+    public int getReactiveCompactAttempts() { return modelCall.reactiveCompactAttempts(); }
+    public void setReactiveCompactAttempts(int v) { modelCall.setReactiveCompactAttempts(v); }
+    public String getCurrentModel() { return modelCall.currentModel(); }
+    public void setCurrentModel(String v) { modelCall.setCurrentModel(v); }
+    public String getFallbackReason() { return modelCall.fallbackReason(); }
+    public void setFallbackReason(String v) { modelCall.setFallbackReason(v); }
+    public ContextOverflowStage getContextOverflowStage() { return modelCall.contextOverflowStage(); }
+    public void setContextOverflowStage(ContextOverflowStage v) { modelCall.setContextOverflowStage(v); }
+    public String getRecoveryModelOverride() { return modelCall.recoveryModelOverride(); }
+    public void setRecoveryModelOverride(String v) { modelCall.setRecoveryModelOverride(v); }
+    public String getContextTranscriptArtifactId() { return modelCall.contextTranscriptArtifactId(); }
+    public void setContextTranscriptArtifactId(String v) { modelCall.setContextTranscriptArtifactId(v); }
+    public String getContextBlockedReason() { return modelCall.contextBlockedReason(); }
+    public void setContextBlockedReason(String v) { modelCall.setContextBlockedReason(v); }
+    public boolean isFloorRetryPending() { return modelCall.floorRetryPending(); }
+    public void setFloorRetryPending(boolean v) { modelCall.setFloorRetryPending(v); }
 
     // ==================== trace delegates ====================
 
@@ -359,13 +359,13 @@ public class AgentContext {
 
     // ==================== cross-state operations ====================
 
-    /** Block the run due to budget exceeded. Sets terminal state via runtime and recovery in one step. */
+    /** Block the run due to budget exceeded. Sets terminal state via runtime in one step. */
     public void blockForBudget(String code, String reason) {
         runtime.fail(AgentStopReason.BUDGET_EXCEEDED, code, reason);
     }
 
-    /** Transition recovery into waiting-for-user-input state. */
-    public void waitForRecoveryInput(String blockedReason, String transcriptArtifactId) {
-        recovery.waitForUserInput(blockedReason, transcriptArtifactId);
+    /** Transition model-call overflow into waiting-for-user-input state. */
+    public void waitForModelCallInput(String blockedReason, String transcriptArtifactId) {
+        modelCall.waitForUserInput(blockedReason, transcriptArtifactId);
     }
 }

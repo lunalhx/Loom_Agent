@@ -7,6 +7,7 @@ import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
+import cn.lunalhx.ai.domain.tool.service.ToolApprovalResolver;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,11 +33,12 @@ final class AuthorizedTestExecutor {
         if (context.getPermissionPolicySnapshot() == null) {
             context.setPermissionPolicySnapshot(new PermissionPolicySnapshot(PermissionAction.ALLOW, List.of(), List.of()));
         }
-        var service = new ToolAuthorizationService(registry, mapper, (display, decision) -> null);
+        var resolver = new ToolApprovalResolver(
+                new ToolAuthorizationService(registry, mapper), (display, decision) -> null);
         var policy = new ToolExecutor.ToolRuntimePolicy(context.getAllowedTools() == null ? null :
                 new java.util.LinkedHashSet<>(context.getAllowedTools()), context.getCollaborationMode(), 0, 1,
                 context.getExecutionProfile());
-        var authorized = service.authorize(context, call, policy, context.getPermissionPolicySnapshot());
+        var authorized = resolver.resolve(context, call, policy, context.getPermissionPolicySnapshot());
         return authorized.authorized() ? executor.execute(context, authorized.authorizedCall()) : authorized.rejection();
     }
 }

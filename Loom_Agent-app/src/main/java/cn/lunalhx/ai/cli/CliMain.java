@@ -330,7 +330,7 @@ public final class CliMain {
         options.topP = arguments.topP;
         options.timeoutSeconds = arguments.timeoutSeconds;
         options.secretEnvNames.addAll(arguments.secretEnvNames);
-        options.approvalPrompt = new CliSessionService.InteractiveApprovalPrompt(
+        options.approvalPrompt = new CliApprovalPrompt(
                 arguments.approval != null && "ask".equals(arguments.approval));
         if (arguments.resume != null && !arguments.resume.isBlank()) {
             options.resumeSessionId = "latest".equals(arguments.resume)

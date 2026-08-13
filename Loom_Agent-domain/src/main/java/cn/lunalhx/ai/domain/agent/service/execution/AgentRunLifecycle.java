@@ -208,7 +208,7 @@ public final class AgentRunLifecycle {
                 .checkpointVersion(runtime.checkpointVersion())
                 .summaryJson(runtime.finalAnswer())
                 .blockedReason(StringUtils.defaultIfBlank(
-                        context.budget().budgetBlockedReason(), context.recovery().contextBlockedReason()))
+                        context.budget().budgetBlockedReason(), context.modelCall().contextBlockedReason()))
                 .evidenceReceipts(context.getEvidenceReceipts())
                 .evidenceDrift(context.isEvidenceDrift())
                 .usedTokens(budgetState.usedTokens())

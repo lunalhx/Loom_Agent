@@ -38,9 +38,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationContext;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -79,6 +77,7 @@ public class CliSessionService implements AutoCloseable {
     private final CliOptions options;
     private final SecretRedactor redactor;
     private final FilePlanSubmissionHandler planSubmissionHandler;
+    private final CliSessionBootstrap sessionBootstrap;
 
     private AgentSession session;
 
@@ -129,13 +128,15 @@ public class CliSessionService implements AutoCloseable {
                 options.apiKey == null || options.apiKey.isBlank()
                         ? Set.of() : Set.of(options.apiKey));
         this.planSubmissionHandler = new FilePlanSubmissionHandler(sessionStore, runStore, mapper);
+        this.sessionBootstrap = new CliSessionBootstrap(sessionStore, workspace,
+                redactor == null ? null : "cli");
         this.session = openOrCreateSession();
         this.loopService = loopService;
     }
 
     private AgentSession openOrCreateSession() {
         if (options.resumeSessionId != null) {
-            ResumeResult result = resume(sessionId);
+            ResumeResult result = sessionBootstrap.resume(sessionId);
             if (result.getKind() == ResumeResult.Kind.SCHEMA_INCOMPATIBLE) {
                 throw new OptionsException(result.getMessage());
             }
@@ -155,7 +156,7 @@ public class CliSessionService implements AutoCloseable {
             }
             return resumed;
         }
-        return recoverPendingPlan(createFreshSession(sessionId,
+        return recoverPendingPlan(sessionBootstrap.createFreshSession(sessionId,
                 options.startupMode == null ? CollaborationMode.BUILD : options.startupMode));
     }
 
@@ -164,110 +165,12 @@ public class CliSessionService implements AutoCloseable {
         return recovered == null ? current : recovered;
     }
 
-    private AgentSession createFreshSession(String id, CollaborationMode mode) {
-        AgentSession fresh = AgentSession.builder()
-                .id(id)
-                .schemaVersion(AgentSession.CURRENT_SCHEMA_VERSION)
-                .workspaceRoot(workspace)
-                .collaborationMode(Objects.requireNonNull(mode, "collaboration mode must not be null"))
-                .createdAt(Instant.now())
-                .history(new ArrayList<>())
-                .workingMemory(new WorkingContextMemory())
-                .checkpoint(null)
-                .keyFiles(new LinkedHashMap<>())
-                .runtimeIdentity(redactor == null ? null : "cli")
-                .build();
-        return sessionStore.save(fresh);
-    }
-
     /** Create and activate a new durable Session without starting a Run. */
     public synchronized String newSession() {
         sessionId = newSessionId();
         options.fullAccess = false;
-        session = createFreshSession(sessionId, session.getCollaborationMode());
+        session = sessionBootstrap.createFreshSession(sessionId, session.getCollaborationMode());
         return sessionId;
-    }
-
-    /** Resume semantics: restore history + working memory + valid semantic
-     *  checkpoint. A new user turn creates a NEW root run; old runs are never
-     *  rewritten. Key-file changes invalidate the checkpoint summary. */
-    private ResumeResult resume(String id) {
-        Optional<AgentSession> loaded;
-        try {
-            loaded = sessionStore.find(id);
-        } catch (IllegalArgumentException e) {
-            throw new OptionsException(e.getMessage());
-        }
-        if (loaded.isEmpty()) {
-            throw new OptionsException("session not found: " + id);
-        }
-        AgentSession s = loaded.get();
-        if (!workspace.equals(s.getWorkspaceRoot())) {
-            return ResumeResult.builder()
-                    .kind(ResumeResult.Kind.WORKSPACE_MISMATCH)
-                    .session(s)
-                    .message("session " + id + " belongs to workspace "
-                            + s.getWorkspaceRoot() + ", refusing to switch to " + workspace)
-                    .build();
-        }
-        TaskCheckpoint checkpoint = s.getCheckpoint();
-        if (checkpoint == null) {
-            return ResumeResult.builder()
-                    .kind(ResumeResult.Kind.NO_CHECKPOINT)
-                    .session(s)
-                    .workingMemory(s.getWorkingMemory())
-                    .message("no semantic checkpoint in session " + id)
-                    .build();
-        }
-        List<String> invalidated = keyFilesInvalidated(checkpoint);
-        if (!invalidated.isEmpty()) {
-            checkpoint.setSummary(null);
-            checkpoint.setKeyFiles(new LinkedHashMap<>());
-            s.setCheckpoint(checkpoint);
-            sessionStore.save(s);
-            return ResumeResult.builder()
-                    .kind(ResumeResult.Kind.PARTIAL_RESUME)
-                    .session(s)
-                    .checkpoint(checkpoint)
-                    .workingMemory(s.getWorkingMemory())
-                    .invalidatedKeyFiles(invalidated)
-                    .message("key files changed: " + String.join(", ", invalidated)
-                            + "; stale checkpoint summary discarded")
-                    .build();
-        }
-        return ResumeResult.builder()
-                .kind(ResumeResult.Kind.FULL_RESTORE)
-                .session(s)
-                .checkpoint(checkpoint)
-                .workingMemory(s.getWorkingMemory())
-                .message("full restore")
-                .build();
-    }
-
-    private List<String> keyFilesInvalidated(TaskCheckpoint checkpoint) {
-        List<String> invalidated = new ArrayList<>();
-        Map<String, String> keyFiles = checkpoint.getKeyFiles();
-        if (keyFiles == null || keyFiles.isEmpty()) {
-            return invalidated;
-        }
-        for (Map.Entry<String, String> e : keyFiles.entrySet()) {
-            String current = sha256(Path.of(workspace).resolve(e.getKey()));
-            if (current == null || !current.equals(e.getValue())) {
-                invalidated.add(e.getKey());
-            }
-        }
-        return invalidated;
-    }
-
-    private static String sha256(Path file) {
-        try {
-            if (!Files.isRegularFile(file)) {
-                return null;
-            }
-            return org.apache.commons.codec.digest.DigestUtils.sha256Hex(Files.readAllBytes(file));
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     /** Run one turn: new root run seeded from session, persist real state. */
@@ -995,73 +898,6 @@ public class CliSessionService implements AutoCloseable {
 
     public Path sessionPath() {
         return ((FileAgentSessionRepository) sessionStore).path(sessionId);
-    }
-
-    /** Interactive approval prompt; non-interactive environments reject by default. */
-    public static final class InteractiveApprovalPrompt implements cn.lunalhx.ai.domain.tool.service.PermissionPrompt {
-        private final BufferedReader reader = new BufferedReader(
-                new InputStreamReader(System.in, StandardCharsets.UTF_8));
-        private final boolean interactive;
-
-        public InteractiveApprovalPrompt(boolean interactive) {
-            this.interactive = interactive;
-        }
-
-        @Override
-        public cn.lunalhx.ai.domain.tool.model.GrantLifetime ask(
-                cn.lunalhx.ai.domain.tool.service.AuthorizationDisplay display,
-                cn.lunalhx.ai.domain.tool.model.PermissionDecision decision) {
-            if (!interactive) {
-                return null;
-            }
-            System.out.println();
-            System.out.println("permission required: " + display.toolName() + " " + display.normalizedSummary());
-            if (display.profile().kind() == cn.lunalhx.ai.domain.tool.model.ExecutionProfileKind.DANGER_FULL_ACCESS) {
-                System.out.println("FULL ACCESS: command runs without the ordinary sandbox.");
-            }
-            System.out.print(decision.perCallOnly()
-                    ? "allow once? [o/N] " : "allow once/session/workspace? [o/s/w/N] ");
-            System.out.flush();
-            try {
-                String line = reader.readLine();
-                if (line == null) return null;
-                String choice = line.strip().toLowerCase();
-                if (decision.perCallOnly() && !("o".equals(choice) || "once".equals(choice))) {
-                    return null;
-                }
-                return switch (choice) {
-                    case "o", "once" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE;
-                    case "s", "session" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
-                    case "w", "workspace" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.WORKSPACE;
-                    default -> null;
-                };
-            } catch (IOException e) {
-                return null;
-            }
-        }
-
-        @Override
-        public cn.lunalhx.ai.domain.tool.model.GrantLifetime askExecutionGrant(
-                cn.lunalhx.ai.domain.tool.model.ExecutionGrantRequest request) {
-            if (!interactive) return null;
-            System.out.println();
-            System.out.println("external filesystem access required: " + request.access().name().toLowerCase()
-                    + " " + request.canonicalPath());
-            System.out.print("allow once/session/workspace? [o/s/w/N] ");
-            System.out.flush();
-            try {
-                String line = reader.readLine();
-                if (line == null) return null;
-                return switch (line.strip().toLowerCase()) {
-                    case "o", "once" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.ONCE;
-                    case "s", "session" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.SESSION;
-                    case "w", "workspace" -> cn.lunalhx.ai.domain.tool.model.GrantLifetime.WORKSPACE;
-                    default -> null;
-                };
-            } catch (IOException e) {
-                return null;
-            }
-        }
     }
 
     private static String currentStamp() {

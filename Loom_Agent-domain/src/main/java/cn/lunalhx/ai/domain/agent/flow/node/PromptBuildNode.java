@@ -10,7 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.StablePrefix;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.agent.service.context.ContextBuildResult;
 import cn.lunalhx.ai.domain.agent.service.context.ContextManager;
 import cn.lunalhx.ai.domain.agent.service.context.PreparedContextView;
@@ -79,7 +79,7 @@ public class PromptBuildNode extends AbstractAgentNode {
                 return NodeResult.fail(List.of());
             }
             context.setContextBlockedReason(result.blockedReason());
-            context.waitForRecoveryInput(result.blockedReason(), null);
+            context.waitForModelCallInput(result.blockedReason(), null);
             AgentEvent event = AgentEvent.builder()
                     .type(AgentEventType.CONTEXT_COMPACTED)
                     .runId(context.getRunId())

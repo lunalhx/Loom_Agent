@@ -11,7 +11,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.agent.service.context.PreparedContextView;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendService;
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
@@ -72,7 +72,7 @@ public class ModelCallNode extends AbstractAgentNode {
 
         switch (outcome.type()) {
             case SUCCESS:
-                resetContextRecovery(context);
+                resetContextOverflow(context);
                 String eventKey = ConversationHistoryInitializer.eventKey(
                         context.getRunId(), String.valueOf(context.getModelAttempts()), "assistant");
                 ledgerAppendService.appendAssistant(
@@ -141,8 +141,8 @@ public class ModelCallNode extends AbstractAgentNode {
         return value == null || value <= 0 ? 8192 : value;
     }
 
-    private void resetContextRecovery(AgentContext context) {
-        context.setContextRecoveryStage(ContextRecoveryStage.NONE);
+    private void resetContextOverflow(AgentContext context) {
+        context.setContextOverflowStage(ContextOverflowStage.NONE);
         context.setReactiveCompactAttempts(0);
         context.setRecoveryModelOverride(null);
         context.setContextTranscriptArtifactId(null);

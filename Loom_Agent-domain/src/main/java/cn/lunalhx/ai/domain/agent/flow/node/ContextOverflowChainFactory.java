@@ -11,15 +11,15 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Factory for creating {@link ContextRecoveryChain} instances used by
- * {@link cn.lunalhx.ai.domain.agent.flow.middleware.ErrorRecoveryMiddleware}.
+ * Factory for creating {@link ContextOverflowChain} instances used by
+ * {@link cn.lunalhx.ai.domain.agent.flow.middleware.ModelCallErrorMiddleware}.
  */
-public final class RecoveryChainFactory {
+public final class ContextOverflowChainFactory {
 
-    private RecoveryChainFactory() {
+    private ContextOverflowChainFactory() {
     }
 
-    public static ContextRecoveryChain createRecoveryChain(
+    public static ContextOverflowChain createOverflowChain(
             AgentRuntimeProperties properties,
             BudgetGuard budgetGuard,
             TraceRecorder traceRecorder,
@@ -27,19 +27,19 @@ public final class RecoveryChainFactory {
         Objects.requireNonNull(properties, "properties must not be null");
         Objects.requireNonNull(contextManager, "contextManager must not be null");
 
-        return new ContextRecoveryChain(List.of(
+        return new ContextOverflowChain(List.of(
                 new FloorRetryStep(properties, contextManager),
                 new ExhaustedStep()
         ));
     }
 
-    public static ContextRecoveryChain createModelErrorRecoveryChain(
+    public static ContextOverflowChain createModelErrorOverflowChain(
             ConversationHistoryAppendService ledgerAppendService,
             ModelRuntimeProperties modelRuntimeProperties) {
         Objects.requireNonNull(ledgerAppendService, "ledgerAppendService must not be null");
         Objects.requireNonNull(modelRuntimeProperties, "modelRuntimeProperties must not be null");
 
-        return new ContextRecoveryChain(List.of(
+        return new ContextOverflowChain(List.of(
                 new FormatReminderStep(ledgerAppendService),
                 new ModelFallbackStep(modelRuntimeProperties),
                 new ModelErrorExhaustedStep()

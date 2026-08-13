@@ -1,20 +1,20 @@
 package cn.lunalhx.ai.domain.agent.model.state;
 
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 
 /**
- * Mutable recovery state: model fallback, context recovery stage, and recovery artifacts.
+ * Mutable model-call overflow state: fallback model, overflow stage, and mitigation artifacts.
  */
-public final class AgentRecoveryState {
+public final class AgentModelCallState {
 
     private int reactiveCompactAttempts;
     private String currentModel;
     private String fallbackReason;
-    private ContextRecoveryStage contextRecoveryStage = ContextRecoveryStage.NONE;
+    private ContextOverflowStage contextOverflowStage = ContextOverflowStage.NONE;
     private String recoveryModelOverride;
     private String contextTranscriptArtifactId;
     private String contextBlockedReason;
-    private boolean modelErrorRecoveryAttempted;
+    private boolean modelErrorOverflowAttempted;
     private boolean floorRetryPending;
 
     // -- getters --
@@ -22,11 +22,11 @@ public final class AgentRecoveryState {
     public int reactiveCompactAttempts() { return reactiveCompactAttempts; }
     public String currentModel() { return currentModel; }
     public String fallbackReason() { return fallbackReason; }
-    public ContextRecoveryStage contextRecoveryStage() { return contextRecoveryStage; }
+    public ContextOverflowStage contextOverflowStage() { return contextOverflowStage; }
     public String recoveryModelOverride() { return recoveryModelOverride; }
     public String contextTranscriptArtifactId() { return contextTranscriptArtifactId; }
     public String contextBlockedReason() { return contextBlockedReason; }
-    public boolean modelErrorRecoveryAttempted() { return modelErrorRecoveryAttempted; }
+    public boolean modelErrorOverflowAttempted() { return modelErrorOverflowAttempted; }
     public boolean floorRetryPending() { return floorRetryPending; }
 
     // -- package-private mutators --
@@ -34,11 +34,11 @@ public final class AgentRecoveryState {
     public void setReactiveCompactAttempts(int v) { this.reactiveCompactAttempts = v; }
     public void setCurrentModel(String v) { this.currentModel = v; }
     public void setFallbackReason(String v) { this.fallbackReason = v; }
-    public void setContextRecoveryStage(ContextRecoveryStage v) { this.contextRecoveryStage = v; }
+    public void setContextOverflowStage(ContextOverflowStage v) { this.contextOverflowStage = v; }
     public void setRecoveryModelOverride(String v) { this.recoveryModelOverride = v; }
     public void setContextTranscriptArtifactId(String v) { this.contextTranscriptArtifactId = v; }
     public void setContextBlockedReason(String v) { this.contextBlockedReason = v; }
-    public void setModelErrorRecoveryAttempted(boolean v) { this.modelErrorRecoveryAttempted = v; }
+    public void setModelErrorOverflowAttempted(boolean v) { this.modelErrorOverflowAttempted = v; }
     public void setFloorRetryPending(boolean v) { this.floorRetryPending = v; }
 
     // -- behavior methods --
@@ -53,19 +53,19 @@ public final class AgentRecoveryState {
     }
 
     public void waitForUserInput(String blockedReason, String transcriptArtifactId) {
-        this.contextRecoveryStage = ContextRecoveryStage.WAITING_USER_INPUT;
+        this.contextOverflowStage = ContextOverflowStage.WAITING_USER_INPUT;
         this.contextBlockedReason = blockedReason;
         this.contextTranscriptArtifactId = transcriptArtifactId;
     }
 
     public void reset() {
         this.reactiveCompactAttempts = 0;
-        this.contextRecoveryStage = ContextRecoveryStage.NONE;
+        this.contextOverflowStage = ContextOverflowStage.NONE;
         this.recoveryModelOverride = null;
         this.contextTranscriptArtifactId = null;
         this.contextBlockedReason = null;
         this.fallbackReason = null;
-        this.modelErrorRecoveryAttempted = false;
+        this.modelErrorOverflowAttempted = false;
         this.floorRetryPending = false;
     }
 }

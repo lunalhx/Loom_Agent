@@ -35,7 +35,7 @@ public class AgentLoopAutoConfig {
 
     @Bean
     public PermissionPrompt approvalPrompt(AgentRuntimeProperties agent) {
-        return new cn.lunalhx.ai.cli.CliSessionService.InteractiveApprovalPrompt(
+        return new cn.lunalhx.ai.cli.CliApprovalPrompt(
                 "ask".equalsIgnoreCase(agent.getApprovalPolicy()));
     }
 

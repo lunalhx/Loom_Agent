@@ -7,7 +7,7 @@ import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryAppendServic
 import cn.lunalhx.ai.domain.agent.service.ledger.ConversationHistoryInitializer;
 import java.util.List;
 
-final class FormatReminderStep implements ContextRecoveryStep {
+final class FormatReminderStep implements ContextOverflowStep {
 
     private static final String FORMAT_REMINDER =
             "【格式提醒】你的上一次响应无法解析。请确保返回合法的 JSON，" +
@@ -26,7 +26,7 @@ final class FormatReminderStep implements ContextRecoveryStep {
     }
 
     @Override
-    public ContextRecoveryTransition apply(ContextRecoveryRequest request, List<AgentEvent> accumulatedEvents) {
+    public ContextOverflowTransition apply(ContextOverflowRequest request, List<AgentEvent> accumulatedEvents) {
         AgentContext context = request.context();
         if (ledgerAppendService != null) {
             ledgerAppendService.appendSystemNote(context, FORMAT_REMINDER,
@@ -44,6 +44,6 @@ final class FormatReminderStep implements ContextRecoveryStep {
                 .parentRunId(context.getParentRunId())
                 .build();
         accumulatedEvents.add(event);
-        return ContextRecoveryTransition.renderPrompt(accumulatedEvents);
+        return ContextOverflowTransition.renderPrompt(accumulatedEvents);
     }
 }

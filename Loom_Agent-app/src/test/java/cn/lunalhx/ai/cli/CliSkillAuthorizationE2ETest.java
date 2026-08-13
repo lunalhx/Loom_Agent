@@ -135,7 +135,7 @@ public class CliSkillAuthorizationE2ETest {
             AtomicInteger calls = new AtomicInteger();
             ModelGateway gateway = writeThenFinalGateway(prompts, calls);
             CliSessionService.CliOptions opts = options(workspace, gateway, "ask");
-            opts.approvalPrompt = new CliSessionService.InteractiveApprovalPrompt(false);
+            opts.approvalPrompt = new CliApprovalPrompt(false);
             CliSessionService service = service(opts, gateway, tools);
             try {
                 assertEquals("done", service.runTurn("$writer jot a note"));

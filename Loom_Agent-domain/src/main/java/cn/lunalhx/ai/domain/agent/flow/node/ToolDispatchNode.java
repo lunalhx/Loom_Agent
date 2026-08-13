@@ -14,9 +14,9 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
+import cn.lunalhx.ai.domain.tool.service.ToolApprovalResolver;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationResult;
-import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -28,10 +28,10 @@ import java.util.Set;
 
 /**
  * Tool input governance node ({@code tool_input}). Constructs the normalized
- * {@link ToolCall} and runs the {@link ToolAuthorizationService} — allowlist, existence,
- * schema validation, repeated-call, read-only and approval. Rejected calls
- * produce a unified safe {@link ToolResult} and route to {@code tool_output};
- * accepted calls route to {@code tool_execute}.
+ * {@link ToolCall} and runs {@link ToolApprovalResolver} over the decision-only
+ * authorization service — allowlist, existence, schema validation, repeated-call,
+ * read-only and approval. Rejected calls produce a unified safe {@link ToolResult}
+ * and route to {@code tool_output}; accepted calls route to {@code tool_execute}.
  *
  * <p>Two input expressions exist: the raw execution value (inside the
  * {@link ToolCall}, never persisted) and the redacted audit/display value
@@ -43,15 +43,15 @@ public class ToolDispatchNode extends AbstractAgentNode {
 
     private static final ObjectMapper REDACTION_MAPPER = new ObjectMapper();
 
-    private final ToolAuthorizationService authorizationService;
+    private final ToolApprovalResolver approvalResolver;
     private final ToolOutputSanitizer sanitizer;
     private final AgentRuntimeProperties properties;
 
-    public ToolDispatchNode(ToolAuthorizationService authorizationService,
+    public ToolDispatchNode(ToolApprovalResolver approvalResolver,
                             ToolOutputSanitizer sanitizer,
                             AgentRuntimeProperties properties) {
         super(AgentNodeNames.TOOL_INPUT, List.of("decision.tool", "decision.input"));
-        this.authorizationService = Objects.requireNonNull(authorizationService, "authorizationService must not be null");
+        this.approvalResolver = Objects.requireNonNull(approvalResolver, "approvalResolver must not be null");
         this.sanitizer = sanitizer;
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
     }
@@ -79,7 +79,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
                 .build();
 
         ToolExecutor.ToolRuntimePolicy policy = resolvePolicy(context);
-        ToolAuthorizationResult authorization = authorizationService.authorize(context, toolCall, policy,
+        ToolAuthorizationResult authorization = approvalResolver.resolve(context, toolCall, policy,
                 context.getPermissionPolicySnapshot());
 
         // Only the redacted display value enters events/state/checkpoint;
@@ -108,8 +108,8 @@ public class ToolDispatchNode extends AbstractAgentNode {
                             : toolCall.getEffectProfile().outboundDisclosure();
             toolCall.setDelegateRequest(DelegateRequest.fromParent(
                     context, context.runtimeProperties(properties), disclosure));
-            authorization = new ToolAuthorizationResult(
-                    authorization.authorizedCall().withDelegateRequest(toolCall.getDelegateRequest()), null);
+            authorization = ToolAuthorizationResult.authorized(
+                    authorization.authorizedCall().withDelegateRequest(toolCall.getDelegateRequest()));
         }
         context.setToolCall(toolCall);
         context.setAuthorizedToolCall(authorization.authorizedCall());

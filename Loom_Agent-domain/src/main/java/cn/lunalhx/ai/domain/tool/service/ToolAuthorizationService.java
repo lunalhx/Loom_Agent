@@ -6,53 +6,53 @@ import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.CallEffectAssessment;
 import cn.lunalhx.ai.domain.tool.model.EffectProfile;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
+import cn.lunalhx.ai.domain.tool.model.ExecutionGrantRequest;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.GrantLifetime;
 import cn.lunalhx.ai.domain.tool.model.NormalizedToolCall;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
 import cn.lunalhx.ai.domain.tool.model.PermissionDecision;
-import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionGrant;
-import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
-import cn.lunalhx.ai.domain.tool.model.ExecutionGrantRequest;
+import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolInputValidationResult;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.nio.file.Path;
-import java.util.ArrayList;
 
-/** The single pre-execution authorization pipeline. */
+/**
+ * The single pre-execution authorization pipeline. Returns decisions only —
+ * interactive approval I/O belongs to the caller via {@link ToolApprovalResolver}.
+ */
 public final class ToolAuthorizationService {
     private final ToolRegistry registry;
     private final ToolCallNormalizer normalizer;
-    private final PermissionPrompt prompt;
     private final ExecutionGrantValidator executionGrantValidator = new ExecutionGrantValidator();
 
-    public ToolAuthorizationService(ToolRegistry registry, ObjectMapper mapper, PermissionPrompt prompt) {
+    public ToolAuthorizationService(ToolRegistry registry, ObjectMapper mapper) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.normalizer = new ToolCallNormalizer(Objects.requireNonNull(mapper, "mapper must not be null"));
-        this.prompt = prompt;
     }
 
     public ToolAuthorizationResult authorize(AgentContext context, ToolCall call,
                                               ToolExecutor.ToolRuntimePolicy runtimePolicy,
                                               PermissionPolicySnapshot policy) {
         String name = call.getName();
+        if (context.getCollaborationMode() == CollaborationMode.PLAN
+                && !registry.isPlanVisible(name, runtimePolicy.allowedTools())) {
+            return reject(call, "plan_mode_denied", "plan_mode_denied", EffectProfile.unknown());
+        }
         if (runtimePolicy.allowedTools() != null && !runtimePolicy.allowedTools().contains(name)) {
             return reject(call, "tool_not_allowed", "tool_not_allowed", EffectProfile.unknown());
         }
         if (!registry.contains(name)) {
             return reject(call, "unknown_tool", "unknown_tool", EffectProfile.unknown());
-        }
-        if (context.getCollaborationMode() == CollaborationMode.PLAN
-                && !registry.isPlanVisible(name, runtimePolicy.allowedTools())) {
-            return reject(call, "plan_mode_denied", "plan_mode_denied", EffectProfile.unknown());
         }
         NormalizedToolCall normalized = normalizer.normalize(call);
         ToolInputValidationResult validation = registry.validateInput(name, normalized.canonicalInput());
@@ -67,22 +67,135 @@ public final class ToolAuthorizationService {
         if (!registry.isAvailable(name, profile)) {
             return reject(call, "execution_backend_unavailable", "execution_backend_unavailable", EffectProfile.unknown());
         }
-        List<ExecutionGrantRequest> executionRequests;
         List<ExecutionGrant> availableExecutionGrants = new ArrayList<>(profile.externalGrants());
         availableExecutionGrants.addAll(context.getExecutionGrants());
+        List<ExecutionGrantRequest> executionRequests;
         try {
             executionRequests = executionGrantValidator.requests(name, normalized.canonicalInput(), profile);
-            requestMissingExecutionGrants(executionRequests, availableExecutionGrants, context);
+        } catch (IllegalArgumentException denied) {
+            return reject(call, "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
+        }
+        for (ExecutionGrantRequest request : executionRequests) {
+            boolean covered = availableExecutionGrants.stream().anyMatch(grant ->
+                    grant.access().includes(request.access())
+                            && request.canonicalPath().startsWith(grant.canonicalPath()));
+            if (!covered) {
+                return ToolAuthorizationResult.needsExecutionGrant(new ToolAuthorizationResult.PendingExecutionGrant(
+                        request, call, normalized, profile, List.copyOf(availableExecutionGrants),
+                        context.getRunId(),
+                        Objects.requireNonNull(policy, "policy must not be null").snapshotDigest(),
+                        runtimePolicy, policy));
+            }
+        }
+        return continueAfterExecutionGrants(context, call, normalized, profile,
+                executionRequests, availableExecutionGrants, policy);
+    }
+
+    /** Resume after the caller supplies an execution grant decision. */
+    public ToolAuthorizationResult continueWithExecutionGrant(AgentContext context,
+                                                              ToolAuthorizationResult.PendingExecutionGrant pending,
+                                                              GrantLifetime lifetime) {
+        Objects.requireNonNull(pending, "pending must not be null");
+        if (lifetime == null) {
+            return reject(pending.call(), "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
+        }
+        ExecutionGrant grant = new ExecutionGrant(pending.request().canonicalPath(),
+                pending.request().access(), lifetime);
+        List<ExecutionGrant> available = new ArrayList<>(pending.availableGrants());
+        available.add(grant);
+        if (lifetime != GrantLifetime.ONCE) {
+            if (lifetime == GrantLifetime.WORKSPACE) {
+                Path workspace = context.getResolvedWorkspace();
+                if (workspace == null) {
+                    return reject(pending.call(), "execution_grant_denied", "execution_grant_denied",
+                            EffectProfile.unknown());
+                }
+                new WorkspacePermissionGrantStore().appendExecution(workspace, grant);
+            }
+            if (lifetime == GrantLifetime.SESSION) {
+                context.addSessionExecutionGrant(grant);
+            } else {
+                context.addExecutionGrant(grant);
+            }
+        }
+        List<ExecutionGrantRequest> executionRequests;
+        try {
+            executionRequests = executionGrantValidator.requests(
+                    pending.call().getName(), pending.normalized().canonicalInput(), pending.baseProfile());
+        } catch (IllegalArgumentException denied) {
+            return reject(pending.call(), "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
+        }
+        for (ExecutionGrantRequest request : executionRequests) {
+            boolean covered = available.stream().anyMatch(existing ->
+                    existing.access().includes(request.access())
+                            && request.canonicalPath().startsWith(existing.canonicalPath()));
+            if (!covered) {
+                return ToolAuthorizationResult.needsExecutionGrant(new ToolAuthorizationResult.PendingExecutionGrant(
+                        request, pending.call(), pending.normalized(), pending.baseProfile(),
+                        List.copyOf(available), pending.runId(), pending.snapshotDigest(),
+                        pending.runtimePolicy(), pending.policy()));
+            }
+        }
+        return continueAfterExecutionGrants(context, pending.call(), pending.normalized(),
+                pending.baseProfile(), executionRequests, available, pending.policy());
+    }
+
+    /** Apply a user approval decision for a previously returned ASK outcome. */
+    public ToolAuthorizationResult completeApproval(AgentContext context,
+                                                    ToolAuthorizationResult.PendingToolApproval pending,
+                                                    GrantLifetime lifetime) {
+        Objects.requireNonNull(pending, "pending must not be null");
+        if (lifetime == null) {
+            return reject(pending.call(), "approval_denied", "approval_denied", pending.effectProfile());
+        }
+        if (pending.decision().perCallOnly() && lifetime != GrantLifetime.ONCE) {
+            return reject(pending.call(), "approval_denied", "per_call_only", pending.effectProfile());
+        }
+        if (lifetime != GrantLifetime.ONCE) {
+            PermissionGrant grant = PermissionGrant.issue(
+                    pending.normalized().permissionSubject().exactKey(), pending.baseProfile(), lifetime);
+            try {
+                if (lifetime == GrantLifetime.WORKSPACE) {
+                    Path workspace = context.getResolvedWorkspace();
+                    if (workspace == null) {
+                        return reject(pending.call(), "grant_persistence_failed", "grant_persistence_failed",
+                                pending.effectProfile());
+                    }
+                    new WorkspacePermissionGrantStore().append(workspace, grant);
+                }
+                context.addPermissionGrant(grant);
+            } catch (RuntimeException e) {
+                return reject(pending.call(), "grant_persistence_failed", "grant_persistence_failed",
+                        pending.effectProfile());
+            }
+        }
+        pending.call().setExecutionProfile(pending.effectiveProfile());
+        return ToolAuthorizationResult.authorized(new AuthorizedToolCall(
+                pending.call(), pending.normalized(), pending.effectProfile(),
+                pending.effectiveProfile(), pending.baseProfile(), pending.decision(),
+                pending.runId(), pending.snapshotDigest()));
+    }
+
+    private ToolAuthorizationResult continueAfterExecutionGrants(
+            AgentContext context,
+            ToolCall call,
+            NormalizedToolCall normalized,
+            ExecutionProfile profile,
+            List<ExecutionGrantRequest> executionRequests,
+            List<ExecutionGrant> availableExecutionGrants,
+            PermissionPolicySnapshot policy) {
+        try {
             executionGrantValidator.validate(executionRequests, availableExecutionGrants);
         } catch (IllegalArgumentException denied) {
             return reject(call, "execution_grant_denied", "execution_grant_denied", EffectProfile.unknown());
         }
         List<ExecutionGrant> effectiveGrants = new ArrayList<>(profile.externalGrants());
         effectiveGrants.addAll(executionRequests.stream()
-                .map(request -> new ExecutionGrant(request.canonicalPath(), request.access(), GrantLifetime.ONCE)).toList());
+                .map(request -> new ExecutionGrant(request.canonicalPath(), request.access(), GrantLifetime.ONCE))
+                .toList());
         ExecutionProfile effectiveProfile = profile.withExternalGrants(effectiveGrants);
         call.setExecutionProfile(effectiveProfile);
-        CallEffectAssessment effect = registry.assessEffect(name, call, effectiveProfile);
+        CallEffectAssessment effect = registry.assessEffect(call.getName(), call, effectiveProfile);
         if (!effect.trusted() || !profile.allows(effect.profile())) {
             return reject(call, "execution_profile_denied", "execution_profile_denied", effect.profile());
         }
@@ -92,25 +205,9 @@ public final class ToolAuthorizationService {
             return reject(call, "permission_denied", decision.reasonCode(), effect.profile());
         }
         if (decision.action() == PermissionAction.ASK && !hasReusableGrant(context, normalized, profile, decision)) {
-            if (prompt == null) return reject(call, "approval_denied", "approval_unavailable", effect.profile());
-            GrantLifetime lifetime = prompt.ask(display(call, normalized, profile), decision);
-            if (lifetime == null) return reject(call, "approval_denied", "approval_denied", effect.profile());
-            if (decision.perCallOnly() && lifetime != GrantLifetime.ONCE) {
-                return reject(call, "approval_denied", "per_call_only", effect.profile());
-            }
-            if (lifetime != GrantLifetime.ONCE) {
-                PermissionGrant grant = PermissionGrant.issue(normalized.permissionSubject().exactKey(), profile, lifetime);
-                try {
-                    if (lifetime == GrantLifetime.WORKSPACE) {
-                        Path workspace = context.getResolvedWorkspace();
-                        if (workspace == null) return reject(call, "grant_persistence_failed", "grant_persistence_failed", effect.profile());
-                        new WorkspacePermissionGrantStore().append(workspace, grant);
-                    }
-                    context.addPermissionGrant(grant);
-                } catch (RuntimeException e) {
-                    return reject(call, "grant_persistence_failed", "grant_persistence_failed", effect.profile());
-                }
-            }
+            return ToolAuthorizationResult.needsApproval(new ToolAuthorizationResult.PendingToolApproval(
+                    display(call, normalized, profile), decision, call, normalized, effect.profile(),
+                    effectiveProfile, profile, context.getRunId(), policy.snapshotDigest()));
         }
         return ToolAuthorizationResult.authorized(new AuthorizedToolCall(call, normalized,
                 effect.profile(), effectiveProfile, profile, decision, context.getRunId(), policy.snapshotDigest()));
@@ -142,39 +239,19 @@ public final class ToolAuthorizationService {
 
     private boolean isRepeated(AgentContext context, String name, String input) {
         List<AgentStep> history = context.getHistory();
-        if (history == null || history.size() < 2) return false;
+        if (history == null || history.size() < 2) {
+            return false;
+        }
         return history.subList(history.size() - 2, history.size()).stream().allMatch(step ->
                 name.equals(step.getTool()) && Objects.equals(input, step.getInput()));
     }
 
     private boolean hasReusableGrant(AgentContext context, NormalizedToolCall normalized,
                                      ExecutionProfile profile, PermissionDecision decision) {
-        if (decision.perCallOnly() || decision.sourceIds().contains("builtin")) return false;
+        if (decision.perCallOnly() || decision.sourceIds().contains("builtin")) {
+            return false;
+        }
         return context.getPermissionGrants().stream().anyMatch(grant ->
                 grant.matches(normalized.permissionSubject().exactKey(), profile));
-    }
-
-    private void requestMissingExecutionGrants(List<ExecutionGrantRequest> requests,
-                                               List<ExecutionGrant> available,
-                                               AgentContext context) {
-        for (ExecutionGrantRequest request : requests) {
-            boolean covered = available.stream().anyMatch(grant -> grant.access().includes(request.access())
-                    && request.canonicalPath().startsWith(grant.canonicalPath()));
-            if (covered) continue;
-            if (prompt == null) throw new IllegalArgumentException("execution grant approval unavailable");
-            GrantLifetime lifetime = prompt.askExecutionGrant(request);
-            if (lifetime == null) throw new IllegalArgumentException("execution grant denied");
-            ExecutionGrant grant = new ExecutionGrant(request.canonicalPath(), request.access(), lifetime);
-            available.add(grant);
-            if (lifetime != GrantLifetime.ONCE) {
-                if (lifetime == GrantLifetime.WORKSPACE) {
-                    Path workspace = context.getResolvedWorkspace();
-                    if (workspace == null) throw new IllegalArgumentException("workspace grant cannot be persisted");
-                    new WorkspacePermissionGrantStore().appendExecution(workspace, grant);
-                }
-                if (lifetime == GrantLifetime.SESSION) context.addSessionExecutionGrant(grant);
-                else context.addExecutionGrant(grant);
-            }
-        }
     }
 }

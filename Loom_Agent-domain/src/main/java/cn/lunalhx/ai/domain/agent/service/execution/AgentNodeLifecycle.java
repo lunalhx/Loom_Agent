@@ -126,7 +126,7 @@ public final class AgentNodeLifecycle {
         if (context.getStopReason() == AgentStopReason.PLAN_DEVIATION) {
             return "stopped";
         }
-        if (context.recovery().contextRecoveryStage() == cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage.WAITING_USER_INPUT) {
+        if (context.modelCall().contextOverflowStage() == cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage.WAITING_USER_INPUT) {
             return "waiting_user_input";
         }
         return "completed";

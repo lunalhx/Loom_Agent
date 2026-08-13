@@ -7,10 +7,10 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 
 import java.util.List;
 
-final class ModelErrorExhaustedStep implements ContextRecoveryStep {
+final class ModelErrorExhaustedStep implements ContextOverflowStep {
 
     @Override
-    public ContextRecoveryTransition apply(ContextRecoveryRequest request, List<AgentEvent> accumulatedEvents) {
+    public ContextOverflowTransition apply(ContextOverflowRequest request, List<AgentEvent> accumulatedEvents) {
         AgentContext context = request.context();
         context.runtime().fail(
                 AgentStopReason.MODEL_ERROR,
@@ -28,6 +28,6 @@ final class ModelErrorExhaustedStep implements ContextRecoveryStep {
                 .parentRunId(context.getParentRunId())
                 .build();
         accumulatedEvents.add(event);
-        return ContextRecoveryTransition.failContextOverflow(accumulatedEvents);
+        return ContextOverflowTransition.failContextOverflow(accumulatedEvents);
     }
 }

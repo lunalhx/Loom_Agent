@@ -15,6 +15,8 @@ import cn.lunalhx.ai.domain.tool.model.ToolCall;
 import cn.lunalhx.ai.domain.tool.model.ToolCapabilityEnvelope;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.PermissionPrompt;
+import cn.lunalhx.ai.domain.tool.service.ToolApprovalResolver;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationResult;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
 import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
@@ -91,9 +93,9 @@ public class SkillAuthorizationContractTest {
         ActiveSkillSnapshot active = activateFromPackage(skillRoot, "guide");
 
         AtomicInteger prompts = new AtomicInteger();
-        ToolAuthorizationService gate = new ToolAuthorizationService(
-                new ToolRegistry(List.of(writeFileTool()), new ToolSchemaValidator(mapper)),
-                mapper,
+        ToolApprovalResolver gate = new ToolApprovalResolver(
+                new ToolAuthorizationService(
+                        new ToolRegistry(List.of(writeFileTool()), new ToolSchemaValidator(mapper)), mapper),
                 (display, decision) -> {
                     prompts.incrementAndGet();
                     return null;
@@ -132,9 +134,9 @@ public class SkillAuthorizationContractTest {
         writeSkill(skillRoot, "danger", "Danger.", "Run rm -rf /.", "allowed-tools: [run_shell]\n");
         ActiveSkillSnapshot active = activateFromPackage(skillRoot, "danger");
 
-        ToolAuthorizationService gate = new ToolAuthorizationService(
-                new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)),
-                mapper,
+        ToolApprovalResolver gate = new ToolApprovalResolver(
+                new ToolAuthorizationService(
+                        new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)), mapper),
                 (display, decision) -> GrantLifetime.ONCE);
 
         AgentContext withSkill = contextWithSkill(PermissionAction.ALLOW, active);
@@ -160,10 +162,10 @@ public class SkillAuthorizationContractTest {
                 discovery.discover(workspace, home), List.of("host-script")).getFirst();
 
         AtomicInteger executionPrompts = new AtomicInteger();
-        ToolAuthorizationService gate = new ToolAuthorizationService(
-                new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)),
-                mapper,
-                new cn.lunalhx.ai.domain.tool.service.PermissionPrompt() {
+        ToolApprovalResolver gate = new ToolApprovalResolver(
+                new ToolAuthorizationService(
+                        new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)), mapper),
+                new PermissionPrompt() {
                     @Override
                     public GrantLifetime ask(
                             cn.lunalhx.ai.domain.tool.service.AuthorizationDisplay display,
@@ -201,9 +203,9 @@ public class SkillAuthorizationContractTest {
                 discovery.discover(workspace, Files.createTempDirectory("skill-auth-project-home")),
                 List.of("project-script")).getFirst();
 
-        ToolAuthorizationService gate = new ToolAuthorizationService(
-                new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)),
-                mapper,
+        ToolApprovalResolver gate = new ToolApprovalResolver(
+                new ToolAuthorizationService(
+                        new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)), mapper),
                 (display, decision) -> {
                     throw new AssertionError("workspace shell must not prompt under ALLOW");
                 });
@@ -225,9 +227,9 @@ public class SkillAuthorizationContractTest {
         writeSkill(pkg, "full-skill", "Full.", "Body.", "allowed-tools: [run_shell]\n");
         ActiveSkillSnapshot active = activateFromPackage(pkg, "full-skill");
 
-        ToolAuthorizationService gate = new ToolAuthorizationService(
-                new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)),
-                mapper,
+        ToolApprovalResolver gate = new ToolApprovalResolver(
+                new ToolAuthorizationService(
+                        new ToolRegistry(List.of(externalShellTool()), new ToolSchemaValidator(mapper)), mapper),
                 (display, decision) -> GrantLifetime.ONCE);
 
         AgentContext ctx = contextWithSkill(PermissionAction.ALLOW, active);
@@ -286,33 +288,33 @@ public class SkillAuthorizationContractTest {
         return ctx;
     }
 
-    private ToolAuthorizationResult authorizeWrite(ToolAuthorizationService gate, AgentContext ctx,
+    private ToolAuthorizationResult authorizeWrite(ToolApprovalResolver gate, AgentContext ctx,
                                                    String path) {
         ObjectNode input = JsonNodeFactory.instance.objectNode()
                 .put("path", path)
                 .put("content", "x");
         ToolCall call = ToolCall.builder().name("write_file").input(input).build();
-        return gate.authorize(ctx, call, new ToolExecutor.ToolRuntimePolicy(
+        return gate.resolve(ctx, call, new ToolExecutor.ToolRuntimePolicy(
                 Set.of("write_file"), CollaborationMode.BUILD, 0, 1, ctx.getExecutionProfile()),
                 ctx.getPermissionPolicySnapshot());
     }
 
-    private ToolAuthorizationResult authorizeShell(ToolAuthorizationService gate, AgentContext ctx,
+    private ToolAuthorizationResult authorizeShell(ToolApprovalResolver gate, AgentContext ctx,
                                                    String command) {
         ObjectNode input = JsonNodeFactory.instance.objectNode().put("command", command);
-        return gate.authorize(ctx, ToolCall.builder().name("run_shell").input(input).build(),
+        return gate.resolve(ctx, ToolCall.builder().name("run_shell").input(input).build(),
                 new ToolExecutor.ToolRuntimePolicy(Set.of("run_shell"), CollaborationMode.BUILD, 0, 1,
                         ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
     }
 
-    private ToolAuthorizationResult authorizeExternalShell(ToolAuthorizationService gate, AgentContext ctx,
+    private ToolAuthorizationResult authorizeExternalShell(ToolApprovalResolver gate, AgentContext ctx,
                                                            Path external) {
         ObjectNode input = JsonNodeFactory.instance.objectNode().put("command", "sh " + external);
         input.set("external_access", JsonNodeFactory.instance.arrayNode()
                 .add(JsonNodeFactory.instance.objectNode()
                         .put("path", external.toString())
                         .put("access", "read")));
-        return gate.authorize(ctx, ToolCall.builder().name("run_shell").input(input).build(),
+        return gate.resolve(ctx, ToolCall.builder().name("run_shell").input(input).build(),
                 new ToolExecutor.ToolRuntimePolicy(Set.of("run_shell"), CollaborationMode.BUILD, 0, 1,
                         ctx.getExecutionProfile()), ctx.getPermissionPolicySnapshot());
     }

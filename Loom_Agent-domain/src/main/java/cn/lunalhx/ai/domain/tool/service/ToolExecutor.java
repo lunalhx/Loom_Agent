@@ -1,21 +1,11 @@
 package cn.lunalhx.ai.domain.tool.service;
 
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
-import cn.lunalhx.ai.domain.agent.model.entity.DelegateProvenance;
-import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
-import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
-import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolOutputSanitizer;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
-import cn.lunalhx.ai.domain.tool.model.EvidenceRevalidation;
-import cn.lunalhx.ai.domain.tool.model.EffectProfile;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
-import cn.lunalhx.ai.domain.tool.model.OutboundDisclosure;
-import cn.lunalhx.ai.domain.tool.model.ToolEffect;
-import cn.lunalhx.ai.domain.tool.model.ToolOutputSanitization;
 import cn.lunalhx.ai.domain.tool.model.ToolResult;
-import cn.lunalhx.ai.domain.tool.model.ShellExecutionResult;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -24,8 +14,10 @@ import java.util.Set;
 
 /**
  * Execution service of the tool chain. Input governance lives in
- * {@link ToolAuthorizationService}; it accepts only a Runtime-minted
- * {@link AuthorizedToolCall} and does not re-evaluate authorization.
+ * {@link ToolAuthorizationService}; adapter invocation is
+ * {@link ToolAdapterInvoker}; deterministic Agent-visible projection is
+ * {@link ToolResultProjector}. This class only orchestrates those seams and
+ * verifies the frozen run/snapshot binding.
  */
 public class ToolExecutor {
 
@@ -56,15 +48,14 @@ public class ToolExecutor {
         }
     }
 
-    private static final String SANITIZE_FAILED_OBSERVATION =
-            "tool_error: sanitization_failed - output withheld";
-
     private final ToolRegistry registry;
-    private final ToolOutputSanitizer sanitizer;
+    private final ToolAdapterInvoker adapterInvoker;
+    private final ToolResultProjector resultProjector;
 
     public ToolExecutor(ToolRegistry registry, ToolOutputSanitizer sanitizer) {
         this.registry = registry;
-        this.sanitizer = sanitizer;
+        this.adapterInvoker = new ToolAdapterInvoker(registry);
+        this.resultProjector = new ToolResultProjector(sanitizer, registry);
     }
 
     public ToolExecutor(ToolRegistry registry) {
@@ -83,189 +74,20 @@ public class ToolExecutor {
                 || !Objects.equals(context.getExecutionProfile(), authorized.baseExecutionProfile())) {
             return unauthorized(context);
         }
-        var call = authorized.executionCall();
-        String name = call.getName();
-        EffectProfile effectProfile = authorized.effectProfile();
-        Path root = call.getWorkspaceRoot();
-        boolean inspectWorkspace = requiresWorkspaceInspection(effectProfile);
+        Path root = authorized.executionCall().getWorkspaceRoot();
+        boolean inspectWorkspace = resultProjector.requiresWorkspaceInspection(authorized.effectProfile());
         Map<String, String> before = inspectWorkspace
                 ? RepositoryStateTracker.snapshot(root) : Map.of();
-        Map<String, String> after = before;
         try {
-            ToolResult result = registry.call(call);
-            after = inspectWorkspace ? RepositoryStateTracker.snapshot(root) : before;
-            RepositoryStateTracker.DiffResult diff = RepositoryStateTracker.diff(before, after);
-            boolean workspaceChanged = !diff.affectedPaths().isEmpty();
-
-            capturePlanEvidence(context, result);
-            result.clearTransientEvidence();
-            applySafeOutput(result, name);
-
-            String toolStatus = "ok";
-            String toolErrorCode = "";
-            if ("run_shell".equals(name)) {
-                ShellExecutionResult shell = result.getShellExecutionResult();
-                int exitCode = shell == null ? -1 : shell.exitCode();
-                if (exitCode != 0 && workspaceChanged) {
-                    toolStatus = "partial_success";
-                    toolErrorCode = "tool_partial_success";
-                } else if (exitCode != 0) {
-                    toolStatus = "error";
-                    toolErrorCode = "tool_failed";
-                }
-            }
-            applyMetadata(result, toolStatus, toolErrorCode, effectProfile, diff, workspaceChanged, root);
-            context.setToolResult(result);
-            return result;
+            ToolResult raw = adapterInvoker.invoke(authorized);
+            Map<String, String> after = inspectWorkspace
+                    ? RepositoryStateTracker.snapshot(root) : before;
+            return resultProjector.projectWithDiff(context, authorized, raw, before, after);
         } catch (Exception e) {
-            after = inspectWorkspace ? RepositoryStateTracker.snapshot(root) : before;
-            RepositoryStateTracker.DiffResult diff = RepositoryStateTracker.diff(before, after);
-            boolean workspaceChanged = !diff.affectedPaths().isEmpty();
-            String securityEvent = e.getMessage() != null && e.getMessage().contains("path escapes workspace")
-                    ? "path_escape" : "";
-            ToolResult result = ToolResult.failure(
-                    workspaceChanged ? "tool_partial_success" : "tool_failed",
-                    "error: tool " + name + " failed: " + e.getMessage(), 0L);
-            result.setToolStatus(workspaceChanged ? "partial_success" : "error");
-            result.setToolErrorCode(workspaceChanged ? "tool_partial_success" : "tool_failed");
-            result.setSecurityEventType(securityEvent);
-            applyEffectMetadata(result, effectProfile);
-            result.setAffectedPaths(diff.affectedPaths());
-            result.setWorkspaceChanged(workspaceChanged);
-            result.setDiffSummary(diff.diffSummary());
-            applySafeOutput(result, name);
-            context.setToolResult(result);
-            return result;
+            Map<String, String> after = inspectWorkspace
+                    ? RepositoryStateTracker.snapshot(root) : before;
+            return resultProjector.projectFailureWithDiff(context, authorized, e, before, after);
         }
-    }
-
-    private boolean requiresWorkspaceInspection(EffectProfile profile) {
-        if (profile == null || !profile.complete()
-                || profile.outboundDisclosure() != OutboundDisclosure.NONE) {
-            return true;
-        }
-        return profile.effects().stream().anyMatch(effect -> effect != ToolEffect.REPOSITORY_READ);
-    }
-
-    private void applySafeOutput(ToolResult result, String toolName) {
-        String rawObservation = result.getObservation() == null ? "" : result.getObservation();
-        ToolOutputSanitization sanitization;
-        try {
-            sanitization = sanitizer == null
-                    ? ToolOutputSanitization.clean(rawObservation)
-                    : sanitizer.sanitize(toolName, rawObservation);
-        } catch (Exception e) {
-            sanitization = ToolOutputSanitization.degraded(SANITIZE_FAILED_OBSERVATION);
-        }
-        if (sanitization.isDegraded()) {
-            result.setObservation(SANITIZE_FAILED_OBSERVATION);
-            result.setTruncated(false);
-            return;
-        }
-        String clipped = clip(sanitization.getOutput());
-        result.setObservation(clipped);
-        result.setTruncated(clipped.length() < sanitization.getOutput().length());
-    }
-
-    private void capturePlanEvidence(AgentContext context, ToolResult result) {
-        if (context.getCollaborationMode() != CollaborationMode.PLAN || result == null) {
-            return;
-        }
-        if (result.isSuccess()) {
-            for (var candidate : result.evidenceCandidatesSafe()) {
-                EvidenceReceipt receipt = EvidenceReceipt.from(candidate, context.getRunId(), context.getRootRunId());
-                if (receipt != null) context.recordEvidence(receipt);
-            }
-        }
-        DelegateResult delegateResult = result.getDelegateResult();
-        if (delegateResult == null || !delegateResult.isSuccessful()) {
-            return;
-        }
-        foldDelegateEvidence(context, delegateResult);
-    }
-
-    /** Fold only receipts that the root can prove came from its bounded child. */
-    private void foldDelegateEvidence(AgentContext context, DelegateResult result) {
-        DelegateProvenance provenance = result.getProvenance();
-        if (!authorizedChild(context, provenance)) {
-            return;
-        }
-        for (EvidenceReceipt receipt : result.safeEvidenceReceipts()) {
-            if (authorizedReceipt(context, provenance, receipt)) {
-                context.recordEvidence(receipt);
-            }
-        }
-    }
-
-    private boolean authorizedChild(AgentContext context, DelegateProvenance provenance) {
-        if (provenance == null || provenance.getRunId() == null
-                || provenance.getParentRunId() == null
-                || !Objects.equals(context.getRunId(), provenance.getParentRunId())
-                || !Objects.equals(rootRunId(context), provenance.getRootRunId())
-                || !Objects.equals(context.getSessionId(), provenance.getSessionId())
-                || provenance.getModeSnapshot() != context.getCollaborationMode()
-                || !sameWorkspace(context.getResolvedWorkspace(), provenance.getWorkspaceRoot())) {
-            return false;
-        }
-        AgentRuntimeProperties properties =
-                context.runtimeProperties(new AgentRuntimeProperties());
-        int maxDepth = properties.getSubAgentMaxDepth() == null
-                ? 1 : properties.getSubAgentMaxDepth();
-        return provenance.getDepth() != null
-                && provenance.getDepth() == context.getAgentDepth() + 1
-                && provenance.getDepth() <= maxDepth;
-    }
-
-    private boolean authorizedReceipt(AgentContext context, DelegateProvenance provenance,
-                                     EvidenceReceipt receipt) {
-        EvidenceRevalidation rule = receipt == null ? null : receipt.getRevalidation();
-        if (receipt == null || !receipt.isRevalidatable()
-                || !Objects.equals(provenance.getRunId(), receipt.getSourceRunId())
-                || !Objects.equals(rootRunId(context), receipt.getRootRunId())
-                || !withinWorkspace(context.getResolvedWorkspace(), rule.getRepositoryRelativePath())) {
-            return false;
-        }
-        String toolName = rule.getObservationType().toolName();
-        if (context.getAllowedTools() != null && !context.getAllowedTools().contains(toolName)) {
-            return false;
-        }
-        return registry.isPlanVisible(toolName, context.getAllowedTools());
-    }
-
-    private boolean withinWorkspace(Path root, String relativePath) {
-        if (root == null || relativePath == null || relativePath.isBlank()) {
-            return false;
-        }
-        try {
-            Path relative = Path.of(relativePath);
-            if (relative.isAbsolute()) {
-                return false;
-            }
-            Path realRoot = root.toRealPath();
-            Path candidate = realRoot.resolve(relative).normalize();
-            if (!candidate.startsWith(realRoot)) {
-                return false;
-            }
-            return candidate.toRealPath().startsWith(realRoot);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean sameWorkspace(Path root, String childRoot) {
-        if (root == null || childRoot == null || childRoot.isBlank()) {
-            return false;
-        }
-        try {
-            return root.toRealPath().equals(Path.of(childRoot).toRealPath());
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private String rootRunId(AgentContext context) {
-        return context.getRootRunId() == null || context.getRootRunId().isBlank()
-                ? context.getRunId() : context.getRootRunId();
     }
 
     private ToolResult unauthorized(AgentContext context) {
@@ -276,36 +98,5 @@ public class ToolExecutor {
         result.setSecurityEventType("unauthorized_tool_call");
         context.setToolResult(result);
         return result;
-    }
-
-    private void applyMetadata(ToolResult result, String toolStatus, String toolErrorCode,
-                               EffectProfile effectProfile,
-                               RepositoryStateTracker.DiffResult diff,
-                               boolean workspaceChanged, Path root) {
-        result.setToolStatus(toolStatus);
-        result.setToolErrorCode(toolErrorCode);
-        applyEffectMetadata(result, effectProfile);
-        result.setAffectedPaths(diff.affectedPaths());
-        result.setWorkspaceChanged(workspaceChanged);
-        result.setDiffSummary(diff.diffSummary());
-        if (root != null) {
-            result.setWorkspaceFingerprint(RepositoryStateTracker.stableFingerprint(root));
-        }
-    }
-
-    private void applyEffectMetadata(ToolResult result, EffectProfile effectProfile) {
-        result.setEffectProfile(effectProfile);
-        result.setReadOnly(effectProfile != null && effectProfile.isReadOnly());
-    }
-
-    private String clip(String text) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= MAX_TOOL_OUTPUT) {
-            return text;
-        }
-        return text.substring(0, MAX_TOOL_OUTPUT)
-                + "\n...[truncated " + (text.length() - MAX_TOOL_OUTPUT) + " chars]";
     }
 }

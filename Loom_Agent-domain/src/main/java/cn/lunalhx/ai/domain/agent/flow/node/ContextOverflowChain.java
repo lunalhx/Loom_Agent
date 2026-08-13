@@ -8,20 +8,20 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ContextRecoveryChain {
+public class ContextOverflowChain {
 
-    private final List<ContextRecoveryStep> steps;
+    private final List<ContextOverflowStep> steps;
 
-    ContextRecoveryChain(List<ContextRecoveryStep> steps) {
+    ContextOverflowChain(List<ContextOverflowStep> steps) {
         this.steps = List.copyOf(steps);
     }
 
     public NodeResult execute(AgentContext context, String attemptedModel, int requestedMaxTokens, long deadlineEpochMs) {
-        ContextRecoveryRequest request = new ContextRecoveryRequest(context, attemptedModel, requestedMaxTokens, deadlineEpochMs);
+        ContextOverflowRequest request = new ContextOverflowRequest(context, attemptedModel, requestedMaxTokens, deadlineEpochMs);
         List<AgentEvent> events = new ArrayList<>();
 
-        for (ContextRecoveryStep step : steps) {
-            ContextRecoveryTransition transition = step.apply(request, events);
+        for (ContextOverflowStep step : steps) {
+            ContextOverflowTransition transition = step.apply(request, events);
             switch (transition.action()) {
                 case RENDER_PROMPT:
                     return NodeResult.nextRound(transition.events());

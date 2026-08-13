@@ -1138,7 +1138,7 @@ public class CliSessionServiceE2ETest {
         CliSessionService.CliOptions opts = options(workspace,
                 runShellGateway("write_file", "done"));
         opts.approvalPolicy = "ask";
-        opts.approvalPrompt = new CliSessionService.InteractiveApprovalPrompt(false);
+        opts.approvalPrompt = new CliApprovalPrompt(false);
 
         AgentSessionRepository sessions = new FileAgentSessionRepository(workspace, mapper);
         FileAgentRunRepository runs = new FileAgentRunRepository(workspace, mapper);

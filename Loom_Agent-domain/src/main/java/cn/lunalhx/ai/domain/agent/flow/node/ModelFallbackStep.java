@@ -8,7 +8,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
-final class ModelFallbackStep implements ContextRecoveryStep {
+final class ModelFallbackStep implements ContextOverflowStep {
 
     private final ModelRuntimeProperties properties;
 
@@ -17,7 +17,7 @@ final class ModelFallbackStep implements ContextRecoveryStep {
     }
 
     @Override
-    public ContextRecoveryTransition apply(ContextRecoveryRequest request, List<AgentEvent> accumulatedEvents) {
+    public ContextOverflowTransition apply(ContextOverflowRequest request, List<AgentEvent> accumulatedEvents) {
         AgentContext context = request.context();
         ModelRuntimeProperties runProperties = context.modelRuntimeProperties(properties);
         String fallbackModel = runProperties.getResilience() == null
@@ -25,7 +25,7 @@ final class ModelFallbackStep implements ContextRecoveryStep {
         String attemptedModel = request.attemptedModel();
 
         if (StringUtils.isBlank(fallbackModel) || fallbackModel.equals(attemptedModel)) {
-            return ContextRecoveryTransition.continueChain();
+            return ContextOverflowTransition.continueChain();
         }
 
         context.setRecoveryModelOverride(fallbackModel);
@@ -40,6 +40,6 @@ final class ModelFallbackStep implements ContextRecoveryStep {
                 .parentRunId(context.getParentRunId())
                 .build();
         accumulatedEvents.add(event);
-        return ContextRecoveryTransition.renderPrompt(accumulatedEvents);
+        return ContextOverflowTransition.renderPrompt(accumulatedEvents);
     }
 }

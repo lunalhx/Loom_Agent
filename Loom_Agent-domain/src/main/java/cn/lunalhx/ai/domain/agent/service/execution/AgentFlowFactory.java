@@ -5,11 +5,11 @@ import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.flow.AgentNode;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.flow.middleware.BudgetMiddleware;
-import cn.lunalhx.ai.domain.agent.flow.middleware.ErrorRecoveryMiddleware;
+import cn.lunalhx.ai.domain.agent.flow.middleware.ModelCallErrorMiddleware;
 import cn.lunalhx.ai.domain.agent.flow.middleware.ModelCallMiddlewareAssembler;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallFailureClassifier;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallNode;
-import cn.lunalhx.ai.domain.agent.flow.node.RecoveryChainFactory;
+import cn.lunalhx.ai.domain.agent.flow.node.ContextOverflowChainFactory;
 import cn.lunalhx.ai.domain.agent.flow.node.DecisionNode;
 import cn.lunalhx.ai.domain.agent.flow.node.ObservationNode;
 import cn.lunalhx.ai.domain.agent.flow.node.PromptBuildNode;
@@ -23,9 +23,10 @@ import cn.lunalhx.ai.domain.agent.service.ledger.LedgerBootstrapService;
 import cn.lunalhx.ai.domain.agent.service.prompt.LedgerPromptServices;
 import cn.lunalhx.ai.domain.agent.service.prompt.StablePrefixBuilder;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
-import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import cn.lunalhx.ai.domain.tool.service.PermissionPrompt;
+import cn.lunalhx.ai.domain.tool.service.ToolApprovalResolver;
 import cn.lunalhx.ai.domain.tool.service.ToolAuthorizationService;
+import cn.lunalhx.ai.domain.tool.service.ToolExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -82,11 +83,11 @@ public class AgentFlowFactory {
         TraceRecorder traceRecorder = runtime.traceRecorder();
         BudgetGuard budgetGuard = runtime.budgetGuard();
 
-        ErrorRecoveryMiddleware errorRecoveryMiddleware =
-                new ErrorRecoveryMiddleware(
-                        RecoveryChainFactory.createRecoveryChain(
+        ModelCallErrorMiddleware modelCallErrorMiddleware =
+                new ModelCallErrorMiddleware(
+                        ContextOverflowChainFactory.createOverflowChain(
                                 properties, budgetGuard, traceRecorder, contextManager),
-                        RecoveryChainFactory.createModelErrorRecoveryChain(
+                        ContextOverflowChainFactory.createModelErrorOverflowChain(
                                 ledgerAppendService,
                                 runtime.modelRuntimeProperties()),
                         new ModelCallFailureClassifier(),
@@ -95,14 +96,11 @@ public class AgentFlowFactory {
         BudgetMiddleware budgetMiddleware =
                 new BudgetMiddleware(budgetGuard, properties);
         ModelCallMiddlewareAssembler assembler =
-                new ModelCallMiddlewareAssembler(errorRecoveryMiddleware, budgetMiddleware);
+                new ModelCallMiddlewareAssembler(modelCallErrorMiddleware, budgetMiddleware);
 
         ToolExecutor executor = new ToolExecutor(toolRegistry, runtime.toolOutputSanitizer());
-        ToolAuthorizationService authorizationService = new ToolAuthorizationService(
-                toolRegistry, objectMapper, permissionPrompt);
-        if (traceRecorder != null) {
-            // Authorization decisions are already reflected in the safe ToolResult.
-        }
+        ToolApprovalResolver approvalResolver = new ToolApprovalResolver(
+                new ToolAuthorizationService(toolRegistry, objectMapper), permissionPrompt);
 
         List<AgentNode> nodeList = new ArrayList<>(List.of(
                 new PromptBuildNode(
@@ -112,7 +110,7 @@ public class AgentFlowFactory {
                         new cn.lunalhx.ai.domain.agent.flow.node.ModelCallTerminalDeps(
                                 modelGateway, budgetGuard, traceRecorder, runtime.agentMetrics())),
                 new DecisionNode(objectMapper, properties, ledgerAppendService, toolRegistry),
-                new ToolDispatchNode(authorizationService, runtime.toolOutputSanitizer(), properties),
+                new ToolDispatchNode(approvalResolver, runtime.toolOutputSanitizer(), properties),
                 new ToolExecuteNode(executor),
                 new ObservationNode(runtime.toolOutputSanitizer(), traceRecorder,
                         runtime.agentMetrics(), ledgerAppendService)

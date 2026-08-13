@@ -10,7 +10,7 @@ import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import cn.lunalhx.ai.domain.model.valobj.ModelGatewayException;
 import cn.lunalhx.ai.types.error.ErrorCode;
-import cn.lunalhx.ai.domain.agent.flow.node.ContextRecoveryChain;
+import cn.lunalhx.ai.domain.agent.flow.node.ContextOverflowChain;
 import cn.lunalhx.ai.domain.agent.flow.node.ModelCallFailureClassifier;
 import org.apache.commons.lang3.StringUtils;
 
@@ -18,26 +18,26 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Model-level recovery: routes gateway errors via the context-recovery and
- * model-error-recovery chains. Parse/format retries are no longer tracked
+ * Model-call error handling: routes gateway errors via the context-overflow and
+ * model-error overflow chains. Parse/format retries are no longer tracked
  * by a local counter; the global {@code modelAttempts} guard in the main
  * loop terminates exhausted retries as {@code RETRY_LIMIT_REACHED}.
  */
-public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
+public class ModelCallErrorMiddleware implements ModelCallMiddleware {
 
-    private final ContextRecoveryChain recoveryChain;
-    private final ContextRecoveryChain modelErrorRecoveryChain;
+    private final ContextOverflowChain overflowChain;
+    private final ContextOverflowChain modelErrorOverflowChain;
     private final ModelCallFailureClassifier failureClassifier;
     private final AgentRuntimeProperties properties;
     private final TraceRecorder traceRecorder;
 
-    public ErrorRecoveryMiddleware(ContextRecoveryChain recoveryChain,
-                                   ContextRecoveryChain modelErrorRecoveryChain,
+    public ModelCallErrorMiddleware(ContextOverflowChain overflowChain,
+                                   ContextOverflowChain modelErrorOverflowChain,
                                    ModelCallFailureClassifier failureClassifier,
                                    AgentRuntimeProperties properties,
                                    TraceRecorder traceRecorder) {
-        this.recoveryChain = Objects.requireNonNull(recoveryChain, "recoveryChain must not be null");
-        this.modelErrorRecoveryChain = Objects.requireNonNull(modelErrorRecoveryChain, "modelErrorRecoveryChain must not be null");
+        this.overflowChain = Objects.requireNonNull(overflowChain, "overflowChain must not be null");
+        this.modelErrorOverflowChain = Objects.requireNonNull(modelErrorOverflowChain, "modelErrorOverflowChain must not be null");
         this.failureClassifier = Objects.requireNonNull(failureClassifier, "failureClassifier must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.traceRecorder = traceRecorder;
@@ -89,7 +89,7 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
                 return ModelCallOutcome.error("模型调用超时");
 
             case CONTEXT_OVERFLOW: {
-                NodeResult recoveryRoute = recoveryChain.execute(context,
+                NodeResult recoveryRoute = overflowChain.execute(context,
                         StringUtils.defaultIfBlank(attemptedModel, context.getRecoveryModelOverride()),
                         requestedMaxTokens, deadlineEpochMs);
                 return ModelCallOutcome.routed(recoveryRoute);
@@ -105,9 +105,9 @@ public class ErrorRecoveryMiddleware implements ModelCallMiddleware {
             }
 
             default: {
-                if (!context.recovery().modelErrorRecoveryAttempted()) {
-                    context.recovery().setModelErrorRecoveryAttempted(true);
-                    NodeResult recoveryRouteResult = modelErrorRecoveryChain.execute(context,
+                if (!context.modelCall().modelErrorOverflowAttempted()) {
+                    context.modelCall().setModelErrorOverflowAttempted(true);
+                    NodeResult recoveryRouteResult = modelErrorOverflowChain.execute(context,
                             StringUtils.defaultIfBlank(
                                     context.getRecoveryModelOverride(),
                                     context.getCurrentModel()),

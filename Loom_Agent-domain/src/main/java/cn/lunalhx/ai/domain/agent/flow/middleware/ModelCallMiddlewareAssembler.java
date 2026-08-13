@@ -8,16 +8,16 @@ import java.util.Objects;
  *
  * <p>Context rebuild, reduction, and dynamic control-info writing now happen in
  * {@code PromptBuildNode}; this chain only handles budget enforcement and
- * model-level error recovery around the terminal model call.
+ * model-call error handling around the terminal model call.
  */
 public class ModelCallMiddlewareAssembler {
 
-    private final ErrorRecoveryMiddleware errorRecoveryMiddleware;
+    private final ModelCallErrorMiddleware modelCallErrorMiddleware;
     private final BudgetMiddleware budgetMiddleware;
 
-    public ModelCallMiddlewareAssembler(ErrorRecoveryMiddleware errorRecoveryMiddleware,
+    public ModelCallMiddlewareAssembler(ModelCallErrorMiddleware modelCallErrorMiddleware,
                                         BudgetMiddleware budgetMiddleware) {
-        this.errorRecoveryMiddleware = Objects.requireNonNull(errorRecoveryMiddleware, "errorRecoveryMiddleware must not be null");
+        this.modelCallErrorMiddleware = Objects.requireNonNull(modelCallErrorMiddleware, "modelCallErrorMiddleware must not be null");
         this.budgetMiddleware = Objects.requireNonNull(budgetMiddleware, "budgetMiddleware must not be null");
     }
 
@@ -25,7 +25,7 @@ public class ModelCallMiddlewareAssembler {
         Objects.requireNonNull(terminal, "terminal must not be null");
         return new ModelCallMiddlewareChain(
                 List.of(
-                        errorRecoveryMiddleware,
+                        modelCallErrorMiddleware,
                         budgetMiddleware
                 ),
                 terminal);

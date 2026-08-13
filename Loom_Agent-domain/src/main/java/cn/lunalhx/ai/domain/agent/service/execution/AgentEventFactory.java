@@ -6,7 +6,7 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentErrorCode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentStopReason;
-import cn.lunalhx.ai.domain.agent.model.valobj.ContextRecoveryStage;
+import cn.lunalhx.ai.domain.agent.model.valobj.ContextOverflowStage;
 import cn.lunalhx.ai.domain.agent.model.valobj.WorkspaceResolutionException;
 import cn.lunalhx.ai.domain.model.valobj.ModelErrorCode;
 import org.apache.commons.lang3.StringUtils;
@@ -131,7 +131,7 @@ public final class AgentEventFactory {
                 .message("自动上下文恢复已耗尽。请补充更聚焦的指令后继续，或终止本次运行。")
                 .metadata(Map.of(
                         "allowedActions", List.of("CONTINUE", "ABORT"),
-                        "recoveryStage", ContextRecoveryStage.WAITING_USER_INPUT.name(),
+                        "recoveryStage", ContextOverflowStage.WAITING_USER_INPUT.name(),
                         "blockedReason", StringUtils.defaultString(context.getContextBlockedReason())))
                 .build();
     }
