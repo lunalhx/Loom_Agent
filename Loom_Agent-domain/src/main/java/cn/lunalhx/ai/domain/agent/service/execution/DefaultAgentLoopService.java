@@ -31,6 +31,7 @@ import cn.lunalhx.ai.domain.skill.service.SkillRunBootstrap;
 import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ToolSpec;
+import cn.lunalhx.ai.domain.tool.service.ObservationTools;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
@@ -163,6 +164,7 @@ public class DefaultAgentLoopService implements AgentLoopService {
                     if (continuing) {
                         context.setCurrentNode(AgentNodeNames.PROMPT_BUILD);
                         emit(sink, lifecycle.resumeRunning(context));
+                        emit(sink, lifecycle.reconcileToolDurability(context));
                     } else {
                         emit(sink, lifecycle.initializeRun(context));
                     }
@@ -307,6 +309,16 @@ public class DefaultAgentLoopService implements AgentLoopService {
                         e);
                 emit(sink, List.of(components.eventFactory().agentError(activeContext.get())));
                 sink.complete();
+            } catch (Error e) {
+                if (e instanceof VirtualMachineError) {
+                    throw e;
+                }
+                log.error("Agent loop failed before terminal event, operation={}, reference={}",
+                        operation,
+                        reference == null ? null : StringUtils.abbreviate(reference, 200),
+                        e);
+                emit(sink, List.of(components.eventFactory().agentError(activeContext.get())));
+                sink.complete();
             } finally {
                 MDC.clear();
             }
@@ -366,6 +378,11 @@ public class DefaultAgentLoopService implements AgentLoopService {
                 }
                 if (AgentNodeNames.MODEL_CALL.equals(currentNode)) {
                     lifecycle.recordModelAttempt(context);
+                }
+                if (AgentNodeNames.TOOL_INPUT.equals(currentNode)
+                        && context.getAuthorizedToolCall() != null
+                        && ObservationTools.isObservation(context.getAuthorizedToolCall().toolName())) {
+                    emit(sink, lifecycle.openExecutionWindow(context));
                 }
                 if (AgentNodeNames.TOOL_OUTPUT.equals(currentNode)) {
                     emit(sink, lifecycle.checkpointAfterTool(context));

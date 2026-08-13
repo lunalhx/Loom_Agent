@@ -85,6 +85,25 @@ public final class ConversationHistoryAppendService {
     }
 
     /**
+     * Append a sanitized Tool Call fact before the execution window opens.
+     *
+     * @param context        the agent context with Conversation History
+     * @param toolName       the tool name
+     * @param toolCallId     stable call identity
+     * @param sanitizedInput already-redacted tool input JSON
+     * @param eventKey       deterministic idempotency key
+     */
+    public List<ConversationHistoryEntry> appendToolCall(
+            AgentContext context, String toolName, String toolCallId,
+            String sanitizedInput, String eventKey) {
+        Objects.requireNonNull(toolCallId, "toolCallId must not be null");
+        String content = StringUtils.defaultIfBlank(sanitizedInput, toolName);
+        return appendWithMetadata(context, "assistant", content,
+                ConversationEntryType.TOOL_CALL, eventKey,
+                toolName, sanitizedInput, null, null, null);
+    }
+
+    /**
      * Append a tool result.
      *
      * <p>Role is {@code "user"}.

@@ -167,7 +167,7 @@ public class ToolDispatchNode extends AbstractAgentNode {
     private String toolCallId(AgentContext context, AgentDecision decision, String rawInput) {
         String input = rawInput == null ? "" : rawInput;
         return DigestUtils.sha256Hex(
-                context.getRunId() + "|" + context.getToolSteps()
+                context.getRunId() + "|" + context.getAttemptId() + "|" + context.getToolSteps()
                         + "|" + decision.getTool() + "|" + input)
                 .substring(0, 24);
     }

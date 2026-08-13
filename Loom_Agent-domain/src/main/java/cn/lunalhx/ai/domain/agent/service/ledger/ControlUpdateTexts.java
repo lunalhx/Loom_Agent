@@ -179,4 +179,11 @@ public final class ControlUpdateTexts {
                 + " source: " + StringUtils.defaultString(source, "unknown")
                 + " status: " + (alreadyActive ? "already_active" : "activated");
     }
+
+    public static String renderInterruptedToolCall(String toolName, String toolCallId) {
+        return "[Interrupted Tool Call] " + StringUtils.defaultIfBlank(toolName, "unknown")
+                + " id=" + StringUtils.defaultIfBlank(toolCallId, "unknown")
+                + " produced no durable Tool Result. Continue with a new safe observation;"
+                + " do not replay this call.";
+    }
 }

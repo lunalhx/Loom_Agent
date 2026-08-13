@@ -9,6 +9,7 @@ public enum ConversationEntryType {
     USER_TASK("user_task"),
     USER_INPUT("user_input"),
     ASSISTANT_ACTION("assistant_action"),
+    TOOL_CALL("tool_call"),
     TOOL_RESULT("tool_result"),
     CONTROL_UPDATE("control_update"),
     SYSTEM_NOTE("system_note"),

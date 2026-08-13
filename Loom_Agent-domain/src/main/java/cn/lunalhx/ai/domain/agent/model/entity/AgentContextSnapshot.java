@@ -108,6 +108,8 @@ public class AgentContextSnapshot {
     // -- action (durable) --
     private AgentDecision decision;
     private ToolResult toolResult;
+    private ToolExecutionMarker executionWindow;
+    private List<ToolExecutionMarker> interruptedToolCalls;
 
     // -- Plan Evidence (safe receipts only) --
     private List<EvidenceReceipt> evidenceReceipts;
@@ -225,6 +227,9 @@ public class AgentContextSnapshot {
                 // action
                 .decision(action.decision())
                 .toolResult(action.toolResult())
+                .executionWindow(action.executionWindow())
+                .interruptedToolCalls(action.interruptedToolCalls() == null ? List.of()
+                        : List.copyOf(action.interruptedToolCalls()))
                 .evidenceReceipts(context.getEvidenceReceipts())
                 .evidenceDrift(context.isEvidenceDrift())
                 // budget
@@ -330,6 +335,9 @@ public class AgentContextSnapshot {
         // action
         context.setDecision(decision);
         context.setToolResult(toolResult);
+        context.setExecutionWindow(executionWindow);
+        context.setInterruptedToolCalls(interruptedToolCalls == null ? List.of()
+                : List.copyOf(interruptedToolCalls));
         context.restoreEvidence(evidenceReceipts, evidenceDrift);
 
         // budget
