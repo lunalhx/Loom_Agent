@@ -70,7 +70,7 @@ public class SkillDurableContinuationContractTest {
         original.setActiveSkills(List.of(active));
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(original);
-        assertEquals(14, (int) snapshot.getSchemaVersion());
+        assertEquals(15, (int) snapshot.getSchemaVersion());
         assertNotNull(snapshot.getFrozenAuthorization());
 
         Files.writeString(skillDir.resolve("SKILL.md"), """

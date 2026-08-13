@@ -14,7 +14,7 @@ import java.util.Optional;
 /**
  * File-backed {@link AgentCheckpoint} store under
  * {@code .loom-code/checkpoints/<runId>/<version>.json}. Checkpoints carry
- * the semantic {@code TaskCheckpoint} payload plus the context snapshot.
+ * an {@link AgentContextSnapshot} with a Conversation History anchor only.
  */
 public final class FileAgentCheckpointRepository implements AgentCheckpointRepository {
 
@@ -98,19 +98,41 @@ public final class FileAgentCheckpointRepository implements AgentCheckpointRepos
             return Optional.empty();
         }
         try {
-            AgentCheckpoint checkpoint = mapper.readValue(best.toFile(), AgentCheckpoint.class);
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(best.toFile());
+            com.fasterxml.jackson.databind.JsonNode snapshotNode = root.get("contextSnapshot");
+            if (snapshotNode == null || snapshotNode.isNull()) {
+                throw new IllegalArgumentException(
+                        "checkpoint " + best + " uses an incompatible schema; "
+                                + "no automatic migration is performed");
+            }
+            Integer version = snapshotNode.has("schemaVersion") && !snapshotNode.get("schemaVersion").isNull()
+                    ? snapshotNode.get("schemaVersion").asInt() : null;
+            if (version == null || version != AgentContextSnapshot.CURRENT_SCHEMA_VERSION) {
+                throw new IllegalArgumentException(
+                        "checkpoint " + best + " uses an incompatible schema; "
+                                + "no automatic migration is performed");
+            }
+            if (snapshotNode.has("ledgerEntries") || snapshotNode.has("ledgerNextSequence")) {
+                throw new IllegalArgumentException(
+                        "checkpoint " + best + " uses an incompatible schema; "
+                                + "no automatic migration is performed");
+            }
+            AgentCheckpoint checkpoint = mapper.treeToValue(root, AgentCheckpoint.class);
             AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
             if (snapshot == null
-                    || snapshot.getSchemaVersion() == null
-                    || snapshot.getSchemaVersion() != AgentContextSnapshot.CURRENT_SCHEMA_VERSION
-                    || snapshot.getRunModeSnapshot() == null) {
+                    || snapshot.getRunModeSnapshot() == null
+                    || snapshot.getHistoryAnchor() == null) {
                 throw new IllegalArgumentException(
                         "checkpoint " + best + " uses an incompatible schema; "
                                 + "no automatic migration is performed");
             }
             return Optional.of(checkpoint);
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (IOException e) {
-            return Optional.empty();
+            throw new IllegalArgumentException(
+                    "checkpoint " + best + " uses an incompatible schema; "
+                            + "no automatic migration is performed", e);
         }
     }
 }

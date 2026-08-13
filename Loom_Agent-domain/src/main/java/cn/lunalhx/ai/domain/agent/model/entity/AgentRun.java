@@ -18,6 +18,9 @@ import java.util.List;
 @AllArgsConstructor
 public class AgentRun {
 
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+
+    private Integer schemaVersion;
     private String runId;
     private String sessionId;
     private String parentRunId;

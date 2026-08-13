@@ -55,5 +55,9 @@ public class AgentQuestion {
     private transient SkillCatalog inheritedSkillCatalogSnapshot;
     /** Parent Active Skill Snapshots at Delegate creation; child-local copies only. */
     private transient List<ActiveSkillSnapshot> inheritedActiveSkills;
+    /** Session history loaded for seeding a new root run; never persisted on the question. */
+    private transient List<ConversationHistoryEntry> seedHistoryEntries;
+    /** Next sequence after {@link #seedHistoryEntries}; null means 0. */
+    private transient Long seedHistoryNextSequence;
 
 }

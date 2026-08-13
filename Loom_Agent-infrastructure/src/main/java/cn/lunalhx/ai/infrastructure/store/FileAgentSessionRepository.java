@@ -2,7 +2,6 @@ package cn.lunalhx.ai.infrastructure.store;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
-import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -218,12 +217,6 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
         }
     }
 
-    private AgentSession readCurrent(Path target, String sessionId) throws IOException {
-        AgentSession session = mapper.readValue(target.toFile(), AgentSession.class);
-        validateCurrent(session, sessionId, target);
-        return session;
-    }
-
     private void validateCurrent(AgentSession session, String sessionId, Path target) {
         if (session.getSchemaVersion() == null
                 || session.getSchemaVersion() != AgentSession.CURRENT_SCHEMA_VERSION) {
@@ -241,14 +234,27 @@ public final class FileAgentSessionRepository implements AgentSessionRepository 
                             + "no automatic migration, refusing to touch the original file: "
                             + target);
         }
-        if (session.getCheckpoint() != null
-                && (session.getCheckpoint().getSchemaVersion() == null
-                || session.getCheckpoint().getSchemaVersion() != TaskCheckpoint.CURRENT_SCHEMA_VERSION
-                || session.getCheckpoint().getRunModeSnapshot() == null)) {
+    }
+
+    private AgentSession readCurrent(Path target, String sessionId) throws IOException {
+        String raw = Files.readString(target);
+        com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(raw);
+        // TaskCheckpoint was removed from Session; any residual checkpoint payload
+        // is an incompatible shape (no migration / silent skip).
+        if (rootNode.has("checkpoint")) {
             throw new IllegalArgumentException(
-                    "session " + sessionId + " contains an incompatible checkpoint schema; "
+                    "session " + sessionId + " contains an incompatible TaskCheckpoint payload; "
                             + "no automatic migration, refusing to touch the original file: " + target);
         }
+        if (rootNode.has("history") || rootNode.has("ledgerNextSequence")) {
+            throw new IllegalArgumentException(
+                    "session " + sessionId + " embeds Conversation History; "
+                            + "History is a separate append-only store — "
+                            + "no automatic migration, refusing to touch the original file: " + target);
+        }
+        AgentSession session = mapper.treeToValue(rootNode, AgentSession.class);
+        validateCurrent(session, sessionId, target);
+        return session;
     }
 
     @Override

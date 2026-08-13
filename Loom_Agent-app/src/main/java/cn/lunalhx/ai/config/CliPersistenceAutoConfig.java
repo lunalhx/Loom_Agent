@@ -4,6 +4,7 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.service.context.SanitizationPolicy;
@@ -14,6 +15,7 @@ import cn.lunalhx.ai.infrastructure.store.ArtifactRedactor;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
@@ -65,6 +67,13 @@ public class CliPersistenceAutoConfig {
                                                                ObjectMapper mapper,
                                                                ArtifactRedactor redactor) {
         return new FileAgentCheckpointRepository(workspace(agent), mapper, redactor);
+    }
+
+    @Bean
+    public ConversationHistoryRepository conversationHistoryRepository(AgentRuntimeProperties agent,
+                                                                       ObjectMapper mapper,
+                                                                       ArtifactRedactor redactor) {
+        return new FileConversationHistoryRepository(workspace(agent), mapper, redactor);
     }
 
     @Bean

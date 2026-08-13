@@ -47,7 +47,7 @@ public class ArtifactLeakScanTest {
         FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper, artifactRedactor);
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent, List.of(), tools, redactor);
         return new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
     }
 
     private CliSessionService.CliOptions options(Path workspace, FakeModelGateway gateway) {

@@ -3,7 +3,6 @@ package cn.lunalhx.ai.cli;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
-import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -53,35 +52,26 @@ public final class CliSessionBootstrap {
                             + s.getWorkspaceRoot() + ", refusing to switch to " + workspace)
                     .build();
         }
-        TaskCheckpoint checkpoint = s.getCheckpoint();
-        if (checkpoint == null) {
-            return ResumeResult.builder()
-                    .kind(ResumeResult.Kind.NO_CHECKPOINT)
-                    .session(s)
-                    .workingMemory(s.getWorkingMemory())
-                    .message("no semantic checkpoint in session " + id)
-                    .build();
-        }
-        List<String> invalidated = keyFilesInvalidated(checkpoint);
+        List<String> invalidated = keyFilesInvalidated(s.getKeyFiles());
         if (!invalidated.isEmpty()) {
-            checkpoint.setSummary(null);
-            checkpoint.setKeyFiles(new LinkedHashMap<>());
-            s.setCheckpoint(checkpoint);
+            discardInvalidatedWorkingMemory(s, invalidated);
+            Map<String, String> keyFiles = new LinkedHashMap<>(
+                    s.getKeyFiles() == null ? Map.of() : s.getKeyFiles());
+            invalidated.forEach(keyFiles::remove);
+            s.setKeyFiles(keyFiles);
             sessionStore.save(s);
             return ResumeResult.builder()
                     .kind(ResumeResult.Kind.PARTIAL_RESUME)
                     .session(s)
-                    .checkpoint(checkpoint)
                     .workingMemory(s.getWorkingMemory())
                     .invalidatedKeyFiles(invalidated)
                     .message("key files changed: " + String.join(", ", invalidated)
-                            + "; stale checkpoint summary discarded")
+                            + "; stale file summaries discarded")
                     .build();
         }
         return ResumeResult.builder()
                 .kind(ResumeResult.Kind.FULL_RESTORE)
                 .session(s)
-                .checkpoint(checkpoint)
                 .workingMemory(s.getWorkingMemory())
                 .message("full restore")
                 .build();
@@ -94,18 +84,38 @@ public final class CliSessionBootstrap {
                 .workspaceRoot(workspace)
                 .collaborationMode(Objects.requireNonNull(mode, "collaboration mode must not be null"))
                 .createdAt(Instant.now())
-                .history(new ArrayList<>())
                 .workingMemory(new WorkingContextMemory())
-                .checkpoint(null)
                 .keyFiles(new LinkedHashMap<>())
                 .runtimeIdentity(runtimeIdentity)
                 .build();
         return sessionStore.save(fresh);
     }
 
-    private List<String> keyFilesInvalidated(TaskCheckpoint checkpoint) {
+    private static void discardInvalidatedWorkingMemory(AgentSession session, List<String> invalidated) {
+        WorkingContextMemory wm = session.getWorkingMemory();
+        if (wm == null || invalidated.isEmpty()) {
+            return;
+        }
+        WorkingContextMemory cleaned = new WorkingContextMemory();
+        cleaned.setTaskSummary(wm.taskSummary());
+        for (String file : wm.recentFiles()) {
+            if (!invalidated.contains(file)) {
+                cleaned.recordRecentFile(file);
+            }
+        }
+        for (WorkingContextMemory.FileSummary summary : wm.fileSummaries().values()) {
+            if (!invalidated.contains(summary.path())) {
+                cleaned.putFileSummary(summary);
+            }
+        }
+        for (WorkingContextMemory.MemoryNote note : wm.notes()) {
+            cleaned.addNote(note);
+        }
+        session.setWorkingMemory(cleaned);
+    }
+
+    private List<String> keyFilesInvalidated(Map<String, String> keyFiles) {
         List<String> invalidated = new ArrayList<>();
-        Map<String, String> keyFiles = checkpoint.getKeyFiles();
         if (keyFiles == null || keyFiles.isEmpty()) {
             return invalidated;
         }

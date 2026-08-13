@@ -54,7 +54,7 @@ public class CliEvalE2ETest {
         FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper);
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent, List.of());
         return new CliSessionService(options(workspace, gateway), mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
     }
 
     @Test
@@ -75,7 +75,7 @@ public class CliEvalE2ETest {
                 List.of(new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(
                         new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())));
         CliSessionService session = new CliSessionService(options(workspace, gateway), mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
 
         String answer = session.runTurn("rewrite main.py to return 42");
         assertEquals("wrote src/main.py", answer);
@@ -119,7 +119,7 @@ public class CliEvalE2ETest {
         CliSessionService.CliOptions opts = options(workspace, gateway);
         opts.maxSteps = 3;
         CliSessionService session = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
 
         String answer = session.runTurn("keep listing");
         assertTrue(answer.contains("达到工具执行上限"));
@@ -159,7 +159,7 @@ public class CliEvalE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper,
                 FakeModelGateway.finalAnswer("second"), agent, List.of());
         CliSessionService resumed = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
 
         String answer = resumed.runTurn("task two");
         assertEquals("second", answer);
@@ -171,7 +171,8 @@ public class CliEvalE2ETest {
         assertEquals("first", oldRun.getFinalAnswer());
 
         AgentSession persisted = sessions.find(sessionId).orElseThrow();
-        assertTrue(persisted.getHistory().size() >= 2);
+        assertTrue(CliLoopTestFixture.historyRepository(workspace, mapper).find(sessionId)
+                .orElseThrow().getEntries().size() >= 2);
         resumed.close();
     }
 }

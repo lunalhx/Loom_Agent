@@ -2,6 +2,7 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
 
@@ -19,12 +20,14 @@ public record AgentLoopStateDependencies(
         AgentWorkspaceResolver workspaceResolver,
         AgentRunRepository runRepository,
         AgentCheckpointRepository checkpointRepository,
+        ConversationHistoryRepository historyRepository,
         ObjectMapper objectMapper
 ) {
     public AgentLoopStateDependencies {
         Objects.requireNonNull(workspaceResolver, "workspaceResolver must not be null");
         Objects.requireNonNull(runRepository, "runRepository must not be null");
         Objects.requireNonNull(checkpointRepository, "checkpointRepository must not be null");
+        Objects.requireNonNull(historyRepository, "historyRepository must not be null");
         Objects.requireNonNull(objectMapper, "objectMapper must not be null");
     }
 }

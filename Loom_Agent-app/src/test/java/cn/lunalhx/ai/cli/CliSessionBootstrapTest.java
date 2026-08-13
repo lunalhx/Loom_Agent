@@ -5,13 +5,11 @@ import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Optional;
 
@@ -31,7 +29,6 @@ public class CliSessionBootstrapTest {
                 .workspaceRoot(root.resolve("other").toString())
                 .collaborationMode(CollaborationMode.BUILD)
                 .createdAt(Instant.now())
-                .history(new ArrayList<>())
                 .workingMemory(new WorkingContextMemory())
                 .keyFiles(new LinkedHashMap<>())
                 .build();

@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * Result of a session resume attempt. Explicitly distinguishes the outcome
  * so the caller can react differently to partial invalidation, workspace
- * mismatch, schema incompatibility, and missing checkpoints.
+ * mismatch, and schema incompatibility.
  */
 @Data
 @Builder
@@ -20,21 +20,18 @@ import java.util.List;
 public class ResumeResult {
 
     public enum Kind {
-        /** History, working memory and the semantic checkpoint are all valid. */
+        /** Working memory and Session context are valid. */
         FULL_RESTORE,
-        /** Some key files changed; their summaries are discarded, history/working memory kept. */
+        /** Some key files changed; their summaries are discarded, Session kept. */
         PARTIAL_RESUME,
-        /** Workspace mismatch or no usable checkpoint; only history is restored. */
+        /** Workspace mismatch; Session is not activated. */
         WORKSPACE_MISMATCH,
         /** Session schema is incompatible; the session is rejected with a clear error. */
-        SCHEMA_INCOMPATIBLE,
-        /** No checkpoint at all. */
-        NO_CHECKPOINT
+        SCHEMA_INCOMPATIBLE
     }
 
     private Kind kind;
     private AgentSession session;
-    private TaskCheckpoint checkpoint;
     private WorkingContextMemory workingMemory;
     private List<String> invalidatedKeyFiles;
     private String message;

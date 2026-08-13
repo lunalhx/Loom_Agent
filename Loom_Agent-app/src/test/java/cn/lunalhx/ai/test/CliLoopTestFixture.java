@@ -2,6 +2,7 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.PlanSubmissionHandler;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
@@ -26,6 +27,7 @@ import cn.lunalhx.ai.domain.tool.service.ToolSchemaValidator;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.infrastructure.tool.NoopToolOutputSanitizer;
 import cn.lunalhx.ai.infrastructure.tool.RedactingToolOutputSanitizer;
@@ -77,12 +79,15 @@ public final class CliLoopTestFixture {
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         AgentCheckpointRepository checkpoints = new FileAgentCheckpointRepository(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
+        ConversationHistoryRepository histories = new FileConversationHistoryRepository(root, mapper,
+                new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         TraceRecorder traces = new FileTraceRecorder(root, mapper,
                 new cn.lunalhx.ai.infrastructure.store.ArtifactRedactor(redactor));
         BudgetGuard budget = new DefaultBudgetGuard(agent);
         ModelRuntimeProperties model = AgentRuntimeTestFixture.testModelRuntimeProperties();
 
-        AgentLoopStateDependencies state = new AgentLoopStateDependencies(resolver, runs, checkpoints, mapper);
+        AgentLoopStateDependencies state = new AgentLoopStateDependencies(
+                resolver, runs, checkpoints, histories, mapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 agent, traces, budget, new NoopAgentMetrics(),
                 new RedactingToolOutputSanitizer(redactor),
@@ -93,6 +98,10 @@ public final class CliLoopTestFixture {
                 new cn.lunalhx.ai.cli.FilePlanSubmissionHandler(sessions, runs, mapper));
         ToolRegistry registry = new ToolRegistry(tools, new ToolSchemaValidator(mapper));
         return factory.createStandalone(registry, Runnable::run);
+    }
+
+    public static FileConversationHistoryRepository historyRepository(Path workspace, ObjectMapper mapper) {
+        return new FileConversationHistoryRepository(workspace, mapper);
     }
 
     public static AgentRuntimeProperties agentProperties(Path workspace) {

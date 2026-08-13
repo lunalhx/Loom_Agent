@@ -199,7 +199,9 @@ public class CliDelegateSkillInheritanceE2ETest {
 
         AgentLoopStateDependencies state = new AgentLoopStateDependencies(
                 new cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver(agent),
-                runs, checkpoints, mapper);
+                runs, checkpoints,
+                new cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository(root, mapper),
+                mapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 agent, traces,
                 new cn.lunalhx.ai.domain.agent.service.budget.DefaultBudgetGuard(agent),
@@ -254,7 +256,7 @@ public class CliDelegateSkillInheritanceE2ETest {
         options.timeoutSeconds = 30;
         options.modelGateway = gateway;
         return new CliSessionService(options, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(root, mapper), traces, loop);
     }
 
     private static String modelVisible(ChatPrompt prompt) {

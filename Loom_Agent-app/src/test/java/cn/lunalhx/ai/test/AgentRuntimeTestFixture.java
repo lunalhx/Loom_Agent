@@ -2,6 +2,7 @@ package cn.lunalhx.ai.test;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentMetrics;
 import cn.lunalhx.ai.domain.agent.adapter.port.BudgetGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
@@ -22,6 +23,7 @@ import cn.lunalhx.ai.infrastructure.adapter.repository.InMemoryTraceRecorder;
 import cn.lunalhx.ai.domain.agent.service.conversation.ConversationExecutionGuard;
 import cn.lunalhx.ai.domain.agent.service.observability.NoopAgentMetrics;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryDocument;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatMessage;
 import cn.lunalhx.ai.domain.conversation.model.entity.ChatPrompt;
 import cn.lunalhx.ai.domain.model.adapter.port.ModelGateway;
@@ -46,6 +48,7 @@ public final class AgentRuntimeTestFixture {
     private AgentRuntimeProperties properties;
     private AgentRunRepository runRepository;
     private AgentCheckpointRepository checkpointRepository;
+    private ConversationHistoryRepository historyRepository;
     private AgentWorkspaceResolver workspaceResolver;
     private TraceRecorder traceRecorder;
     private BudgetGuard budgetGuard;
@@ -97,6 +100,11 @@ public final class AgentRuntimeTestFixture {
         return this;
     }
 
+    public AgentRuntimeTestFixture historyRepository(ConversationHistoryRepository historyRepository) {
+        this.historyRepository = historyRepository;
+        return this;
+    }
+
     public AgentRuntimeTestFixture workspaceResolver(AgentWorkspaceResolver workspaceResolver) {
         this.workspaceResolver = workspaceResolver;
         return this;
@@ -144,6 +152,10 @@ public final class AgentRuntimeTestFixture {
         return checkpointRepository != null ? checkpointRepository : new InMemoryAgentCheckpointRepository();
     }
 
+    private ConversationHistoryRepository effectiveHistoryRepository() {
+        return historyRepository != null ? historyRepository : new InMemoryConversationHistoryRepository();
+    }
+
     private AgentWorkspaceResolver effectiveWorkspaceResolver(AgentRuntimeProperties props) {
         return workspaceResolver != null ? workspaceResolver : new AgentWorkspaceResolver(props);
     }
@@ -177,6 +189,7 @@ public final class AgentRuntimeTestFixture {
                 effectiveWorkspaceResolver(props),
                 effectiveRunRepository(),
                 effectiveCheckpointRepository(),
+                effectiveHistoryRepository(),
                 objectMapper);
         AgentLoopRuntimeDependencies runtime = new AgentLoopRuntimeDependencies(
                 props, effectiveTraceRecorder(), effectiveBudgetGuard(props),
@@ -264,5 +277,20 @@ public final class AgentRuntimeTestFixture {
             }
         }
         return text.toString();
+    }
+
+    private static final class InMemoryConversationHistoryRepository implements ConversationHistoryRepository {
+        private final java.util.Map<String, ConversationHistoryDocument> bySession = new java.util.HashMap<>();
+
+        @Override
+        public java.util.Optional<ConversationHistoryDocument> find(String sessionId) {
+            return java.util.Optional.ofNullable(bySession.get(sessionId));
+        }
+
+        @Override
+        public ConversationHistoryDocument save(ConversationHistoryDocument document) {
+            bySession.put(document.getSessionId(), document);
+            return document;
+        }
     }
 }

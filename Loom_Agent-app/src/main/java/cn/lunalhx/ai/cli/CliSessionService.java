@@ -4,18 +4,20 @@ import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunStartGuard;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentSessionRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.TraceRecorder;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryDocument;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.EvidenceReceipt;
 import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanBinding;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
-import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentEventType;
 import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
@@ -56,7 +58,7 @@ import java.util.UUID;
 /**
  * CLI session facade. One {@link AgentSession} per workspace session; every
  * user turn creates a fresh root run whose context is seeded from the session
- * (history, working memory, semantic checkpoint). Runs/traces/checkpoints and
+ * (conversation history store, working memory). Runs/traces/checkpoints and
  * the session are all written from the loop's own state — never from a second
  * CLI-side state machine.
  */
@@ -70,6 +72,7 @@ public class CliSessionService implements AutoCloseable {
     private final AgentSessionRepository sessionStore;
     private final AgentRunRepository runStore;
     private final AgentCheckpointRepository checkpointStore;
+    private final ConversationHistoryRepository historyStore;
     private final TraceRecorder traceRecorder;
     private final cn.lunalhx.ai.domain.memory.adapter.port.DurableMemoryRepository memoryStore;
     private final cn.lunalhx.ai.domain.memory.service.MemoryPromotionService memoryPromotion;
@@ -88,6 +91,7 @@ public class CliSessionService implements AutoCloseable {
                 spring.getBean(AgentSessionRepository.class),
                 spring.getBean(AgentRunRepository.class),
                 spring.getBean(AgentCheckpointRepository.class),
+                spring.getBean(ConversationHistoryRepository.class),
                 spring.getBean(TraceRecorder.class),
                 spring.getBean(AgentLoopService.class));
     }
@@ -105,7 +109,9 @@ public class CliSessionService implements AutoCloseable {
     CliSessionService(CliOptions options, ObjectMapper mapper,
                       AgentRuntimeProperties agent, ModelRuntimeProperties model,
                       AgentSessionRepository sessionStore, AgentRunRepository runStore,
-                      AgentCheckpointRepository checkpointStore, TraceRecorder traceRecorder,
+                      AgentCheckpointRepository checkpointStore,
+                      ConversationHistoryRepository historyStore,
+                      TraceRecorder traceRecorder,
                       AgentLoopService loopService) {
         this.sessionId = options.resumeSessionId != null
                 ? options.resumeSessionId : newSessionId();
@@ -115,6 +121,7 @@ public class CliSessionService implements AutoCloseable {
         this.sessionStore = sessionStore;
         this.runStore = runStore;
         this.checkpointStore = checkpointStore;
+        this.historyStore = historyStore;
         this.traceRecorder = traceRecorder;
         this.memoryStore = new FileDurableMemoryRepository(Path.of(options.workspaceRoot), mapper,
                 artifactRedactor(options));
@@ -142,9 +149,6 @@ public class CliSessionService implements AutoCloseable {
             }
             if (result.getKind() == ResumeResult.Kind.WORKSPACE_MISMATCH) {
                 throw new OptionsException(result.getMessage());
-            }
-            if (result.getKind() == ResumeResult.Kind.NO_CHECKPOINT) {
-                System.out.println("(resume: session found, no semantic checkpoint)");
             }
             AgentSession resumed = recoverPendingPlan(result.getSession());
             if (options.startupMode != null) {
@@ -239,13 +243,18 @@ public class CliSessionService implements AutoCloseable {
         // configured via --secret-env-name ever reaches the ledger, checkpoint,
         // run.json, trace or report on disk.
         String safePrompt = redactor.redact(prompt);
-        AgentContextSnapshot seed;
+        AgentContextSnapshot seedSnapshot;
+        List<ConversationHistoryEntry> seedHistoryEntries;
+        long seedHistoryNextSequence;
         CollaborationMode runMode;
         String planTarget;
         Integer planRevision;
         long planStateVersion;
         synchronized (this) {
-            seed = seedSnapshot();
+            SeedContext seed = buildSeed();
+            seedSnapshot = seed.snapshot();
+            seedHistoryEntries = seed.historyEntries();
+            seedHistoryNextSequence = seed.historyNextSequence();
             runMode = modeOverride == null ? session.getCollaborationMode() : modeOverride;
             planTarget = planBinding != null ? planBinding.getPlanId()
                     : runMode == CollaborationMode.PLAN ? planTargetForRun() : null;
@@ -270,7 +279,9 @@ public class CliSessionService implements AutoCloseable {
                 .planStateVersion(planStateVersion)
                 .planBinding(planBinding)
                 .runStartGuard(runStartGuard)
-                .seedSnapshot(seed)
+                .seedSnapshot(seedSnapshot)
+                .seedHistoryEntries(seedHistoryEntries)
+                .seedHistoryNextSequence(seedHistoryNextSequence)
                 .inheritedSessionExecutionGrants(session.getExecutionGrants())
                 .fullAccess(options.fullAccess && runMode == CollaborationMode.BUILD)
                 .build();
@@ -350,19 +361,32 @@ public class CliSessionService implements AutoCloseable {
         return finalAnswer;
     }
 
-    private AgentContextSnapshot seedSnapshot() {
-        if (session.getHistory() == null || session.getHistory().isEmpty()) {
-            return null;
+    private SeedContext buildSeed() {
+        Optional<ConversationHistoryDocument> history = historyStore.find(sessionId);
+        List<ConversationHistoryEntry> entries = history
+                .map(doc -> doc.getEntries() == null ? List.<ConversationHistoryEntry>of()
+                        : List.copyOf(doc.getEntries()))
+                .orElse(List.of());
+        long nextSequence = history.map(ConversationHistoryDocument::getNextSequence).orElse(0L);
+        boolean hasWorkingMemory = session.getWorkingMemory() != null && !session.getWorkingMemory().isEmpty();
+        if (entries.isEmpty() && !hasWorkingMemory) {
+            return new SeedContext(null, List.of(), 0L);
         }
-        return AgentContextSnapshot.builder()
+        AgentContextSnapshot snapshot = AgentContextSnapshot.builder()
                 .schemaVersion(AgentContextSnapshot.CURRENT_SCHEMA_VERSION)
                 .runModeSnapshot(session.getCollaborationMode())
-                .ledgerEntries(session.getHistory())
-                .ledgerNextSequence(session.getLedgerNextSequence())
                 .workingMemory(session.getWorkingMemory())
                 .stablePrefix(null)
                 .generation(0)
+                .historyAnchor(cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryAnchor.from(
+                        history.orElse(null)))
                 .build();
+        return new SeedContext(snapshot, entries, nextSequence);
+    }
+
+    private record SeedContext(AgentContextSnapshot snapshot,
+                               List<ConversationHistoryEntry> historyEntries,
+                               long historyNextSequence) {
     }
 
     private Map<String, Object> newTaskState(String runId, String userRequest) {
@@ -389,9 +413,9 @@ public class CliSessionService implements AutoCloseable {
         return entry;
     }
 
-    /** Persist loop-derived state back into the session. The latest semantic
-     *  checkpoint of the newest root run is the single source of truth for
-     *  history, working memory and the task anchor. */
+    /** Persist loop-derived state back into the session. The latest root run
+     *  checkpoint overlay is the source of truth for Session Working Memory
+     *  and key files; Conversation History stays in its own store. */
     public synchronized void persistSession() {
         recoverPendingIfPresent();
         // Re-read the durable Session before applying loop-derived state. A
@@ -422,7 +446,6 @@ public class CliSessionService implements AutoCloseable {
             session.setId(run.getSessionId() == null ? sessionId : run.getSessionId());
             session.setUpdatedAt(Instant.now());
             syncFromCheckpoint(run);
-            session.setCheckpoint(taskCheckpoint(run));
         }
         redactSessionInPlace();
         if (!sessionStore.saveIfUnchanged(session, durableUpdatedAt)) {
@@ -439,25 +462,6 @@ public class CliSessionService implements AutoCloseable {
 
     /** Redact every persisted text field in the session before it hits disk. */
     private void redactSessionInPlace() {
-        if (session.getHistory() != null) {
-            List<cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry> redacted = new ArrayList<>();
-            for (cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry e : session.getHistory()) {
-                redacted.add(cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry.builder()
-                        .entryId(e.entryId())
-                        .sequence(e.sequence())
-                        .role(e.role())
-                        .content(redactor.redact(e.content()))
-                        .stableType(e.stableType())
-                        .eventKey(e.eventKey())
-                        .toolName(e.toolName())
-                        .toolInputJson(e.toolInputJson() == null ? null : redactor.redact(e.toolInputJson()))
-                        .artifactId(e.artifactId())
-                        .originalChars(e.originalChars())
-                        .renderChars(e.renderChars())
-                        .build());
-            }
-            session.setHistory(redacted);
-        }
         WorkingContextMemory wm = session.getWorkingMemory();
         if (wm != null) {
             WorkingContextMemory redacted = new WorkingContextMemory();
@@ -477,18 +481,12 @@ public class CliSessionService implements AutoCloseable {
             }
             session.setWorkingMemory(redacted);
         }
-        TaskCheckpoint cp = session.getCheckpoint();
-        if (cp != null) {
-            cp.setGoal(redactor.redact(cp.getGoal()));
-            cp.setCompleted(redactor.redact(cp.getCompleted()));
-            cp.setExcluded(redactor.redact(cp.getExcluded()));
-            cp.setBlocker(redactor.redact(cp.getBlocker()));
-            cp.setNextStep(redactor.redact(cp.getNextStep()));
-            cp.setSummary(redactor.redact(cp.getSummary()));
-        }
     }
 
     private void syncFromCheckpoint(AgentRun run) {
+        if (run.getStatus() != AgentRunStatus.COMPLETED) {
+            return;
+        }
         Optional<cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint> latest =
                 checkpointStore.latest(run.getRunId());
         if (latest.isEmpty()) {
@@ -497,10 +495,6 @@ public class CliSessionService implements AutoCloseable {
         AgentContextSnapshot snapshot = latest.get().getContextSnapshot();
         if (snapshot == null) {
             return;
-        }
-        if (snapshot.getLedgerEntries() != null && !snapshot.getLedgerEntries().isEmpty()) {
-            session.setHistory(snapshot.getLedgerEntries());
-            session.setLedgerNextSequence(snapshot.getLedgerNextSequence());
         }
         if (snapshot.getWorkingMemory() != null) {
             session.setWorkingMemory(snapshot.getWorkingMemory());
@@ -519,31 +513,6 @@ public class CliSessionService implements AutoCloseable {
             }
         }
         session.setKeyFiles(keyFiles);
-    }
-
-    private TaskCheckpoint taskCheckpoint(AgentRun run) {
-        TaskCheckpoint checkpoint = session.getCheckpoint();
-        if (checkpoint == null) {
-            checkpoint = new TaskCheckpoint();
-            checkpoint.setSchemaVersion(TaskCheckpoint.CURRENT_SCHEMA_VERSION);
-            checkpoint.setCreatedAt(Instant.now());
-        }
-        checkpoint.setSessionId(sessionId);
-        checkpoint.setRunId(run.getRunId());
-        checkpoint.setGoal(run.getQuestion());
-        checkpoint.setSummary(StringUtils.abbreviate(
-                org.apache.commons.lang3.StringUtils.defaultString(run.getFinalAnswer(),
-                        org.apache.commons.lang3.StringUtils.defaultString(run.getStopReason())), 500));
-        checkpoint.setNextStep(org.apache.commons.lang3.StringUtils.defaultIfBlank(run.getStopReason(),
-                AgentStopReason.FINAL_ANSWER_RETURNED.name()));
-        checkpoint.setRuntimeIdentity(run.getRootRunId());
-        checkpoint.setRunModeSnapshot(run.getRunModeSnapshot());
-        checkpoint.setKeyFiles(session.getKeyFiles());
-        checkpoint.setWorkingMemory(session.getWorkingMemory());
-        checkpoint.setHistory(session.getHistory());
-        checkpoint.setLedgerNextSequence(session.getLedgerNextSequence());
-        checkpoint.setUpdatedAt(Instant.now());
-        return checkpoint;
     }
 
     @Override

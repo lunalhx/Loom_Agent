@@ -8,15 +8,17 @@ import cn.lunalhx.ai.domain.agent.model.entity.DelegateResult;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentSession;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
+import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentDecision;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryDocument;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.Plan;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanRevision;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmission;
 import cn.lunalhx.ai.domain.agent.model.entity.PlanSubmissionTransaction;
 import cn.lunalhx.ai.domain.agent.model.entity.ResumeResult;
-import cn.lunalhx.ai.domain.agent.model.entity.TaskCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunKind;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRunStatus;
@@ -32,6 +34,7 @@ import cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties;
 import cn.lunalhx.ai.infrastructure.store.FileAgentCheckpointRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentRunRepository;
 import cn.lunalhx.ai.infrastructure.store.FileAgentSessionRepository;
+import cn.lunalhx.ai.infrastructure.store.FileConversationHistoryRepository;
 import cn.lunalhx.ai.infrastructure.store.FileTraceRecorder;
 import cn.lunalhx.ai.infrastructure.loom.DelegateTool;
 import cn.lunalhx.ai.infrastructure.loom.ReadFileTool;
@@ -102,6 +105,10 @@ public class CliSessionServiceE2ETest {
         return o;
     }
 
+    private FileConversationHistoryRepository historyRepository(Path workspace) {
+        return CliLoopTestFixture.historyRepository(workspace, mapper);
+    }
+
     private CliSessionService service(Path workspace, ModelGateway gateway) {
         AgentRuntimeProperties agent = CliLoopTestFixture.agentProperties(workspace);
         ModelRuntimeProperties model = new ModelRuntimeProperties();
@@ -111,7 +118,7 @@ public class CliSessionServiceE2ETest {
         FileTraceRecorder traces = new FileTraceRecorder(workspace, mapper);
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper, gateway, agent, java.util.List.of());
         return new CliSessionService(options(workspace, gateway), mapper, agent, model,
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, historyRepository(workspace), traces, loop);
     }
 
     // ---- first turn: answer, run artifacts, session persisted ----
@@ -125,15 +132,37 @@ public class CliSessionServiceE2ETest {
 
         Optional<AgentRun> run = session.runRepository().findLatestRootByConversationId(session.sessionId());
         assertTrue(run.isPresent());
+        assertEquals(AgentRun.CURRENT_SCHEMA_VERSION, (int) run.get().getSchemaVersion());
         assertEquals("COMPLETED", run.get().getStatus().name());
         assertEquals("FINAL_ANSWER_RETURNED", run.get().getStopReason());
         assertEquals(0, (int) run.get().getToolSteps());
 
         AgentSession persisted = session.sessionRepository().find(session.sessionId()).orElseThrow();
         assertEquals(AgentSession.CURRENT_SCHEMA_VERSION, (int) persisted.getSchemaVersion());
-        assertFalse(persisted.getHistory().isEmpty());
-        assertNotNull(persisted.getCheckpoint());
         assertNotNull(persisted.getWorkingMemory());
+
+        // Session must not copy History or checkpoint
+        String sessionJson = Files.readString(
+                workspace.resolve(".loom-code").resolve("sessions").resolve(session.sessionId() + ".json"));
+        assertFalse(sessionJson.contains("\"history\""));
+        assertFalse(sessionJson.contains("\"checkpoint\""));
+        assertFalse(sessionJson.contains("\"ledgerNextSequence\""));
+
+        ConversationHistoryDocument history = historyRepository(workspace).find(session.sessionId()).orElseThrow();
+        assertEquals(ConversationHistoryDocument.CURRENT_SCHEMA_VERSION, (int) history.getSchemaVersion());
+        assertFalse(history.getEntries().isEmpty());
+
+        AgentCheckpoint checkpoint = new FileAgentCheckpointRepository(workspace, mapper)
+                .latest(run.get().getRunId()).orElseThrow();
+        AgentContextSnapshot snapshot = checkpoint.getContextSnapshot();
+        assertEquals(AgentContextSnapshot.CURRENT_SCHEMA_VERSION, (int) snapshot.getSchemaVersion());
+        assertNotNull(snapshot.getHistoryAnchor());
+        assertEquals(history.getNextSequence(), snapshot.getHistoryAnchor().getNextSequence());
+        String checkpointJson = Files.readString(
+                workspace.resolve(".loom-code").resolve("checkpoints")
+                        .resolve(run.get().getRunId())
+                        .resolve(checkpoint.getVersion() + ".json"));
+        assertFalse(checkpointJson.contains("\"ledgerEntries\""));
         session.close();
     }
 
@@ -162,9 +191,8 @@ public class CliSessionServiceE2ETest {
         assertEquals(persisted.getCurrentPlanId(), persisted.getPlans().get(0).getPlanId());
         assertEquals(1, persisted.getPlans().get(0).currentRevision().getRevision().intValue());
         assertFalse(persisted.getPlans().get(0).currentRevision().getContentDigest().isBlank());
-        assertTrue(persisted.getHistory().stream()
+        assertTrue(historyRepository(workspace).find(session.sessionId()).orElseThrow().getEntries().stream()
                 .anyMatch(entry -> entry.content().contains("research and submit the first plan")));
-        assertNotNull(persisted.getCheckpoint());
 
         ByteArrayOutputStream listOutput = new ByteArrayOutputStream();
         assertTrue(CliMain.handleControl(session, "/plan list",
@@ -590,6 +618,7 @@ public class CliSessionServiceE2ETest {
                 new FileAgentSessionRepository(workspace, mapper),
                 new FileAgentRunRepository(workspace, mapper),
                 new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
                 new FileTraceRecorder(workspace, mapper),
                 CliLoopTestFixture.build(workspace, mapper,
                         countingFinalAnswerGateway("unused", modelCalls),
@@ -606,11 +635,11 @@ public class CliSessionServiceE2ETest {
         assertEquals(1, modelCalls.get());
         AgentSession original = reopened.sessionRepository().find(originalId).orElseThrow();
         AgentSession fresh = reopened.sessionRepository().find(newId).orElseThrow();
-        assertFalse(original.getHistory().isEmpty());
-        assertNotNull(original.getCheckpoint());
-        assertTrue(fresh.getHistory().isEmpty());
+        assertFalse(historyRepository(workspace).find(originalId).orElseThrow().getEntries().isEmpty());
+        assertTrue(historyRepository(workspace).find(newId)
+                .map(doc -> doc.getEntries() == null || doc.getEntries().isEmpty())
+                .orElse(true));
         assertTrue(fresh.getWorkingMemory().isEmpty());
-        assertNull(fresh.getCheckpoint());
         assertTrue(fresh.getKeyFiles().isEmpty());
         assertEquals(1, reopened.runRepository().findByConversationId(originalId).size());
         assertTrue(reopened.runRepository().findByConversationId(newId).isEmpty());
@@ -625,6 +654,7 @@ public class CliSessionServiceE2ETest {
                 new FileAgentSessionRepository(workspace, mapper),
                 new FileAgentRunRepository(workspace, mapper),
                 new FileAgentCheckpointRepository(workspace, mapper),
+                historyRepository(workspace),
                 new FileTraceRecorder(workspace, mapper),
                 CliLoopTestFixture.build(workspace, mapper,
                         countingFinalAnswerGateway("after resume", modelCalls),
@@ -632,8 +662,9 @@ public class CliSessionServiceE2ETest {
         assertEquals(originalId, resumed.sessionId());
         assertEquals("after resume", resumed.runTurn("continue original conversation"));
         assertEquals(2, resumed.runRepository().findByConversationId(originalId).size());
-        AgentSession freshAfterResume = resumed.sessionRepository().find(newId).orElseThrow();
-        assertTrue(freshAfterResume.getHistory().isEmpty());
+        assertTrue(historyRepository(workspace).find(newId)
+                .map(doc -> doc.getEntries() == null || doc.getEntries().isEmpty())
+                .orElse(true));
         resumed.close();
     }
 
@@ -655,7 +686,9 @@ public class CliSessionServiceE2ETest {
         assertEquals(0, modelCalls.get());
         assertTrue(session.runRepository().findByConversationId(sessionId).isEmpty());
         AgentSession persisted = session.sessionRepository().find(sessionId).orElseThrow();
-        assertTrue(persisted.getHistory().isEmpty());
+        assertTrue(historyRepository(workspace).find(sessionId)
+                .map(doc -> doc.getEntries() == null || doc.getEntries().isEmpty())
+                .orElse(true));
         session.close();
     }
 
@@ -667,23 +700,31 @@ public class CliSessionServiceE2ETest {
         session.runTurn("old state");
 
         FileAgentSessionRepository externalStore = new FileAgentSessionRepository(workspace, mapper);
+        FileConversationHistoryRepository externalHistory = historyRepository(workspace);
         AgentSession newer = externalStore.find(sessionId).orElseThrow();
         newer.setRuntimeIdentity("authoritative-newer-state");
-        newer.getHistory().add(ConversationHistoryEntry.builder()
+        externalStore.save(newer);
+        ConversationHistoryDocument existingHistory = externalHistory.find(sessionId).orElseThrow();
+        java.util.List<ConversationHistoryEntry> entries = new java.util.ArrayList<>(existingHistory.getEntries());
+        entries.add(ConversationHistoryEntry.builder()
                 .entryId("external-entry")
-                .sequence(newer.getLedgerNextSequence())
+                .sequence(existingHistory.getNextSequence())
                 .role("user")
                 .content("newer persisted state")
                 .stableType(ConversationEntryType.USER_INPUT)
                 .build());
-        newer.setLedgerNextSequence(newer.getLedgerNextSequence() + 1);
-        externalStore.save(newer);
+        externalHistory.save(ConversationHistoryDocument.builder()
+                .schemaVersion(ConversationHistoryDocument.CURRENT_SCHEMA_VERSION)
+                .sessionId(sessionId)
+                .entries(entries)
+                .nextSequence(existingHistory.getNextSequence() + 1)
+                .build());
 
         session.persistSession();
 
         AgentSession persisted = externalStore.find(sessionId).orElseThrow();
         assertEquals("authoritative-newer-state", persisted.getRuntimeIdentity());
-        assertTrue(persisted.getHistory().stream()
+        assertTrue(externalHistory.find(sessionId).orElseThrow().getEntries().stream()
                 .anyMatch(entry -> "newer persisted state".equals(entry.content())));
         session.close();
     }
@@ -710,7 +751,8 @@ public class CliSessionServiceE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper,
                 finalAnswerGateway("second answer"), agent, java.util.List.of());
         CliSessionService resumed = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
 
         String answer = resumed.runTurn("second question");
         assertEquals("second answer", answer);
@@ -725,10 +767,9 @@ public class CliSessionServiceE2ETest {
         assertEquals("first answer", oldRun.getFinalAnswer());
         assertEquals("COMPLETED", oldRun.getStatus().name());
 
-        // session history grew (2 questions)
-        AgentSession persisted = resumed.sessionRepository().find(sessionId).orElseThrow();
-        assertTrue(persisted.getHistory().size() >= 2);
-        assertTrue(persisted.getHistory().stream()
+        ConversationHistoryDocument history = historyRepository(workspace).find(sessionId).orElseThrow();
+        assertTrue(history.getEntries().size() >= 2);
+        assertTrue(history.getEntries().stream()
                 .anyMatch(e -> "second question".equals(e.content())));
         resumed.close();
     }
@@ -793,7 +834,7 @@ public class CliSessionServiceE2ETest {
                 finalAnswerGateway("ok"), agent, java.util.List.of());
         try {
             new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
-                    sessions, runs, checkpoints, traces, loop);
+                    sessions, runs, checkpoints, historyRepository(workspaceB), traces, loop);
             fail("expected workspace mismatch rejection");
         } catch (CliSessionService.OptionsException e) {
             assertTrue(e.getMessage().contains("workspace"));
@@ -821,7 +862,7 @@ public class CliSessionServiceE2ETest {
                 finalAnswerGateway("x"), agent, java.util.List.of());
         try {
             new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
-                    sessions, runs, checkpoints, traces, loop);
+                    sessions, runs, checkpoints, historyRepository(workspace), traces, loop);
             fail("expected schema rejection");
         } catch (CliSessionService.OptionsException e) {
             assertTrue(e.getMessage().contains("schema"));
@@ -837,7 +878,7 @@ public class CliSessionServiceE2ETest {
         Path invalid = sessionsDir.resolve("missing-mode.json");
         Files.writeString(invalid, "{\"id\":\"missing-mode\",\"schemaVersion\":"
                 + AgentSession.CURRENT_SCHEMA_VERSION + ",\"workspaceRoot\":\""
-                + workspace + "\",\"history\":[]}");
+                + workspace + "\"}");
 
         try {
             new FileAgentSessionRepository(workspace, mapper).find("missing-mode");
@@ -875,14 +916,12 @@ public class CliSessionServiceE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper,
                 finalAnswerGateway("second"), agent, java.util.List.of());
         CliSessionService resumed = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
 
-        // checkpoint summary was discarded because the key file changed
         AgentSession loaded = resumed.sessionRepository().find(sessionId).orElseThrow();
-        TaskCheckpoint checkpoint = loaded.getCheckpoint();
-        assertNotNull(checkpoint);
-        assertNull("stale summary must be discarded after key file change",
-                checkpoint.getSummary());
+        assertFalse("stale file summary must be discarded after key file change",
+                loaded.getWorkingMemory().fileSummaries().containsKey("A.java"));
         resumed.close();
     }
 
@@ -897,7 +936,8 @@ public class CliSessionServiceE2ETest {
                 java.util.List.of(new cn.lunalhx.ai.infrastructure.loom.ReadFileTool(
                         new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())));
         return new CliSessionService(options(workspace, gateway), mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
     }
 
     /** Gateway: first call asks for a read_file of the path, then returns the final answer. */
@@ -1149,16 +1189,15 @@ public class CliSessionServiceE2ETest {
                 java.util.List.of(new cn.lunalhx.ai.infrastructure.loom.WriteFileTool(
                         new cn.lunalhx.ai.infrastructure.tool.LocalWorkspacePort())));
         CliSessionService session = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
 
         String answer = session.runTurn("write a file");
         assertEquals("done", answer);
         session.close();
 
-        // the approval denial must be visible in the session history
-        AgentSession persisted = sessions.find(session.sessionId()).orElseThrow();
         assertTrue("approval denial must reach the model as an observation",
-                persisted.getHistory().stream()
+                historyRepository(workspace).find(session.sessionId()).orElseThrow().getEntries().stream()
                         .anyMatch(e -> e.content() != null && e.content().contains("approval denied")));
     }
 
@@ -1206,7 +1245,8 @@ public class CliSessionServiceE2ETest {
                 java.util.List.of(new cn.lunalhx.ai.infrastructure.loom.DelegateTool(
                         new TestDelegateRunner(workspace, mapper, agent))));
         CliSessionService session = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
 
         String answer = session.runTurn("delegate to investigate");
         assertEquals("done", answer);
@@ -1249,7 +1289,8 @@ public class CliSessionServiceE2ETest {
                         new ReadFileTool(new LocalWorkspacePort()),
                         new DelegateTool(delegateRunner)));
         CliSessionService session = new CliSessionService(opts, mapper, agent,
-                new ModelRuntimeProperties(), sessions, runs, checkpoints, traces, loop);
+                new ModelRuntimeProperties(), sessions, runs, checkpoints,
+                historyRepository(workspace), traces, loop);
 
         assertEquals("done", session.runTurn("delegate the file read twice"));
         session.close();
@@ -1487,6 +1528,6 @@ public class CliSessionServiceE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(workspace, mapper,
                 finalAnswerGateway("done"), agent, java.util.List.of());
         return new CliSessionService(opts, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, historyRepository(workspace), traces, loop);
     }
 }

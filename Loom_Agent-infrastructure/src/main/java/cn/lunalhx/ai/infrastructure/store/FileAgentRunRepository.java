@@ -52,7 +52,11 @@ public final class FileAgentRunRepository implements AgentRunRepository {
     @Override
     public AgentRun save(AgentRun run) {
         try {
+            if (run.getSchemaVersion() == null) {
+                run.setSchemaVersion(AgentRun.CURRENT_SCHEMA_VERSION);
+            }
             Path target = runFile(run.getRunId());
+            validateCurrent(run, target);
             Files.createDirectories(target.getParent());
             Instant now = Instant.now();
             run.setUpdatedAt(now);
@@ -79,7 +83,11 @@ public final class FileAgentRunRepository implements AgentRunRepository {
             return Optional.empty();
         }
         try {
-            return Optional.of(mapper.readValue(target.toFile(), AgentRun.class));
+            AgentRun run = mapper.readValue(target.toFile(), AgentRun.class);
+            validateCurrent(run, target);
+            return Optional.of(run);
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (IOException e) {
             return Optional.empty();
         }
@@ -124,6 +132,18 @@ public final class FileAgentRunRepository implements AgentRunRepository {
         return List.of();
     }
 
+    private void validateCurrent(AgentRun run, Path target) {
+        if (run.getSchemaVersion() == null
+                || run.getSchemaVersion() != AgentRun.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException(
+                    "run " + run.getRunId() + " uses an incompatible schema version ("
+                            + run.getSchemaVersion() + "); expected "
+                            + AgentRun.CURRENT_SCHEMA_VERSION
+                            + " — no automatic migration, refusing to touch the original file: "
+                            + target);
+        }
+    }
+
     private List<AgentRun> allRuns() {
         if (!Files.isDirectory(root)) {
             return List.of();
@@ -136,8 +156,11 @@ public final class FileAgentRunRepository implements AgentRunRepository {
                     continue;
                 }
                 try {
-                    result.add(mapper.readValue(target.toFile(), AgentRun.class));
-                } catch (IOException ignored) {
+                    AgentRun run = mapper.readValue(target.toFile(), AgentRun.class);
+                    validateCurrent(run, target);
+                    result.add(run);
+                } catch (Exception ignored) {
+                    // incompatible or corrupted runs are skipped by list helpers
                 }
             }
         } catch (IOException ignored) {

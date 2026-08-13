@@ -188,7 +188,7 @@ public class CliModeE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(Path.of(options.workspaceRoot), mapper,
                 gateway, agent, java.util.List.of(), tools);
         return new CliSessionService(options, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(Path.of(options.workspaceRoot), mapper), traces, loop);
     }
 
     private CliSessionService.CliOptions options(Path workspace, ModelGateway gateway) {

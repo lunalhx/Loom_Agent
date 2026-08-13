@@ -101,7 +101,7 @@ public class CliDurableSkillContinuationE2ETest {
 
             AgentContextSnapshot latest = new FileAgentCheckpointRepository(workspace, mapper)
                     .latest(runId).orElseThrow().getContextSnapshot();
-            assertEquals(14, (int) latest.getSchemaVersion());
+            assertEquals(15, (int) latest.getSchemaVersion());
             assertNotNull(latest.getFrozenAuthorization());
             assertNotNull(latest.getSkillCatalogSnapshot());
             String json = mapper.writeValueAsString(latest);
@@ -166,7 +166,7 @@ public class CliDurableSkillContinuationE2ETest {
             }
         }
         assertNotNull("expected after_tool checkpoint", afterTool);
-        assertEquals(14, (int) afterTool.getContextSnapshot().getSchemaVersion());
+        assertEquals(15, (int) afterTool.getContextSnapshot().getSchemaVersion());
         assertNotNull(afterTool.getContextSnapshot().getActiveSkills());
         assertFalse(afterTool.getContextSnapshot().getActiveSkills().isEmpty());
 
@@ -271,7 +271,7 @@ public class CliDurableSkillContinuationE2ETest {
         FileTraceRecorder traces = new FileTraceRecorder(root, mapper);
         AgentLoopService loop = CliLoopTestFixture.build(root, mapper, gateway, agent, List.of(), tools);
         return new CliSessionService(options, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(root, mapper), traces, loop);
     }
 
     private static void restoreHome(String previousHome) {

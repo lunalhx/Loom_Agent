@@ -39,15 +39,11 @@ public class AgentContextSnapshotV8CompatTest {
                   "question": "task",
                   "conversationId": "conv-1",
                   "generation": 0,
-                  "ledgerNextSequence": 2,
-                  "ledgerEntries": [
-                    {"entryId":"e1","sequence":0,"role":"user","content":"task","stableType":"USER_TASK","eventKey":"run-1:init:user_task"}
-                  ],
                   "stablePrefix": {"frozenContent":"prefix","fingerprint":"fp"},
                   "workingMemory": {
                     "taskSummary":"summary",
                     "recentFiles":["A.java"],
-                    "notes": ["note one", "note two"]
+                    "notes": []
                   }
                 }
                 """;

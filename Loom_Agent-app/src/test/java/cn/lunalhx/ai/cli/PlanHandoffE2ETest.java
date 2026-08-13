@@ -426,7 +426,7 @@ public class PlanHandoffE2ETest {
         options.modelGateway = gateway;
         options.resumeSessionId = resumeSessionId;
         return new CliSessionService(options, mapper, agent, new ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(workspace, mapper), traces, loop);
     }
 
     private ModelGateway blockingBuildGateway(CountDownLatch modelStarted,

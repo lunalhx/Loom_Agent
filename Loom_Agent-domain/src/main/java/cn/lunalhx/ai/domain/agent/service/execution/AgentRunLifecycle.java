@@ -2,12 +2,14 @@ package cn.lunalhx.ai.domain.agent.service.execution;
 
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentCheckpointRepository;
 import cn.lunalhx.ai.domain.agent.adapter.port.AgentRunRepository;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.flow.AgentNodeNames;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentCheckpoint;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentEvent;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentRun;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
 import cn.lunalhx.ai.domain.agent.model.state.AgentBudgetState;
 import cn.lunalhx.ai.domain.agent.model.state.AgentIdentity;
 import cn.lunalhx.ai.domain.agent.model.state.AgentRuntimeState;
@@ -26,16 +28,22 @@ import java.util.Objects;
  * Explicit run lifecycle persistence, replacing the hidden checkpoint hook.
  * Handles run init, model-attempt update, safe post-tool checkpoint,
  * approval/user-input pauses, and terminal complete/stopped/failed/cancelled.
+ *
+ * <p>Conversation History is persisted before each AgentCheckpoint so the
+ * checkpoint may only store an exact History anchor.
  */
 public final class AgentRunLifecycle {
 
     private final AgentRunRepository runRepository;
     private final AgentCheckpointRepository checkpointRepository;
+    private final ConversationHistoryRepository historyRepository;
 
     public AgentRunLifecycle(AgentRunRepository runRepository,
-                             AgentCheckpointRepository checkpointRepository) {
+                             AgentCheckpointRepository checkpointRepository,
+                             ConversationHistoryRepository historyRepository) {
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.checkpointRepository = Objects.requireNonNull(checkpointRepository, "checkpointRepository must not be null");
+        this.historyRepository = Objects.requireNonNull(historyRepository, "historyRepository must not be null");
     }
 
     // ================================================================
@@ -143,15 +151,11 @@ public final class AgentRunLifecycle {
         saveRun(context, context.runtime().currentNode(), AgentRunStatus.STOPPED);
     }
 
-    /** Terminal checkpoint so session sync captures the final ledger (incl. the
-     *  final answer system note) and the final working memory. */
+    /** Terminal checkpoint so the final History anchor and Working Memory Overlay
+     *  are durable with the terminal Run. */
     private void saveFinalCheckpoint(AgentContext context, String reason) {
-        try {
-            AgentCheckpoint checkpoint = saveCheckpoint(context, context.runtime().currentNode(), reason);
-            context.setCheckpointVersion(checkpoint.getVersion());
-        } catch (Exception ignored) {
-            // checkpoint persistence must never mask the terminal outcome
-        }
+        AgentCheckpoint checkpoint = saveCheckpoint(context, context.runtime().currentNode(), reason);
+        context.setCheckpointVersion(checkpoint.getVersion());
     }
 
     // ================================================================
@@ -159,6 +163,7 @@ public final class AgentRunLifecycle {
     // ================================================================
 
     private AgentCheckpoint saveCheckpoint(AgentContext context, String currentNode, String reason) {
+        persistConversationHistory(context);
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
         return checkpointRepository.save(AgentCheckpoint.builder()
                 .runId(context.identity().runId())
@@ -166,6 +171,23 @@ public final class AgentRunLifecycle {
                 .contextSnapshot(snapshot)
                 .reason(reason)
                 .build());
+    }
+
+    private void persistConversationHistory(AgentContext context) {
+        String sessionId = context.getSessionId();
+        if (StringUtils.isBlank(sessionId)) {
+            return;
+        }
+        // Session Conversation History is shared across the task tree. Only the
+        // root Run writes it; Delegate Runs must not shrink or fork the log.
+        if (StringUtils.isNotBlank(context.getParentRunId())) {
+            return;
+        }
+        ConversationHistory history = context.prompt().conversationHistory();
+        if (history == null) {
+            return;
+        }
+        historyRepository.save(sessionId, history);
     }
 
     private void saveRun(AgentContext context, String currentNode, AgentRunStatus fallbackStatus) {
@@ -178,6 +200,7 @@ public final class AgentRunLifecycle {
         AgentRunStatus status = resolveStatus(runtime, fallbackStatus);
 
         runRepository.save(AgentRun.builder()
+                .schemaVersion(AgentRun.CURRENT_SCHEMA_VERSION)
                 .runId(id.runId())
                 .sessionId(context.getSessionId())
                 .parentRunId(id.parentRunId())

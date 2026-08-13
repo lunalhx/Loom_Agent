@@ -29,16 +29,16 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * Ticket 07 seam: v14 checkpoint must durable-freeze Skill Catalog, active
+ * Ticket 07 seam: v15 checkpoint must durable-freeze Skill Catalog, active
  * instruction bodies / resource identities, and a rehydratable authorization
- * snapshot without host-absolute Skill paths.
+ * snapshot without host-absolute Skill paths or embedded History copies.
  */
 public class AgentContextSnapshotV14ContractTest {
 
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     @Test
-    public void v14RoundTripPersistsFrozenSkillsAndAuthWithoutAbsoluteSkillPaths() throws Exception {
+    public void v15RoundTripPersistsFrozenSkillsAndAuthWithoutAbsoluteSkillPaths() throws Exception {
         Path skillRoot = Path.of("/tmp/host-home/.agents/skills/review-pr").toAbsolutePath();
         AgentContext context = new AgentContext();
         context.setRunId("run-1");
@@ -82,12 +82,14 @@ public class AgentContextSnapshotV14ContractTest {
         context.setAllowedTools(List.of("read_file"));
 
         AgentContextSnapshot snapshot = AgentContextSnapshot.from(context);
-        assertEquals(14, (int) snapshot.getSchemaVersion());
+        assertEquals(15, (int) snapshot.getSchemaVersion());
+        assertNotNull(snapshot.getHistoryAnchor());
         assertNotNull(snapshot.getSkillCatalogSnapshot());
         assertNotNull(snapshot.getActiveSkills());
         assertNotNull(snapshot.getFrozenAuthorization());
 
         String json = mapper.writeValueAsString(snapshot);
+        assertFalse(json.contains("ledgerEntries"));
         assertFalse("persisted checkpoint must not contain host-absolute skill paths",
                 json.contains(skillRoot.toString()));
         assertFalse(json.contains("/tmp/host-home"));
@@ -96,7 +98,8 @@ public class AgentContextSnapshotV14ContractTest {
         assertTrue(json.contains("review-pr"));
 
         AgentContextSnapshot restored = mapper.readValue(json, AgentContextSnapshot.class);
-        assertEquals(14, (int) restored.getSchemaVersion());
+        assertEquals(15, (int) restored.getSchemaVersion());
+        assertNotNull(restored.getHistoryAnchor());
         AgentContext live = restored.restore();
         assertEquals(1, live.getSkillCatalogSnapshot().effective().size());
         assertEquals("review-pr", live.getSkillCatalogSnapshot().effective().getFirst().name());
@@ -123,8 +126,7 @@ public class AgentContextSnapshotV14ContractTest {
                   "question": "task",
                   "conversationId": "conv-1",
                   "runModeSnapshot": "BUILD",
-                  "generation": 0,
-                  "ledgerNextSequence": 0
+                  "generation": 0
                 }
                 """;
         AgentContextSnapshot snapshot = mapper.readValue(json, AgentContextSnapshot.class);

@@ -12,12 +12,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
 import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 
 /**
- * Durable, resumable session state. Replaces the CLI's loose
- * {@code Map<String,Object>} session and is the single source of truth for
- * history, working memory and the latest semantic checkpoint.
+ * Durable Session state (schema v5). Conversation History and AgentCheckpoint
+ * are stored separately; this Session keeps mode, Session Working Memory,
+ * Plans, and grants — it must not copy History or checkpoint payloads.
  *
  * <p>A session spans many root runs (one per user question). Runs reference
  * the session by {@code sessionId} and never resume an old run's node
@@ -29,7 +30,7 @@ import cn.lunalhx.ai.domain.tool.model.ExecutionGrant;
 @AllArgsConstructor
 public class AgentSession {
 
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    public static final int CURRENT_SCHEMA_VERSION = 5;
 
     private String id;
     private Integer schemaVersion;
@@ -38,17 +39,8 @@ public class AgentSession {
     private Instant createdAt;
     private Instant updatedAt;
 
-    /** Append-only conversation ledger persisted across runs. */
-    @Builder.Default
-    private List<ConversationHistoryEntry> history = new ArrayList<>();
-
-    private long ledgerNextSequence;
-
-    /** Working memory (task summary, recent files, file summaries, notes). */
+    /** Session Working Memory projected from normally completed root Runs. */
     private WorkingContextMemory workingMemory;
-
-    /** Latest semantic task checkpoint (TaskCheckpoint semantics). */
-    private TaskCheckpoint checkpoint;
 
     /** Path → SHA-256 of key files the session depends on. */
     @Builder.Default

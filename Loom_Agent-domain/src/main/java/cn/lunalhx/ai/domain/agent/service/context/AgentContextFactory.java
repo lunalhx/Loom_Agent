@@ -1,27 +1,30 @@
 package cn.lunalhx.ai.domain.agent.service.context;
 
+import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
+import cn.lunalhx.ai.domain.agent.adapter.port.ConversationHistoryRepository;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContext;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentContextSnapshot;
 import cn.lunalhx.ai.domain.agent.model.entity.AgentQuestion;
 import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistory;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryAnchor;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryDocument;
+import cn.lunalhx.ai.domain.agent.model.entity.ConversationHistoryEntry;
 import cn.lunalhx.ai.domain.agent.model.entity.RootRunSecurityScope;
-import cn.lunalhx.ai.domain.agent.adapter.port.AgentRuntimeConfigSource;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentRuntimeProperties;
-import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.model.valobj.AgentWorkspace;
+import cn.lunalhx.ai.domain.agent.model.valobj.CollaborationMode;
 import cn.lunalhx.ai.domain.agent.service.workspace.AgentWorkspaceResolver;
+import cn.lunalhx.ai.domain.skill.service.SkillPackageRootBinder;
+import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.adapter.port.ToolRegistry;
 import cn.lunalhx.ai.domain.tool.model.ExecutionProfile;
 import cn.lunalhx.ai.domain.tool.model.PermissionAction;
-import cn.lunalhx.ai.domain.tool.model.PermissionPolicySnapshot;
 import cn.lunalhx.ai.domain.tool.model.PermissionRule;
-import cn.lunalhx.ai.domain.skill.service.SkillPackageRootBinder;
-import cn.lunalhx.ai.domain.skill.service.SkillToolCatalogProjector;
 import cn.lunalhx.ai.domain.tool.service.RunAuthorizationSource;
 import org.apache.commons.lang3.StringUtils;
 
-import java.time.Instant;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,17 +37,21 @@ public final class AgentContextFactory {
     private final AgentWorkspaceResolver workspaceResolver;
     private final AgentRuntimeConfigSource runtimeConfigSource;
     private final ToolRegistry toolRegistry;
+    private final ConversationHistoryRepository historyRepository;
 
     public AgentContextFactory(AgentRuntimeProperties properties,
                                AgentWorkspaceResolver workspaceResolver,
                                AgentRuntimeConfigSource runtimeConfigSource,
-                               ToolRegistry toolRegistry) {
+                               ToolRegistry toolRegistry,
+                               ConversationHistoryRepository historyRepository) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.workspaceResolver = Objects.requireNonNull(workspaceResolver,
                 "workspaceResolver must not be null");
         this.runtimeConfigSource = Objects.requireNonNull(runtimeConfigSource,
                 "runtimeConfigSource must not be null");
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry must not be null");
+        this.historyRepository = Objects.requireNonNull(historyRepository,
+                "historyRepository must not be null");
     }
 
     public AgentContext create(AgentQuestion question) {
@@ -64,22 +71,22 @@ public final class AgentContextFactory {
      *  (not a node-position resume). The run keeps its own fresh identity. */
     private void restoreSeed(AgentContext context, AgentQuestion question) {
         AgentContextSnapshot previous = question.getSeedSnapshot();
+        if (question.getSeedHistoryEntries() != null && !question.getSeedHistoryEntries().isEmpty()) {
+            context.setConversationHistory(ConversationHistory.fromPersisted(
+                    new ArrayList<>(question.getSeedHistoryEntries()),
+                    question.getSeedHistoryNextSequence() == null
+                            ? 0L : question.getSeedHistoryNextSequence()));
+        }
         if (previous == null) {
+            context.setPendingContinuation(context.getQuestion());
             return;
         }
         previous.ensureCurrentShape();
-        if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
-            context.setConversationHistory(ConversationHistory.fromPersisted(
-                    new ArrayList<>(previous.getLedgerEntries()),
-                    previous.getLedgerNextSequence()));
-        }
         if (previous.getWorkingMemory() != null) {
             context.setWorkingMemory(previous.getWorkingMemory());
         }
         context.setStablePrefix(previous.getStablePrefix());
         context.setGeneration(Math.max(0, previous.getGeneration()));
-        // The new user question joins the seeded ledger as raw user input so
-        // resumed sessions keep an append-only record of every request.
         context.setPendingContinuation(context.getQuestion());
     }
 
@@ -139,10 +146,9 @@ public final class AgentContextFactory {
         context.setTraceId(StringUtils.defaultIfBlank(question.getTraceId(), context.getRootRunId()));
 
         if (previous != null) {
-            if (previous.getLedgerEntries() != null && !previous.getLedgerEntries().isEmpty()) {
-                context.setConversationHistory(ConversationHistory.fromPersisted(
-                        new ArrayList<>(previous.getLedgerEntries()),
-                        previous.getLedgerNextSequence()));
+            ConversationHistory history = loadHistoryForSnapshot(previous, question.getSessionId());
+            if (history != null) {
+                context.setConversationHistory(history);
             }
             if (previous.getStablePrefix() != null) {
                 context.setStablePrefix(previous.getStablePrefix());
@@ -179,8 +185,11 @@ public final class AgentContextFactory {
         context.setResolvedWorkspace(workspace.getRoot());
         context.setWorkspace(workspace.getWorkspace());
         context.setWorkspaceDisplayName(workspace.getDisplayName());
-        if (StringUtils.isNotBlank(question.getSessionId())) {
-            context.setSessionId(question.getSessionId());
+        String sessionId = StringUtils.defaultIfBlank(question.getSessionId(), checkpoint.getSessionId());
+        if (StringUtils.isNotBlank(sessionId)) {
+            context.setSessionId(sessionId);
+            ConversationHistory history = loadAndValidateHistory(sessionId, checkpoint.getHistoryAnchor());
+            context.setConversationHistory(history);
         }
         context.setSessionExecutionGrants(question.getInheritedSessionExecutionGrants());
         RootRunSecurityScope scope = RootRunSecurityScope.create();
@@ -199,6 +208,41 @@ public final class AgentContextFactory {
             context.setCurrentModel(question.getModel());
         }
         return context;
+    }
+
+    private ConversationHistory loadHistoryForSnapshot(AgentContextSnapshot snapshot, String sessionId) {
+        if (snapshot.getHistoryAnchor() == null || StringUtils.isBlank(sessionId)) {
+            return null;
+        }
+        return loadAndValidateHistory(sessionId, snapshot.getHistoryAnchor());
+    }
+
+    private ConversationHistory loadAndValidateHistory(String sessionId, ConversationHistoryAnchor anchor) {
+        ConversationHistoryDocument document = historyRepository.find(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "conversation history not found for session " + sessionId));
+        if (document.getNextSequence() < anchor.getNextSequence()) {
+            throw new IllegalArgumentException(
+                    "conversation history nextSequence " + document.getNextSequence()
+                            + " is behind checkpoint anchor " + anchor.getNextSequence());
+        }
+        if (anchor.getLastEntryId() != null) {
+            long expectedSequence = anchor.getNextSequence() - 1;
+            ConversationHistoryEntry lastEntry = document.getEntries() == null ? null
+                    : document.getEntries().stream()
+                    .filter(entry -> entry.sequence() == expectedSequence)
+                    .findFirst()
+                    .orElse(null);
+            if (lastEntry == null || !anchor.getLastEntryId().equals(lastEntry.entryId())) {
+                throw new IllegalArgumentException(
+                        "conversation history anchor lastEntryId does not match durable entry");
+            }
+        }
+        List<ConversationHistoryEntry> entries = document.getEntries() == null ? List.of()
+                : document.getEntries().stream()
+                .filter(entry -> entry.sequence() < anchor.getNextSequence())
+                .toList();
+        return ConversationHistory.fromPersisted(new ArrayList<>(entries), anchor.getNextSequence());
     }
 
     private void rehydrateFrozenAuthorization(AgentContext context,
@@ -328,8 +372,6 @@ public final class AgentContextFactory {
                 ? baseProfile : new ExecutionProfile(baseProfile.kind(), baseProfile.workspace(), baseProfile.workspaceAccess(),
                 scope.homeRoot(), scope.temporaryRoot(), baseProfile.networkAllowed(), baseProfile.hostPrivateVisible(),
                 baseProfile.externalGrants(), baseProfile.sandboxBackend()));
-        // A delegate inherits the root's already validated snapshot; it never
-        // re-reads policy sources or applies a child default.
         if (context.getParentRunId() != null && context.getPermissionPolicySnapshot() != null) {
             return;
         }
@@ -361,12 +403,5 @@ public final class AgentContextFactory {
             return previous.getRunModeSnapshot();
         }
         return CollaborationMode.BUILD;
-    }
-
-    private void restoreWorkspace(AgentContext context, String workspace) {
-        AgentWorkspace resolved = workspaceResolver.resolve(workspace);
-        context.setResolvedWorkspace(resolved.getRoot());
-        context.setWorkspace(resolved.getWorkspace());
-        context.setWorkspaceDisplayName(resolved.getDisplayName());
     }
 }

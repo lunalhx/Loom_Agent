@@ -49,7 +49,6 @@ public class PlanSubmissionTransactionTest {
                 .workspaceRoot(workspace.toString())
                 .collaborationMode(CollaborationMode.PLAN)
                 .createdAt(Instant.now())
-                .history(new ArrayList<>())
                 .keyFiles(new LinkedHashMap<>())
                 .build());
 
@@ -279,7 +278,6 @@ public class PlanSubmissionTransactionTest {
                 .workspaceRoot(workspace.toString())
                 .collaborationMode(CollaborationMode.PLAN)
                 .createdAt(Instant.now())
-                .history(new ArrayList<>())
                 .keyFiles(new LinkedHashMap<>())
                 .build());
     }

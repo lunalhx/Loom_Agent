@@ -185,7 +185,7 @@ public class CliImplicitSkillActivationE2ETest {
         AgentLoopService loop = CliLoopTestFixture.build(Path.of(options.workspaceRoot), mapper,
                 gateway, agent, List.of(), List.of());
         return new CliSessionService(options, mapper, agent, new cn.lunalhx.ai.domain.model.valobj.ModelRuntimeProperties(),
-                sessions, runs, checkpoints, traces, loop);
+                sessions, runs, checkpoints, CliLoopTestFixture.historyRepository(Path.of(options.workspaceRoot), mapper), traces, loop);
     }
 
     private CliSessionService.CliOptions options(Path workspace, ModelGateway gateway) {

@@ -30,16 +30,14 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Checkpoint snapshot v14 — durable state needed for recovery of an unfinished Run,
+ * Checkpoint snapshot v15 — durable state needed for recovery of an unfinished Run,
  * including frozen Skill Catalog / Active Skill bodies and a rehydratable authorization
  * snapshot. Host-absolute Skill package paths are never persisted.
  *
- * <p>v14 continues loom-code loop semantics and safe Plan Evidence receipts.
- * Policy rules, grants and capability profile are restored from
- * {@link FrozenAuthorizationSnapshot} rather than recompiled from host config.
- * Disposable security-scope roots and Full Access host paths remain non-durable;
- * Full Access Runs refuse restore after process restart. Only v14 snapshots are
- * recoverable; earlier shapes are rejected at restore time.
+ * <p>v15 stores an exact Conversation History anchor rather than copying History.
+ * Session Working Memory is not duplicated here; only the Run's Working Memory Overlay
+ * is kept. Full Access Runs refuse restore after process restart. Only v15 snapshots
+ * are recoverable; earlier shapes are rejected at restore time.
  */
 @Data
 @Builder
@@ -47,7 +45,7 @@ import java.util.Objects;
 @AllArgsConstructor
 public class AgentContextSnapshot {
 
-    public static final int CURRENT_SCHEMA_VERSION = 14;
+    public static final int CURRENT_SCHEMA_VERSION = 15;
 
     private Integer schemaVersion;
 
@@ -130,9 +128,8 @@ public class AgentContextSnapshot {
     private String traceId;
     private Long traceSequenceNo;
 
-    // -- conversation history (v3) --
-    private List<ConversationHistoryEntry> ledgerEntries;
-    private long ledgerNextSequence;
+    // -- conversation history anchor (v15) — never a full History copy --
+    private ConversationHistoryAnchor historyAnchor;
     private StablePrefix stablePrefix;
     private int generation;
 
@@ -145,15 +142,6 @@ public class AgentContextSnapshot {
     private cn.lunalhx.ai.domain.agent.model.state.WorkingContextMemory workingMemory;
 
     // ---- factory methods ----
-
-    /** Defensive copy of ledger entries for snapshot isolation. */
-    private static List<ConversationHistoryEntry> captureLedgerEntries(AgentContext context) {
-        ConversationHistory ledger = context.prompt().conversationHistory();
-        if (ledger == null || ledger.isEmpty()) {
-            return null;
-        }
-        return new ArrayList<>(ledger.entries());
-    }
 
     public static AgentContextSnapshot from(AgentContext context) {
         AgentIdentity id = context.identity();
@@ -249,15 +237,13 @@ public class AgentContextSnapshot {
                 // trace
                 .traceId(trace.traceId())
                 .traceSequenceNo(trace.traceSequenceNo())
-                // conversation ledger (v3)
-                .ledgerEntries(captureLedgerEntries(context))
-                .ledgerNextSequence(context.prompt().conversationHistory() != null
-                        ? context.prompt().conversationHistory().nextSequence() : 0)
+                // conversation history anchor (v15)
+                .historyAnchor(ConversationHistoryAnchor.from(context.prompt().conversationHistory()))
                 .stablePrefix(context.prompt().stablePrefix())
                 .generation(context.prompt().generation())
                 // config fingerprint (C9)
                 .configFingerprint(context.prompt().configFingerprint())
-                // working memory (v7)
+                // working memory overlay (not Session Working Memory copy)
                 .workingMemory(context.getWorkingMemory())
                 .build();
     }
@@ -359,12 +345,8 @@ public class AgentContextSnapshot {
         context.setTraceId(traceId);
         context.setTraceSequenceNo(traceSequenceNo == null ? 0L : traceSequenceNo);
 
-        // conversation ledger (v3) — defensive reconstruct
-        if (ledgerEntries != null && !ledgerEntries.isEmpty()) {
-            context.setConversationHistory(ConversationHistory.fromPersisted(
-                    new ArrayList<>(ledgerEntries), ledgerNextSequence));
-        }
-        // stablePrefix is immutable — safe to share
+        // conversation history is loaded from the Conversation History store
+        // using historyAnchor — never restored from a checkpoint copy
         context.setStablePrefix(stablePrefix);
         context.setGeneration(generation);
         context.setConfigFingerprint(configFingerprint);
@@ -379,6 +361,11 @@ public class AgentContextSnapshot {
                 || runModeSnapshot == null) {
             throw new IllegalArgumentException(
                     "checkpoint snapshot uses an incompatible schema; "
+                            + "no automatic migration is performed");
+        }
+        if (historyAnchor == null) {
+            throw new IllegalArgumentException(
+                    "checkpoint snapshot is missing Conversation History anchor; "
                             + "no automatic migration is performed");
         }
     }
