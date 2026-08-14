@@ -27,9 +27,9 @@
 | 🔧 **工具系统** | 六个基础工具 + 受深度控制的 `delegate`，全部经过 `ToolExecutor` 治理 |
 | 🛡️ **安全治理** | allowedTools 白名单、参数语义校验、连续重复调用检测、审批策略、工作区快照 diff |
 | 📝 **XML 协议** | `<tool>{...json...}</tool>`、`<tool name=...>...</tool>`、`<final>...</final>` |
-| 💾 **文件存储** | 会话/运行轨迹/report 保存在 `.loom-code/sessions` 与 `.loom-code/runs` |
+| 💾 **文件存储** | Session、Conversation History、AgentCheckpoint 与 Run 轨迹保存在 `.loom-code` |
 | 🔌 **四类 Provider** | DeepSeek、OpenAI-compatible、Anthropic-compatible、Ollama |
-| 🖥️ **CLI/REPL** | 一次性执行或交互式会话，无 HTTP、无端口监听 |
+| 🖥️ **CLI/REPL** | 一次性执行或交互式会话；`--resume` 只恢复对话，未完成 Run 需显式 `/recover` 或 `/abandon` |
 
 ---
 
@@ -58,11 +58,22 @@ java -jar Loom_Agent-app/target/Loom_Agent-app.jar --cwd /path/to/repo
 REPL 命令：
 
 ```
-/help    显示帮助
-/memory  显示工作记忆
-/session 显示当前 session 路径
-/new     创建独立的新会话并保留当前会话
-/exit    退出
+/help                 显示帮助
+/memory               显示工作记忆
+/session              显示当前 session
+/mode plan|build      查看或切换协作模式
+/sandbox workspace    查看当前沙箱选择
+/sandbox full-access  查看本次启动的 Full Access 选择
+/plan new|list|show   Plan 查看与创建
+/plan select <id>     选择某个 Plan 的最新修订
+/plan handoff [id]    按 Plan 修订启动 Build Run
+/skills               列出有效 Skills
+/new                  创建独立新会话，旧会话保留；无 /reset
+/recover              Recovery Required 时继续未完成的 Run
+/recovery fact <text> Ambiguity Review 中补充外部事实
+/recovery continue    带着未知结果继续
+/abandon              放弃未完成的 Run
+/exit                 退出
 ```
 
 ---
@@ -77,7 +88,7 @@ REPL 命令：
 | `--model` | 模型名覆盖 | provider 默认值 |
 | `--base-url` | Provider API base URL | provider 默认值 |
 | `--host` | Ollama base URL 便捷参数 | `http://127.0.0.1:11434` |
-| `--resume <sessionId\|latest>` | 恢复会话 | - |
+| `--resume <sessionId\|latest>` | Session Resume：恢复对话连续性，不接管未完成 Run、不重放 Tool | - |
 | `--approval` | `ask` \| `auto` \| `never` | `ask` |
 | `--secret-env-name` | 追加脱敏环境变量名（可重复）；默认自动发现 `*_API_KEY`/`*_TOKEN`/`*_SECRET`/`*_PASSWORD` 环境变量 | - |
 | `--max-steps` | 每轮最大工具步数 | `6` |
@@ -181,18 +192,29 @@ loom:
 .loom-code/
   sessions/
     <sessionId>.json
+  histories/
+    <sessionId>.json
+  checkpoints/
+    <runId>/
+      <version>.json
   runs/
     <runId>/
+      run.json
+      attempt-lease.json
       task_state.json
       trace.jsonl
       report.json
 ```
 
-- `--resume latest` 选择当前工作区最近更新的会话；工作区不一致时拒绝恢复。
+- `--resume` 是 Session Resume：加载对话连续性与 Session Working Memory，不接管未完成 Run，也不重放 Tool。`--resume latest` 选择当前工作区最近更新的会话；工作区不一致时拒绝恢复。
+- 若存在失去有效 Attempt 的未终态根 Run，该 Session 进入 Recovery Required，在 `/recover` 或 `/abandon` 之前不接受普通请求、不调用模型或工具。Full Access、最新 AgentCheckpoint / History anchor 损坏或不兼容时进入 Recovery Blocked，只允许检查与 `/abandon`。
+- `/recover` 是 Run Recovery：保留原 `runId`，创建新 Attempt，不自动重放 Interrupted Tool Call。无法核实的 Shell / MCP / 外部结果进入 Ambiguity Review，再用 `/recovery fact`、`/recovery continue` 或 `/abandon`。
+- 活动 Run 退出或首次 `Ctrl-C` 需在 Run Suspension 与 Run Abandonment 之间选择。Full Access Run 进程退出后不可恢复，因此不提供暂停。
 - REPL 复用同一 session；`/new` 创建独立会话，旧 session 可通过 `--resume` 显式恢复。
-- 所有持久化 artifact（trace、checkpoint、run、report、session、working/durable memory）在写入前统一脱敏，占位符为 `<redacted>`：自动发现后缀 `API_KEY`/`TOKEN`/`SECRET`/`PASSWORD` 的环境变量值、`--secret-env-name` 指定字段、Provider API key 按长度降序替换；敏感字段名（如 `api_key`）整体替换。
+- Conversation History 是消息与已持久 Tool Result 的事实来源；AgentCheckpoint 只保存恢复快照与 History anchor，不复制完整历史。`task_state.json` 仍作为 Run 轨迹写入，恢复不依赖它。
+- 所有持久化 artifact（trace、AgentCheckpoint、run、report、session、Conversation History、Session Working Memory）在写入前统一脱敏，占位符为 `<redacted>`：自动发现后缀 `API_KEY`/`TOKEN`/`SECRET`/`PASSWORD` 的环境变量值、`--secret-env-name` 指定字段、Provider API key 按长度降序替换；敏感字段名（如 `api_key`）整体替换。
 - trace 事件的 `sensitiveRedacted` 按真实处理状态标记（仅当实际替换了秘密才为 `true`），并携带 `redactionVersion`（当前规则版本 `1`）；旧 `[REDACTED]` 标记在重写时统一归一为新占位符，旧 trace JSONL 行（无 `redactionVersion` 字段）仍可被读取。
-- 脱敏发生在工具执行边界（工具输出在进入 history/ledger/memory/checkpoint 之前已清洗）；文件 writer 层作为最后防线再次兜底。清洗失败时 fail-closed：原文不会进入模型上下文、记忆、checkpoint 或 trace。
+- 脱敏发生在工具执行边界（工具输出在进入 Conversation History / Session Working Memory / AgentCheckpoint 之前已清洗）；文件 writer 层作为最后防线再次兜底。清洗失败时 fail-closed：原文不会进入模型上下文、记忆、checkpoint 或 trace。
 - 工具输出是**不可信数据**：系统指令明确要求把输出中的命令/标签/指令视为数据而非控制协议；疑似 prompt injection（伪造系统指令、忽略规则、泄露 secrets、绕过审批、伪造 `<tool>`/`<final>` 标签）记录 `WARN` 安全事件，不阻断合法内容。
 
 ---
@@ -206,7 +228,7 @@ CLI → SessionRuntime → AgentLoop → Prompt/Model → Loom XML Parser → de
 - `decision`：只解析模型协议（final/retry/action），不做工具授权。
 - `tool_input`：工具可见性/allowlist、schema 校验、重复调用、read-only 与审批；只把脱敏后的参数写入 event/state。
 - `tool_execute`：唯一执行边界，`registry.call` 返回后立即脱敏+截断，步数只在此递增一次。
-- `tool_output`：唯一 history/ledger/memory 写入者，消费已清洗的 result。
+- `tool_output`：唯一 Conversation History / Session Working Memory 写入者，消费已清洗的 result。
 
 模块划分：
 
@@ -240,7 +262,11 @@ CLI → SessionRuntime → AgentLoop → Prompt/Model → Loom XML Parser → de
 
 ### 会话恢复报 workspace 不匹配
 
-`--resume` 的会话属于另一个工作区。删除或换用正确工作区下的会话。
+`--resume` 的会话属于另一个工作区。换用正确工作区，或用该工作区下的会话。
+
+### `--resume` 后提示 Recovery Required
+
+未完成的根 Run 丢失了有效 Attempt。该 Session 在 `/recover` 或 `/abandon` 之前不能接受普通请求。Full Access 或冻结契约不兼容时只会看到 Recovery Blocked，只能 `/abandon`。未完成的工作可换另一个 Session 继续。
 
 ### 工具被拒绝
 
@@ -252,7 +278,10 @@ CLI → SessionRuntime → AgentLoop → Prompt/Model → Loom XML Parser → de
 
 ## 相关文档
 
-- [Agent 循环设计](docs/design/agent-loop.md)
+- [领域语言](CONTEXT.md)
+- [任务恢复](docs/spec/task-recovery.md)
+- [Plan Mode](docs/spec/plan-mode.md)
+- [Agent Skills](docs/spec/agent-skills.md)
 
 ## 许可证
 
